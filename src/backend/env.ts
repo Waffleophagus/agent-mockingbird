@@ -1,0 +1,32 @@
+import { createEnv } from "@t3-oss/env-core";
+import { z } from "zod";
+
+export const env = createEnv({
+  server: {
+    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    WAFFLEBOT_DB_PATH: z.string().optional(),
+    WAFFLEBOT_OPENCODE_BASE_URL: z.string().url().default("http://127.0.0.1:4096"),
+    WAFFLEBOT_OPENCODE_PROVIDER_ID: z.string().min(1).default("ollama"),
+    WAFFLEBOT_OPENCODE_MODEL_ID: z.string().min(1).default("qwen3-coder"),
+    WAFFLEBOT_OPENCODE_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+    WAFFLEBOT_OPENCODE_DIRECTORY: z.string().optional(),
+    WAFFLEBOT_OPENCODE_AUTH_HEADER: z.string().optional(),
+    WAFFLEBOT_OPENCODE_USERNAME: z.string().optional(),
+    WAFFLEBOT_OPENCODE_PASSWORD: z.string().optional(),
+    WAFFLEBOT_MEMORY_ENABLED: z.coerce.boolean().default(true),
+    WAFFLEBOT_MEMORY_WORKSPACE_DIR: z.string().default("./data/workspace"),
+    WAFFLEBOT_MEMORY_EMBED_PROVIDER: z.enum(["ollama", "none"]).default("ollama"),
+    WAFFLEBOT_MEMORY_EMBED_MODEL: z.string().min(1).default("nomic-embed-text"),
+    WAFFLEBOT_MEMORY_OLLAMA_BASE_URL: z.string().url().default("http://127.0.0.1:11434"),
+    WAFFLEBOT_MEMORY_CHUNK_TOKENS: z.coerce.number().int().positive().default(400),
+    WAFFLEBOT_MEMORY_CHUNK_OVERLAP: z.coerce.number().int().min(0).default(80),
+    WAFFLEBOT_MEMORY_MAX_RESULTS: z.coerce.number().int().positive().default(6),
+    WAFFLEBOT_MEMORY_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.25),
+    WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS: z.coerce.number().int().min(0).default(10_000),
+    WAFFLEBOT_MEMORY_TOOL_MODE: z.enum(["hybrid", "inject_only", "tool_only"]).default("hybrid"),
+    WAFFLEBOT_MEMORY_WRITE_POLICY: z.enum(["conservative", "moderate", "aggressive"]).default("conservative"),
+    WAFFLEBOT_MEMORY_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.7),
+  },
+  runtimeEnv: process.env,
+  emptyStringAsUndefined: true,
+});
