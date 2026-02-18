@@ -8,6 +8,7 @@ export interface RuntimeStartupInfo {
     baseUrl: string;
     providerId: string;
     modelId: string;
+    smallModel: string;
     timeoutMs: number;
     directoryConfigured: boolean;
     authConfigured: boolean;
@@ -28,6 +29,7 @@ export function getRuntimeStartupInfo(): RuntimeStartupInfo {
       baseUrl: connection.baseUrl,
       providerId: env.WAFFLEBOT_OPENCODE_PROVIDER_ID,
       modelId: env.WAFFLEBOT_OPENCODE_MODEL_ID,
+      smallModel: env.WAFFLEBOT_OPENCODE_SMALL_MODEL,
       timeoutMs: connection.timeoutMs,
       directoryConfigured: connection.directoryConfigured,
       authConfigured: connection.authConfigured,
@@ -35,4 +37,4 @@ export function getRuntimeStartupInfo(): RuntimeStartupInfo {
   };
 }
 
-export { RuntimeSessionNotFoundError } from "./errors";
+export { RuntimeSessionBusyError, RuntimeSessionNotFoundError, RuntimeTurnTimeoutError } from "./errors";

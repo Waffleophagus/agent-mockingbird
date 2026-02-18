@@ -1,4 +1,19 @@
-import { Activity, AlertTriangle, BookOpen, Bot, ChevronsUpDown, Cpu, LoaderCircle, Plus, RefreshCcw, Send, Users, Wrench } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  BookOpen,
+  Bot,
+  ChevronsUpDown,
+  CircleSlash,
+  Cpu,
+  LoaderCircle,
+  Plus,
+  RefreshCcw,
+  Scissors,
+  Send,
+  Users,
+  Wrench,
+} from "lucide-react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -8,6 +23,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  type ActiveSend,
+  type LocalChatMessage,
+  extractTextDelta,
+  mergeMessages,
+  normalizeListInput,
+  normalizeRequestError,
+  relativeFromIso,
+} from "@/frontend/app/chatHelpers";
 import type {
   ChatMessage,
   DashboardBootstrap,
@@ -15,88 +39,40 @@ import type {
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
+  SessionCompactedSnapshot,
+  SessionMessagePartSnapshot,
+  SessionRunErrorSnapshot,
+  SessionRunStatusSnapshot,
   SessionSummary,
   SpecialistAgent,
   UsageSnapshot,
 } from "@/types/dashboard";
 import "@/index.css";
 
-interface OptimisticUserMeta {
-  type: "optimistic-user";
-  requestId: string;
-}
+const RUN_POLL_INTERVAL_MS = 350;
+const RUN_POLL_TIMEOUT_MS = 180_000;
 
-interface PendingAssistantMeta {
-  type: "assistant-pending";
-  requestId: string;
-  status: "pending" | "failed";
-  retryContent: string;
-  errorMessage?: string;
-}
+type AgentRunState = "queued" | "running" | "completed" | "failed";
 
-type LocalMessageMeta = OptimisticUserMeta | PendingAssistantMeta;
-
-interface LocalChatMessage extends ChatMessage {
-  uiMeta?: LocalMessageMeta;
-}
-
-interface ActiveSend {
-  requestId: string;
+interface AgentRunSnapshot {
+  id: string;
   sessionId: string;
-  content: string;
+  state: AgentRunState;
+  error?: unknown;
 }
 
-function relativeFromIso(iso: string): string {
-  const deltaMs = Date.now() - new Date(iso).getTime();
-  const minutes = Math.max(1, Math.floor(deltaMs / 60_000));
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
-}
-
-function normalizeListInput(value: string): string[] {
-  const seen = new Set<string>();
-  const list: string[] = [];
-  for (const line of value.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    list.push(trimmed);
+function extractRunErrorMessage(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return "Run failed.";
   }
-  return list;
-}
-
-function mergeMessages(current: LocalChatMessage[], incoming: ChatMessage[]): LocalChatMessage[] {
-  if (incoming.length === 0) return current;
-  const merged = [...current];
-  for (const message of incoming) {
-    const index = merged.findIndex(existing => existing.id === message.id);
-    if (index === -1) {
-      merged.push(message);
-      continue;
-    }
-    const existing = merged[index];
-    if (!existing) continue;
-    merged[index] = {
-      ...existing,
-      ...message,
-      uiMeta: existing.uiMeta,
-    };
+  const record = error as Record<string, unknown>;
+  if (typeof record.message === "string" && record.message.trim()) {
+    return record.message.trim();
   }
-  return merged;
-}
-
-function normalizeRequestError(error: unknown): string {
-  if (error instanceof DOMException && error.name === "AbortError") {
-    return "Request timed out.";
+  if (typeof record.name === "string" && record.name.trim()) {
+    return record.name.trim();
   }
-  if (error instanceof TypeError) {
-    return "Network error while sending request.";
-  }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return "Request failed.";
+  return "Run failed.";
 }
 
 export function App() {
@@ -135,10 +111,18 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [draftMessage, setDraftMessage] = useState("");
   const [activeSend, setActiveSend] = useState<ActiveSend | null>(null);
+  const [isAborting, setIsAborting] = useState(false);
+  const [isCompacting, setIsCompacting] = useState(false);
+  const [chatControlError, setChatControlError] = useState("");
+  const [runStatusBySession, setRunStatusBySession] = useState<Record<string, SessionRunStatusSnapshot>>({});
+  const [runErrorsBySession, setRunErrorsBySession] = useState<Record<string, string>>({});
+  const [compactedAtBySession, setCompactedAtBySession] = useState<Record<string, string>>({});
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const composerFormRef = useRef<HTMLFormElement>(null);
   const loadedSessionsRef = useRef(new Set<string>());
   const activeSendRef = useRef<ActiveSend | null>(null);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const abortedRequestIdsRef = useRef(new Set<string>());
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -288,6 +272,72 @@ export function App() {
         ...current,
         [payload.sessionId]: mergeMessages(current[payload.sessionId] ?? [], [payload.message]),
       }));
+      if (payload.message.role === "assistant" && activeSendRef.current?.sessionId === payload.sessionId) {
+        removeOptimisticRequest(payload.sessionId, activeSendRef.current.requestId);
+      }
+      setRunStatusBySession(current => ({
+        ...current,
+        [payload.sessionId]: {
+          sessionId: payload.sessionId,
+          status: "idle",
+        },
+      }));
+      setRunErrorsBySession(current => {
+        if (!current[payload.sessionId]) return current;
+        const next = { ...current };
+        delete next[payload.sessionId];
+        return next;
+      });
+    });
+
+    events.addEventListener("session-status", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionRunStatusSnapshot;
+      setRunStatusBySession(current => ({
+        ...current,
+        [payload.sessionId]: payload,
+      }));
+      if (payload.status === "idle") {
+        setRunErrorsBySession(current => {
+          if (!current[payload.sessionId]) return current;
+          const next = { ...current };
+          delete next[payload.sessionId];
+          return next;
+        });
+      }
+    });
+
+    events.addEventListener("session-part", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionMessagePartSnapshot;
+      applySessionPartUpdate(payload);
+    });
+
+    events.addEventListener("session-compacted", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionCompactedSnapshot;
+      setCompactedAtBySession(current => ({
+        ...current,
+        [payload.sessionId]: new Date().toISOString(),
+      }));
+    });
+
+    events.addEventListener("session-error", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionRunErrorSnapshot;
+      if (payload.sessionId) {
+        const sessionId = payload.sessionId;
+        setRunErrorsBySession(current => ({
+          ...current,
+          [sessionId]: payload.message,
+        }));
+        setRunStatusBySession(current => ({
+          ...current,
+          [sessionId]: {
+            sessionId,
+            status: "idle",
+          },
+        }));
+        if (activeSendRef.current?.sessionId === sessionId) {
+          markRequestFailed(sessionId, activeSendRef.current.requestId, payload.message);
+        }
+      }
     });
 
     return () => {
@@ -331,6 +381,19 @@ export function App() {
     () => sessions.find(session => session.id === activeSessionId) ?? sessions[0],
     [sessions, activeSessionId],
   );
+  const activeSessionRunStatus = activeSession ? runStatusBySession[activeSession.id] : undefined;
+  const activeSessionRunError = activeSession ? runErrorsBySession[activeSession.id] : "";
+  const activeSessionCompactedAt = activeSession ? compactedAtBySession[activeSession.id] : "";
+  const isActiveSessionRunning =
+    Boolean(activeSend) && Boolean(activeSession) && activeSend?.sessionId === activeSession?.id;
+  const canAbortActiveSession = isActiveSessionRunning && !isAborting;
+  const activeRunStatusLabel = activeSessionRunStatus?.status ?? (isActiveSessionRunning ? "busy" : "idle");
+  const activeRunStatusHint =
+    activeSessionRunStatus?.status === "retry"
+      ? `${activeSessionRunStatus.message ?? "retrying"}${
+          activeSessionRunStatus.nextAt ? ` · next ${relativeFromIso(activeSessionRunStatus.nextAt)}` : ""
+        }`
+      : "";
   const availableModels = useMemo(() => {
     const byId = new Map(modelOptions.map(option => [option.id, option]));
     if (activeSession?.model && !byId.has(activeSession.model)) {
@@ -395,15 +458,6 @@ export function App() {
     previousActiveSessionIdRef.current = activeSessionId;
   }, [activeSessionId, activeMessages.length, loadingMessages, isSending]);
 
-  function applyConversationUpdate(payload: { messages: ChatMessage[]; session: SessionSummary }) {
-    loadedSessionsRef.current.add(payload.session.id);
-    setMessagesBySession(current => ({
-      ...current,
-      [payload.session.id]: mergeMessages(current[payload.session.id] ?? [], payload.messages),
-    }));
-    setSessions(current => current.map(session => (session.id === payload.session.id ? payload.session : session)));
-  }
-
   function appendOptimisticRequest(sessionId: string, content: string, requestId: string) {
     const createdAt = new Date().toISOString();
     const optimisticUserMessage: LocalChatMessage = {
@@ -452,10 +506,12 @@ export function App() {
         }
         return {
           ...message,
+          content: "",
           uiMeta: {
             ...message.uiMeta,
             status: "pending",
             errorMessage: undefined,
+            runtimeMessageId: undefined,
           },
         };
       }),
@@ -479,6 +535,156 @@ export function App() {
         };
       }),
     }));
+    setRunErrorsBySession(current => ({
+      ...current,
+      [sessionId]: errorMessage,
+    }));
+    setRunStatusBySession(current => ({
+      ...current,
+      [sessionId]: {
+        sessionId,
+        status: "idle",
+      },
+    }));
+  }
+
+  function applySessionPartUpdate(payload: SessionMessagePartSnapshot) {
+    const activeSend = activeSendRef.current;
+    if (!activeSend || activeSend.sessionId !== payload.sessionId) return;
+
+    setMessagesBySession(current => ({
+      ...current,
+      [payload.sessionId]: (current[payload.sessionId] ?? []).map(message => {
+        if (
+          message.uiMeta?.type !== "assistant-pending" ||
+          message.uiMeta.status !== "pending" ||
+          message.uiMeta.requestId !== activeSend.requestId
+        ) {
+          return message;
+        }
+
+        const runtimeMessageId = message.uiMeta.runtimeMessageId;
+        if (runtimeMessageId && runtimeMessageId !== payload.messageId) {
+          return message;
+        }
+
+        const deltaText = extractTextDelta(payload);
+        const nextContent =
+          deltaText.length > 0
+            ? typeof payload.delta === "string"
+              ? `${message.content}${deltaText}`
+              : deltaText
+            : message.content;
+        return {
+          ...message,
+          content: nextContent,
+          uiMeta: {
+            ...message.uiMeta,
+            runtimeMessageId: runtimeMessageId ?? payload.messageId,
+          },
+        };
+      }),
+    }));
+  }
+
+  async function waitForRunTerminalStateByPolling(runId: string, abortSignal: AbortSignal) {
+    const startedAt = Date.now();
+    while (true) {
+      if (abortSignal.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      if (Date.now() - startedAt > RUN_POLL_TIMEOUT_MS) {
+        throw new Error("Run timed out waiting for completion.");
+      }
+
+      const runResponse = await fetch(`/api/runs/${encodeURIComponent(runId)}`, {
+        signal: abortSignal,
+      });
+      const runPayload = (await runResponse.json()) as { run?: AgentRunSnapshot; error?: string };
+      if (!runResponse.ok || !runPayload.run) {
+        throw new Error(runPayload.error ?? `Run lookup failed (${runResponse.status})`);
+      }
+
+      const run = runPayload.run;
+      if (run.state === "completed") {
+        return;
+      }
+      if (run.state === "failed") {
+        throw new Error(extractRunErrorMessage(run.error));
+      }
+
+      await new Promise<void>(resolve => {
+        setTimeout(resolve, RUN_POLL_INTERVAL_MS);
+      });
+    }
+  }
+
+  async function waitForRunTerminalState(runId: string, abortSignal: AbortSignal) {
+    if (typeof EventSource !== "function") {
+      await waitForRunTerminalStateByPolling(runId, abortSignal);
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const stream = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream?afterSeq=0`);
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        stream.close();
+        abortSignal.removeEventListener("abort", onAbort);
+      };
+
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+
+      const onAbort = () => {
+        fail(new DOMException("Aborted", "AbortError"));
+      };
+
+      timeout = setTimeout(() => {
+        fail(new Error("Run timed out waiting for completion."));
+      }, RUN_POLL_TIMEOUT_MS);
+
+      abortSignal.addEventListener("abort", onAbort, { once: true });
+      stream.addEventListener("run-event", event => {
+        try {
+          const payload = JSON.parse((event as MessageEvent<string>).data) as {
+            type?: string;
+            payload?: unknown;
+          };
+          if (payload.type === "run.completed") {
+            succeed();
+            return;
+          }
+          if (payload.type === "run.failed") {
+            fail(new Error(extractRunErrorMessage(payload.payload)));
+          }
+        } catch {
+          // Ignore malformed stream event payloads and continue listening.
+        }
+      });
+      stream.onerror = () => {
+        if (abortSignal.aborted) {
+          onAbort();
+        }
+      };
+    });
   }
 
   async function submitChatRequest(input: {
@@ -490,6 +696,14 @@ export function App() {
     if (activeSendRef.current) return;
 
     const requestId = input.requestId ?? crypto.randomUUID();
+    setChatControlError("");
+    setRunErrorsBySession(current => {
+      if (!current[input.sessionId]) return current;
+      const next = { ...current };
+      delete next[input.sessionId];
+      return next;
+    });
+
     if (input.retry) {
       markRequestPending(input.sessionId, requestId);
     } else {
@@ -501,33 +715,100 @@ export function App() {
       sessionId: input.sessionId,
       content: input.content,
     };
+    const abortController = new AbortController();
     activeSendRef.current = nextActiveSend;
+    activeAbortControllerRef.current = abortController;
     setActiveSend(nextActiveSend);
+    setRunStatusBySession(current => ({
+      ...current,
+      [input.sessionId]: {
+        sessionId: input.sessionId,
+        status: "busy",
+      },
+    }));
 
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           sessionId: input.sessionId,
           content: input.content,
+          idempotencyKey: requestId,
         }),
       });
-      const payload = (await response.json()) as { messages?: ChatMessage[]; session?: SessionSummary; error?: string };
-      if (!response.ok || !payload.messages || !payload.session) {
+      const payload = (await response.json()) as {
+        run?: AgentRunSnapshot;
+        runId?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.run) {
         throw new Error(payload.error ?? `Request failed (${response.status})`);
       }
 
+      const runId = payload.runId ?? payload.run.id;
+      await waitForRunTerminalState(runId, abortController.signal);
+
+      const [messagesResponse, sessionsResponse] = await Promise.all([
+        fetch(`/api/sessions/${encodeURIComponent(input.sessionId)}/messages`, {
+          signal: abortController.signal,
+        }),
+        fetch("/api/sessions", { signal: abortController.signal }),
+      ]);
+      const messagesPayload = (await messagesResponse.json()) as {
+        messages?: ChatMessage[];
+        error?: string;
+      };
+      const sessionsPayload = (await sessionsResponse.json()) as {
+        sessions?: SessionSummary[];
+        error?: string;
+      };
+
+      if (!messagesResponse.ok || !Array.isArray(messagesPayload.messages)) {
+        throw new Error(messagesPayload.error ?? "Failed to refresh session messages");
+      }
+
+      loadedSessionsRef.current.add(input.sessionId);
+      setMessagesBySession(current => ({
+        ...current,
+        [input.sessionId]: mergeMessages(current[input.sessionId] ?? [], messagesPayload.messages ?? []),
+      }));
+
+      if (sessionsResponse.ok && Array.isArray(sessionsPayload.sessions)) {
+        const updatedSession = sessionsPayload.sessions.find(session => session.id === input.sessionId);
+        if (updatedSession) {
+          setSessions(current => current.map(session => (session.id === updatedSession.id ? updatedSession : session)));
+        }
+      }
+
       removeOptimisticRequest(input.sessionId, requestId);
-      applyConversationUpdate({
-        messages: payload.messages,
-        session: payload.session,
+      setRunStatusBySession(current => ({
+        ...current,
+        [input.sessionId]: {
+          sessionId: input.sessionId,
+          status: "idle",
+        },
+      }));
+      setRunErrorsBySession(current => {
+        if (!current[input.sessionId]) return current;
+        const next = { ...current };
+        delete next[input.sessionId];
+        return next;
       });
     } catch (error) {
-      markRequestFailed(input.sessionId, requestId, normalizeRequestError(error));
+      if (abortedRequestIdsRef.current.has(requestId)) {
+        abortedRequestIdsRef.current.delete(requestId);
+        markRequestFailed(input.sessionId, requestId, "Request aborted.");
+      } else {
+        markRequestFailed(input.sessionId, requestId, normalizeRequestError(error));
+      }
     } finally {
       if (activeSendRef.current?.requestId === requestId) {
         activeSendRef.current = null;
+      }
+      if (activeAbortControllerRef.current === abortController) {
+        activeAbortControllerRef.current = null;
       }
       setActiveSend(current => (current?.requestId === requestId ? null : current));
     }
@@ -550,6 +831,63 @@ export function App() {
         retry: true,
       });
       return;
+    }
+  }
+
+  async function abortActiveRun() {
+    const currentSend = activeSendRef.current;
+    if (!currentSend || isAborting) return;
+
+    setIsAborting(true);
+    setChatControlError("");
+    abortedRequestIdsRef.current.add(currentSend.requestId);
+
+    try {
+      const response = await fetch(`/api/chat/${encodeURIComponent(currentSend.sessionId)}/abort`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { aborted?: boolean; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to abort session run");
+      }
+      if (!payload.aborted) {
+        setChatControlError("No active runtime turn was available to abort.");
+      }
+    } catch (error) {
+      abortedRequestIdsRef.current.delete(currentSend.requestId);
+      setChatControlError(error instanceof Error ? error.message : "Failed to abort session run");
+      return;
+    } finally {
+      setIsAborting(false);
+    }
+
+    activeAbortControllerRef.current?.abort();
+  }
+
+  async function compactSession(sessionId: string) {
+    if (isCompacting) return;
+
+    setIsCompacting(true);
+    setChatControlError("");
+    try {
+      const response = await fetch(`/api/chat/${encodeURIComponent(sessionId)}/compact`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { compacted?: boolean; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to compact session");
+      }
+      if (!payload.compacted) {
+        throw new Error("Runtime reported session compaction was skipped.");
+      }
+      setCompactedAtBySession(current => ({
+        ...current,
+        [sessionId]: new Date().toISOString(),
+      }));
+    } catch (error) {
+      setChatControlError(error instanceof Error ? error.message : "Failed to compact session");
+    } finally {
+      setIsCompacting(false);
     }
   }
 
@@ -802,8 +1140,50 @@ export function App() {
                   )}
                 </div>
                 {isSavingModel && <p className="text-xs text-muted-foreground">Saving model...</p>}
+                <Badge
+                  variant={
+                    activeRunStatusLabel === "idle"
+                      ? "success"
+                      : activeRunStatusLabel === "retry"
+                        ? "warning"
+                        : "outline"
+                  }
+                >
+                  run {activeRunStatusLabel}
+                </Badge>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void abortActiveRun();
+                  }}
+                  disabled={!canAbortActiveSession}
+                >
+                  <CircleSlash className="size-3.5" />
+                  {isAborting ? "Aborting..." : "Abort"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (!activeSession) return;
+                    void compactSession(activeSession.id);
+                  }}
+                  disabled={!activeSession || isCompacting || isActiveSessionRunning}
+                >
+                  <Scissors className="size-3.5" />
+                  {isCompacting ? "Compacting..." : "Compact"}
+                </Button>
               </div>
               {modelError && <p className="text-xs text-destructive">{modelError}</p>}
+              {activeRunStatusHint && <p className="text-xs text-muted-foreground">{activeRunStatusHint}</p>}
+              {activeSessionRunError && <p className="text-xs text-destructive">{activeSessionRunError}</p>}
+              {chatControlError && <p className="text-xs text-destructive">{chatControlError}</p>}
+              {activeSessionCompactedAt && (
+                <p className="text-xs text-muted-foreground">Last compacted {relativeFromIso(activeSessionCompactedAt)}</p>
+              )}
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
               <div
@@ -840,10 +1220,15 @@ export function App() {
                         )}
                       </div>
                       {isPending && (
-                        <p className="mt-1 inline-flex items-center gap-2 leading-relaxed text-muted-foreground">
-                          <LoaderCircle className="size-4 animate-spin" />
-                          OpenCode is responding...
-                        </p>
+                        <div className="mt-1 space-y-2">
+                          <p className="inline-flex items-center gap-2 leading-relaxed text-muted-foreground">
+                            <LoaderCircle className="size-4 animate-spin" />
+                            OpenCode is responding...
+                          </p>
+                          {message.content && (
+                            <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
+                          )}
+                        </div>
                       )}
                       {isFailed && pendingMeta && (
                         <div className="mt-1 space-y-2">
@@ -851,6 +1236,9 @@ export function App() {
                             <AlertTriangle className="size-4" />
                             Failed to send request.
                           </p>
+                          {message.content && (
+                            <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
+                          )}
                           {pendingMeta.errorMessage && (
                             <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
                           )}

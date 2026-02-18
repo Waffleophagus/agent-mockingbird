@@ -88,6 +88,9 @@ const SOURCE = "memory";
 const SNIPPET_MAX_CHARS = 700;
 const DEFAULT_CANDIDATE_LIMIT = 48;
 const MMR_LAMBDA = 0.75;
+const VECTOR_PREFILTER_MIN = 200;
+const VECTOR_PREFILTER_MAX = 800;
+const SQLITE_IN_BIND_LIMIT = 900;
 const EPHEMERAL_CONTENT_RE =
   /^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|lol|lmao|ping|test|testing|what's up|sup)[\s.!?]*$/i;
 const MIN_CONTENT_LENGTH_BY_POLICY: Record<MemoryWritePolicy, number> = {
@@ -1102,13 +1105,46 @@ function parseUpdatedAtFromMeta(): number | null {
   }
 }
 
-function searchVectorCandidates(queryVector: number[], candidateLimit: number) {
+function selectRecentChunkIds(limit: number): string[] {
+  if (limit <= 0) return [];
+  const rows = sqlite
+    .query(
+      `
+      SELECT id
+      FROM memory_chunks
+      ORDER BY updated_at DESC
+      LIMIT ?1
+    `,
+    )
+    .all(limit) as Array<{ id: string }>;
+  return rows.map(row => row.id);
+}
+
+function searchVectorCandidates(queryVector: number[], candidateLimit: number, seedChunkIds: string[] = []) {
   if (!queryVector.length) return new Map<string, number>();
-  const rows = sqlite.query(`
-    SELECT id, embedding_json
-    FROM memory_chunks
-    WHERE embedding_json IS NOT NULL
-  `).all() as Array<{ id: string; embedding_json: string }>;
+
+  const prefilterLimit = Math.max(
+    VECTOR_PREFILTER_MIN,
+    Math.min(VECTOR_PREFILTER_MAX, candidateLimit * 12),
+  );
+  const prefilterIds = [...new Set([...seedChunkIds, ...selectRecentChunkIds(prefilterLimit)])].slice(
+    0,
+    SQLITE_IN_BIND_LIMIT,
+  );
+  if (!prefilterIds.length) return new Map<string, number>();
+
+  const placeholders = prefilterIds.map(() => "?").join(", ");
+  const rows = sqlite
+    .query(
+      `
+      SELECT id, embedding_json
+      FROM memory_chunks
+      WHERE embedding_json IS NOT NULL
+        AND id IN (${placeholders})
+    `,
+    )
+    .all(...prefilterIds) as Array<{ id: string; embedding_json: string }>;
+
   const scored = rows
     .map(row => ({
       id: row.id,
@@ -1233,8 +1269,8 @@ export async function searchMemory(query: string, options?: { maxResults?: numbe
     queryVector = [];
   }
 
-  const vectorScores = searchVectorCandidates(queryVector, candidateLimit);
   const textScores = searchTextCandidates(normalizedQuery, candidateLimit);
+  const vectorScores = searchVectorCandidates(queryVector, candidateLimit, [...textScores.keys()]);
   const candidateIds = [...new Set([...vectorScores.keys(), ...textScores.keys()])];
   if (!candidateIds.length) return [] as MemorySearchResult[];
 

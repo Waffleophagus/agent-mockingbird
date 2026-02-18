@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { tool } from "@opencode-ai/plugin";
 
 function resolveApiBaseUrl() {
   const explicit = process.env.WAFFLEBOT_MEMORY_API_BASE_URL?.trim();
@@ -21,16 +21,16 @@ async function postJson(pathname: string, body: unknown) {
   return { ok: response.ok, status: response.status, payload };
 }
 
-export default {
+export default tool({
   description: "Persist a durable memory note (fact/preference/decision/todo) with backend policy guardrails.",
   args: {
-    type: z.enum(["decision", "preference", "fact", "todo", "observation"]),
-    content: z.string().min(1),
-    confidence: z.number().min(0).max(1).optional(),
-    source: z.enum(["assistant", "user", "system"]).default("assistant"),
-    entities: z.array(z.string()).optional(),
-    supersedes: z.array(z.string()).optional(),
-    topic: z.string().optional(),
+    type: tool.schema.enum(["decision", "preference", "fact", "todo", "observation"]),
+    content: tool.schema.string().min(1),
+    confidence: tool.schema.number().min(0).max(1).optional(),
+    source: tool.schema.enum(["assistant", "user", "system"]).optional(),
+    entities: tool.schema.array(tool.schema.string()).optional(),
+    supersedes: tool.schema.array(tool.schema.string()).optional(),
+    topic: tool.schema.string().optional(),
   },
   async execute(args: {
     type: "decision" | "preference" | "fact" | "todo" | "observation";
@@ -46,10 +46,10 @@ export default {
       source: args.source ?? "assistant",
     });
 
-    return {
+    return JSON.stringify({
       ok: response.ok,
       status: response.status,
       result: response.payload,
-    };
+    });
   },
-};
+});

@@ -208,6 +208,50 @@ Validation:
 - Enforce schedule correctness and timezone validation
 - Enforce handler existence for `system`/`script`
 
+## Model-facing cron skill plan
+
+Expose a dedicated model tool/skill so the primary agent can manage scheduled work without raw DB access.
+
+Planned skill id:
+
+- `cron_manager`
+
+Planned actions:
+
+- `status` (scheduler health + queue depth)
+- `list_jobs`
+- `get_job` / `list_job_instances`
+- `create_job`
+- `update_job`
+- `enable_job` / `disable_job`
+- `run_job_now`
+- `delete_job`
+
+Creation contract:
+
+- `run_mode=system` requires allowlisted `handler_key`
+- `run_mode=agent` requires `agent_prompt_template`
+- `run_mode=script` requires allowlisted `handler_key`, with optional `agent_prompt_template` for invoke path
+- `invoke_policy` allowed values:
+  - `never`
+  - `always`
+  - `on_condition` (script mode primary use)
+
+Guardrails:
+
+- Skill cannot register arbitrary handlers or execute arbitrary shell in MVP
+- Skill cannot bypass `run_mode`/`invoke_policy` constraints
+- Skill writes through normal API validation only
+- Destructive operations (`delete_job`) should require explicit user intent in the requesting prompt
+
+Return payload shape (high level):
+
+- `ok`
+- `action`
+- `job` and/or `instance`
+- `warnings`
+- `error` (when not ok)
+
 ## UI plan (MVP-aligned)
 
 Cron list view:
@@ -309,6 +353,7 @@ Exit criteria:
 - run history view
 - metrics panels
 - failure injection tests
+- `cron_manager` skill/tool wired to runtime with validation and audit logs
 
 Exit criteria:
 

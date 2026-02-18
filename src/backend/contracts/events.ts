@@ -20,11 +20,47 @@ export interface SessionMessageCreatedPayload {
 }
 export type SessionMessageCreatedEvent = RuntimeEventBase<"session.message.created", SessionMessageCreatedPayload>;
 
+export interface SessionRunStatusPayload {
+  sessionId: string;
+  status: "idle" | "busy" | "retry";
+  attempt?: number;
+  message?: string;
+  nextAt?: string;
+}
+export type SessionRunStatusUpdatedEvent = RuntimeEventBase<"session.run.status.updated", SessionRunStatusPayload>;
+
+export interface SessionCompactedPayload {
+  sessionId: string;
+}
+export type SessionCompactedEvent = RuntimeEventBase<"session.compacted", SessionCompactedPayload>;
+
+export interface SessionMessagePartUpdatedPayload {
+  sessionId: string;
+  messageId: string;
+  part: Record<string, unknown>;
+  delta?: string;
+}
+export type SessionMessagePartUpdatedEvent = RuntimeEventBase<
+  "session.message.part.updated",
+  SessionMessagePartUpdatedPayload
+>;
+
+export interface SessionRunErrorPayload {
+  sessionId: string | null;
+  name?: string;
+  message: string;
+}
+export type SessionRunErrorEvent = RuntimeEventBase<"session.run.error", SessionRunErrorPayload>;
+
 export type RuntimeEvent =
   | HeartbeatUpdatedEvent
   | UsageUpdatedEvent
   | SessionStateUpdatedEvent
-  | SessionMessageCreatedEvent;
+  | SessionMessageCreatedEvent
+  | SessionRunStatusUpdatedEvent
+  | SessionCompactedEvent
+  | SessionMessagePartUpdatedEvent
+  | SessionRunErrorEvent;
 
 function baseRuntimeEvent<TType extends RuntimeEvent["type"], TPayload>(
   type: TType,
@@ -57,4 +93,32 @@ export function createSessionMessageCreatedEvent(
   source: RuntimeEventSource,
 ): SessionMessageCreatedEvent {
   return baseRuntimeEvent("session.message.created", payload, source);
+}
+
+export function createSessionRunStatusUpdatedEvent(
+  payload: SessionRunStatusPayload,
+  source: RuntimeEventSource,
+): SessionRunStatusUpdatedEvent {
+  return baseRuntimeEvent("session.run.status.updated", payload, source);
+}
+
+export function createSessionCompactedEvent(
+  payload: SessionCompactedPayload,
+  source: RuntimeEventSource,
+): SessionCompactedEvent {
+  return baseRuntimeEvent("session.compacted", payload, source);
+}
+
+export function createSessionMessagePartUpdatedEvent(
+  payload: SessionMessagePartUpdatedPayload,
+  source: RuntimeEventSource,
+): SessionMessagePartUpdatedEvent {
+  return baseRuntimeEvent("session.message.part.updated", payload, source);
+}
+
+export function createSessionRunErrorEvent(
+  payload: SessionRunErrorPayload,
+  source: RuntimeEventSource,
+): SessionRunErrorEvent {
+  return baseRuntimeEvent("session.run.error", payload, source);
 }

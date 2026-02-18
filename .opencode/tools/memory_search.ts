@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { tool } from "@opencode-ai/plugin";
 
 function resolveApiBaseUrl() {
   const explicit = process.env.WAFFLEBOT_MEMORY_API_BASE_URL?.trim();
@@ -21,12 +21,12 @@ async function postJson(pathname: string, body: unknown) {
   return payload;
 }
 
-export default {
+export default tool({
   description: "Search durable memory for relevant prior facts, preferences, decisions, and todos.",
   args: {
-    query: z.string().min(1).describe("Natural language memory query"),
-    maxResults: z.number().int().min(1).max(20).optional(),
-    minScore: z.number().min(0).max(1).optional(),
+    query: tool.schema.string().min(1).describe("Natural language memory query"),
+    maxResults: tool.schema.number().int().min(1).max(20).optional(),
+    minScore: tool.schema.number().min(0).max(1).optional(),
   },
   async execute(args: { query: string; maxResults?: number; minScore?: number }) {
     const payload = await postJson("/api/memory/retrieve", {
@@ -35,11 +35,11 @@ export default {
       minScore: args.minScore,
     });
     const results = Array.isArray(payload.results) ? payload.results : [];
-    return {
+    return JSON.stringify({
       ok: true,
       query: args.query,
       count: results.length,
       results,
-    };
+    });
   },
-};
+});

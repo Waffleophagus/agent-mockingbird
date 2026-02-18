@@ -54,6 +54,31 @@ export interface UsageSnapshot {
   estimatedCostUsd: number;
 }
 
+export interface SessionRunStatusSnapshot {
+  sessionId: string;
+  status: "idle" | "busy" | "retry";
+  attempt?: number;
+  message?: string;
+  nextAt?: string;
+}
+
+export interface SessionCompactedSnapshot {
+  sessionId: string;
+}
+
+export interface SessionMessagePartSnapshot {
+  sessionId: string;
+  messageId: string;
+  part: Record<string, unknown>;
+  delta?: string;
+}
+
+export interface SessionRunErrorSnapshot {
+  sessionId: string | null;
+  name?: string;
+  message: string;
+}
+
 export interface HeartbeatSnapshot {
   online: boolean;
   at: string;
@@ -111,4 +136,8 @@ export type DashboardEvent =
   | { event: "heartbeat"; payload: HeartbeatSnapshot }
   | { event: "usage"; payload: UsageSnapshot }
   | { event: "session-updated"; payload: SessionSummary }
-  | { event: "session-message"; payload: { sessionId: string; message: ChatMessage } };
+  | { event: "session-message"; payload: { sessionId: string; message: ChatMessage } }
+  | { event: "session-status"; payload: SessionRunStatusSnapshot }
+  | { event: "session-compacted"; payload: SessionCompactedSnapshot }
+  | { event: "session-part"; payload: SessionMessagePartSnapshot }
+  | { event: "session-error"; payload: SessionRunErrorSnapshot };

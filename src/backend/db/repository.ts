@@ -9,9 +9,11 @@ import type {
   SpecialistAgent,
   UsageSnapshot,
 } from "../../types/dashboard";
+import { clearCronTables } from "../cron/storage";
 import { DEFAULT_AGENTS, DEFAULT_MCPS, DEFAULT_SESSIONS, DEFAULT_SKILLS } from "../defaults";
 import { env } from "../env";
 import { sqlite } from "./client";
+import { clearRunTables } from "../run/storage";
 
 type RuntimeConfigKey = "skills" | "mcps" | "agents" | "sessionBindings";
 type RuntimeEventSource = "api" | "runtime" | "scheduler" | "system";
@@ -233,6 +235,8 @@ export function createSession(input?: { title?: string; model?: string }): Sessi
 
 export function resetDatabaseToDefaults(): DashboardBootstrap {
   const reset = sqlite.transaction(() => {
+    clearCronTables();
+    clearRunTables();
     sqlite.query("DELETE FROM message_memory_traces").run();
     sqlite.query("DELETE FROM messages").run();
     sqlite.query("DELETE FROM usage_events").run();

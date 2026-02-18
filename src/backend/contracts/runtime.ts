@@ -15,4 +15,6 @@ export interface RuntimeMessageAck {
 export interface RuntimeEngine {
   sendUserMessage(input: SendUserMessageInput): Promise<RuntimeMessageAck>;
   subscribe(onEvent: (event: RuntimeEvent) => void): () => void;
+  abortSession?(sessionId: string): Promise<boolean>;
+  compactSession?(sessionId: string): Promise<boolean>;
 }

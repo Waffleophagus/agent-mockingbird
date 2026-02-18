@@ -1,0 +1,75 @@
+import { sqlite } from "../db/client";
+
+export function ensureCronTables() {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS cron_job_definitions (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      schedule_kind TEXT NOT NULL CHECK (schedule_kind IN ('at', 'every', 'cron')),
+      schedule_expr TEXT,
+      every_ms INTEGER,
+      at_iso TEXT,
+      timezone TEXT,
+      run_mode TEXT NOT NULL CHECK (run_mode IN ('system', 'agent', 'script')),
+      invoke_policy TEXT NOT NULL CHECK (invoke_policy IN ('never', 'always', 'on_condition')),
+      handler_key TEXT,
+      agent_prompt_template TEXT,
+      agent_model_override TEXT,
+      max_attempts INTEGER NOT NULL DEFAULT 3,
+      retry_backoff_ms INTEGER NOT NULL DEFAULT 30000,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      last_enqueued_for INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS cron_job_definitions_enabled_idx
+      ON cron_job_definitions(enabled, schedule_kind);
+
+    CREATE TABLE IF NOT EXISTS cron_job_instances (
+      id TEXT PRIMARY KEY,
+      job_definition_id TEXT NOT NULL REFERENCES cron_job_definitions(id) ON DELETE CASCADE,
+      scheduled_for INTEGER NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('queued', 'leased', 'running', 'completed', 'failed', 'dead')),
+      attempt INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at INTEGER,
+      lease_owner TEXT,
+      lease_expires_at INTEGER,
+      last_heartbeat_at INTEGER,
+      result_summary TEXT,
+      error_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(job_definition_id, scheduled_for)
+    );
+
+    CREATE INDEX IF NOT EXISTS cron_job_instances_ready_idx
+      ON cron_job_instances(state, next_attempt_at, scheduled_for);
+    CREATE INDEX IF NOT EXISTS cron_job_instances_job_idx
+      ON cron_job_instances(job_definition_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS cron_job_steps (
+      id TEXT PRIMARY KEY,
+      job_instance_id TEXT NOT NULL REFERENCES cron_job_instances(id) ON DELETE CASCADE,
+      step_kind TEXT NOT NULL CHECK (step_kind IN ('system', 'script', 'agent')),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'completed', 'failed', 'skipped')),
+      input_json TEXT,
+      output_json TEXT,
+      error_json TEXT,
+      started_at INTEGER,
+      finished_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS cron_job_steps_instance_idx
+      ON cron_job_steps(job_instance_id, created_at ASC);
+  `);
+}
+
+export function clearCronTables() {
+  ensureCronTables();
+  sqlite.query("DELETE FROM cron_job_steps").run();
+  sqlite.query("DELETE FROM cron_job_instances").run();
+  sqlite.query("DELETE FROM cron_job_definitions").run();
+}

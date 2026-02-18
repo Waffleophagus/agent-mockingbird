@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { tool } from "@opencode-ai/plugin";
 
 function resolveApiBaseUrl() {
   const explicit = process.env.WAFFLEBOT_MEMORY_API_BASE_URL?.trim();
@@ -21,12 +21,12 @@ async function postJson(pathname: string, body: unknown) {
   return payload;
 }
 
-export default {
+export default tool({
   description: "Read a safe slice of canonical markdown memory files by path and line window.",
   args: {
-    path: z.string().min(1).describe("Memory path such as MEMORY.md or memory/2026-02-17.md"),
-    from: z.number().int().min(1).optional().describe("Start line number (1-based)"),
-    lines: z.number().int().min(1).max(400).optional().describe("Number of lines to return"),
+    path: tool.schema.string().min(1).describe("Memory path such as MEMORY.md or memory/2026-02-17.md"),
+    from: tool.schema.number().int().min(1).optional().describe("Start line number (1-based)"),
+    lines: tool.schema.number().int().min(1).max(400).optional().describe("Number of lines to return"),
   },
   async execute(args: { path: string; from?: number; lines?: number }) {
     const payload = await postJson("/api/memory/read", {
@@ -34,10 +34,10 @@ export default {
       from: args.from,
       lines: args.lines,
     });
-    return {
+    return JSON.stringify({
       ok: true,
       path: payload.path,
       text: payload.text,
-    };
+    });
   },
-};
+});

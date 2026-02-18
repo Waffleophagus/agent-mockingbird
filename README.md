@@ -47,6 +47,12 @@ bun run db:check
 
 By default the SQLite file is `./data/wafflebot.db`. Override with `WAFFLEBOT_DB_PATH`.
 
+Reset local database to defaults (including cron job tables):
+
+```bash
+bun run db:wipe
+```
+
 Memory CLI:
 
 ```bash
@@ -70,12 +76,22 @@ Wafflebot runs with an OpenCode-backed runtime that forwards prompts to OpenCode
 OpenCode runtime environment variables:
 
 - `WAFFLEBOT_OPENCODE_BASE_URL` (default `http://127.0.0.1:4096`)
-- `WAFFLEBOT_OPENCODE_PROVIDER_ID` (default `ollama`)
-- `WAFFLEBOT_OPENCODE_MODEL_ID` (default `qwen3-coder`)
+- `WAFFLEBOT_OPENCODE_PROVIDER_ID` (default `opencode`)
+- `WAFFLEBOT_OPENCODE_MODEL_ID` (default `kimi-k2.5-free`)
+- `WAFFLEBOT_OPENCODE_SMALL_MODEL` (default `opencode/kimi-k2.5-free`)
 - `WAFFLEBOT_OPENCODE_TIMEOUT_MS` (default `120000`)
+- `WAFFLEBOT_OPENCODE_STREAM_PARTS` (default `false`; enables token/part SSE updates)
 - `WAFFLEBOT_OPENCODE_DIRECTORY` (optional, passed as `directory` query param)
 - `WAFFLEBOT_OPENCODE_AUTH_HEADER` (optional full `Authorization` header)
 - `WAFFLEBOT_OPENCODE_USERNAME` / `WAFFLEBOT_OPENCODE_PASSWORD` (optional Basic auth fallback)
+
+Cron environment variables:
+
+- `WAFFLEBOT_CRON_ENABLED` (default `true`)
+- `WAFFLEBOT_CRON_SCHEDULER_POLL_MS` (default `1000`)
+- `WAFFLEBOT_CRON_WORKER_POLL_MS` (default `1000`)
+- `WAFFLEBOT_CRON_LEASE_MS` (default `30000`)
+- `WAFFLEBOT_CRON_MAX_ENQUEUE_PER_JOB_TICK` (default `25`)
 
 Memory mode environment variables:
 
@@ -98,8 +114,9 @@ OpenCode local memory tools:
 - `.opencode/tools/memory_search.ts`
 - `.opencode/tools/memory_get.ts`
 - `.opencode/tools/memory_remember.ts`
+- `.opencode/tools/cron_manager.ts`
 
-These tools call Wafflebot's memory API. Set `WAFFLEBOT_MEMORY_API_BASE_URL` for the OpenCode process if needed (default `http://127.0.0.1:3001`).
+These tools call Wafflebot APIs. Set `WAFFLEBOT_MEMORY_API_BASE_URL` and/or `WAFFLEBOT_CRON_API_BASE_URL` for the OpenCode process if needed (default `http://127.0.0.1:3001`).
 
 Memory API endpoints used by tools:
 
@@ -109,6 +126,27 @@ Memory API endpoints used by tools:
 - `POST /api/memory/remember/validate`
 - `GET /api/memory/policy`
 - `GET /api/memory/activity`
+
+Run API endpoints:
+
+- `POST /api/runs`
+- `GET /api/runs/:id`
+- `GET /api/runs/:id/events`
+- `GET /api/runs/:id/events/stream`
+
+Cron API endpoints:
+
+- `GET /api/cron/handlers`
+- `GET /api/cron/health`
+- `GET /api/cron/jobs`
+- `POST /api/cron/jobs`
+- `GET /api/cron/jobs/:id`
+- `PATCH /api/cron/jobs/:id`
+- `DELETE /api/cron/jobs/:id`
+- `POST /api/cron/jobs/:id/run`
+- `GET /api/cron/instances`
+- `GET /api/cron/instances/:id/steps`
+- `POST /api/cron/manage` (used by `cron_manager`)
 
 Environment variables are parsed and validated at startup via `@t3-oss/env-core` + `zod`.
 
