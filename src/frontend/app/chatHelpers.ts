@@ -11,7 +11,6 @@ export interface PendingAssistantMeta {
   status: "pending" | "failed";
   retryContent: string;
   errorMessage?: string;
-  runtimeMessageId?: string;
 }
 
 export type LocalMessageMeta = OptimisticUserMeta | PendingAssistantMeta;
@@ -77,17 +76,4 @@ export function normalizeRequestError(error: unknown): string {
     return error.message;
   }
   return "Request failed.";
-}
-
-export function extractTextDelta(input: { part: Record<string, unknown>; delta?: string }): string {
-  if (input.part.type !== "text") {
-    return "";
-  }
-  if (typeof input.delta === "string" && input.delta.length > 0) {
-    return input.delta;
-  }
-  if (typeof input.part.text === "string") {
-    return input.part.text;
-  }
-  return "";
 }

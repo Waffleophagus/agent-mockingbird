@@ -66,13 +66,6 @@ export interface SessionCompactedSnapshot {
   sessionId: string;
 }
 
-export interface SessionMessagePartSnapshot {
-  sessionId: string;
-  messageId: string;
-  part: Record<string, unknown>;
-  delta?: string;
-}
-
 export interface SessionRunErrorSnapshot {
   sessionId: string | null;
   name?: string;
@@ -139,5 +132,4 @@ export type DashboardEvent =
   | { event: "session-message"; payload: { sessionId: string; message: ChatMessage } }
   | { event: "session-status"; payload: SessionRunStatusSnapshot }
   | { event: "session-compacted"; payload: SessionCompactedSnapshot }
-  | { event: "session-part"; payload: SessionMessagePartSnapshot }
   | { event: "session-error"; payload: SessionRunErrorSnapshot };

@@ -26,7 +26,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   type ActiveSend,
   type LocalChatMessage,
-  extractTextDelta,
   mergeMessages,
   normalizeListInput,
   normalizeRequestError,
@@ -40,7 +39,6 @@ import type {
   MemoryWriteEvent,
   ModelOption,
   SessionCompactedSnapshot,
-  SessionMessagePartSnapshot,
   SessionRunErrorSnapshot,
   SessionRunStatusSnapshot,
   SessionSummary,
@@ -306,11 +304,6 @@ export function App() {
       }
     });
 
-    events.addEventListener("session-part", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionMessagePartSnapshot;
-      applySessionPartUpdate(payload);
-    });
-
     events.addEventListener("session-compacted", event => {
       const payload = JSON.parse((event as MessageEvent<string>).data) as SessionCompactedSnapshot;
       setCompactedAtBySession(current => ({
@@ -511,7 +504,6 @@ export function App() {
             ...message.uiMeta,
             status: "pending",
             errorMessage: undefined,
-            runtimeMessageId: undefined,
           },
         };
       }),
@@ -545,45 +537,6 @@ export function App() {
         sessionId,
         status: "idle",
       },
-    }));
-  }
-
-  function applySessionPartUpdate(payload: SessionMessagePartSnapshot) {
-    const activeSend = activeSendRef.current;
-    if (!activeSend || activeSend.sessionId !== payload.sessionId) return;
-
-    setMessagesBySession(current => ({
-      ...current,
-      [payload.sessionId]: (current[payload.sessionId] ?? []).map(message => {
-        if (
-          message.uiMeta?.type !== "assistant-pending" ||
-          message.uiMeta.status !== "pending" ||
-          message.uiMeta.requestId !== activeSend.requestId
-        ) {
-          return message;
-        }
-
-        const runtimeMessageId = message.uiMeta.runtimeMessageId;
-        if (runtimeMessageId && runtimeMessageId !== payload.messageId) {
-          return message;
-        }
-
-        const deltaText = extractTextDelta(payload);
-        const nextContent =
-          deltaText.length > 0
-            ? typeof payload.delta === "string"
-              ? `${message.content}${deltaText}`
-              : deltaText
-            : message.content;
-        return {
-          ...message,
-          content: nextContent,
-          uiMeta: {
-            ...message.uiMeta,
-            runtimeMessageId: runtimeMessageId ?? payload.messageId,
-          },
-        };
-      }),
     }));
   }
 

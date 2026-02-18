@@ -28,8 +28,6 @@ function toSseEventName(event: RuntimeEvent): string {
       return "session-status";
     case "session.compacted":
       return "session-compacted";
-    case "session.message.part.updated":
-      return "session-part";
     case "session.run.error":
       return "session-error";
     default:

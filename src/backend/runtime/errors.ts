@@ -12,6 +12,27 @@ export class RuntimeSessionBusyError extends Error {
   }
 }
 
+export class RuntimeProviderQuotaError extends Error {
+  constructor(message = "Provider quota exceeded. Add credits or switch provider/model.") {
+    super(message);
+    this.name = "RuntimeProviderQuotaError";
+  }
+}
+
+export class RuntimeProviderAuthError extends Error {
+  constructor(message = "Provider authentication failed. Check API key or provider credentials.") {
+    super(message);
+    this.name = "RuntimeProviderAuthError";
+  }
+}
+
+export class RuntimeProviderRateLimitError extends Error {
+  constructor(message = "Provider rate limited this request. Please retry in a moment.") {
+    super(message);
+    this.name = "RuntimeProviderRateLimitError";
+  }
+}
+
 export class RuntimeTurnTimeoutError extends Error {
   constructor(sessionId: string, timeoutMs: number) {
     super(`Session response timed out after ${timeoutMs}ms: ${sessionId}`);

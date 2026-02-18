@@ -10,6 +10,7 @@ export interface RuntimeStartupInfo {
     modelId: string;
     smallModel: string;
     timeoutMs: number;
+    promptTimeoutMs: number;
     directoryConfigured: boolean;
     authConfigured: boolean;
   };
@@ -31,10 +32,18 @@ export function getRuntimeStartupInfo(): RuntimeStartupInfo {
       modelId: env.WAFFLEBOT_OPENCODE_MODEL_ID,
       smallModel: env.WAFFLEBOT_OPENCODE_SMALL_MODEL,
       timeoutMs: connection.timeoutMs,
+      promptTimeoutMs: env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS,
       directoryConfigured: connection.directoryConfigured,
       authConfigured: connection.authConfigured,
     },
   };
 }
 
-export { RuntimeSessionBusyError, RuntimeSessionNotFoundError, RuntimeTurnTimeoutError } from "./errors";
+export {
+  RuntimeProviderAuthError,
+  RuntimeProviderQuotaError,
+  RuntimeProviderRateLimitError,
+  RuntimeSessionBusyError,
+  RuntimeSessionNotFoundError,
+  RuntimeTurnTimeoutError,
+} from "./errors";

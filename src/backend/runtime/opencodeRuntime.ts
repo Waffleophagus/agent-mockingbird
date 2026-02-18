@@ -6,13 +6,18 @@ import type {
   Session,
 } from "@opencode-ai/sdk/client";
 
-import { RuntimeSessionBusyError, RuntimeSessionNotFoundError } from "./errors";
+import {
+  RuntimeProviderAuthError,
+  RuntimeProviderQuotaError,
+  RuntimeProviderRateLimitError,
+  RuntimeSessionBusyError,
+  RuntimeSessionNotFoundError,
+} from "./errors";
 import type { MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
 import {
   createHeartbeatUpdatedEvent,
   createSessionCompactedEvent,
   createSessionMessageCreatedEvent,
-  createSessionMessagePartUpdatedEvent,
   createSessionRunErrorEvent,
   createSessionRunStatusUpdatedEvent,
   createSessionStateUpdatedEvent,
@@ -48,12 +53,6 @@ export class OpencodeRuntime implements RuntimeEngine {
   private client = createOpencodeClient();
   private eventSyncStarted = false;
   private busySessions = new Set<string>();
-  private messageRoles = new Map<string, Message["role"]>();
-  private userFacingAssistantMessageIds = new Set<string>();
-  private pendingAssistantTextParts = new Map<
-    string,
-    Array<{ part: Extract<Part, { type: "text" }>; delta?: string }>
-  >();
 
   constructor(private options: OpencodeRuntimeOptions) {
     this.syncOpencodeSmallModel();
@@ -92,7 +91,11 @@ export class OpencodeRuntime implements RuntimeEngine {
         // Bound OpenCode sessions can disappear if server state is reset.
         if (getOpencodeErrorStatus(error) === 404) {
           opencodeSessionId = await this.createOpencodeSession(session.id, session.title);
-          assistantMessage = await this.sendPrompt(opencodeSessionId, model, promptInput.content, memorySystemPrompt);
+          try {
+            assistantMessage = await this.sendPrompt(opencodeSessionId, model, promptInput.content, memorySystemPrompt);
+          } catch (retryError) {
+            throw this.normalizeRuntimeError(retryError);
+          }
         } else {
           throw this.normalizeRuntimeError(error);
         }
@@ -104,16 +107,17 @@ export class OpencodeRuntime implements RuntimeEngine {
       const trace = this.buildMessageMemoryTrace(assistantMessage.parts, promptInput.injectedContextResults);
       const assistantError = this.extractAssistantError(assistantMessage.info, assistantMessage.parts);
       if (assistantError) {
+        const normalizedAssistantError = this.normalizeProviderMessage(assistantError) || assistantError;
         this.emit(
           createSessionRunErrorEvent(
             {
               sessionId: session.id,
-              message: assistantError,
+              message: normalizedAssistantError,
             },
             "runtime",
           ),
         );
-        throw new Error(`OpenCode run failed: ${assistantError}`);
+        throw new Error(`OpenCode run failed: ${normalizedAssistantError}`);
       }
 
       const assistantText = this.extractText(assistantMessage.parts);
@@ -193,6 +197,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         path: { id: opencodeSessionId },
         responseStyle: "data",
         throwOnError: true,
+        signal: this.defaultRequestSignal(),
       });
       return Boolean(unwrapSdkData<boolean>(result));
     } catch (error) {
@@ -218,6 +223,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         },
         responseStyle: "data",
         throwOnError: true,
+        signal: this.defaultRequestSignal(),
       });
       return Boolean(unwrapSdkData<boolean>(result));
     } catch (error) {
@@ -231,6 +237,7 @@ export class OpencodeRuntime implements RuntimeEngine {
           },
           responseStyle: "data",
           throwOnError: true,
+          signal: this.defaultRequestSignal(),
         });
         return Boolean(unwrapSdkData<boolean>(retry));
       }
@@ -351,12 +358,6 @@ export class OpencodeRuntime implements RuntimeEngine {
       case "session.compacted":
         this.handleSessionCompactedEvent(event);
         return;
-      case "message.updated":
-        this.handleMessageUpdatedEvent(event);
-        return;
-      case "message.part.updated":
-        this.handleMessagePartUpdatedEvent(event);
-        return;
       case "session.error":
         this.handleSessionErrorEvent(event);
         return;
@@ -394,7 +395,7 @@ export class OpencodeRuntime implements RuntimeEngine {
           sessionId: localSessionId,
           status: status.type,
           attempt: status.type === "retry" ? status.attempt : undefined,
-          message: status.type === "retry" ? status.message : undefined,
+          message: status.type === "retry" ? this.normalizeProviderMessage(status.message) : undefined,
           nextAt:
             status.type === "retry" && Number.isFinite(status.next)
               ? new Date(status.next).toISOString()
@@ -437,39 +438,6 @@ export class OpencodeRuntime implements RuntimeEngine {
     );
   }
 
-  private handleMessageUpdatedEvent(event: Extract<OpencodeEvent, { type: "message.updated" }>) {
-    const message = event.properties.info;
-    this.trackMessageRole(message.id, message.role);
-    if (message.role !== "assistant") {
-      this.userFacingAssistantMessageIds.delete(message.id);
-      this.pendingAssistantTextParts.delete(message.id);
-      return;
-    }
-    if (!this.isUserFacingAssistantInfo(message)) {
-      this.userFacingAssistantMessageIds.delete(message.id);
-      this.pendingAssistantTextParts.delete(message.id);
-      return;
-    }
-    this.userFacingAssistantMessageIds.add(message.id);
-    this.flushPendingAssistantTextParts(message.id);
-  }
-
-  private handleMessagePartUpdatedEvent(event: Extract<OpencodeEvent, { type: "message.part.updated" }>) {
-    if (!env.WAFFLEBOT_OPENCODE_STREAM_PARTS) return;
-    const part = event.properties.part;
-    if (part.type !== "text") return;
-
-    if (this.userFacingAssistantMessageIds.has(part.messageID)) {
-      this.emitSessionMessagePartUpdated(part, event.properties.delta);
-      return;
-    }
-
-    const pending = this.pendingAssistantTextParts.get(part.messageID) ?? [];
-    pending.push({ part, delta: event.properties.delta });
-    if (pending.length > 512) pending.shift();
-    this.pendingAssistantTextParts.set(part.messageID, pending);
-  }
-
   private handleSessionErrorEvent(event: Extract<OpencodeEvent, { type: "session.error" }>) {
     const error = event.properties.error;
     if (!error) return;
@@ -478,19 +446,14 @@ export class OpencodeRuntime implements RuntimeEngine {
       ? getLocalSessionIdByRuntimeBinding("opencode", event.properties.sessionID)
       : null;
 
-    const message =
-      typeof error.data?.message === "string"
-        ? error.data.message
-        : typeof error.name === "string"
-          ? error.name
-          : "OpenCode session error";
+    const normalized = this.normalizeRuntimeError(error);
 
     this.emit(
       createSessionRunErrorEvent(
         {
           sessionId: localSessionId,
-          name: error.name,
-          message,
+          name: normalized.name,
+          message: normalized.message,
         },
         "runtime",
       ),
@@ -650,58 +613,13 @@ export class OpencodeRuntime implements RuntimeEngine {
         },
         responseStyle: "data",
         throwOnError: true,
+        signal: this.promptRequestSignal(),
       }),
     );
     if (response.info.role !== "assistant") {
       throw new Error(`OpenCode returned unexpected message role: ${response.info.role}`);
     }
     return response as { info: AssistantInfo; parts: Array<Part> };
-  }
-
-  private isUserFacingAssistantInfo(info: AssistantInfo): boolean {
-    if (info.summary) return false;
-    const mode = info.mode.trim().toLowerCase();
-    return !["title", "summary", "compaction"].includes(mode);
-  }
-
-  private trackMessageRole(messageId: string, role: Message["role"]) {
-    this.messageRoles.set(messageId, role);
-    if (this.messageRoles.size <= 12_000) return;
-
-    const firstKey = this.messageRoles.keys().next().value as string | undefined;
-    if (!firstKey) return;
-    this.messageRoles.delete(firstKey);
-    this.userFacingAssistantMessageIds.delete(firstKey);
-    this.pendingAssistantTextParts.delete(firstKey);
-  }
-
-  private flushPendingAssistantTextParts(messageId: string) {
-    const pending = this.pendingAssistantTextParts.get(messageId);
-    if (!pending || pending.length === 0) {
-      this.pendingAssistantTextParts.delete(messageId);
-      return;
-    }
-    this.pendingAssistantTextParts.delete(messageId);
-    for (const item of pending) {
-      this.emitSessionMessagePartUpdated(item.part, item.delta);
-    }
-  }
-
-  private emitSessionMessagePartUpdated(part: Extract<Part, { type: "text" }>, delta?: string) {
-    const localSessionId = getLocalSessionIdByRuntimeBinding("opencode", part.sessionID);
-    if (!localSessionId) return;
-
-    this.emit(
-      createSessionMessagePartUpdatedEvent(
-        {
-          sessionId: localSessionId,
-          messageId: part.messageID,
-          part: part as Record<string, unknown>,
-          delta,
-        },
-        "runtime",
-      ),
-    );
   }
 
   private async resolveOrCreateOpencodeSession(localSessionId: string, localTitle: string) {
@@ -717,6 +635,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         body,
         responseStyle: "data",
         throwOnError: true,
+        signal: this.defaultRequestSignal(),
       }),
     );
     setRuntimeSessionBinding("opencode", localSessionId, created.id);
@@ -767,6 +686,7 @@ export class OpencodeRuntime implements RuntimeEngine {
           path: { id: opencodeSessionId },
           responseStyle: "data",
           throwOnError: true,
+          signal: this.defaultRequestSignal(),
         }),
       );
       const remoteTitle = opencodeSession.title.trim();
@@ -784,12 +704,78 @@ export class OpencodeRuntime implements RuntimeEngine {
 
   private normalizeRuntimeError(error: unknown): Error {
     const status = getOpencodeErrorStatus(error);
+    const fallback = this.describeUnknownError(error) ?? "OpenCode request failed.";
+    const categorized = this.categorizeProviderError(status, fallback);
+    if (categorized) return categorized;
     if (status !== null) {
-      const message = error instanceof Error ? error.message : "OpenCode request failed";
-      return new Error(`OpenCode API error (${status}): ${message}`);
+      return new Error(`OpenCode API error (${status}): ${fallback}`);
     }
     if (error instanceof Error) return error;
-    return new Error("OpenCode request failed.");
+    return new Error(fallback);
+  }
+
+  private normalizeProviderMessage(message: unknown): string {
+    if (typeof message !== "string" || !message.trim()) return "";
+    const normalized = this.categorizeProviderError(null, message);
+    return normalized ? normalized.message : message;
+  }
+
+  private categorizeProviderError(status: number | null, message: string): Error | null {
+    const normalized = message.toLowerCase();
+    const includes = (needle: string) => normalized.includes(needle);
+    const hasAny = (values: Array<string>) => values.some(includes);
+
+    if (
+      hasAny([
+        "exceeded_current_quota_error",
+        "exceeded your current token quota",
+        "freeusagelimiterror",
+        "insufficient_quota",
+        "quota exceeded",
+        "not enough credits",
+        "credit balance",
+      ])
+    ) {
+      return new RuntimeProviderQuotaError();
+    }
+
+    if (
+      status === 401 ||
+      status === 403 ||
+      hasAny([
+        "invalid api key",
+        "authentication failed",
+        "unauthorized",
+        "forbidden",
+        "auth error",
+        "bad credentials",
+      ])
+    ) {
+      return new RuntimeProviderAuthError();
+    }
+
+    if (
+      status === 429 ||
+      hasAny([
+        "too many requests",
+        "rate limited",
+        "rate limit",
+        "rate_limit",
+        "provider is overloaded",
+      ])
+    ) {
+      return new RuntimeProviderRateLimitError();
+    }
+
+    return null;
+  }
+
+  private defaultRequestSignal() {
+    return AbortSignal.timeout(env.WAFFLEBOT_OPENCODE_TIMEOUT_MS);
+  }
+
+  private promptRequestSignal() {
+    return AbortSignal.timeout(env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS);
   }
 
   private async syncOpencodeSmallModel() {
@@ -801,6 +787,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         await this.client.config.get({
           responseStyle: "data",
           throwOnError: true,
+          signal: this.defaultRequestSignal(),
         }),
       );
       if (current.small_model === desiredSmallModel) return;
@@ -812,6 +799,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         },
         responseStyle: "data",
         throwOnError: true,
+        signal: this.defaultRequestSignal(),
       });
     } catch {
       // Non-blocking: config sync should not prevent runtime startup.

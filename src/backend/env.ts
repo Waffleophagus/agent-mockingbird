@@ -10,7 +10,7 @@ export const env = createEnv({
     WAFFLEBOT_OPENCODE_MODEL_ID: z.string().min(1).default("kimi-k2.5-free"),
     WAFFLEBOT_OPENCODE_SMALL_MODEL: z.string().min(1).default("opencode/kimi-k2.5-free"),
     WAFFLEBOT_OPENCODE_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
-    WAFFLEBOT_OPENCODE_STREAM_PARTS: z.coerce.boolean().default(false),
+    WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
     WAFFLEBOT_OPENCODE_DIRECTORY: z.string().optional(),
     WAFFLEBOT_OPENCODE_AUTH_HEADER: z.string().optional(),
     WAFFLEBOT_OPENCODE_USERNAME: z.string().optional(),
