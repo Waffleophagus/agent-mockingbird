@@ -18,7 +18,6 @@
     "memory:sync": "bun run src/backend/memory/cli.ts sync",
     "memory:reindex": "bun run src/backend/memory/cli.ts reindex",
     "memory:search": "bun run src/backend/memory/cli.ts search",
-    "memory:policy": "bun run src/backend/memory/cli.ts policy",
     "memory:activity": "bun run src/backend/memory/cli.ts activity",
     "memory:lint": "bun run src/backend/memory/cli.ts lint",
     "memory:e2e": "bash scripts/memory-e2e.sh",

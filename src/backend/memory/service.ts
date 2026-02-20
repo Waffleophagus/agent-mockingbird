@@ -11,7 +11,6 @@ import {
 import type {
   MemoryChunk,
   MemoryLintReport,
-  MemoryPolicyInfo,
   MemoryRecord,
   MemoryRecordInput,
   MemoryRememberInput,
@@ -19,7 +18,6 @@ import type {
   MemorySearchResult,
   MemoryStatus,
   MemoryWriteEvent,
-  MemoryWritePolicy,
   MemoryWriteValidation,
 } from "./types";
 import { getConfigSnapshot } from "../config/service";
@@ -58,7 +56,6 @@ interface MemoryWriteEventRow {
   id: string;
   status: "accepted" | "rejected";
   reason: string;
-  type: string;
   source: string;
   content: string;
   confidence: number;
@@ -91,23 +88,6 @@ const MMR_LAMBDA = 0.75;
 const VECTOR_PREFILTER_MIN = 200;
 const VECTOR_PREFILTER_MAX = 800;
 const SQLITE_IN_BIND_LIMIT = 900;
-const EPHEMERAL_CONTENT_RE =
-  /^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|lol|lmao|ping|test|testing|what's up|sup)[\s.!?]*$/i;
-const MIN_CONTENT_LENGTH_BY_POLICY: Record<MemoryWritePolicy, number> = {
-  conservative: 24,
-  moderate: 16,
-  aggressive: 8,
-};
-const MIN_WORDS_BY_POLICY: Record<MemoryWritePolicy, number> = {
-  conservative: 5,
-  moderate: 4,
-  aggressive: 2,
-};
-const ALLOWED_TYPES_BY_POLICY: Record<MemoryWritePolicy, MemoryRecordInput["type"][]> = {
-  conservative: ["decision", "preference", "fact", "todo"],
-  moderate: ["decision", "preference", "fact", "todo", "observation"],
-  aggressive: ["decision", "preference", "fact", "todo", "observation"],
-};
 
 let schemaReady = false;
 let lastSyncMs = 0;
@@ -177,7 +157,6 @@ function clipSnippet(text: string, maxChars = SNIPPET_MAX_CHARS) {
 
 function normalizeRecordInput(input: MemoryRecordInput): MemoryRecordInput {
   return {
-    type: input.type,
     source: input.source,
     content: input.content.trim(),
     entities: [...new Set((input.entities ?? []).map(value => value.trim()).filter(Boolean))],
@@ -185,32 +164,6 @@ function normalizeRecordInput(input: MemoryRecordInput): MemoryRecordInput {
       typeof input.confidence === "number" ? Math.max(0, Math.min(1, input.confidence)) : undefined,
     supersedes: [...new Set((input.supersedes ?? []).map(value => value.trim()).filter(Boolean))],
   };
-}
-
-function resolveWritePolicy(): MemoryWritePolicy {
-  return currentMemoryConfig().writePolicy;
-}
-
-function resolveAllowedTypes(policy: MemoryWritePolicy) {
-  return ALLOWED_TYPES_BY_POLICY[policy];
-}
-
-function splitWords(content: string) {
-  return content
-    .split(/\s+/)
-    .map(part => part.trim())
-    .filter(Boolean);
-}
-
-function isLikelyEphemeral(content: string) {
-  if (EPHEMERAL_CONTENT_RE.test(content)) return true;
-  const lowered = content.toLowerCase();
-  return (
-    lowered.includes("this message") ||
-    lowered.includes("current prompt") ||
-    lowered.includes("current request") ||
-    lowered.includes("just said")
-  );
 }
 
 function chunkMarkdown(content: string, tokens: number, overlap: number): MemoryChunk[] {
@@ -344,7 +297,7 @@ async function ensureWorkspaceScaffold() {
   try {
     await stat(memoryFile);
   } catch {
-    await writeFile(memoryFile, "# Durable Memory\n\n", "utf8");
+    await writeFile(memoryFile, "# Memory\n\n", "utf8");
   }
 }
 
@@ -395,7 +348,6 @@ async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS memory_records (
       id TEXT PRIMARY KEY,
       path TEXT NOT NULL,
-      type TEXT NOT NULL,
       source TEXT NOT NULL,
       content TEXT NOT NULL,
       entities_json TEXT NOT NULL,
@@ -413,7 +365,6 @@ async function ensureSchema() {
       id TEXT PRIMARY KEY,
       status TEXT NOT NULL,
       reason TEXT NOT NULL,
-      type TEXT NOT NULL,
       source TEXT NOT NULL,
       content TEXT NOT NULL,
       confidence REAL NOT NULL,
@@ -623,12 +574,11 @@ async function indexMemoryFile(filePath: string, options?: { force?: boolean }) 
     const records = parseMemoryRecords(content);
     const insertRecord = sqlite.query(`
       INSERT INTO memory_records (
-        id, path, type, source, content, entities_json, confidence, supersedes_json, superseded_by, recorded_at, updated_at
+        id, path, source, content, entities_json, confidence, supersedes_json, superseded_by, recorded_at, updated_at
       )
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9)
       ON CONFLICT(id) DO UPDATE SET
         path = excluded.path,
-        type = excluded.type,
         source = excluded.source,
         content = excluded.content,
         entities_json = excluded.entities_json,
@@ -650,7 +600,6 @@ async function indexMemoryFile(filePath: string, options?: { force?: boolean }) 
       insertRecord.run(
         record.id,
         relPath,
-        record.type,
         record.source,
         record.content,
         JSON.stringify(record.entities ?? []),
@@ -757,27 +706,6 @@ async function ensureFreshIndex() {
   }
 }
 
-export function getMemoryPolicy(): MemoryPolicyInfo {
-  const memoryConfig = currentMemoryConfig();
-  const policy = resolveWritePolicy();
-  const allowedTypes = [...resolveAllowedTypes(policy)];
-  const disallowedTypes = (["decision", "preference", "fact", "todo", "observation"] as const).filter(
-    type => !allowedTypes.includes(type),
-  );
-  return {
-    mode: memoryConfig.toolMode,
-    writePolicy: policy,
-    minConfidence: memoryConfig.minConfidence,
-    allowedTypes,
-    disallowedTypes,
-    guidance: [
-      "Remember only durable facts/preferences/decisions/todos.",
-      "Avoid transient chat, greetings, and one-off operational chatter.",
-      "Use supersedes when updating prior memory entries.",
-    ],
-  };
-}
-
 async function findDuplicateRecordId(input: MemoryRecordInput) {
   await ensureSchema();
   const row = sqlite
@@ -785,24 +713,20 @@ async function findDuplicateRecordId(input: MemoryRecordInput) {
       `
       SELECT id
       FROM memory_records
-      WHERE type = ?1
-        AND content = ?2
+      WHERE content = ?1
         AND superseded_by IS NULL
       ORDER BY recorded_at DESC
       LIMIT 1
     `,
     )
-    .get(input.type, input.content) as { id: string } | null;
+    .get(input.content) as { id: string } | null;
   return row?.id;
 }
 
 export async function validateMemoryRememberInput(input: MemoryRememberInput): Promise<MemoryWriteValidation> {
-  const memoryConfig = currentMemoryConfig();
   const normalized = normalizeRecordInput(input);
   const content = normalized.content;
   const confidence = typeof normalized.confidence === "number" ? normalized.confidence : 0.75;
-  const policy = resolveWritePolicy();
-  const allowedTypes = resolveAllowedTypes(policy);
 
   if (!content) {
     return {
@@ -813,56 +737,11 @@ export async function validateMemoryRememberInput(input: MemoryRememberInput): P
     };
   }
 
-  if (!allowedTypes.includes(normalized.type)) {
-    return {
-      accepted: false,
-      reason: `type '${normalized.type}' is not allowed by ${policy} policy`,
-      normalizedContent: content,
-      normalizedConfidence: confidence,
-    };
-  }
-
-  if (confidence < memoryConfig.minConfidence) {
-    return {
-      accepted: false,
-      reason: `confidence ${confidence.toFixed(2)} is below minimum ${memoryConfig.minConfidence.toFixed(2)}`,
-      normalizedContent: content,
-      normalizedConfidence: confidence,
-    };
-  }
-
-  if (content.length < MIN_CONTENT_LENGTH_BY_POLICY[policy]) {
-    return {
-      accepted: false,
-      reason: "content is too short for durable memory",
-      normalizedContent: content,
-      normalizedConfidence: confidence,
-    };
-  }
-
-  if (splitWords(content).length < MIN_WORDS_BY_POLICY[policy]) {
-    return {
-      accepted: false,
-      reason: "content has too few words for durable memory",
-      normalizedContent: content,
-      normalizedConfidence: confidence,
-    };
-  }
-
-  if (isLikelyEphemeral(content)) {
-    return {
-      accepted: false,
-      reason: "content appears ephemeral and was rejected",
-      normalizedContent: content,
-      normalizedConfidence: confidence,
-    };
-  }
-
   const duplicateRecordId = await findDuplicateRecordId(normalized);
   if (duplicateRecordId) {
     return {
       accepted: false,
-      reason: "duplicate durable memory already exists",
+      reason: "duplicate memory already exists",
       normalizedContent: content,
       normalizedConfidence: confidence,
       duplicateRecordId,
@@ -880,7 +759,6 @@ export async function validateMemoryRememberInput(input: MemoryRememberInput): P
 async function logMemoryWriteEvent(input: {
   status: "accepted" | "rejected";
   reason: string;
-  type: MemoryRecordInput["type"];
   source: MemoryRecordInput["source"];
   content: string;
   confidence: number;
@@ -895,16 +773,15 @@ async function logMemoryWriteEvent(input: {
     .query(
       `
       INSERT INTO memory_write_events (
-        id, status, reason, type, source, content, confidence, session_id, topic, record_id, path, created_at
+        id, status, reason, source, content, confidence, session_id, topic, record_id, path, created_at
       )
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
     `,
     )
     .run(
       crypto.randomUUID(),
       input.status,
       input.reason,
-      input.type,
       input.source,
       input.content,
       input.confidence,
@@ -926,7 +803,7 @@ export async function listMemoryWriteEvents(limit = 20): Promise<MemoryWriteEven
   const rows = sqlite
     .query(
       `
-      SELECT id, status, reason, type, source, content, confidence, session_id, topic, record_id, path, created_at
+      SELECT id, status, reason, source, content, confidence, session_id, topic, record_id, path, created_at
       FROM memory_write_events
       ORDER BY created_at DESC
       LIMIT ?1
@@ -937,7 +814,6 @@ export async function listMemoryWriteEvents(limit = 20): Promise<MemoryWriteEven
     id: row.id,
     status: row.status,
     reason: row.reason,
-    type: row.type as MemoryRecordInput["type"],
     source: row.source as MemoryRecordInput["source"],
     content: row.content,
     confidence: row.confidence,
@@ -963,13 +839,12 @@ export async function lintMemory(): Promise<MemoryLintReport> {
   const allRows = sqlite
     .query(
       `
-      SELECT id, type, content, supersedes_json, superseded_by
+      SELECT id, content, supersedes_json, superseded_by
       FROM memory_records
     `,
     )
-    .all() as Array<{
+  .all() as Array<{
     id: string;
-    type: string;
     content: string;
     supersedes_json: string;
     superseded_by: string | null;
@@ -977,15 +852,14 @@ export async function lintMemory(): Promise<MemoryLintReport> {
   const idSet = new Set(allRows.map(row => row.id));
 
   const activeRows = allRows.filter(row => !row.superseded_by);
-  const duplicateKeyMap = new Map<string, { type: string; content: string; ids: string[] }>();
+  const duplicateKeyMap = new Map<string, { content: string; ids: string[] }>();
   for (const row of activeRows) {
-    const key = `${row.type}\n${row.content}`;
+    const key = row.content;
     const existing = duplicateKeyMap.get(key);
     if (existing) {
       existing.ids.push(row.id);
     } else {
       duplicateKeyMap.set(key, {
-        type: row.type,
         content: row.content,
         ids: [row.id],
       });
@@ -995,7 +869,6 @@ export async function lintMemory(): Promise<MemoryLintReport> {
   const duplicateActiveRecords = [...duplicateKeyMap.values()]
     .filter(entry => entry.ids.length > 1)
     .map(entry => ({
-      type: entry.type as MemoryRecordInput["type"],
       content: clipSnippet(entry.content, 240),
       count: entry.ids.length,
       recordIds: entry.ids,
@@ -1039,13 +912,11 @@ export async function rememberMemory(
 
   const normalized = normalizeRecordInput(input);
   const validation = await validateMemoryRememberInput(input);
-  const policy = resolveWritePolicy();
 
   if (!validation.accepted) {
     await logMemoryWriteEvent({
       status: "rejected",
       reason: validation.reason,
-      type: normalized.type,
       source: normalized.source,
       content: validation.normalizedContent,
       confidence: validation.normalizedConfidence,
@@ -1055,7 +926,6 @@ export async function rememberMemory(
     return {
       accepted: false,
       reason: validation.reason,
-      policy,
       validation,
     };
   }
@@ -1064,13 +934,11 @@ export async function rememberMemory(
     return {
       accepted: true,
       reason: validation.reason,
-      policy,
       validation,
     };
   }
 
   const persisted = await appendStructuredMemory({
-    type: normalized.type,
     source: normalized.source,
     content: validation.normalizedContent,
     entities: normalized.entities,
@@ -1081,7 +949,6 @@ export async function rememberMemory(
   await logMemoryWriteEvent({
     status: "accepted",
     reason: validation.reason,
-    type: normalized.type,
     source: normalized.source,
     content: validation.normalizedContent,
     confidence: validation.normalizedConfidence,
@@ -1094,7 +961,6 @@ export async function rememberMemory(
   return {
     accepted: true,
     reason: validation.reason,
-    policy,
     validation,
     record: persisted.record,
     path: persisted.path,
@@ -1407,8 +1273,6 @@ export async function getMemoryStatus(): Promise<MemoryStatus> {
       provider: memoryConfig.embedProvider,
       model: memoryConfig.embedModel,
       toolMode: memoryConfig.toolMode,
-      writePolicy: memoryConfig.writePolicy,
-      minConfidence: memoryConfig.minConfidence,
       files: 0,
       chunks: 0,
       records: 0,
@@ -1432,8 +1296,6 @@ export async function getMemoryStatus(): Promise<MemoryStatus> {
     provider: memoryConfig.embedProvider,
     model: memoryConfig.embedModel,
     toolMode: memoryConfig.toolMode,
-    writePolicy: memoryConfig.writePolicy,
-    minConfidence: memoryConfig.minConfidence,
     files: files.count,
     chunks: chunks.count,
     records: records.count,

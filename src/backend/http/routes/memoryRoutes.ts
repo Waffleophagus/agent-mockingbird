@@ -1,5 +1,4 @@
 import {
-  getMemoryPolicy,
   getMemoryStatus,
   listMemoryWriteEvents,
   readMemoryFileSlice,
@@ -18,17 +17,6 @@ export function createMemoryRoutes() {
           return Response.json({ status: await getMemoryStatus() });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to load memory status";
-          return Response.json({ error: message }, { status: 500 });
-        }
-      },
-    },
-
-    "/api/memory/policy": {
-      GET: () => {
-        try {
-          return Response.json({ policy: getMemoryPolicy() });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to load memory policy";
           return Response.json({ error: message }, { status: 500 });
         }
       },
@@ -120,7 +108,7 @@ export function createMemoryRoutes() {
           return Response.json(
             {
               error:
-                "Invalid payload. Expected { type, source, content, entities?, confidence?, supersedes?, sessionId?, topic?, ttl? }",
+                "Invalid payload. Expected { source?, content, entities?, confidence?, supersedes?, sessionId?, topic?, ttl? }",
             },
             { status: 400 },
           );
@@ -142,17 +130,14 @@ export function createMemoryRoutes() {
           return Response.json(
             {
               error:
-                "Invalid payload. Expected { type, source, content, entities?, confidence?, supersedes?, sessionId?, topic?, ttl? }",
+                "Invalid payload. Expected { source?, content, entities?, confidence?, supersedes?, sessionId?, topic?, ttl? }",
             },
             { status: 400 },
           );
         }
         try {
           const validation = await validateMemoryRememberInput(body);
-          return Response.json({
-            validation,
-            policy: getMemoryPolicy(),
-          });
+          return Response.json({ validation });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Memory validation failed";
           return Response.json({ error: message }, { status: 502 });

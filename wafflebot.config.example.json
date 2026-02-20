@@ -31,9 +31,7 @@
       "maxResults": 6,
       "minScore": 0.25,
       "syncCooldownMs": 10000,
-      "toolMode": "hybrid",
-      "writePolicy": "conservative",
-      "minConfidence": 0.7
+      "toolMode": "hybrid"
     },
     "cron": {
       "defaultMaxAttempts": 3,

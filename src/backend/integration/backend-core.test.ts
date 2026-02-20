@@ -54,7 +54,6 @@ interface MemoryRememberResultLite {
 interface MemoryServiceApi {
   initializeMemory: () => Promise<void>;
   rememberMemory: (input: {
-    type: "decision" | "preference" | "fact" | "todo" | "observation";
     source: "user" | "assistant" | "system";
     content: string;
     sessionId?: string;
@@ -874,11 +873,18 @@ describe("background routes", () => {
 });
 
 describe("memory validation and logging", () => {
-  test("rejected remember writes are logged in memory_write_events", async () => {
-    const result = await memoryService.rememberMemory({
-      type: "fact",
+  test("duplicate remember writes are rejected and logged in memory_write_events", async () => {
+    const first = await memoryService.rememberMemory({
       source: "system",
-      content: "ok",
+      content: "Persist this memory value",
+      sessionId: "main",
+      confidence: 0.95,
+    });
+    expect(first.accepted).toBe(true);
+
+    const result = await memoryService.rememberMemory({
+      source: "system",
+      content: "Persist this memory value",
       sessionId: "main",
       confidence: 0.95,
     });
@@ -886,8 +892,7 @@ describe("memory validation and logging", () => {
     expect(result.accepted).toBe(false);
     const events = await memoryService.listMemoryWriteEvents(5);
     expect(events.length).toBeGreaterThan(0);
-    expect(events[0]?.status).toBe("rejected");
-    expect(events[0]?.sessionId).toBe("main");
+    expect(events.some(event => event.status === "rejected" && event.sessionId === "main")).toBe(true);
   });
 });
 

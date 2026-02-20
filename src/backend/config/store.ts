@@ -122,8 +122,6 @@ function buildLegacyBootstrappedConfig() {
         minScore: env.WAFFLEBOT_MEMORY_MIN_SCORE,
         syncCooldownMs: env.WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS,
         toolMode: env.WAFFLEBOT_MEMORY_TOOL_MODE,
-        writePolicy: env.WAFFLEBOT_MEMORY_WRITE_POLICY,
-        minConfidence: env.WAFFLEBOT_MEMORY_MIN_CONFIDENCE,
       },
       cron: {
         defaultMaxAttempts: 3,
@@ -141,8 +139,24 @@ function buildLegacyBootstrappedConfig() {
   return wafflebotConfigSchema.parse(candidate);
 }
 
+function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
+  if (!isPlainObject(raw)) return raw;
+  const root = { ...raw };
+  const runtime = isPlainObject(root.runtime) ? { ...root.runtime } : null;
+  if (!runtime) return root;
+  const memory = isPlainObject(runtime.memory) ? { ...runtime.memory } : null;
+  if (!memory) return root;
+
+  delete memory.writePolicy;
+  delete memory.minConfidence;
+
+  runtime.memory = memory;
+  root.runtime = runtime;
+  return root;
+}
+
 export function parseConfig(raw: unknown) {
-  const parsed = wafflebotConfigSchema.safeParse(raw);
+  const parsed = wafflebotConfigSchema.safeParse(stripLegacyMemoryWriteConfig(raw));
   if (!parsed.success) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }

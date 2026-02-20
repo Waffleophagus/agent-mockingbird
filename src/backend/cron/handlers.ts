@@ -59,7 +59,6 @@ const locationSyncHandler: CronHandler = async ctx => {
   }
 
   await rememberMemory({
-    type: "observation",
     source: "system",
     content: `Current user location: ${locationText}`,
     confidence: 0.95,

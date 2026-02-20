@@ -62,7 +62,7 @@ bun run memory:reindex
 bun run memory:search "query"
 bun run memory:e2e
 bun run memory:trace:e2e
-bun run src/backend/memory/cli.ts policy
+bun run src/backend/memory/cli.ts remember "some note to store"
 bun run src/backend/memory/cli.ts activity 20
 bun run memory:lint
 ```
@@ -118,8 +118,6 @@ Memory mode environment variables:
 - `WAFFLEBOT_MEMORY_MIN_SCORE` (default `0.25`)
 - `WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS` (default `10000`)
 - `WAFFLEBOT_MEMORY_TOOL_MODE` (`hybrid`, `inject_only`, `tool_only`; default `hybrid`)
-- `WAFFLEBOT_MEMORY_WRITE_POLICY` (`conservative`, `moderate`, `aggressive`; default `conservative`)
-- `WAFFLEBOT_MEMORY_MIN_CONFIDENCE` (default `0.7`)
 
 OpenCode local memory tools:
 
@@ -136,7 +134,6 @@ Memory API endpoints used by tools:
 - `POST /api/memory/read`
 - `POST /api/memory/remember`
 - `POST /api/memory/remember/validate`
-- `GET /api/memory/policy`
 - `GET /api/memory/activity`
 
 Run API endpoints:

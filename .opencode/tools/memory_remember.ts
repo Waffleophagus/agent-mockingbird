@@ -22,9 +22,8 @@ async function postJson(pathname: string, body: unknown) {
 }
 
 export default tool({
-  description: "Persist a durable memory note (fact/preference/decision/todo) with backend policy guardrails.",
+  description: "Persist a memory note so it can be retrieved later.",
   args: {
-    type: tool.schema.enum(["decision", "preference", "fact", "todo", "observation"]),
     content: tool.schema.string().min(1),
     confidence: tool.schema.number().min(0).max(1).optional(),
     source: tool.schema.enum(["assistant", "user", "system"]).optional(),
@@ -33,7 +32,6 @@ export default tool({
     topic: tool.schema.string().optional(),
   },
   async execute(args: {
-    type: "decision" | "preference" | "fact" | "todo" | "observation";
     content: string;
     confidence?: number;
     source?: "assistant" | "user" | "system";

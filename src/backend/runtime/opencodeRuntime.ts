@@ -779,10 +779,9 @@ export class OpencodeRuntime implements RuntimeEngine {
       lines.push("");
       lines.push(
         "Memory policy:",
-        "- Use memory_search first for questions about prior facts/preferences/decisions/todos.",
+        "- Use memory_search first for questions that may depend on earlier context.",
         "- Use memory_get to inspect cited records before relying on them.",
-        "- Use memory_remember only for durable information worth reusing later.",
-        `- Current write policy: ${memoryConfig.writePolicy}; minimum confidence: ${memoryConfig.minConfidence.toFixed(2)}.`,
+        "- Use memory_remember when new context could be useful later.",
         "- Prefer supersedes when replacing older memory records.",
       );
     }

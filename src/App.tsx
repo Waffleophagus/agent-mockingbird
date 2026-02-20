@@ -40,7 +40,6 @@ import type {
   BackgroundRunSnapshot,
   ChatMessage,
   DashboardBootstrap,
-  MemoryPolicySnapshot,
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
@@ -208,7 +207,6 @@ export function App() {
     estimatedCostUsd: 0,
   });
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatusSnapshot | null>(null);
-  const [memoryPolicy, setMemoryPolicy] = useState<MemoryPolicySnapshot | null>(null);
   const [memoryActivity, setMemoryActivity] = useState<MemoryWriteEvent[]>([]);
   const [memoryError, setMemoryError] = useState("");
   const [heartbeatAt, setHeartbeatAt] = useState<string>("");
@@ -270,7 +268,6 @@ export function App() {
         const [
           modelsResponse,
           memoryStatusResponse,
-          memoryPolicyResponse,
           memoryActivityResponse,
           configResponse,
           skillsCatalogResponse,
@@ -280,7 +277,6 @@ export function App() {
         ] = await Promise.all([
           fetch("/api/opencode/models"),
           fetch("/api/memory/status"),
-          fetch("/api/memory/policy"),
           fetch("/api/memory/activity?limit=12"),
           fetch("/api/config"),
           fetch("/api/config/skills/catalog"),
@@ -291,10 +287,6 @@ export function App() {
         const modelsPayload = (await modelsResponse.json()) as { models?: ModelOption[]; error?: string };
         const memoryStatusPayload = (await memoryStatusResponse.json()) as {
           status?: MemoryStatusSnapshot;
-          error?: string;
-        };
-        const memoryPolicyPayload = (await memoryPolicyResponse.json()) as {
-          policy?: MemoryPolicySnapshot;
           error?: string;
         };
         const memoryActivityPayload = (await memoryActivityResponse.json()) as {
@@ -327,7 +319,6 @@ export function App() {
         setModelOptions(modelsPayload.models ?? []);
         setModelError(modelsResponse.ok ? "" : (modelsPayload.error ?? "Failed to load OpenCode models"));
         setMemoryStatus(memoryStatusPayload.status ?? null);
-        setMemoryPolicy(memoryPolicyPayload.policy ?? null);
         setMemoryActivity(memoryActivityPayload.events ?? []);
         setAvailableSkills(Array.isArray(skillsCatalogPayload.skills) ? skillsCatalogPayload.skills : []);
         setAvailableMcps(Array.isArray(mcpsCatalogPayload.mcps) ? mcpsCatalogPayload.mcps : []);
@@ -356,7 +347,6 @@ export function App() {
         }
         const failedMemoryMessage =
           (!memoryStatusResponse.ok && (memoryStatusPayload.error ?? "Failed to load memory status")) ||
-          (!memoryPolicyResponse.ok && (memoryPolicyPayload.error ?? "Failed to load memory policy")) ||
           (!memoryActivityResponse.ok && (memoryActivityPayload.error ?? "Failed to load memory activity")) ||
           "";
         setMemoryError(failedMemoryMessage);
@@ -2603,12 +2593,6 @@ export function App() {
                       <BookOpen className="size-4 text-muted-foreground" />
                       {memoryStatus?.toolMode ?? "unknown"}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      policy: {memoryStatus?.writePolicy ?? "unknown"} · min confidence{" "}
-                      {typeof memoryStatus?.minConfidence === "number"
-                        ? memoryStatus.minConfidence.toFixed(2)
-                        : "n/a"}
-                    </p>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="rounded-lg border border-border bg-muted/70 p-3">
@@ -2638,7 +2622,7 @@ export function App() {
                           <div key={event.id} className="rounded-md border border-border/70 bg-background/60 p-2">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                                {event.status} · {event.type}
+                                {event.status}
                               </p>
                               <p className="text-[11px] text-muted-foreground">{relativeFromIso(event.createdAt)}</p>
                             </div>
@@ -2651,12 +2635,6 @@ export function App() {
                       </div>
                     )}
                   </div>
-                  {memoryPolicy && (
-                    <div className="rounded-lg border border-border bg-muted/70 p-3">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Allowed types</p>
-                      <p className="mt-1 text-xs">{memoryPolicy.allowedTypes.join(", ") || "none"}</p>
-                    </div>
-                  )}
                 </TabsContent>
 
                 <TabsContent value="background" className="space-y-3">

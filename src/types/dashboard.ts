@@ -153,8 +153,6 @@ export interface MemoryStatusSnapshot {
   provider: string;
   model: string;
   toolMode: "hybrid" | "inject_only" | "tool_only";
-  writePolicy: "conservative" | "moderate" | "aggressive";
-  minConfidence: number;
   files: number;
   chunks: number;
   records: number;
@@ -162,20 +160,10 @@ export interface MemoryStatusSnapshot {
   indexedAt: string | null;
 }
 
-export interface MemoryPolicySnapshot {
-  mode: "hybrid" | "inject_only" | "tool_only";
-  writePolicy: "conservative" | "moderate" | "aggressive";
-  minConfidence: number;
-  allowedTypes: Array<"decision" | "preference" | "fact" | "todo" | "observation">;
-  disallowedTypes: Array<"decision" | "preference" | "fact" | "todo" | "observation">;
-  guidance: string[];
-}
-
 export interface MemoryWriteEvent {
   id: string;
   status: "accepted" | "rejected";
   reason: string;
-  type: "decision" | "preference" | "fact" | "todo" | "observation";
   source: "user" | "assistant" | "system";
   content: string;
   confidence: number;

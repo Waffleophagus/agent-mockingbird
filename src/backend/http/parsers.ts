@@ -1,4 +1,4 @@
-import type { MemoryRecordSource, MemoryRecordType } from "../memory/types";
+import type { MemoryRecordSource } from "../memory/types";
 
 export function parseStringListBody(body: unknown, field: string): string[] | null {
   if (!body || typeof body !== "object") return null;
@@ -12,7 +12,6 @@ export function parseStringListBody(body: unknown, field: string): string[] | nu
 export function parseMemoryRememberBody(body: unknown) {
   if (!body || typeof body !== "object") return null;
   const value = body as Record<string, unknown>;
-  const type = typeof value.type === "string" ? value.type.trim() : "";
   const source = typeof value.source === "string" ? value.source.trim() : "user";
   const content = typeof value.content === "string" ? value.content.trim() : "";
   const sessionId = typeof value.sessionId === "string" ? value.sessionId.trim() : undefined;
@@ -25,13 +24,10 @@ export function parseMemoryRememberBody(body: unknown) {
     ? value.supersedes.filter((item): item is string => typeof item === "string")
     : [];
   const confidence = typeof value.confidence === "number" ? value.confidence : undefined;
-  if (!type || !content) return null;
-  const allowedTypes = ["decision", "preference", "fact", "todo", "observation"] as const;
+  if (!content) return null;
   const allowedSources = ["user", "assistant", "system"] as const;
-  if (!allowedTypes.includes(type as MemoryRecordType)) return null;
   if (!allowedSources.includes(source as MemoryRecordSource)) return null;
   return {
-    type: type as MemoryRecordType,
     source: source as MemoryRecordSource,
     content,
     entities,

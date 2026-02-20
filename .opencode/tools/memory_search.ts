@@ -22,7 +22,7 @@ async function postJson(pathname: string, body: unknown) {
 }
 
 export default tool({
-  description: "Search durable memory for relevant prior facts, preferences, decisions, and todos.",
+  description: "Search memory for relevant prior context.",
   args: {
     query: tool.schema.string().min(1).describe("Natural language memory query"),
     maxResults: tool.schema.number().int().min(1).max(20).optional(),

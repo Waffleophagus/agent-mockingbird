@@ -31,7 +31,6 @@ export function createMemoryRecord(input: MemoryRecordInput): MemoryRecord {
   return {
     id,
     recordedAt: createdAt,
-    type: input.type,
     source: input.source,
     content: normalizeContent(input.content),
     entities: normalizeList(input.entities),
@@ -44,7 +43,6 @@ export function formatMemoryRecord(record: MemoryRecord): string {
   const meta = JSON.stringify(
     {
       id: record.id,
-      type: record.type,
       source: record.source,
       confidence: clampConfidence(record.confidence),
       entities: normalizeList(record.entities),
@@ -56,7 +54,7 @@ export function formatMemoryRecord(record: MemoryRecord): string {
   );
 
   return [
-    `### [memory:${record.id}] ${record.type} · ${record.recordedAt}`,
+    `### [memory:${record.id}] ${record.recordedAt}`,
     "```json",
     meta,
     "```",
@@ -87,7 +85,6 @@ export function parseMemoryRecords(content: string): MemoryRecord[] {
     try {
       const metadata = JSON.parse(metaRaw) as Partial<MemoryRecord>;
       const id = typeof metadata.id === "string" && metadata.id.trim() ? metadata.id.trim() : parsedId;
-      const type = metadata.type ?? "observation";
       const source = metadata.source ?? "system";
       const recordedAt =
         typeof metadata.recordedAt === "string" && metadata.recordedAt.trim()
@@ -96,7 +93,6 @@ export function parseMemoryRecords(content: string): MemoryRecord[] {
 
       records.push({
         id,
-        type,
         source,
         recordedAt,
         content: bodyRaw,

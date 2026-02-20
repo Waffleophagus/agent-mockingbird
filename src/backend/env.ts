@@ -34,8 +34,6 @@ export const env = createEnv({
     WAFFLEBOT_MEMORY_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.25),
     WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS: z.coerce.number().int().min(0).default(10_000),
     WAFFLEBOT_MEMORY_TOOL_MODE: z.enum(["hybrid", "inject_only", "tool_only"]).default("hybrid"),
-    WAFFLEBOT_MEMORY_WRITE_POLICY: z.enum(["conservative", "moderate", "aggressive"]).default("conservative"),
-    WAFFLEBOT_MEMORY_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.7),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,

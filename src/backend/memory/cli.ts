@@ -1,5 +1,4 @@
 import {
-  getMemoryPolicy,
   getMemoryStatus,
   lintMemory,
   listMemoryWriteEvents,
@@ -14,8 +13,7 @@ function usage() {
   console.log("  bun run src/backend/memory/cli.ts sync");
   console.log("  bun run src/backend/memory/cli.ts reindex");
   console.log("  bun run src/backend/memory/cli.ts search <query>");
-  console.log("  bun run src/backend/memory/cli.ts remember <type> <content>");
-  console.log("  bun run src/backend/memory/cli.ts policy");
+  console.log("  bun run src/backend/memory/cli.ts remember <content>");
   console.log("  bun run src/backend/memory/cli.ts activity [limit]");
   console.log("  bun run src/backend/memory/cli.ts lint");
 }
@@ -58,24 +56,17 @@ async function run() {
       return;
     }
     case "remember": {
-      const [type, ...contentParts] = args;
-      const content = contentParts.join(" ").trim();
-      if (!type || !content) {
-        console.error("remember requires <type> and <content>");
+      const content = args.join(" ").trim();
+      if (!content) {
+        console.error("remember requires <content>");
         process.exitCode = 1;
         return;
       }
       const result = await rememberMemory({
-        type: type as "decision" | "preference" | "fact" | "todo" | "observation",
         source: "system",
         content,
       });
       console.log(JSON.stringify(result, null, 2));
-      return;
-    }
-    case "policy": {
-      const policy = getMemoryPolicy();
-      console.log(JSON.stringify(policy, null, 2));
       return;
     }
     case "activity": {
