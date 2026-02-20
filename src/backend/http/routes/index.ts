@@ -1,3 +1,4 @@
+import { createBackgroundRoutes } from "./backgroundRoutes";
 import { createChatRoutes } from "./chatRoutes";
 import { createConfigRoutes } from "./configRoutes";
 import { createCronRoutes } from "./cronRoutes";
@@ -18,6 +19,7 @@ export function createApiRoutes(input: {
 }) {
   return {
     ...createDashboardRoutes(input.runtime),
+    ...createBackgroundRoutes(input.runtime),
     ...createChatRoutes(input.runtime),
     ...createRunRoutes(input.runService),
     ...createConfigRoutes(input.eventStream),

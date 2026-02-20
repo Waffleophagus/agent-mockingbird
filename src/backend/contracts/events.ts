@@ -41,6 +41,24 @@ export interface SessionRunErrorPayload {
 }
 export type SessionRunErrorEvent = RuntimeEventBase<"session.run.error", SessionRunErrorPayload>;
 
+export interface BackgroundRunUpdatedPayload {
+  runId: string;
+  parentSessionId: string;
+  parentExternalSessionId: string;
+  childExternalSessionId: string;
+  childSessionId: string | null;
+  requestedBy: string;
+  prompt: string;
+  status: "created" | "running" | "retrying" | "idle" | "completed" | "failed" | "aborted";
+  resultSummary: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+export type BackgroundRunUpdatedEvent = RuntimeEventBase<"background.run.updated", BackgroundRunUpdatedPayload>;
+
 export interface ConfigUpdatedPayload {
   hash: string;
   path: string;
@@ -65,6 +83,7 @@ export type RuntimeEvent =
   | SessionRunStatusUpdatedEvent
   | SessionCompactedEvent
   | SessionRunErrorEvent
+  | BackgroundRunUpdatedEvent
   | ConfigUpdatedEvent
   | ConfigUpdateFailedEvent;
 
@@ -120,6 +139,13 @@ export function createSessionRunErrorEvent(
   source: RuntimeEventSource,
 ): SessionRunErrorEvent {
   return baseRuntimeEvent("session.run.error", payload, source);
+}
+
+export function createBackgroundRunUpdatedEvent(
+  payload: BackgroundRunUpdatedPayload,
+  source: RuntimeEventSource,
+): BackgroundRunUpdatedEvent {
+  return baseRuntimeEvent("background.run.updated", payload, source);
 }
 
 export function createConfigUpdatedEvent(

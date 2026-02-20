@@ -99,6 +99,7 @@ function buildLegacyBootstrappedConfig() {
         timeoutMs: env.WAFFLEBOT_OPENCODE_TIMEOUT_MS,
         promptTimeoutMs: env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS,
         runWaitTimeoutMs: env.WAFFLEBOT_OPENCODE_RUN_WAIT_TIMEOUT_MS,
+        childSessionHideAfterDays: 3,
         directory: env.WAFFLEBOT_OPENCODE_DIRECTORY?.trim() || null,
       },
       smokeTest: {

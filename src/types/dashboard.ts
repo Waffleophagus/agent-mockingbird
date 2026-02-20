@@ -125,6 +125,23 @@ export interface SessionRunErrorSnapshot {
   message: string;
 }
 
+export interface BackgroundRunSnapshot {
+  runId: string;
+  parentSessionId: string;
+  parentExternalSessionId: string;
+  childExternalSessionId: string;
+  childSessionId: string | null;
+  requestedBy: string;
+  prompt: string;
+  status: "created" | "running" | "retrying" | "idle" | "completed" | "failed" | "aborted";
+  resultSummary: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
 export interface HeartbeatSnapshot {
   online: boolean;
   at: string;
@@ -185,4 +202,5 @@ export type DashboardEvent =
   | { event: "session-message"; payload: { sessionId: string; message: ChatMessage } }
   | { event: "session-status"; payload: SessionRunStatusSnapshot }
   | { event: "session-compacted"; payload: SessionCompactedSnapshot }
-  | { event: "session-error"; payload: SessionRunErrorSnapshot };
+  | { event: "session-error"; payload: SessionRunErrorSnapshot }
+  | { event: "background-run"; payload: BackgroundRunSnapshot };

@@ -24,6 +24,7 @@ import {
 import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import {
+  createBackgroundRunUpdatedEvent,
   createHeartbeatUpdatedEvent,
   createSessionCompactedEvent,
   createSessionMessageCreatedEvent,
@@ -36,6 +37,7 @@ import {
 import type {
   BackgroundRunHandle,
   BackgroundRunStatus,
+  ListBackgroundRunsInput,
   PromptBackgroundAsyncInput,
   RuntimeEngine,
   RuntimeHealthCheckInput,
@@ -45,10 +47,17 @@ import type {
   SpawnBackgroundSessionInput,
 } from "../contracts/runtime";
 import {
+  appendAssistantMessage,
   appendChatExchange,
   createBackgroundRun,
+  ensureSessionForRuntimeBinding,
   getBackgroundRunByChildExternalSessionId,
   getBackgroundRunById,
+  listBackgroundRunsForParentSession,
+  listBackgroundRunsPendingAnnouncement,
+  listInFlightBackgroundRuns,
+  listRecentBackgroundRuns,
+  listRuntimeSessionBindings,
   getLocalSessionIdByRuntimeBinding,
   getRuntimeSessionBinding,
   getSessionById,
@@ -56,6 +65,7 @@ import {
   setMessageMemoryTrace,
   setSessionTitle,
   setRuntimeSessionBinding,
+  upsertSessionMessages,
   type BackgroundRunRecord,
 } from "../db/repository";
 import { env } from "../env";
@@ -97,6 +107,7 @@ interface OpencodeRuntimeOptions {
   getConfiguredAgents?: () => Array<SpecialistAgent>;
   enableEventSync?: boolean;
   enableSmallModelSync?: boolean;
+  enableBackgroundSync?: boolean;
 }
 
 const MODEL_MEMORY_TOOLS = new Set(["memory_search", "memory_get", "memory_remember"]);
@@ -105,6 +116,9 @@ const RUNTIME_HEALTH_OK_PATTERN = /\bok\b/i;
 const RUNTIME_HEALTH_CACHE_TTL_MS = 5_000;
 const RUNTIME_HEALTH_TIMEOUT_CAP_MS = 15_000;
 const OPENCODE_RUNTIME_ID = "opencode";
+const BACKGROUND_SYNC_INTERVAL_MS = 8_000;
+const BACKGROUND_SYNC_BATCH_LIMIT = 200;
+const BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS = 3_000;
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -179,6 +193,12 @@ export class OpencodeRuntime implements RuntimeEngine {
   private healthProbeInFlight: Promise<RuntimeHealthSnapshot> | null = null;
   private runtimeConfigSyncKey: string | null = null;
   private runtimeConfigSyncInFlight: Promise<void> | null = null;
+  private backgroundSyncStarted = false;
+  private backgroundSyncInFlight: Promise<void> | null = null;
+  private backgroundHydrationInFlight = new Set<string>();
+  private backgroundAnnouncementInFlight = new Set<string>();
+  private backgroundLastEmitByRunId = new Map<string, string>();
+  private backgroundMessageSyncAtByChildSessionId = new Map<string, number>();
 
   constructor(private options: OpencodeRuntimeOptions) {
     if (options.client) {
@@ -192,6 +212,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (options.enableEventSync !== false) {
       this.startEventSync();
     }
+    if (options.enableBackgroundSync !== false) {
+      this.startBackgroundSync();
+    }
   }
 
   subscribe(onEvent: Listener): () => void {
@@ -199,6 +222,24 @@ export class OpencodeRuntime implements RuntimeEngine {
     return () => {
       this.listeners.delete(onEvent);
     };
+  }
+
+  async syncSessionMessages(sessionId: string): Promise<void> {
+    const localSessionId = sessionId.trim();
+    if (!localSessionId) return;
+    const localSession = getSessionById(localSessionId);
+    if (!localSession) return;
+    const externalSessionId = getRuntimeSessionBinding(OPENCODE_RUNTIME_ID, localSessionId);
+    if (!externalSessionId) return;
+    const run = getBackgroundRunByChildExternalSessionId(OPENCODE_RUNTIME_ID, externalSessionId);
+    if (!run) return;
+    this.ensureLocalSessionForBackgroundRun(run);
+    await this.syncLocalSessionFromOpencode({
+      localSessionId,
+      externalSessionId,
+      force: true,
+      titleHint: localSession.title,
+    });
   }
 
   async checkHealth(input?: RuntimeHealthCheckInput): Promise<RuntimeHealthCheckResult> {
@@ -459,6 +500,8 @@ export class OpencodeRuntime implements RuntimeEngine {
       throw new Error("Failed to create background run record.");
     }
 
+    this.ensureLocalSessionForBackgroundRun(run, created);
+    this.emitBackgroundRunUpdated(run);
     return this.backgroundRecordToHandle(run);
   }
 
@@ -486,14 +529,17 @@ export class OpencodeRuntime implements RuntimeEngine {
     const model = this.resolveModel(input.model?.trim() || parentSession.model);
     const startedAt = run.startedAt ? undefined : Date.now();
 
-    setBackgroundRunStatus({
+    const running =
+      setBackgroundRunStatus({
       runId: run.id,
       status: "running",
       prompt: content,
       startedAt,
       completedAt: null,
+      resultSummary: null,
       error: null,
-    });
+      }) ?? run;
+    this.emitBackgroundRunUpdated(running);
 
     try {
       await this.getClient().session.promptAsync({
@@ -514,12 +560,14 @@ export class OpencodeRuntime implements RuntimeEngine {
       });
     } catch (error) {
       const normalizedError = this.normalizeRuntimeError(error);
-      setBackgroundRunStatus({
+      const failed =
+        setBackgroundRunStatus({
         runId: run.id,
         status: "failed",
         completedAt: Date.now(),
         error: normalizedError.message,
-      });
+        }) ?? run;
+      this.emitBackgroundRunUpdated(failed);
       throw normalizedError;
     }
 
@@ -553,7 +601,38 @@ export class OpencodeRuntime implements RuntimeEngine {
       // Keep local status if status refresh fails.
     }
 
+    if (run.status === "completed") {
+      await this.announceBackgroundRunIfNeeded(run.id);
+      const refreshed = getBackgroundRunById(run.id);
+      if (refreshed) {
+        run = refreshed;
+      }
+    }
+
+    await this.syncBackgroundSessionMessages(
+      run,
+      run.status === "completed" || run.status === "failed" || run.status === "aborted",
+    );
+
     return this.backgroundRecordToHandle(run);
+  }
+
+  async listBackgroundRuns(input?: ListBackgroundRunsInput): Promise<Array<BackgroundRunHandle>> {
+    const limit = Math.max(1, Math.min(500, Math.floor(input?.limit ?? 100)));
+    const parentSessionId = input?.parentSessionId?.trim();
+    const runs = parentSessionId
+      ? listBackgroundRunsForParentSession(parentSessionId, limit)
+      : input?.inFlightOnly
+        ? listInFlightBackgroundRuns(OPENCODE_RUNTIME_ID, limit)
+        : listRecentBackgroundRuns(OPENCODE_RUNTIME_ID, limit);
+
+    const handles: Array<BackgroundRunHandle> = [];
+    for (const run of runs) {
+      const status = await this.getBackgroundStatus(run.id);
+      if (!status) continue;
+      handles.push(status);
+    }
+    return handles;
   }
 
   async abortBackground(runId: string): Promise<boolean> {
@@ -571,12 +650,14 @@ export class OpencodeRuntime implements RuntimeEngine {
       });
       const aborted = Boolean(unwrapSdkData<boolean>(result));
       if (aborted) {
-        setBackgroundRunStatus({
+        const updated =
+          setBackgroundRunStatus({
           runId: run.id,
           status: "aborted",
           completedAt: Date.now(),
           error: null,
-        });
+          }) ?? run;
+        this.emitBackgroundRunUpdated(updated);
       }
       return aborted;
     } catch (error) {
@@ -731,6 +812,78 @@ export class OpencodeRuntime implements RuntimeEngine {
     void this.runEventSyncLoop();
   }
 
+  private startBackgroundSync() {
+    if (this.backgroundSyncStarted) return;
+    this.backgroundSyncStarted = true;
+    void this.runBackgroundSyncLoop();
+  }
+
+  private async runBackgroundSyncLoop() {
+    while (true) {
+      await this.syncBackgroundRuns();
+      await new Promise((resolve) => setTimeout(resolve, BACKGROUND_SYNC_INTERVAL_MS));
+    }
+  }
+
+  private async syncBackgroundRuns() {
+    if (this.backgroundSyncInFlight) {
+      await this.backgroundSyncInFlight;
+      return;
+    }
+
+    const task = (async () => {
+      try {
+        await this.reconcileBackgroundChildrenFromParents();
+        await this.refreshInFlightBackgroundRuns();
+        await this.processPendingBackgroundAnnouncements();
+      } catch {
+        // Non-blocking: background sync should not impact foreground interactions.
+      }
+    })();
+
+    this.backgroundSyncInFlight = task;
+    try {
+      await task;
+    } finally {
+      this.backgroundSyncInFlight = null;
+    }
+  }
+
+  private async reconcileBackgroundChildrenFromParents() {
+    const bindings = listRuntimeSessionBindings(OPENCODE_RUNTIME_ID, BACKGROUND_SYNC_BATCH_LIMIT);
+    for (const binding of bindings) {
+      try {
+        const children = unwrapSdkData<Array<Session>>(
+          await this.getClient().session.children({
+            path: { id: binding.externalSessionId },
+            responseStyle: "data",
+            throwOnError: true,
+            signal: this.defaultRequestSignal(),
+          }),
+        );
+        for (const child of children) {
+          this.ensureBackgroundRunForSessionInfo(child, "created", binding.sessionId);
+        }
+      } catch {
+        // best effort
+      }
+    }
+  }
+
+  private async refreshInFlightBackgroundRuns() {
+    const runs = listInFlightBackgroundRuns(OPENCODE_RUNTIME_ID, BACKGROUND_SYNC_BATCH_LIMIT);
+    for (const run of runs) {
+      await this.getBackgroundStatus(run.id);
+    }
+  }
+
+  private async processPendingBackgroundAnnouncements() {
+    const pending = listBackgroundRunsPendingAnnouncement(OPENCODE_RUNTIME_ID, BACKGROUND_SYNC_BATCH_LIMIT);
+    for (const run of pending) {
+      await this.announceBackgroundRunIfNeeded(run.id);
+    }
+  }
+
   private async runEventSyncLoop() {
     while (true) {
       try {
@@ -753,6 +906,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (!this.isOpencodeEvent(event)) return;
 
     switch (event.type) {
+      case "session.created":
+        this.handleSessionCreatedEvent(event);
+        return;
       case "session.updated":
         this.handleSessionUpdatedEvent(event);
         return;
@@ -773,7 +929,13 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
   }
 
+  private handleSessionCreatedEvent(event: Extract<OpencodeEvent, { type: "session.created" }>) {
+    this.ensureBackgroundRunForSessionInfo(event.properties.info, "created");
+  }
+
   private handleSessionUpdatedEvent(event: Extract<OpencodeEvent, { type: "session.updated" }>) {
+    this.ensureBackgroundRunForSessionInfo(event.properties.info, "created");
+
     const opencodeSessionId = event.properties.info.id.trim();
     const remoteTitle = event.properties.info.title.trim();
     if (!opencodeSessionId || !remoteTitle) return;
@@ -882,22 +1044,355 @@ export class OpencodeRuntime implements RuntimeEngine {
   }
 
   private backgroundRecordToHandle(run: BackgroundRunRecord): BackgroundRunHandle {
+    const childSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, run.childExternalSessionId);
     return {
       runId: run.id,
       parentSessionId: run.parentSessionId,
       parentExternalSessionId: run.parentExternalSessionId,
       childExternalSessionId: run.childExternalSessionId,
+      childSessionId,
+      requestedBy: run.requestedBy,
+      prompt: run.prompt,
       status: run.status,
+      resultSummary: run.resultSummary,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
       startedAt: run.startedAt,
       completedAt: run.completedAt,
       error: run.error,
     };
   }
 
+  private backgroundRecordFingerprint(run: BackgroundRunRecord) {
+    const childSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, run.childExternalSessionId) ?? "";
+    return [
+      run.status,
+      run.error ?? "",
+      run.resultSummary ?? "",
+      run.prompt,
+      childSessionId,
+      run.startedAt ?? "",
+      run.completedAt ?? "",
+      run.updatedAt,
+    ].join("|");
+  }
+
+  private emitBackgroundRunUpdated(run: BackgroundRunRecord, force = false) {
+    const nextFingerprint = this.backgroundRecordFingerprint(run);
+    const previous = this.backgroundLastEmitByRunId.get(run.id);
+    if (!force && previous === nextFingerprint) return;
+    this.backgroundLastEmitByRunId.set(run.id, nextFingerprint);
+
+    this.emit(
+      createBackgroundRunUpdatedEvent(
+        {
+          runId: run.id,
+          parentSessionId: run.parentSessionId,
+          parentExternalSessionId: run.parentExternalSessionId,
+          childExternalSessionId: run.childExternalSessionId,
+          childSessionId: getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, run.childExternalSessionId),
+          requestedBy: run.requestedBy,
+          prompt: run.prompt,
+          status: run.status,
+          resultSummary: run.resultSummary,
+          error: run.error,
+          createdAt: run.createdAt,
+          updatedAt: run.updatedAt,
+          startedAt: run.startedAt,
+          completedAt: run.completedAt,
+        },
+        "runtime",
+      ),
+    );
+  }
+
+  private ensureLocalSessionForBackgroundRun(run: BackgroundRunRecord, sessionInfo?: Session): string | null {
+    const existingSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, run.childExternalSessionId);
+    const existingSession = existingSessionId ? getSessionById(existingSessionId) : null;
+    const parentSession = getSessionById(run.parentSessionId);
+    const remoteTitle = sessionInfo?.title?.trim();
+
+    const ensured = ensureSessionForRuntimeBinding({
+      runtime: OPENCODE_RUNTIME_ID,
+      externalSessionId: run.childExternalSessionId,
+      title:
+        remoteTitle ||
+        existingSession?.title ||
+        `${parentSession?.title?.trim() || "Session"} background`,
+      model: parentSession?.model,
+    });
+    if (!ensured) return null;
+
+    if (!existingSession || existingSession.title !== ensured.title || existingSession.model !== ensured.model) {
+      this.emit(createSessionStateUpdatedEvent(ensured, "runtime"));
+    }
+
+    return ensured.id;
+  }
+
+  private mapOpencodeMessageContent(info: Message, parts: Array<Part>): string {
+    const text = this.extractText(parts);
+    if (text && text.trim()) {
+      return text;
+    }
+    if (info.role === "assistant") {
+      const failure = this.extractAssistantError(info, parts);
+      if (failure) {
+        return `[assistant error] ${failure}`;
+      }
+    }
+    return "";
+  }
+
+  private async syncLocalSessionFromOpencode(input: {
+    localSessionId: string;
+    externalSessionId: string;
+    force?: boolean;
+    titleHint?: string;
+    messages?: Array<{ info: Message; parts: Array<Part> }>;
+  }): Promise<void> {
+    const localSessionId = input.localSessionId.trim();
+    const externalSessionId = input.externalSessionId.trim();
+    if (!localSessionId || !externalSessionId) return;
+
+    const existingSession = getSessionById(localSessionId);
+    if (!existingSession) return;
+    if (getRuntimeSessionBinding(OPENCODE_RUNTIME_ID, localSessionId) !== externalSessionId) {
+      setRuntimeSessionBinding(OPENCODE_RUNTIME_ID, localSessionId, externalSessionId);
+    }
+
+    const now = Date.now();
+    if (!input.force) {
+      const lastSyncedAt = this.backgroundMessageSyncAtByChildSessionId.get(externalSessionId) ?? 0;
+      if (now - lastSyncedAt < BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS) {
+        return;
+      }
+    }
+    this.backgroundMessageSyncAtByChildSessionId.set(externalSessionId, now);
+
+    const normalizedTitle = input.titleHint?.trim();
+    if (normalizedTitle && normalizedTitle !== existingSession.title) {
+      const updatedTitle = setSessionTitle(localSessionId, normalizedTitle);
+      if (updatedTitle) {
+        this.emit(createSessionStateUpdatedEvent(updatedTitle, "runtime"));
+      }
+    }
+
+    let messages = input.messages;
+    if (!messages) {
+      messages = unwrapSdkData<Array<{ info: Message; parts: Array<Part> }>>(
+        await this.getClient().session.messages({
+          path: { id: externalSessionId },
+          query: { limit: 200 },
+          responseStyle: "data",
+          throwOnError: true,
+          signal: this.defaultRequestSignal(),
+        }),
+      );
+    }
+
+    const imported = messages.map(entry => ({
+      id: entry.info.id,
+      role: entry.info.role,
+      content: this.mapOpencodeMessageContent(entry.info, entry.parts),
+      createdAt: entry.info.time.created,
+    }));
+
+    const synced = upsertSessionMessages({
+      sessionId: localSessionId,
+      messages: imported,
+      touchedAt: now,
+    });
+    if (!synced || synced.inserted.length === 0) return;
+
+    for (const message of synced.inserted) {
+      this.emit(
+        createSessionMessageCreatedEvent(
+          {
+            sessionId: localSessionId,
+            message,
+          },
+          "runtime",
+        ),
+      );
+    }
+    this.emit(createSessionStateUpdatedEvent(synced.session, "runtime"));
+  }
+
+  private async syncBackgroundSessionMessages(
+    run: BackgroundRunRecord,
+    force = false,
+    messages?: Array<{ info: Message; parts: Array<Part> }>,
+  ): Promise<void> {
+    const childSessionId = this.ensureLocalSessionForBackgroundRun(run);
+    if (!childSessionId) return;
+
+    try {
+      await this.syncLocalSessionFromOpencode({
+        localSessionId: childSessionId,
+        externalSessionId: run.childExternalSessionId,
+        force,
+        messages,
+      });
+    } catch {
+      // Non-blocking: transcript sync should never block run status updates.
+    }
+  }
+
+  private ensureBackgroundRunForSessionInfo(
+    sessionInfo: Session,
+    status: BackgroundRunStatus = "created",
+    knownParentSessionId?: string,
+  ): BackgroundRunRecord | null {
+    const childExternalSessionId = sessionInfo.id.trim();
+    const parentExternalSessionId = sessionInfo.parentID?.trim();
+    if (!childExternalSessionId || !parentExternalSessionId) return null;
+
+    const parentSessionId =
+      knownParentSessionId?.trim() || getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, parentExternalSessionId);
+    if (!parentSessionId) return null;
+
+    const run = createBackgroundRun({
+      runtime: OPENCODE_RUNTIME_ID,
+      parentSessionId,
+      parentExternalSessionId,
+      childExternalSessionId,
+      requestedBy: "runtime-sync",
+      status,
+    });
+    if (run) {
+      this.ensureLocalSessionForBackgroundRun(run, sessionInfo);
+      this.emitBackgroundRunUpdated(run);
+    }
+    return run;
+  }
+
+  private async hydrateBackgroundRunFromSessionId(
+    childExternalSessionId: string,
+    status?: OpencodeSessionStatus,
+  ): Promise<BackgroundRunRecord | null> {
+    const normalizedChildExternalSessionId = childExternalSessionId.trim();
+    if (!normalizedChildExternalSessionId) return null;
+    if (this.backgroundHydrationInFlight.has(normalizedChildExternalSessionId)) return null;
+
+    this.backgroundHydrationInFlight.add(normalizedChildExternalSessionId);
+    try {
+      const sessionInfo = unwrapSdkData<Session>(
+        await this.getClient().session.get({
+          path: { id: normalizedChildExternalSessionId },
+          responseStyle: "data",
+          throwOnError: true,
+          signal: this.defaultRequestSignal(),
+        }),
+      );
+      const run = this.ensureBackgroundRunForSessionInfo(sessionInfo, "created");
+      if (run && status) {
+        return this.applyOpencodeBackgroundStatus(run, status);
+      }
+      return run;
+    } catch {
+      return null;
+    } finally {
+      this.backgroundHydrationInFlight.delete(normalizedChildExternalSessionId);
+    }
+  }
+
+  private async announceBackgroundRunIfNeeded(runId: string): Promise<boolean> {
+    const normalizedRunId = runId.trim();
+    if (!normalizedRunId) return false;
+    if (this.backgroundAnnouncementInFlight.has(normalizedRunId)) return false;
+
+    const current = getBackgroundRunById(normalizedRunId);
+    if (!current || current.status !== "completed") return false;
+    if (current.resultSummary && current.resultSummary.trim()) return false;
+
+    this.backgroundAnnouncementInFlight.add(normalizedRunId);
+    try {
+      const latest = getBackgroundRunById(normalizedRunId);
+      if (!latest || latest.status !== "completed") return false;
+      if (latest.resultSummary && latest.resultSummary.trim()) return false;
+
+      const messages = unwrapSdkData<Array<{ info: Message; parts: Array<Part> }>>(
+        await this.getClient().session.messages({
+          path: { id: latest.childExternalSessionId },
+          query: { limit: 50 },
+          responseStyle: "data",
+          throwOnError: true,
+          signal: this.defaultRequestSignal(),
+        }),
+      );
+      await this.syncBackgroundSessionMessages(latest, true, messages);
+      const assistantParts = [...messages]
+        .reverse()
+        .find((entry) => entry.info.role === "assistant")?.parts;
+      const assistantText = assistantParts ? this.extractText(assistantParts) : null;
+      const resultSummary = (assistantText?.trim() || "Background run completed.").slice(0, 4_000);
+      const announcementText = `[Background ${latest.id}] ${resultSummary}`;
+
+      const appended = appendAssistantMessage({
+        sessionId: latest.parentSessionId,
+        content: announcementText,
+        source: "runtime",
+      });
+      if (!appended) {
+        const failed =
+          setBackgroundRunStatus({
+          runId: latest.id,
+          status: "failed",
+          completedAt: Date.now(),
+          error: `Unable to append announcement to parent session ${latest.parentSessionId}.`,
+          }) ?? latest;
+        this.emitBackgroundRunUpdated(failed);
+        return false;
+      }
+
+      const updated = setBackgroundRunStatus({
+        runId: latest.id,
+        status: "completed",
+        resultSummary,
+        error: null,
+      });
+      if (updated) {
+        this.emitBackgroundRunUpdated(updated);
+      }
+
+      this.emit(
+        createSessionMessageCreatedEvent(
+          {
+            sessionId: appended.session.id,
+            message: appended.message,
+          },
+          "runtime",
+        ),
+      );
+      this.emit(createSessionStateUpdatedEvent(appended.session, "runtime"));
+      this.emit(createUsageUpdatedEvent(appended.usage, "runtime"));
+      this.emit(createHeartbeatUpdatedEvent(appended.heartbeat, "runtime"));
+
+      return Boolean(updated);
+    } catch (error) {
+      const failed = setBackgroundRunStatus({
+        runId: normalizedRunId,
+        status: "failed",
+        completedAt: Date.now(),
+        error: this.normalizeRuntimeError(error).message,
+      });
+      if (failed) {
+        this.emitBackgroundRunUpdated(failed);
+      }
+      return false;
+    } finally {
+      this.backgroundAnnouncementInFlight.delete(normalizedRunId);
+    }
+  }
+
   private applyBackgroundStatusBySessionId(opencodeSessionId: string, status: OpencodeSessionStatus) {
     const run = getBackgroundRunByChildExternalSessionId(OPENCODE_RUNTIME_ID, opencodeSessionId);
-    if (!run) return;
-    this.applyOpencodeBackgroundStatus(run, status);
+    if (run) {
+      this.applyOpencodeBackgroundStatus(run, status);
+      return;
+    }
+    void this.hydrateBackgroundRunFromSessionId(opencodeSessionId, status);
   }
 
   private applyOpencodeBackgroundStatus(
@@ -939,28 +1434,42 @@ export class OpencodeRuntime implements RuntimeEngine {
       return run;
     }
 
-    return (
+    const updated =
       setBackgroundRunStatus({
         runId: run.id,
         status: nextStatus,
         startedAt,
         completedAt,
         error,
-      }) ?? run
-    );
+      }) ?? run;
+
+    this.emitBackgroundRunUpdated(updated);
+
+    if (updated.status === "completed") {
+      void this.announceBackgroundRunIfNeeded(updated.id);
+    }
+
+    return updated;
   }
 
   private markBackgroundRunFailed(opencodeSessionId: string, message: string) {
     const run = getBackgroundRunByChildExternalSessionId(OPENCODE_RUNTIME_ID, opencodeSessionId);
-    if (!run || run.status === "aborted" || run.status === "completed") {
+    if (!run) {
+      void this.hydrateBackgroundRunFromSessionId(opencodeSessionId);
       return;
     }
-    setBackgroundRunStatus({
+    if (run.status === "aborted" || run.status === "completed") {
+      return;
+    }
+    const updated = setBackgroundRunStatus({
       runId: run.id,
       status: "failed",
       completedAt: Date.now(),
       error: message,
     });
+    if (updated) {
+      this.emitBackgroundRunUpdated(updated);
+    }
   }
 
   private resolveModel(rawModel: string): ResolvedModel {

@@ -30,6 +30,8 @@ function toSseEventName(event: RuntimeEvent): string {
       return "session-compacted";
     case "session.run.error":
       return "session-error";
+    case "background.run.updated":
+      return "background-run";
     case "config.updated":
       return "config-updated";
     case "config.update.failed":

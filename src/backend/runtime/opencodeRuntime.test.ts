@@ -24,6 +24,7 @@ process.env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS = "20";
 interface RepositoryApi {
   ensureSeedData: () => void;
   resetDatabaseToDefaults: () => unknown;
+  listMessagesForSession: (sessionId: string) => Array<{ role: string; content: string }>;
 }
 
 type PromptInput = {
@@ -52,9 +53,11 @@ type PromptAsyncInput = {
 interface MockClient {
   session: {
     create: (input: unknown) => Promise<unknown>;
+    children: (input: unknown) => Promise<unknown>;
     prompt: (input: PromptInput) => Promise<unknown>;
     promptAsync: (input: PromptAsyncInput) => Promise<unknown>;
     status: (input: unknown) => Promise<unknown>;
+    messages: (input: unknown) => Promise<unknown>;
     get: (input: unknown) => Promise<unknown>;
     abort: (input: unknown) => Promise<unknown>;
     summarize: (input: unknown) => Promise<unknown>;
@@ -107,6 +110,7 @@ type RuntimeCtor = new (input: {
   getConfiguredAgents?: () => Array<SpecialistAgent>;
   enableEventSync?: boolean;
   enableSmallModelSync?: boolean;
+  enableBackgroundSync?: boolean;
 }) => {
   subscribe: (listener: (event: unknown) => void) => () => void;
   checkHealth: (input?: { force?: boolean }) => Promise<{
@@ -130,6 +134,7 @@ type RuntimeCtor = new (input: {
     parentSessionId: string;
     parentExternalSessionId: string;
     childExternalSessionId: string;
+    childSessionId: string | null;
     status: string;
     startedAt: string | null;
     completedAt: string | null;
@@ -151,6 +156,19 @@ type RuntimeCtor = new (input: {
     status: string;
     completedAt: string | null;
   } | null>;
+  listBackgroundRuns: (input?: {
+    parentSessionId?: string;
+    limit?: number;
+    inFlightOnly?: boolean;
+  }) => Promise<
+    Array<{
+      runId: string;
+      childExternalSessionId: string;
+      childSessionId: string | null;
+      status: string;
+      completedAt: string | null;
+    }>
+  >;
   abortBackground: (runId: string) => Promise<boolean>;
 };
 
@@ -222,6 +240,9 @@ function createMockClient(input: {
   create?: (request: unknown) => Promise<unknown>;
   promptAsync?: (request: PromptAsyncInput) => Promise<unknown>;
   status?: () => Promise<unknown>;
+  get?: (request: unknown) => Promise<unknown>;
+  messages?: (request: unknown) => Promise<unknown>;
+  children?: (request: unknown) => Promise<unknown>;
 }): MockClient {
   let createCount = 0;
   return {
@@ -236,6 +257,10 @@ function createMockClient(input: {
           },
         };
       },
+      children: async (request) => {
+        if (input.children) return input.children(request);
+        return { data: [] };
+      },
       prompt: input.prompt,
       promptAsync: async (request) => {
         if (input.promptAsync) return input.promptAsync(request);
@@ -247,12 +272,21 @@ function createMockClient(input: {
           data: {},
         };
       },
-      get: async () => ({
-        data: {
-          id: "ses-1",
-          title: "main",
-        },
-      }),
+      messages: async (request) => {
+        if (input.messages) return input.messages(request);
+        return {
+          data: [assistantResponse((request as { path: { id: string } }).path.id, "Background result").data],
+        };
+      },
+      get: async (request) => {
+        if (input.get) return input.get(request);
+        return {
+          data: {
+            id: (request as { path: { id: string } }).path.id,
+            title: "main",
+          },
+        };
+      },
       abort: async () => ({ data: true }),
       summarize: async () => ({ data: true }),
     },
@@ -279,6 +313,7 @@ function createRuntimeWithClient(
     getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
     getConfiguredAgents?: () => Array<SpecialistAgent>;
     enableSmallModelSync?: boolean;
+    enableBackgroundSync?: boolean;
   },
 ) {
   return new OpencodeRuntime({
@@ -292,7 +327,12 @@ function createRuntimeWithClient(
     client: client as unknown,
     enableEventSync: false,
     enableSmallModelSync: options?.enableSmallModelSync ?? false,
+    enableBackgroundSync: options?.enableBackgroundSync ?? false,
   });
+}
+
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 describe("opencode runtime failover contract", () => {
@@ -554,6 +594,9 @@ describe("opencode runtime failover contract", () => {
     expect(spawned.childExternalSessionId).toBe("ses-2");
     expect(spawned.status).toBe("created");
     expect(createBodies[1]?.parentID).toBe("ses-1");
+
+    const listed = await runtime.listBackgroundRuns({ parentSessionId: "main" });
+    expect(listed.some((run) => run.runId === spawned.runId)).toBe(true);
   });
 
   test("dispatches async background prompt and completes when session becomes idle", async () => {
@@ -636,6 +679,94 @@ describe("opencode runtime failover contract", () => {
     const aborted = await runtime.abortBackground(spawned.runId);
     expect(aborted).toBe(true);
     expect(abortedSessionIds).toEqual(["ses-2"]);
+  });
+
+  test("announces completed background run into the parent session", async () => {
+    let createCount = 0;
+    let statusType: "busy" | "idle" = "busy";
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        create: async () => {
+          createCount += 1;
+          return {
+            data: {
+              id: `ses-${createCount}`,
+              title: createCount === 1 ? "main" : "background",
+            },
+          };
+        },
+        prompt: async (request) => assistantResponse(request.path.id, "OK"),
+        promptAsync: async () => ({ data: undefined }),
+        status: async () => ({
+          data: {
+            "ses-2": {
+              type: statusType,
+            },
+          },
+        }),
+        messages: async () => ({
+          data: [assistantResponse("ses-2", "Background findings complete.").data],
+        }),
+      }),
+    );
+
+    const spawned = await runtime.spawnBackgroundSession({
+      parentSessionId: "main",
+      title: "Planner child",
+    });
+    await runtime.promptBackgroundAsync({
+      runId: spawned.runId,
+      content: "Investigate.",
+    });
+
+    statusType = "idle";
+    const completed = await runtime.getBackgroundStatus(spawned.runId);
+    expect(completed?.status).toBe("completed");
+
+    await sleep(10);
+    const parentMessages = repository.listMessagesForSession("main");
+    const latest = parentMessages.at(-1);
+    expect(latest?.role).toBe("assistant");
+    expect(latest?.content).toContain(`[Background ${spawned.runId}]`);
+    expect(latest?.content).toContain("Background findings complete.");
+  });
+
+  test("reconciles child sessions via session.children into background runs", async () => {
+    let createCount = 0;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        create: async () => {
+          createCount += 1;
+          return {
+            data: {
+              id: `ses-${createCount}`,
+              title: createCount === 1 ? "main" : "background",
+            },
+          };
+        },
+        prompt: async (request) => assistantResponse(request.path.id, "OK"),
+        children: async () => ({
+          data: [
+            {
+              id: "ses-child-1",
+              parentID: "ses-1",
+              title: "Child session",
+            },
+          ],
+        }),
+      }),
+    );
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Seed parent session binding",
+    });
+
+    const syncBackgroundRuns = (runtime as unknown as { syncBackgroundRuns: () => Promise<void> }).syncBackgroundRuns;
+    await syncBackgroundRuns.call(runtime);
+
+    const listed = await runtime.listBackgroundRuns({ parentSessionId: "main", limit: 20 });
+    expect(listed.some((run) => run.childExternalSessionId === "ses-child-1")).toBe(true);
   });
 
   test("health check runs prompt probe and serves cached result", async () => {

@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   BookOpen,
   Bot,
+  ChevronDown,
+  ChevronRight,
   ChevronsUpDown,
   CircleSlash,
   Cpu,
@@ -35,6 +37,7 @@ import {
   relativeFromIso,
 } from "@/frontend/app/chatHelpers";
 import type {
+  BackgroundRunSnapshot,
   ChatMessage,
   DashboardBootstrap,
   MemoryPolicySnapshot,
@@ -56,6 +59,8 @@ import "@/index.css";
 
 const RUN_POLL_INTERVAL_MS = 350;
 const DEFAULT_RUN_WAIT_TIMEOUT_MS = 180_000;
+const DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type AgentRunState = "queued" | "running" | "completed" | "failed";
 
@@ -66,16 +71,31 @@ interface AgentRunSnapshot {
   error?: unknown;
 }
 
+interface BackgroundRunsResponse {
+  runs?: BackgroundRunSnapshot[];
+  run?: BackgroundRunSnapshot;
+  aborted?: boolean;
+  error?: string;
+}
+
 interface ConfigSnapshotResponse {
   hash?: string;
   config?: {
     runtime?: {
       opencode?: {
         runWaitTimeoutMs?: number;
+        childSessionHideAfterDays?: number;
       };
     };
   };
 }
+
+const IN_FLIGHT_BACKGROUND_STATUSES = new Set<BackgroundRunSnapshot["status"]>([
+  "created",
+  "running",
+  "retrying",
+  "idle",
+]);
 
 function extractRunErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
@@ -91,9 +111,55 @@ function extractRunErrorMessage(error: unknown): string {
   return "Run failed.";
 }
 
+function sortBackgroundRuns(input: BackgroundRunSnapshot[]) {
+  return [...input].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+}
+
+function upsertBackgroundRunList(current: BackgroundRunSnapshot[], nextRun: BackgroundRunSnapshot) {
+  const filtered = current.filter(run => run.runId !== nextRun.runId);
+  return sortBackgroundRuns([nextRun, ...filtered]);
+}
+
+function sortSessionsByActivity(input: SessionSummary[]) {
+  return [...input].sort((left, right) => {
+    if (left.id === "main" && right.id !== "main") return -1;
+    if (right.id === "main" && left.id !== "main") return 1;
+    return Date.parse(right.lastActiveAt) - Date.parse(left.lastActiveAt);
+  });
+}
+
+function upsertSessionList(current: SessionSummary[], nextSession: SessionSummary) {
+  const filtered = current.filter(session => session.id !== nextSession.id);
+  return sortSessionsByActivity([nextSession, ...filtered]);
+}
+
+function mergeBackgroundRunsBySession(
+  current: Record<string, BackgroundRunSnapshot[]>,
+  runs: BackgroundRunSnapshot[],
+) {
+  if (runs.length === 0) return current;
+  const next = { ...current };
+  for (const run of runs) {
+    next[run.parentSessionId] = upsertBackgroundRunList(next[run.parentSessionId] ?? [], run);
+  }
+  return next;
+}
+
+function isBackgroundRunInFlight(run: BackgroundRunSnapshot) {
+  return IN_FLIGHT_BACKGROUND_STATUSES.has(run.status);
+}
+
+function normalizeChildSessionHideAfterDays(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS;
+  }
+  return Math.max(0, Math.min(365, Math.floor(value)));
+}
+
 export function App() {
   type StreamStatus = "connecting" | "connected" | "reconnecting";
   type DashboardPage = "chat" | "skills" | "mcp" | "agents";
+  type ConfigPanelTab = "usage" | "memory" | "background";
 
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -156,9 +222,24 @@ export function App() {
   const [runStatusBySession, setRunStatusBySession] = useState<Record<string, SessionRunStatusSnapshot>>({});
   const [runErrorsBySession, setRunErrorsBySession] = useState<Record<string, string>>({});
   const [compactedAtBySession, setCompactedAtBySession] = useState<Record<string, string>>({});
+  const [backgroundRunsBySession, setBackgroundRunsBySession] = useState<Record<string, BackgroundRunSnapshot[]>>({});
+  const [loadingBackgroundRuns, setLoadingBackgroundRuns] = useState(false);
+  const [backgroundRunsError, setBackgroundRunsError] = useState("");
+  const [backgroundPrompt, setBackgroundPrompt] = useState("");
+  const [backgroundSpawnBusy, setBackgroundSpawnBusy] = useState(false);
+  const [backgroundSteerDraftByRun, setBackgroundSteerDraftByRun] = useState<Record<string, string>>({});
+  const [backgroundActionBusyByRun, setBackgroundActionBusyByRun] = useState<Record<string, "steer" | "abort">>({});
+  const [backgroundCheckInBusyByRun, setBackgroundCheckInBusyByRun] = useState<Record<string, boolean>>({});
+  const [activeConfigPanelTab, setActiveConfigPanelTab] = useState<ConfigPanelTab>("usage");
+  const [focusedBackgroundRunId, setFocusedBackgroundRunId] = useState("");
+  const [expandedSessionGroupsById, setExpandedSessionGroupsById] = useState<Record<string, boolean>>({});
+  const [showAllChildren, setShowAllChildren] = useState(false);
+  const [childSessionSearchQuery, setChildSessionSearchQuery] = useState("");
+  const [childSessionHideAfterDays, setChildSessionHideAfterDays] = useState(DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const composerFormRef = useRef<HTMLFormElement>(null);
   const loadedSessionsRef = useRef(new Set<string>());
+  const loadedBackgroundSessionsRef = useRef(new Set<string>());
   const activeSendRef = useRef<ActiveSend | null>(null);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
   const abortedRequestIdsRef = useRef(new Set<string>());
@@ -175,7 +256,7 @@ export function App() {
       const payload = (await response.json()) as DashboardBootstrap;
       if (!alive) return;
 
-      setSessions(payload.sessions);
+      setSessions(sortSessionsByActivity(payload.sessions));
       setSkillsDraft(payload.skills.join("\n"));
       setMcpsDraft(payload.mcps.join("\n"));
       setAgents(payload.agents);
@@ -195,6 +276,7 @@ export function App() {
           skillsCatalogResponse,
           mcpsCatalogResponse,
           agentsCatalogResponse,
+          backgroundInFlightResponse,
         ] = await Promise.all([
           fetch("/api/opencode/models"),
           fetch("/api/memory/status"),
@@ -204,6 +286,7 @@ export function App() {
           fetch("/api/config/skills/catalog"),
           fetch("/api/config/mcps/catalog"),
           fetch("/api/config/agents/catalog"),
+          fetch("/api/background?limit=500"),
         ]);
         const modelsPayload = (await modelsResponse.json()) as { models?: ModelOption[]; error?: string };
         const memoryStatusPayload = (await memoryStatusResponse.json()) as {
@@ -238,6 +321,7 @@ export function App() {
           hash?: string;
           error?: string;
         };
+        const backgroundInFlightPayload = (await backgroundInFlightResponse.json()) as BackgroundRunsResponse;
         if (!alive) return;
 
         setModelOptions(modelsPayload.models ?? []);
@@ -260,10 +344,16 @@ export function App() {
             ? configPayload.config.runtime.opencode.runWaitTimeoutMs
             : DEFAULT_RUN_WAIT_TIMEOUT_MS,
         );
+        setChildSessionHideAfterDays(
+          normalizeChildSessionHideAfterDays(configPayload.config?.runtime?.opencode?.childSessionHideAfterDays),
+        );
         setConfigHash(typeof configPayload.hash === "string" ? configPayload.hash : "");
         setSkillCatalogError(skillsCatalogResponse.ok ? "" : (skillsCatalogPayload.error ?? "Failed to load runtime skills"));
         setMcpCatalogError(mcpsCatalogResponse.ok ? "" : (mcpsCatalogPayload.error ?? "Failed to load runtime MCP servers"));
         setAgentCatalogError(agentsCatalogResponse.ok ? "" : (agentsCatalogPayload.error ?? "Failed to load runtime agents"));
+        if (backgroundInFlightResponse.ok && Array.isArray(backgroundInFlightPayload.runs)) {
+          setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, backgroundInFlightPayload.runs ?? []));
+        }
         const failedMemoryMessage =
           (!memoryStatusResponse.ok && (memoryStatusPayload.error ?? "Failed to load memory status")) ||
           (!memoryPolicyResponse.ok && (memoryPolicyPayload.error ?? "Failed to load memory policy")) ||
@@ -327,6 +417,71 @@ export function App() {
   }, [activeSessionId]);
 
   useEffect(() => {
+    if (!activeSessionId || loadedBackgroundSessionsRef.current.has(activeSessionId)) return;
+
+    let cancelled = false;
+    const loadBackgroundRuns = async () => {
+      setLoadingBackgroundRuns(true);
+      setBackgroundRunsError("");
+      try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(activeSessionId)}/background`);
+        const payload = (await response.json()) as BackgroundRunsResponse;
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to load background runs");
+        }
+        if (cancelled) return;
+
+        const runs = Array.isArray(payload.runs) ? sortBackgroundRuns(payload.runs) : [];
+        setBackgroundRunsBySession(current => ({
+          ...current,
+          [activeSessionId]: runs,
+        }));
+        loadedBackgroundSessionsRef.current.add(activeSessionId);
+      } catch (error) {
+        if (!cancelled) {
+          setBackgroundRunsError(error instanceof Error ? error.message : "Failed to load background runs");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingBackgroundRuns(false);
+        }
+      }
+    };
+
+    void loadBackgroundRuns();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshInFlightBackgroundRunsSilently = async () => {
+      try {
+        const response = await fetch("/api/background?inFlightOnly=1&limit=500");
+        const payload = (await response.json()) as BackgroundRunsResponse;
+        if (!response.ok || !Array.isArray(payload.runs) || cancelled) {
+          return;
+        }
+        setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, payload.runs ?? []));
+      } catch {
+        // non-blocking; sidebar hierarchy should degrade gracefully when listing is unavailable
+      }
+    };
+
+    void refreshInFlightBackgroundRunsSilently();
+    const interval = setInterval(() => {
+      void refreshInFlightBackgroundRunsSilently();
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
     const events = new EventSource("/api/events");
     setStreamStatus("connecting");
 
@@ -349,7 +504,7 @@ export function App() {
 
     events.addEventListener("session-updated", event => {
       const payload = JSON.parse((event as MessageEvent<string>).data) as SessionSummary;
-      setSessions(current => current.map(session => (session.id === payload.id ? payload : session)));
+      setSessions(current => upsertSessionList(current, payload));
     });
 
     events.addEventListener("session-message", event => {
@@ -425,6 +580,27 @@ export function App() {
       }
     });
 
+    events.addEventListener("background-run", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as BackgroundRunSnapshot;
+      loadedBackgroundSessionsRef.current.add(payload.parentSessionId);
+      setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, [payload]));
+      if (payload.status === "completed" || payload.status === "failed" || payload.status === "aborted") {
+        setBackgroundSteerDraftByRun(current => {
+          if (!current[payload.runId]) return current;
+          const next = { ...current };
+          delete next[payload.runId];
+          return next;
+        });
+        setBackgroundActionBusyByRun(current => {
+          if (!current[payload.runId]) return current;
+          const next = { ...current };
+          delete next[payload.runId];
+          return next;
+        });
+        setFocusedBackgroundRunId(current => (current === payload.runId ? "" : current));
+      }
+    });
+
     events.addEventListener("config-updated", () => {
       void (async () => {
         try {
@@ -435,6 +611,9 @@ export function App() {
             typeof payload.config?.runtime?.opencode?.runWaitTimeoutMs === "number"
               ? payload.config.runtime.opencode.runWaitTimeoutMs
               : DEFAULT_RUN_WAIT_TIMEOUT_MS,
+          );
+          setChildSessionHideAfterDays(
+            normalizeChildSessionHideAfterDays(payload.config?.runtime?.opencode?.childSessionHideAfterDays),
           );
           setConfigHash(typeof payload.hash === "string" ? payload.hash : "");
         } catch {
@@ -487,6 +666,170 @@ export function App() {
   const activeSessionRunStatus = activeSession ? runStatusBySession[activeSession.id] : undefined;
   const activeSessionRunError = activeSession ? runErrorsBySession[activeSession.id] : "";
   const activeSessionCompactedAt = activeSession ? compactedAtBySession[activeSession.id] : "";
+  const activeBackgroundRuns = useMemo(
+    () => sortBackgroundRuns(backgroundRunsBySession[activeSessionId] ?? []),
+    [backgroundRunsBySession, activeSessionId],
+  );
+  const inFlightBackgroundRunsBySession = useMemo(() => {
+    const next: Record<string, BackgroundRunSnapshot[]> = {};
+    for (const [sessionId, runs] of Object.entries(backgroundRunsBySession)) {
+      const inFlight = runs.filter(isBackgroundRunInFlight);
+      if (inFlight.length > 0) {
+        next[sessionId] = sortBackgroundRuns(inFlight);
+      }
+    }
+    return next;
+  }, [backgroundRunsBySession]);
+  const latestBackgroundRunByChildSessionId = useMemo(() => {
+    const next = new Map<string, BackgroundRunSnapshot>();
+    for (const runs of Object.values(backgroundRunsBySession)) {
+      for (const run of runs) {
+        if (!run.childSessionId) continue;
+        const current = next.get(run.childSessionId);
+        if (!current || Date.parse(run.updatedAt) > Date.parse(current.updatedAt)) {
+          next.set(run.childSessionId, run);
+        }
+      }
+    }
+    return next;
+  }, [backgroundRunsBySession]);
+  const childParentSessionIdByChildSessionId = useMemo(() => {
+    const next = new Map<string, string>();
+    for (const runs of Object.values(backgroundRunsBySession)) {
+      for (const run of runs) {
+        if (!run.childSessionId) continue;
+        next.set(run.childSessionId, run.parentSessionId);
+      }
+    }
+    return next;
+  }, [backgroundRunsBySession]);
+  const sessionsById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
+  const rootSessions = useMemo(
+    () =>
+      sessions.filter(session => {
+        const parentSessionId = childParentSessionIdByChildSessionId.get(session.id);
+        if (!parentSessionId) return true;
+        return !sessionsById.has(parentSessionId);
+      }),
+    [sessions, childParentSessionIdByChildSessionId, sessionsById],
+  );
+  const childSessionsByParentSessionId = useMemo(() => {
+    const next: Record<string, SessionSummary[]> = {};
+    for (const session of sessions) {
+      const parentSessionId = childParentSessionIdByChildSessionId.get(session.id);
+      if (!parentSessionId || !sessionsById.has(parentSessionId)) continue;
+      if (!next[parentSessionId]) next[parentSessionId] = [];
+      next[parentSessionId].push(session);
+    }
+    for (const [parentSessionId, children] of Object.entries(next)) {
+      next[parentSessionId] = sortSessionsByActivity(children);
+    }
+    return next;
+  }, [sessions, childParentSessionIdByChildSessionId, sessionsById]);
+  const sessionSearchNeedle = useMemo(() => childSessionSearchQuery.trim().toLowerCase(), [childSessionSearchQuery]);
+  const childSessionVisibilityByParentSessionId = useMemo(() => {
+    const visible: Record<string, SessionSummary[]> = {};
+    const hiddenByAgeCount: Record<string, number> = {};
+    const hideAfterMs = childSessionHideAfterDays * DAY_MS;
+    const now = Date.now();
+
+    for (const [parentSessionId, children] of Object.entries(childSessionsByParentSessionId)) {
+      const nextVisible: SessionSummary[] = [];
+      let hidden = 0;
+
+      for (const child of children) {
+        const childRun = latestBackgroundRunByChildSessionId.get(child.id) ?? null;
+        const inFlight = childRun ? isBackgroundRunInFlight(childRun) : false;
+        const lastActiveAtMs = Date.parse(child.lastActiveAt);
+        const hiddenByAge =
+          !showAllChildren &&
+          hideAfterMs > 0 &&
+          Number.isFinite(lastActiveAtMs) &&
+          now - lastActiveAtMs > hideAfterMs &&
+          child.id !== activeSessionId &&
+          !inFlight;
+        if (hiddenByAge) {
+          hidden += 1;
+          continue;
+        }
+        nextVisible.push(child);
+      }
+
+      visible[parentSessionId] = nextVisible;
+      hiddenByAgeCount[parentSessionId] = hidden;
+    }
+
+    return { visible, hiddenByAgeCount };
+  }, [
+    childSessionsByParentSessionId,
+    latestBackgroundRunByChildSessionId,
+    showAllChildren,
+    childSessionHideAfterDays,
+    activeSessionId,
+  ]);
+  const childSessionSearchMatchBySessionId = useMemo(() => {
+    const matches = new Map<string, boolean>();
+    if (!sessionSearchNeedle) return matches;
+    for (const [parentSessionId, children] of Object.entries(childSessionVisibilityByParentSessionId.visible)) {
+      for (const child of children) {
+        const childRun = latestBackgroundRunByChildSessionId.get(child.id) ?? null;
+        const haystack = `${child.title}\n${child.model}\n${childRun?.prompt ?? ""}`.toLowerCase();
+        matches.set(child.id, haystack.includes(sessionSearchNeedle));
+      }
+      if (!children.length) {
+        matches.set(parentSessionId, false);
+      }
+    }
+    return matches;
+  }, [childSessionVisibilityByParentSessionId.visible, latestBackgroundRunByChildSessionId, sessionSearchNeedle]);
+  const parentSessionSearchMatchBySessionId = useMemo(() => {
+    const matches = new Map<string, boolean>();
+    if (!sessionSearchNeedle) return matches;
+
+    for (const session of rootSessions) {
+      const inFlightRuns = inFlightBackgroundRunsBySession[session.id] ?? [];
+      const children = childSessionVisibilityByParentSessionId.visible[session.id] ?? [];
+      const parentMatch = `${session.title}\n${session.model}`.toLowerCase().includes(sessionSearchNeedle);
+      const childMatch = children.some(child => childSessionSearchMatchBySessionId.get(child.id) === true);
+      const runMatch = inFlightRuns.some(run => (run.prompt ?? "").toLowerCase().includes(sessionSearchNeedle));
+      matches.set(session.id, parentMatch || childMatch || runMatch);
+    }
+
+    return matches;
+  }, [
+    sessionSearchNeedle,
+    rootSessions,
+    inFlightBackgroundRunsBySession,
+    childSessionVisibilityByParentSessionId.visible,
+    childSessionSearchMatchBySessionId,
+  ]);
+  const totalSessionSearchMatches = useMemo(() => {
+    if (!sessionSearchNeedle) return 0;
+    let count = 0;
+    for (const matched of parentSessionSearchMatchBySessionId.values()) {
+      if (matched) count += 1;
+    }
+    for (const matched of childSessionSearchMatchBySessionId.values()) {
+      if (matched) count += 1;
+    }
+    return count;
+  }, [sessionSearchNeedle, parentSessionSearchMatchBySessionId, childSessionSearchMatchBySessionId]);
+  const totalHiddenChildSessionsByAge = useMemo(
+    () =>
+      Object.values(childSessionVisibilityByParentSessionId.hiddenByAgeCount).reduce((count, value) => count + value, 0),
+    [childSessionVisibilityByParentSessionId.hiddenByAgeCount],
+  );
+  const totalInFlightBackgroundRuns = useMemo(
+    () =>
+      Object.values(inFlightBackgroundRunsBySession).reduce((count, runs) => {
+        return count + runs.length;
+      }, 0),
+    [inFlightBackgroundRunsBySession],
+  );
+  const activeBackgroundInFlightCount = useMemo(
+    () => activeBackgroundRuns.filter(run => isBackgroundRunInFlight(run)).length,
+    [activeBackgroundRuns],
+  );
   const isActiveSessionRunning =
     Boolean(activeSend) && Boolean(activeSession) && activeSend?.sessionId === activeSession?.id;
   const canAbortActiveSession = isActiveSessionRunning && !isAborting;
@@ -873,7 +1216,7 @@ export function App() {
       if (sessionsResponse.ok && Array.isArray(sessionsPayload.sessions)) {
         const updatedSession = sessionsPayload.sessions.find(session => session.id === input.sessionId);
         if (updatedSession) {
-          setSessions(current => current.map(session => (session.id === updatedSession.id ? updatedSession : session)));
+          setSessions(current => upsertSessionList(current, updatedSession));
         }
       }
 
@@ -983,6 +1326,209 @@ export function App() {
       setChatControlError(error instanceof Error ? error.message : "Failed to compact session");
     } finally {
       setIsCompacting(false);
+    }
+  }
+
+  async function refreshBackgroundRunsForSession(sessionId: string) {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) return;
+
+    setLoadingBackgroundRuns(true);
+    setBackgroundRunsError("");
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(normalizedSessionId)}/background`);
+      const payload = (await response.json()) as BackgroundRunsResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load background runs");
+      }
+      const runs = Array.isArray(payload.runs) ? sortBackgroundRuns(payload.runs) : [];
+      setBackgroundRunsBySession(current => ({
+        ...current,
+        [normalizedSessionId]: runs,
+      }));
+      loadedBackgroundSessionsRef.current.add(normalizedSessionId);
+    } catch (error) {
+      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to load background runs");
+    } finally {
+      setLoadingBackgroundRuns(false);
+    }
+  }
+
+  async function refreshSessionsList() {
+    try {
+      const response = await fetch("/api/sessions");
+      const payload = (await response.json()) as { sessions?: SessionSummary[]; error?: string };
+      if (!response.ok || !Array.isArray(payload.sessions)) {
+        throw new Error(payload.error ?? "Failed to refresh sessions");
+      }
+      setSessions(sortSessionsByActivity(payload.sessions));
+    } catch {
+      // best-effort only; caller can continue with local view
+    }
+  }
+
+  function toggleSessionGroup(sessionId: string) {
+    setExpandedSessionGroupsById(current => ({
+      ...current,
+      [sessionId]: !current[sessionId],
+    }));
+  }
+
+  async function refreshInFlightBackgroundRuns() {
+    setBackgroundRunsError("");
+    try {
+      const response = await fetch("/api/background?inFlightOnly=1&limit=500");
+      const payload = (await response.json()) as BackgroundRunsResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to refresh in-flight background runs");
+      }
+      if (Array.isArray(payload.runs)) {
+        setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, payload.runs ?? []));
+      }
+    } catch (error) {
+      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to refresh in-flight background runs");
+    }
+  }
+
+  async function spawnBackgroundRun() {
+    if (!activeSession) return;
+    const prompt = backgroundPrompt.trim();
+    if (!prompt) return;
+
+    setBackgroundSpawnBusy(true);
+    setBackgroundRunsError("");
+    try {
+      const response = await fetch("/api/background", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: activeSession.id,
+          prompt,
+          requestedBy: "dashboard-ui",
+        }),
+      });
+      const payload = (await response.json()) as BackgroundRunsResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to spawn background run");
+      }
+      if (payload.run) {
+        const run = payload.run;
+        loadedBackgroundSessionsRef.current.add(run.parentSessionId);
+        setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, [run]));
+      }
+      setBackgroundPrompt("");
+      await refreshBackgroundRunsForSession(activeSession.id);
+    } catch (error) {
+      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to spawn background run");
+    } finally {
+      setBackgroundSpawnBusy(false);
+    }
+  }
+
+  async function steerBackgroundRun(runId: string, rawContent?: string) {
+    const content = (rawContent ?? backgroundSteerDraftByRun[runId] ?? "").trim();
+    if (!content) return;
+
+    setBackgroundActionBusyByRun(current => ({
+      ...current,
+      [runId]: "steer",
+    }));
+    setBackgroundRunsError("");
+    try {
+      const response = await fetch(`/api/background/${encodeURIComponent(runId)}/steer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      const payload = (await response.json()) as BackgroundRunsResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to steer background run");
+      }
+      if (payload.run) {
+        const run = payload.run;
+        loadedBackgroundSessionsRef.current.add(run.parentSessionId);
+        setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, [run]));
+      }
+      setBackgroundSteerDraftByRun(current => {
+        if (!current[runId]) return current;
+        const next = { ...current };
+        delete next[runId];
+        return next;
+      });
+    } catch (error) {
+      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to steer background run");
+    } finally {
+      setBackgroundActionBusyByRun(current => {
+        if (!current[runId]) return current;
+        const next = { ...current };
+        delete next[runId];
+        return next;
+      });
+    }
+  }
+
+  async function checkInBackgroundRun(run: BackgroundRunSnapshot) {
+    setFocusedBackgroundRunId(run.runId);
+    setBackgroundRunsError("");
+    setBackgroundCheckInBusyByRun(current => ({
+      ...current,
+      [run.runId]: true,
+    }));
+    try {
+      const response = await fetch(`/api/background/${encodeURIComponent(run.runId)}`);
+      const payload = (await response.json()) as BackgroundRunsResponse;
+      if (!response.ok || !payload.run) {
+        throw new Error(payload.error ?? "Failed to check in on background run");
+      }
+      const latest = payload.run;
+      setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, [latest]));
+      await refreshBackgroundRunsForSession(latest.parentSessionId);
+      const targetSessionId = latest.childSessionId ?? run.childSessionId;
+      if (targetSessionId) {
+        await refreshSessionsList();
+        setActiveSessionId(targetSessionId);
+      } else {
+        setActiveSessionId(latest.parentSessionId);
+        setActiveConfigPanelTab("background");
+      }
+    } catch (error) {
+      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to check in on background run");
+    } finally {
+      setBackgroundCheckInBusyByRun(current => {
+        if (!current[run.runId]) return current;
+        const next = { ...current };
+        delete next[run.runId];
+        return next;
+      });
+    }
+  }
+
+  async function abortBackgroundRun(runId: string) {
+    setBackgroundActionBusyByRun(current => ({
+      ...current,
+      [runId]: "abort",
+    }));
+    setBackgroundRunsError("");
+    try {
+      const response = await fetch(`/api/background/${encodeURIComponent(runId)}/abort`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as BackgroundRunsResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to abort background run");
+      }
+      if (!payload.aborted) {
+        throw new Error("No active background run was available to abort.");
+      }
+    } catch (error) {
+      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to abort background run");
+    } finally {
+      setBackgroundActionBusyByRun(current => {
+        if (!current[runId]) return current;
+        const next = { ...current };
+        delete next[runId];
+        return next;
+      });
     }
   }
 
@@ -1427,7 +1973,7 @@ export function App() {
       }
       const updated = payload.session;
 
-      setSessions(current => current.map(session => (session.id === updated.id ? updated : session)));
+      setSessions(current => upsertSessionList(current, updated));
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "Failed to update session model");
     } finally {
@@ -1457,11 +2003,16 @@ export function App() {
       const created = payload.session;
 
       loadedSessionsRef.current.add(created.id);
+      loadedBackgroundSessionsRef.current.add(created.id);
       setMessagesBySession(current => ({
         ...current,
         [created.id]: current[created.id] ?? [],
       }));
-      setSessions(current => [created, ...current.filter(session => session.id !== created.id)]);
+      setBackgroundRunsBySession(current => ({
+        ...current,
+        [created.id]: current[created.id] ?? [],
+      }));
+      setSessions(current => sortSessionsByActivity([created, ...current.filter(session => session.id !== created.id)]));
       setActiveSessionId(created.id);
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : "Failed to create session");
@@ -1533,40 +2084,235 @@ export function App() {
           <Card className="panel-noise flex min-h-0 flex-col">
             <CardHeader>
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="min-w-0">
                   <CardTitle className="flex items-center gap-2">
                     <Bot className="size-4" />
                     Sessions
                   </CardTitle>
                   <CardDescription>Switch sessions and set the model for each conversation.</CardDescription>
                 </div>
-                <Button type="button" size="sm" onClick={createNewSession} disabled={isCreatingSession}>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void refreshInFlightBackgroundRuns()}
+                  className="w-full justify-center"
+                >
+                  <RefreshCcw className="size-4" />
+                  runs {totalInFlightBackgroundRuns}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={createNewSession}
+                  disabled={isCreatingSession}
+                  className="w-full justify-center"
+                >
                   <Plus className="size-4" />
                   {isCreatingSession ? "Creating..." : "New"}
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <Input
+                  value={childSessionSearchQuery}
+                  onChange={event => setChildSessionSearchQuery(event.target.value)}
+                  placeholder="Search threads and topics..."
+                  className="h-8 text-xs"
+                />
+                {sessionSearchNeedle && (
+                  <p className="px-1 text-[11px] text-muted-foreground">
+                    {totalSessionSearchMatches} match{totalSessionSearchMatches === 1 ? "" : "es"}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-full justify-start px-2 text-xs text-muted-foreground"
+                  onClick={() => setShowAllChildren(current => !current)}
+                >
+                  {showAllChildren
+                    ? "Hide old children"
+                    : `Show all children${totalHiddenChildSessionsByAge > 0 ? ` (${totalHiddenChildSessionsByAge} hidden)` : ""}`}
                 </Button>
               </div>
               {sessionError && <p className="text-xs text-destructive">{sessionError}</p>}
             </CardHeader>
             <CardContent className="space-y-2 overflow-y-auto">
               {loading && <p className="text-sm text-muted-foreground">Loading sessions...</p>}
-              {sessions.map(session => (
-                <button
-                  key={session.id}
-                  type="button"
-                  onClick={() => setActiveSessionId(session.id)}
-                  className="w-full rounded-xl border border-border bg-muted/70 p-3 text-left transition hover:bg-muted data-[active=true]:border-primary/40 data-[active=true]:bg-primary/10"
-                  data-active={activeSessionId === session.id}
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="font-display text-sm">{session.title}</p>
-                    <Badge variant={session.status === "active" ? "success" : "warning"}>{session.status}</Badge>
+              {rootSessions.map(session => {
+                const childSessions = childSessionsByParentSessionId[session.id] ?? [];
+                const visibleChildSessions = childSessionVisibilityByParentSessionId.visible[session.id] ?? [];
+                const hiddenChildrenByAge = childSessionVisibilityByParentSessionId.hiddenByAgeCount[session.id] ?? 0;
+                const parentSearchMatch = sessionSearchNeedle
+                  ? parentSessionSearchMatchBySessionId.get(session.id) === true
+                  : false;
+                const matchingVisibleChildCount = sessionSearchNeedle
+                  ? visibleChildSessions.filter(child => childSessionSearchMatchBySessionId.get(child.id) === true).length
+                  : 0;
+                const hasChildren = childSessions.length > 0;
+                const inFlightRuns = inFlightBackgroundRunsBySession[session.id] ?? [];
+                const expanded = Boolean(expandedSessionGroupsById[session.id]);
+                return (
+                  <div
+                    key={session.id}
+                    className="space-y-2 rounded-xl border border-border bg-muted/70 p-2 transition data-[active=true]:border-primary/40 data-[active=true]:bg-primary/10 data-[search-match=true]:border-amber-500/40 data-[search-match=true]:bg-amber-500/5"
+                    data-active={activeSessionId === session.id}
+                    data-search-match={parentSearchMatch}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActiveSessionId(session.id)}
+                      className="w-full rounded-lg p-1.5 text-left transition hover:bg-muted"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="line-clamp-2 break-words font-display text-sm">{session.title}</p>
+                          <p className="mt-1 truncate text-xs text-muted-foreground" title={session.model}>
+                            {session.model}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {parentSearchMatch && <Badge variant="warning">match</Badge>}
+                          {matchingVisibleChildCount > 0 && (
+                            <Badge variant="outline">{matchingVisibleChildCount} child match</Badge>
+                          )}
+                          {hasChildren && <Badge variant="outline">{childSessions.length} child</Badge>}
+                          <Badge variant={session.status === "active" ? "success" : "warning"}>{session.status}</Badge>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {session.messageCount} msgs • {relativeFromIso(session.lastActiveAt)}
+                        {inFlightRuns.length > 0 ? ` • ${inFlightRuns.length} bg running` : ""}
+                      </p>
+                    </button>
+
+                    {hasChildren && (
+                      <div className="space-y-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-full justify-start px-2 text-xs text-muted-foreground"
+                          onClick={() => toggleSessionGroup(session.id)}
+                        >
+                          {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                          {expanded ? "Hide child sessions" : "Show child sessions"}
+                        </Button>
+                        {expanded && (
+                          <div className="space-y-2 border-l border-border/70 pl-2">
+                            {visibleChildSessions.map(childSession => {
+                              const childRun = latestBackgroundRunByChildSessionId.get(childSession.id) ?? null;
+                              const childRunInFlight = childRun ? isBackgroundRunInFlight(childRun) : false;
+                              const childSearchMatch = sessionSearchNeedle
+                                ? childSessionSearchMatchBySessionId.get(childSession.id) === true
+                                : false;
+                              const checkInBusy = childRun ? Boolean(backgroundCheckInBusyByRun[childRun.runId]) : false;
+                              const steerBusy = childRun ? backgroundActionBusyByRun[childRun.runId] === "steer" : false;
+                              const nudgeDraft = childRun ? (backgroundSteerDraftByRun[childRun.runId] ?? "") : "";
+                              return (
+                                <div
+                                  key={childSession.id}
+                                  className="space-y-2 rounded-md border border-border/70 bg-background/60 p-2 data-[active=true]:border-primary/40 data-[active=true]:bg-primary/10 data-[search-match=true]:border-amber-500/40 data-[search-match=true]:bg-amber-500/5"
+                                  data-active={activeSessionId === childSession.id}
+                                  data-search-match={childSearchMatch}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveSessionId(childSession.id)}
+                                    className="w-full rounded-md p-1 text-left transition hover:bg-muted"
+                                  >
+                                    <div className="space-y-1">
+                                      <p className="line-clamp-2 break-words text-xs font-medium leading-tight">
+                                        {childSession.title}
+                                      </p>
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        {childSearchMatch && <Badge variant="warning">match</Badge>}
+                                        {childRun && (
+                                          <Badge variant={childRunInFlight ? "warning" : "outline"}>
+                                            {childRun.status}
+                                          </Badge>
+                                        )}
+                                        <Badge variant={childSession.status === "active" ? "success" : "outline"}>
+                                          {childSession.status}
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                    {childRun?.prompt && (
+                                      <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                                        {childRun.prompt}
+                                      </p>
+                                    )}
+                                    <p className="mt-1 text-[11px] text-muted-foreground">
+                                      {childSession.messageCount} msgs • {relativeFromIso(childSession.lastActiveAt)}
+                                    </p>
+                                  </button>
+                                  {childRun && (
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 px-2 text-[11px]"
+                                        onClick={() => {
+                                          void checkInBackgroundRun(childRun);
+                                        }}
+                                        disabled={checkInBusy}
+                                      >
+                                        {checkInBusy ? "Opening..." : "Open"}
+                                      </Button>
+                                      {childRunInFlight && (
+                                        <>
+                                          <Input
+                                            value={nudgeDraft}
+                                            onChange={event =>
+                                              setBackgroundSteerDraftByRun(current => ({
+                                                ...current,
+                                                [childRun.runId]: event.target.value,
+                                              }))
+                                            }
+                                            className="h-7 text-[11px]"
+                                            placeholder="Nudge..."
+                                            disabled={steerBusy}
+                                          />
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            className="h-7 px-2 text-[11px]"
+                                            onClick={() => {
+                                              void steerBackgroundRun(childRun.runId);
+                                            }}
+                                            disabled={steerBusy || !nudgeDraft.trim()}
+                                          >
+                                            {steerBusy ? "..." : "Nudge"}
+                                          </Button>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {visibleChildSessions.length === 0 && (
+                              <p className="rounded-md border border-border/70 bg-background/60 px-2 py-1.5 text-[11px] text-muted-foreground">
+                                No child sessions visible with current filters.
+                              </p>
+                            )}
+                            {hiddenChildrenByAge > 0 && !showAllChildren && (
+                              <p className="text-[11px] text-muted-foreground">
+                                {hiddenChildrenByAge} old child session{hiddenChildrenByAge === 1 ? "" : "s"} hidden by age
+                                filter ({childSessionHideAfterDays}d).
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{session.model}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {session.messageCount} msgs • {relativeFromIso(session.lastActiveAt)}
-                  </p>
-                </button>
-              ))}
+                );
+              })}
             </CardContent>
           </Card>
 
@@ -1638,6 +2384,9 @@ export function App() {
                 >
                   run {activeRunStatusLabel}
                 </Badge>
+                <Badge variant={activeBackgroundInFlightCount > 0 ? "warning" : "outline"}>
+                  bg {activeBackgroundInFlightCount}
+                </Badge>
                 <Button
                   type="button"
                   size="sm"
@@ -1656,6 +2405,19 @@ export function App() {
                   variant="outline"
                   onClick={() => {
                     if (!activeSession) return;
+                    void refreshBackgroundRunsForSession(activeSession.id);
+                  }}
+                  disabled={!activeSession || loadingBackgroundRuns}
+                >
+                  <RefreshCcw className="size-3.5" />
+                  {loadingBackgroundRuns ? "Refreshing..." : "Refresh BG"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (!activeSession) return;
                     void compactSession(activeSession.id);
                   }}
                   disabled={!activeSession || isCompacting || isActiveSessionRunning}
@@ -1667,6 +2429,7 @@ export function App() {
               {modelError && <p className="text-xs text-destructive">{modelError}</p>}
               {activeRunStatusHint && <p className="text-xs text-muted-foreground">{activeRunStatusHint}</p>}
               {activeSessionRunError && <p className="text-xs text-destructive">{activeSessionRunError}</p>}
+              {backgroundRunsError && <p className="text-xs text-destructive">{backgroundRunsError}</p>}
               {chatControlError && <p className="text-xs text-destructive">{chatControlError}</p>}
               {activeSessionCompactedAt && (
                 <p className="text-xs text-muted-foreground">Last compacted {relativeFromIso(activeSessionCompactedAt)}</p>
@@ -1799,10 +2562,14 @@ export function App() {
               <CardDescription>Manage skill/MCP config and monitor usage telemetry.</CardDescription>
             </CardHeader>
             <CardContent className="min-h-0 overflow-y-auto">
-              <Tabs defaultValue="usage">
+              <Tabs
+                value={activeConfigPanelTab}
+                onValueChange={value => setActiveConfigPanelTab(value as ConfigPanelTab)}
+              >
                 <TabsList className="w-full justify-between">
                   <TabsTrigger value="usage">Usage</TabsTrigger>
                   <TabsTrigger value="memory">Memory</TabsTrigger>
+                  <TabsTrigger value="background">Background</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="usage" className="space-y-2">
@@ -1890,6 +2657,126 @@ export function App() {
                       <p className="mt-1 text-xs">{memoryPolicy.allowedTypes.join(", ") || "none"}</p>
                     </div>
                   )}
+                </TabsContent>
+
+                <TabsContent value="background" className="space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/70 p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Spawn background run</p>
+                    <Textarea
+                      value={backgroundPrompt}
+                      onChange={event => setBackgroundPrompt(event.target.value)}
+                      className="mt-2 min-h-20 resize-y"
+                      placeholder="Describe a background task for this session..."
+                    />
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-muted-foreground">
+                        Runs are attached to this session and report back automatically.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          void spawnBackgroundRun();
+                        }}
+                        disabled={!activeSession || !backgroundPrompt.trim() || backgroundSpawnBusy}
+                      >
+                        <Plus className="size-3.5" />
+                        {backgroundSpawnBusy ? "Spawning..." : "Spawn"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {loadingBackgroundRuns && (
+                    <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                      Loading background runs...
+                    </p>
+                  )}
+
+                  {!loadingBackgroundRuns && activeBackgroundRuns.length === 0 && (
+                    <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                      No background runs for this session yet.
+                    </p>
+                  )}
+
+                  {activeBackgroundRuns.map(run => {
+                    const isTerminal =
+                      run.status === "completed" || run.status === "failed" || run.status === "aborted";
+                    const busyAction = backgroundActionBusyByRun[run.runId];
+                    return (
+                      <div
+                        key={run.runId}
+                        className="space-y-2 rounded-md border border-border bg-muted/70 p-3 data-[focused=true]:border-primary/40 data-[focused=true]:bg-primary/10"
+                        data-focused={focusedBackgroundRunId === run.runId}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-xs font-medium">{run.runId}</p>
+                          <Badge
+                            variant={
+                              run.status === "completed"
+                                ? "success"
+                                : run.status === "failed" || run.status === "aborted"
+                                  ? "warning"
+                                  : "outline"
+                            }
+                          >
+                            {run.status}
+                          </Badge>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          updated {relativeFromIso(run.updatedAt)}
+                          {run.startedAt ? ` · started ${relativeFromIso(run.startedAt)}` : ""}
+                          {run.completedAt ? ` · completed ${relativeFromIso(run.completedAt)}` : ""}
+                        </p>
+                        {run.prompt && <p className="text-xs">prompt: {run.prompt}</p>}
+                        {run.resultSummary && <p className="text-xs text-muted-foreground">result: {run.resultSummary}</p>}
+                        {run.error && <p className="text-xs text-destructive">{run.error}</p>}
+
+                        <div className="space-y-2">
+                          <Textarea
+                            value={backgroundSteerDraftByRun[run.runId] ?? ""}
+                            onChange={event =>
+                              setBackgroundSteerDraftByRun(current => ({
+                                ...current,
+                                [run.runId]: event.target.value,
+                              }))
+                            }
+                            className="min-h-16 resize-y"
+                            placeholder="Steer this background run with additional instructions..."
+                            disabled={isTerminal || busyAction === "abort"}
+                          />
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                void abortBackgroundRun(run.runId);
+                              }}
+                              disabled={isTerminal || Boolean(busyAction)}
+                            >
+                              <CircleSlash className="size-3.5" />
+                              {busyAction === "abort" ? "Aborting..." : "Abort"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => {
+                                void steerBackgroundRun(run.runId);
+                              }}
+                              disabled={
+                                isTerminal ||
+                                busyAction === "abort" ||
+                                !(backgroundSteerDraftByRun[run.runId]?.trim())
+                              }
+                            >
+                              <Send className="size-3.5" />
+                              {busyAction === "steer" ? "Steering..." : "Steer"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </TabsContent>
               </Tabs>
             </CardContent>

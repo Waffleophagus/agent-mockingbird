@@ -60,6 +60,7 @@ export const runtimeOpencodeSchema = z
     timeoutMs: z.number().int().positive(),
     promptTimeoutMs: z.number().int().positive(),
     runWaitTimeoutMs: z.number().int().positive().default(180_000),
+    childSessionHideAfterDays: z.number().int().min(0).max(365).default(3),
     directory: z.string().min(1).nullable().default(null),
   })
   .strict();

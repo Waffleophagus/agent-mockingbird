@@ -60,10 +60,19 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
       if (!session) {
         return Response.json({ error: "Unknown session" }, { status: 404 });
       }
-      return Response.json({
-        sessionId,
-        messages: listMessagesForSession(sessionId),
-      });
+      return (async () => {
+        if (runtime.syncSessionMessages) {
+          try {
+            await runtime.syncSessionMessages(sessionId);
+          } catch {
+            // degrade gracefully; return best-effort local transcript
+          }
+        }
+        return Response.json({
+          sessionId,
+          messages: listMessagesForSession(sessionId),
+        });
+      })();
     },
 
     "/api/sessions/:id/model": {

@@ -66,6 +66,7 @@ interface MemoryServiceApi {
 interface RuntimeStub {
   sendUserMessage: (input: { sessionId: string; content: string; metadata?: Record<string, unknown> }) => Promise<unknown>;
   subscribe: (_listener: (event: unknown) => void) => () => void;
+  syncSessionMessages?: (sessionId: string) => Promise<void>;
   checkHealth?: (_input?: { force?: boolean }) => Promise<{
     ok: boolean;
     error: { name: string; message: string } | null;
@@ -73,6 +74,69 @@ interface RuntimeStub {
   }>;
   abortSession?: (sessionId: string) => Promise<boolean>;
   compactSession?: (sessionId: string) => Promise<boolean>;
+  spawnBackgroundSession?: (input: {
+    parentSessionId: string;
+    title?: string;
+    requestedBy?: string;
+    prompt?: string;
+  }) => Promise<{
+    runId: string;
+    parentSessionId: string;
+    parentExternalSessionId: string;
+    childExternalSessionId: string;
+    childSessionId: string | null;
+    status: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    error: string | null;
+  }>;
+  promptBackgroundAsync?: (input: {
+    runId: string;
+    content: string;
+    model?: string;
+    system?: string;
+    agent?: string;
+    noReply?: boolean;
+  }) => Promise<{
+    runId: string;
+    parentSessionId: string;
+    parentExternalSessionId: string;
+    childExternalSessionId: string;
+    childSessionId: string | null;
+    status: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    error: string | null;
+  }>;
+  getBackgroundStatus?: (runId: string) => Promise<{
+    runId: string;
+    parentSessionId: string;
+    parentExternalSessionId: string;
+    childExternalSessionId: string;
+    childSessionId: string | null;
+    status: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    error: string | null;
+  } | null>;
+  listBackgroundRuns?: (input?: {
+    parentSessionId?: string;
+    limit?: number;
+    inFlightOnly?: boolean;
+  }) => Promise<
+    Array<{
+      runId: string;
+      parentSessionId: string;
+      parentExternalSessionId: string;
+      childExternalSessionId: string;
+      childSessionId: string | null;
+      status: string;
+      startedAt: string | null;
+      completedAt: string | null;
+      error: string | null;
+    }>
+  >;
+  abortBackground?: (runId: string) => Promise<boolean>;
 }
 
 interface CronJobDefinitionLite {
@@ -669,6 +733,146 @@ describe("run routes", () => {
   });
 });
 
+describe("background routes", () => {
+  test("spawn, list, steer, and abort background runs", async () => {
+    const session = repository.createSession({ title: "Background API Session" });
+
+    const runs = new Map<
+      string,
+      {
+        runId: string;
+        parentSessionId: string;
+        parentExternalSessionId: string;
+        childExternalSessionId: string;
+        childSessionId: string | null;
+        status: string;
+        startedAt: string | null;
+        completedAt: string | null;
+        error: string | null;
+      }
+    >();
+    const runtime: RuntimeStub = {
+      ...createRuntimeStub(async () => ({ sessionId: session.id, messages: [] })),
+      spawnBackgroundSession: async (input) => {
+        const runId = "bg-route-1";
+        const run = {
+          runId,
+          parentSessionId: input.parentSessionId,
+          parentExternalSessionId: "ext-parent-1",
+          childExternalSessionId: "ext-child-1",
+          childSessionId: "session-bg-route-1",
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+        runs.set(runId, run);
+        return run;
+      },
+      promptBackgroundAsync: async (input) => {
+        const run = runs.get(input.runId);
+        if (!run) throw new Error("Unknown run");
+        const next = {
+          ...run,
+          status: "running",
+          startedAt: run.startedAt ?? new Date().toISOString(),
+          completedAt: null,
+          error: null,
+        };
+        runs.set(input.runId, next);
+        return next;
+      },
+      getBackgroundStatus: async (runId) => runs.get(runId) ?? null,
+      listBackgroundRuns: async (input) => {
+        const values = [...runs.values()];
+        if (!input?.parentSessionId) return values;
+        return values.filter((run) => run.parentSessionId === input.parentSessionId);
+      },
+      abortBackground: async (runId) => {
+        const run = runs.get(runId);
+        if (!run) return false;
+        runs.set(runId, {
+          ...run,
+          status: "aborted",
+          completedAt: new Date().toISOString(),
+        });
+        return true;
+      },
+    };
+
+    const cronService = new CronService(runtime);
+    const runService = new RunService(runtime);
+    runService.start();
+    const eventStream = createRuntimeEventStream({
+      getHeartbeatSnapshot: repository.getHeartbeatSnapshot,
+      getUsageSnapshot: repository.getUsageSnapshot,
+    });
+    const routes = createApiRoutes({
+      runtime,
+      cronService,
+      eventStream,
+      runService,
+    });
+
+    const spawnRoute = routes["/api/background"] as { POST: (req: Request) => Promise<Response> };
+    const spawnResponse = await spawnRoute.POST(
+      new Request("http://localhost/api/background", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.id,
+          title: "Child worker",
+          prompt: "Run analysis",
+        }),
+      }),
+    );
+    expect(spawnResponse.status).toBe(202);
+    const spawnPayload = (await spawnResponse.json()) as { run: { runId: string; status: string } };
+    expect(spawnPayload.run.runId).toBe("bg-route-1");
+    expect(spawnPayload.run.status).toBe("running");
+
+    const listSessionRoute = routes["/api/sessions/:id/background"] as {
+      GET: (req: Request & { params: { id: string } }) => Promise<Response>;
+    };
+    const listSessionResponse = await listSessionRoute.GET(
+      Object.assign(new Request(`http://localhost/api/sessions/${session.id}/background`), {
+        params: { id: session.id },
+      }),
+    );
+    expect(listSessionResponse.status).toBe(200);
+    const listSessionPayload = (await listSessionResponse.json()) as { runs: Array<{ runId: string }> };
+    expect(listSessionPayload.runs.some((run) => run.runId === "bg-route-1")).toBe(true);
+
+    const steerRoute = routes["/api/background/:id/steer"] as {
+      POST: (req: Request & { params: { id: string } }) => Promise<Response>;
+    };
+    const steerResponse = await steerRoute.POST(
+      Object.assign(new Request("http://localhost/api/background/bg-route-1/steer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "Do one more pass" }),
+      }), {
+        params: { id: "bg-route-1" },
+      }),
+    );
+    expect(steerResponse.status).toBe(202);
+    const steerPayload = (await steerResponse.json()) as { run: { status: string } };
+    expect(steerPayload.run.status).toBe("running");
+
+    const abortRoute = routes["/api/background/:id/abort"] as {
+      POST: (req: Request & { params: { id: string } }) => Promise<Response>;
+    };
+    const abortResponse = await abortRoute.POST(
+      Object.assign(new Request("http://localhost/api/background/bg-route-1/abort", { method: "POST" }), {
+        params: { id: "bg-route-1" },
+      }),
+    );
+    expect(abortResponse.status).toBe(200);
+    const abortPayload = (await abortResponse.json()) as { aborted: boolean };
+    expect(abortPayload.aborted).toBe(true);
+  });
+});
+
 describe("memory validation and logging", () => {
   test("rejected remember writes are logged in memory_write_events", async () => {
     const result = await memoryService.rememberMemory({
@@ -794,6 +998,33 @@ describe("sse contract", () => {
       },
     });
     expect(frame).toContain("event: session-status");
+    expect(frame).toContain("data:");
+  });
+
+  test("toSseFrame maps background.run.updated to background-run event", () => {
+    const frame = toSseFrame({
+      id: "evt-bg-1",
+      type: "background.run.updated",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        runId: "bg-1",
+        parentSessionId: "main",
+        parentExternalSessionId: "ses-1",
+        childExternalSessionId: "ses-2",
+        childSessionId: "session-bg-1",
+        requestedBy: "test",
+        prompt: "Investigate",
+        status: "running",
+        resultSummary: null,
+        error: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        startedAt: new Date().toISOString(),
+        completedAt: null,
+      },
+    });
+    expect(frame).toContain("event: background-run");
     expect(frame).toContain("data:");
   });
 

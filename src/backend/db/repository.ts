@@ -50,6 +50,24 @@ interface UsageAggregateRow {
   cost_micros: number;
 }
 
+interface RuntimeSessionBindingRow {
+  runtime: string;
+  session_id: string;
+  external_session_id: string;
+  updated_at: number;
+}
+
+interface ExistingMessageIdRow {
+  id: string;
+}
+
+export interface RuntimeSessionBindingRecord {
+  runtime: string;
+  sessionId: string;
+  externalSessionId: string;
+  updatedAt: string;
+}
+
 export type BackgroundRunStatus =
   | "created"
   | "running"
@@ -91,6 +109,13 @@ export interface BackgroundRunRecord {
   updatedAt: string;
   startedAt: string | null;
   completedAt: string | null;
+}
+
+export interface SessionMessageImportInput {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: number;
 }
 
 const nowMs = () => Date.now();
@@ -150,6 +175,15 @@ function backgroundRunRowToRecord(row: BackgroundRunRow): BackgroundRunRecord {
   };
 }
 
+function runtimeSessionBindingRowToRecord(row: RuntimeSessionBindingRow): RuntimeSessionBindingRecord {
+  return {
+    runtime: row.runtime,
+    sessionId: row.session_id,
+    externalSessionId: row.external_session_id,
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
 function ensureAuxiliaryTables() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS message_memory_traces (
@@ -197,6 +231,14 @@ function createSessionRecord(input: {
     .run(input.id, input.title, input.model, input.status ?? "idle", input.messageCount ?? 0, createdAt);
 }
 
+function allocateSessionId() {
+  let id = `${sessionIdPrefix}-${crypto.randomUUID().slice(0, 8)}`;
+  while (scalar<{ count: number }>("SELECT COUNT(*) as count FROM sessions WHERE id = ?1", id).count > 0) {
+    id = `${sessionIdPrefix}-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  return id;
+}
+
 function seedDefaultState(createdAt: number) {
   const defaultModel = getDefaultSessionModel();
 
@@ -237,10 +279,7 @@ export function createSession(input?: { title?: string; model?: string }): Sessi
     const totalSessions = scalar<{ count: number }>("SELECT COUNT(*) as count FROM sessions").count;
     const title = input?.title?.trim() || `Session ${totalSessions + 1}`;
     const model = input?.model?.trim() || getDefaultSessionModel();
-    let id = `${sessionIdPrefix}-${crypto.randomUUID().slice(0, 8)}`;
-    while (scalar<{ count: number }>("SELECT COUNT(*) as count FROM sessions WHERE id = ?1", id).count > 0) {
-      id = `${sessionIdPrefix}-${crypto.randomUUID().slice(0, 8)}`;
-    }
+    const id = allocateSessionId();
 
     createSessionRecord({
       id,
@@ -552,6 +591,87 @@ export function setRuntimeSessionBinding(runtime: string, sessionId: string, ext
     .run(normalizedRuntime, normalizedSessionId, normalizedExternalSessionId, updatedAt);
 }
 
+export function ensureSessionForRuntimeBinding(input: {
+  runtime: string;
+  externalSessionId: string;
+  title?: string;
+  model?: string;
+  createdAt?: number;
+}): SessionSummary | null {
+  const normalizedRuntime = input.runtime.trim();
+  const normalizedExternalSessionId = input.externalSessionId.trim();
+  if (!normalizedRuntime || !normalizedExternalSessionId) return null;
+
+  const tx = sqlite.transaction(() => {
+    const existingSessionId = getLocalSessionIdByRuntimeBinding(normalizedRuntime, normalizedExternalSessionId);
+    const normalizedTitle = input.title?.trim();
+    const normalizedModel = input.model?.trim();
+    if (existingSessionId) {
+      if (normalizedTitle) {
+        sqlite
+          .query(
+            `
+            UPDATE sessions
+            SET title = ?2, updated_at = ?3
+            WHERE id = ?1
+          `,
+          )
+          .run(existingSessionId, normalizedTitle, input.createdAt ?? nowMs());
+      }
+      if (normalizedModel) {
+        sqlite
+          .query(
+            `
+            UPDATE sessions
+            SET model = ?2, updated_at = ?3
+            WHERE id = ?1
+          `,
+          )
+          .run(existingSessionId, normalizedModel, input.createdAt ?? nowMs());
+      }
+      return existingSessionId;
+    }
+
+    const totalSessions = scalar<{ count: number }>("SELECT COUNT(*) as count FROM sessions").count;
+    const title = normalizedTitle || `Session ${totalSessions + 1}`;
+    const model = normalizedModel || getDefaultSessionModel();
+    const id = allocateSessionId();
+    const createdAt = input.createdAt ?? nowMs();
+
+    createSessionRecord({
+      id,
+      title,
+      model,
+      status: "idle",
+      messageCount: 0,
+      createdAt,
+    });
+    setRuntimeSessionBinding(normalizedRuntime, id, normalizedExternalSessionId);
+    return id;
+  });
+
+  const sessionId = tx();
+  return sessionId ? getSessionById(sessionId) : null;
+}
+
+export function listRuntimeSessionBindings(runtime: string, limit = 500): Array<RuntimeSessionBindingRecord> {
+  const normalizedRuntime = runtime.trim();
+  if (!normalizedRuntime) return [];
+  const normalizedLimit = Math.max(1, Math.min(2_000, Math.floor(limit)));
+  const rows = allRows<RuntimeSessionBindingRow>(
+    `
+      SELECT runtime, session_id, external_session_id, updated_at
+      FROM runtime_session_bindings
+      WHERE runtime = ?1
+      ORDER BY updated_at DESC
+      LIMIT ?2
+    `,
+    normalizedRuntime,
+    normalizedLimit,
+  );
+  return rows.map(runtimeSessionBindingRowToRecord);
+}
+
 export function createBackgroundRun(input: {
   runtime: string;
   parentSessionId: string;
@@ -587,6 +707,19 @@ export function createBackgroundRun(input: {
         result_summary, error, created_at, updated_at, started_at, completed_at
       )
       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, ?9, ?9, NULL, NULL)
+      ON CONFLICT(runtime, child_external_session_id) DO UPDATE SET
+        parent_session_id = excluded.parent_session_id,
+        parent_external_session_id = excluded.parent_external_session_id,
+        requested_by = excluded.requested_by,
+        prompt = CASE
+          WHEN trim(excluded.prompt) <> '' THEN excluded.prompt
+          ELSE background_runs.prompt
+        END,
+        status = CASE
+          WHEN background_runs.status IN ('completed', 'failed', 'aborted') THEN background_runs.status
+          ELSE excluded.status
+        END,
+        updated_at = excluded.updated_at
     `,
     )
     .run(
@@ -601,7 +734,7 @@ export function createBackgroundRun(input: {
       createdAt,
     );
 
-  return getBackgroundRunById(runId);
+  return getBackgroundRunByChildExternalSessionId(normalizedRuntime, normalizedChildExternalSessionId);
 }
 
 export function getBackgroundRunById(runId: string): BackgroundRunRecord | null {
@@ -653,6 +786,63 @@ export function listBackgroundRunsForParentSession(sessionId: string, limit = 50
       LIMIT ?2
     `,
     normalizedSessionId,
+    normalizedLimit,
+  );
+  return rows.map(backgroundRunRowToRecord);
+}
+
+export function listInFlightBackgroundRuns(runtime: string, limit = 250): Array<BackgroundRunRecord> {
+  const normalizedRuntime = runtime.trim();
+  if (!normalizedRuntime) return [];
+  const normalizedLimit = Math.max(1, Math.min(2_000, Math.floor(limit)));
+  const rows = allRows<BackgroundRunRow>(
+    `
+      SELECT *
+      FROM background_runs
+      WHERE runtime = ?1
+        AND status IN ('created', 'running', 'retrying', 'idle')
+      ORDER BY updated_at ASC
+      LIMIT ?2
+    `,
+    normalizedRuntime,
+    normalizedLimit,
+  );
+  return rows.map(backgroundRunRowToRecord);
+}
+
+export function listRecentBackgroundRuns(runtime: string, limit = 250): Array<BackgroundRunRecord> {
+  const normalizedRuntime = runtime.trim();
+  if (!normalizedRuntime) return [];
+  const normalizedLimit = Math.max(1, Math.min(2_000, Math.floor(limit)));
+  const rows = allRows<BackgroundRunRow>(
+    `
+      SELECT *
+      FROM background_runs
+      WHERE runtime = ?1
+      ORDER BY created_at DESC
+      LIMIT ?2
+    `,
+    normalizedRuntime,
+    normalizedLimit,
+  );
+  return rows.map(backgroundRunRowToRecord);
+}
+
+export function listBackgroundRunsPendingAnnouncement(runtime: string, limit = 250): Array<BackgroundRunRecord> {
+  const normalizedRuntime = runtime.trim();
+  if (!normalizedRuntime) return [];
+  const normalizedLimit = Math.max(1, Math.min(2_000, Math.floor(limit)));
+  const rows = allRows<BackgroundRunRow>(
+    `
+      SELECT *
+      FROM background_runs
+      WHERE runtime = ?1
+        AND status = 'completed'
+        AND (result_summary IS NULL OR trim(result_summary) = '')
+      ORDER BY updated_at ASC
+      LIMIT ?2
+    `,
+    normalizedRuntime,
     normalizedLimit,
   );
   return rows.map(backgroundRunRowToRecord);
@@ -807,6 +997,173 @@ export function appendChatExchange(input: {
       usage: getUsageSnapshot(),
       heartbeat,
     };
+  });
+
+  return tx();
+}
+
+export function appendAssistantMessage(input: {
+  sessionId: string;
+  content: string;
+  source: RuntimeEventSource;
+  createdAt?: number;
+  messageId?: string;
+}): {
+  session: SessionSummary;
+  message: ChatMessage;
+  usage: UsageSnapshot;
+  heartbeat: HeartbeatSnapshot;
+} | null {
+  const tx = sqlite.transaction(() => {
+    const session = scalar<{ id: string } | null>("SELECT id FROM sessions WHERE id = ?1", input.sessionId);
+    if (!session) return null;
+
+    const createdAt = input.createdAt ?? nowMs();
+    const message: ChatMessage = {
+      id: input.messageId ?? crypto.randomUUID(),
+      role: "assistant",
+      content: input.content,
+      at: toIso(createdAt),
+    };
+
+    sqlite
+      .query(
+        `
+        INSERT INTO messages (id, session_id, role, content, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+      `,
+      )
+      .run(message.id, input.sessionId, message.role, message.content, createdAt);
+
+    sqlite
+      .query(
+        `
+        UPDATE sessions
+        SET
+          status = 'active',
+          message_count = message_count + 1,
+          updated_at = ?2,
+          last_active_at = ?2
+        WHERE id = ?1
+      `,
+      )
+      .run(input.sessionId, createdAt);
+
+    const heartbeat = recordHeartbeat(input.source, true, createdAt);
+    const sessionSummary = getSessionById(input.sessionId);
+    if (!sessionSummary) return null;
+
+    return {
+      session: sessionSummary,
+      message,
+      usage: getUsageSnapshot(),
+      heartbeat,
+    };
+  });
+
+  return tx();
+}
+
+export function upsertSessionMessages(input: {
+  sessionId: string;
+  messages: Array<SessionMessageImportInput>;
+  touchedAt?: number;
+}): {
+  session: SessionSummary;
+  inserted: ChatMessage[];
+} | null {
+  const sessionId = input.sessionId.trim();
+  if (!sessionId) return null;
+
+  const tx = sqlite.transaction(() => {
+    const sessionExists = scalar<{ id: string } | null>("SELECT id FROM sessions WHERE id = ?1", sessionId);
+    if (!sessionExists) return null;
+
+    const deduped = new Map<string, SessionMessageImportInput>();
+    for (const message of input.messages) {
+      const id = message.id.trim();
+      if (!id) continue;
+      const role = message.role;
+      if (role !== "user" && role !== "assistant") continue;
+      const createdAt = Number.isFinite(message.createdAt) ? Math.floor(message.createdAt) : nowMs();
+      deduped.set(id, {
+        id,
+        role,
+        content: message.content,
+        createdAt,
+      });
+    }
+    const candidates = [...deduped.values()];
+    if (!candidates.length) {
+      const session = getSessionById(sessionId);
+      return session ? { session, inserted: [] as ChatMessage[] } : null;
+    }
+
+    const messageIds = candidates.map(message => message.id);
+    const placeholders = messageIds.map(() => "?").join(", ");
+    const existingRows = sqlite
+      .query(
+        `
+        SELECT id
+        FROM messages
+        WHERE session_id = ?1
+          AND id IN (${placeholders})
+      `,
+      )
+      .all(sessionId, ...messageIds) as ExistingMessageIdRow[];
+    const existingIds = new Set(existingRows.map(row => row.id));
+
+    const insertedInputs = candidates
+      .filter(message => !existingIds.has(message.id))
+      .sort((left, right) => left.createdAt - right.createdAt);
+    if (insertedInputs.length > 0) {
+      for (const message of insertedInputs) {
+        sqlite
+          .query(
+            `
+            INSERT INTO messages (id, session_id, role, content, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+          `,
+          )
+          .run(message.id, sessionId, message.role, message.content, message.createdAt);
+      }
+
+      const touchedAt = Math.max(
+        input.touchedAt ?? 0,
+        insertedInputs[insertedInputs.length - 1]?.createdAt ?? 0,
+        nowMs(),
+      );
+      sqlite
+        .query(
+          `
+          UPDATE sessions
+          SET
+            status = 'active',
+            message_count = (
+              SELECT COUNT(*)
+              FROM messages
+              WHERE session_id = ?1
+            ),
+            updated_at = ?2,
+            last_active_at = CASE
+              WHEN last_active_at > ?2 THEN last_active_at
+              ELSE ?2
+            END
+          WHERE id = ?1
+        `,
+        )
+        .run(sessionId, touchedAt);
+    }
+
+    const session = getSessionById(sessionId);
+    if (!session) return null;
+    const inserted = insertedInputs.map(message => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      at: toIso(message.createdAt),
+    }));
+    return { session, inserted };
   });
 
   return tx();

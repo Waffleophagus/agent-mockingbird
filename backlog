@@ -1,0 +1,4 @@
+# Backlog
+
+- [ ] Add Fuse.js-powered fuzzy search for session/thread discovery in the UI.
+- [ ] Add a SQLite FTS index for fast thread/content search.

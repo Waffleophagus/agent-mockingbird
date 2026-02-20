@@ -49,7 +49,13 @@ export interface BackgroundRunHandle {
   parentSessionId: string;
   parentExternalSessionId: string;
   childExternalSessionId: string;
+  childSessionId: string | null;
+  requestedBy: string;
+  prompt: string;
   status: BackgroundRunStatus;
+  resultSummary: string | null;
+  createdAt: string;
+  updatedAt: string;
   startedAt: string | null;
   completedAt: string | null;
   error: string | null;
@@ -64,14 +70,22 @@ export interface PromptBackgroundAsyncInput {
   noReply?: boolean;
 }
 
+export interface ListBackgroundRunsInput {
+  parentSessionId?: string;
+  limit?: number;
+  inFlightOnly?: boolean;
+}
+
 export interface RuntimeEngine {
   sendUserMessage(input: SendUserMessageInput): Promise<RuntimeMessageAck>;
   subscribe(onEvent: (event: RuntimeEvent) => void): () => void;
+  syncSessionMessages?(sessionId: string): Promise<void>;
   checkHealth?(input?: RuntimeHealthCheckInput): Promise<RuntimeHealthCheckResult>;
   abortSession?(sessionId: string): Promise<boolean>;
   compactSession?(sessionId: string): Promise<boolean>;
   spawnBackgroundSession?(input: SpawnBackgroundSessionInput): Promise<BackgroundRunHandle>;
   promptBackgroundAsync?(input: PromptBackgroundAsyncInput): Promise<BackgroundRunHandle>;
   getBackgroundStatus?(runId: string): Promise<BackgroundRunHandle | null>;
+  listBackgroundRuns?(input?: ListBackgroundRunsInput): Promise<Array<BackgroundRunHandle>>;
   abortBackground?(runId: string): Promise<boolean>;
 }
