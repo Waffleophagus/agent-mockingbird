@@ -78,3 +78,30 @@ export const runtimeSessionBindings = sqliteTable(
     index("runtime_session_bindings_updated_idx").on(table.updatedAt),
   ],
 );
+
+export const backgroundRuns = sqliteTable(
+  "background_runs",
+  {
+    id: text("id").primaryKey(),
+    runtime: text("runtime").notNull(),
+    parentSessionId: text("parent_session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    parentExternalSessionId: text("parent_external_session_id").notNull(),
+    childExternalSessionId: text("child_external_session_id").notNull(),
+    requestedBy: text("requested_by").notNull().default("system"),
+    prompt: text("prompt").notNull().default(""),
+    status: text("status").notNull().default("created"),
+    resultSummary: text("result_summary"),
+    error: text("error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  table => [
+    index("background_runs_child_external_idx").on(table.runtime, table.childExternalSessionId),
+    index("background_runs_parent_created_idx").on(table.parentSessionId, table.createdAt),
+    index("background_runs_status_updated_idx").on(table.status, table.updatedAt),
+  ],
+);

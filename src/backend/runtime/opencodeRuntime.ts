@@ -5,6 +5,7 @@ import type {
   OpencodeClient,
   Part,
   Session,
+  SessionStatus as OpencodeSessionStatus,
 } from "@opencode-ai/sdk/client";
 
 import {
@@ -33,20 +34,29 @@ import {
   type RuntimeEvent,
 } from "../contracts/events";
 import type {
+  BackgroundRunHandle,
+  BackgroundRunStatus,
+  PromptBackgroundAsyncInput,
   RuntimeEngine,
   RuntimeHealthCheckInput,
   RuntimeHealthCheckResult,
   RuntimeMessageAck,
   SendUserMessageInput,
+  SpawnBackgroundSessionInput,
 } from "../contracts/runtime";
 import {
   appendChatExchange,
+  createBackgroundRun,
+  getBackgroundRunByChildExternalSessionId,
+  getBackgroundRunById,
   getLocalSessionIdByRuntimeBinding,
   getRuntimeSessionBinding,
   getSessionById,
+  setBackgroundRunStatus,
   setMessageMemoryTrace,
   setSessionTitle,
   setRuntimeSessionBinding,
+  type BackgroundRunRecord,
 } from "../db/repository";
 import { env } from "../env";
 import {
@@ -94,6 +104,7 @@ const RUNTIME_HEALTH_PROMPT = 'Just respond "OK" to this to confirm the gateway 
 const RUNTIME_HEALTH_OK_PATTERN = /\bok\b/i;
 const RUNTIME_HEALTH_CACHE_TTL_MS = 5_000;
 const RUNTIME_HEALTH_TIMEOUT_CAP_MS = 15_000;
+const OPENCODE_RUNTIME_ID = "opencode";
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -414,8 +425,170 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
   }
 
+  async spawnBackgroundSession(input: SpawnBackgroundSessionInput): Promise<BackgroundRunHandle> {
+    const parentSessionId = input.parentSessionId.trim();
+    const parentSession = getSessionById(parentSessionId);
+    if (!parentSession) {
+      throw new RuntimeSessionNotFoundError(parentSessionId);
+    }
+
+    await this.ensureRuntimeConfigSynced();
+    const parentOpencodeSessionId = await this.resolveOrCreateOpencodeSession(parentSession.id, parentSession.title);
+    const created = unwrapSdkData<Session>(
+      await this.getClient().session.create({
+        body: {
+          parentID: parentOpencodeSessionId,
+          title: input.title?.trim() || `${parentSession.title} background`,
+        },
+        responseStyle: "data",
+        throwOnError: true,
+        signal: this.defaultRequestSignal(),
+      }),
+    );
+
+    const run = createBackgroundRun({
+      runtime: OPENCODE_RUNTIME_ID,
+      parentSessionId: parentSession.id,
+      parentExternalSessionId: parentOpencodeSessionId,
+      childExternalSessionId: created.id,
+      requestedBy: input.requestedBy,
+      prompt: input.prompt,
+      status: "created",
+    });
+    if (!run) {
+      throw new Error("Failed to create background run record.");
+    }
+
+    return this.backgroundRecordToHandle(run);
+  }
+
+  async promptBackgroundAsync(input: PromptBackgroundAsyncInput): Promise<BackgroundRunHandle> {
+    const runId = input.runId.trim();
+    const content = input.content.trim();
+    if (!runId) {
+      throw new Error("runId is required.");
+    }
+    if (!content) {
+      throw new Error("content is required.");
+    }
+
+    const run = getBackgroundRunById(runId);
+    if (!run) {
+      throw new Error(`Unknown background run: ${runId}`);
+    }
+
+    const parentSession = getSessionById(run.parentSessionId);
+    if (!parentSession) {
+      throw new RuntimeSessionNotFoundError(run.parentSessionId);
+    }
+
+    await this.ensureRuntimeConfigSynced();
+    const model = this.resolveModel(input.model?.trim() || parentSession.model);
+    const startedAt = run.startedAt ? undefined : Date.now();
+
+    setBackgroundRunStatus({
+      runId: run.id,
+      status: "running",
+      prompt: content,
+      startedAt,
+      completedAt: null,
+      error: null,
+    });
+
+    try {
+      await this.getClient().session.promptAsync({
+        path: { id: run.childExternalSessionId },
+        body: {
+          model: {
+            providerID: model.providerId,
+            modelID: model.modelId,
+          },
+          system: input.system,
+          agent: input.agent?.trim() || undefined,
+          noReply: input.noReply,
+          parts: [{ type: "text", text: content }],
+        },
+        responseStyle: "data",
+        throwOnError: true,
+        signal: this.promptRequestSignal(),
+      });
+    } catch (error) {
+      const normalizedError = this.normalizeRuntimeError(error);
+      setBackgroundRunStatus({
+        runId: run.id,
+        status: "failed",
+        completedAt: Date.now(),
+        error: normalizedError.message,
+      });
+      throw normalizedError;
+    }
+
+    const refreshed = await this.getBackgroundStatus(run.id);
+    if (!refreshed) {
+      throw new Error(`Background run disappeared after dispatch: ${run.id}`);
+    }
+    return refreshed;
+  }
+
+  async getBackgroundStatus(runId: string): Promise<BackgroundRunHandle | null> {
+    const normalizedRunId = runId.trim();
+    if (!normalizedRunId) return null;
+
+    let run = getBackgroundRunById(normalizedRunId);
+    if (!run) return null;
+
+    try {
+      const statuses = unwrapSdkData<Record<string, OpencodeSessionStatus>>(
+        await this.getClient().session.status({
+          responseStyle: "data",
+          throwOnError: true,
+          signal: this.defaultRequestSignal(),
+        }),
+      );
+      const opencodeStatus = statuses[run.childExternalSessionId];
+      if (opencodeStatus) {
+        run = this.applyOpencodeBackgroundStatus(run, opencodeStatus);
+      }
+    } catch {
+      // Keep local status if status refresh fails.
+    }
+
+    return this.backgroundRecordToHandle(run);
+  }
+
+  async abortBackground(runId: string): Promise<boolean> {
+    const normalizedRunId = runId.trim();
+    if (!normalizedRunId) return false;
+    const run = getBackgroundRunById(normalizedRunId);
+    if (!run) return false;
+
+    try {
+      const result = await this.getClient().session.abort({
+        path: { id: run.childExternalSessionId },
+        responseStyle: "data",
+        throwOnError: true,
+        signal: this.defaultRequestSignal(),
+      });
+      const aborted = Boolean(unwrapSdkData<boolean>(result));
+      if (aborted) {
+        setBackgroundRunStatus({
+          runId: run.id,
+          status: "aborted",
+          completedAt: Date.now(),
+          error: null,
+        });
+      }
+      return aborted;
+    } catch (error) {
+      if (getOpencodeErrorStatus(error) === 404) {
+        return false;
+      }
+      throw this.normalizeRuntimeError(error);
+    }
+  }
+
   async abortSession(sessionId: string): Promise<boolean> {
-    const opencodeSessionId = getRuntimeSessionBinding("opencode", sessionId);
+    const opencodeSessionId = getRuntimeSessionBinding(OPENCODE_RUNTIME_ID, sessionId);
     if (!opencodeSessionId) return false;
     try {
       const result = await this.getClient().session.abort({
@@ -605,7 +778,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     const remoteTitle = event.properties.info.title.trim();
     if (!opencodeSessionId || !remoteTitle) return;
 
-    const localSessionId = getLocalSessionIdByRuntimeBinding("opencode", opencodeSessionId);
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId || localSessionId === "main") return;
 
     const localSession = getSessionById(localSessionId);
@@ -620,7 +793,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     const opencodeSessionId = event.properties.sessionID;
     const status = event.properties.status;
 
-    const localSessionId = getLocalSessionIdByRuntimeBinding("opencode", opencodeSessionId);
+    this.applyBackgroundStatusBySessionId(opencodeSessionId, status);
+
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId) return;
 
     this.emit(
@@ -643,7 +818,9 @@ export class OpencodeRuntime implements RuntimeEngine {
   private handleSessionIdleEvent(event: Extract<OpencodeEvent, { type: "session.idle" }>) {
     const opencodeSessionId = event.properties.sessionID;
 
-    const localSessionId = getLocalSessionIdByRuntimeBinding("opencode", opencodeSessionId);
+    this.applyBackgroundStatusBySessionId(opencodeSessionId, { type: "idle" });
+
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId) return;
 
     this.emit(
@@ -659,7 +836,7 @@ export class OpencodeRuntime implements RuntimeEngine {
 
   private handleSessionCompactedEvent(event: Extract<OpencodeEvent, { type: "session.compacted" }>) {
     const opencodeSessionId = event.properties.sessionID;
-    const localSessionId = getLocalSessionIdByRuntimeBinding("opencode", opencodeSessionId);
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId) return;
 
     this.emit(
@@ -676,8 +853,12 @@ export class OpencodeRuntime implements RuntimeEngine {
     const error = event.properties.error;
     if (!error) return;
 
+    if (event.properties.sessionID) {
+      this.markBackgroundRunFailed(event.properties.sessionID, this.normalizeRuntimeError(error).message);
+    }
+
     const localSessionId = event.properties.sessionID
-      ? getLocalSessionIdByRuntimeBinding("opencode", event.properties.sessionID)
+      ? getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, event.properties.sessionID)
       : null;
 
     const normalized = this.normalizeRuntimeError(error);
@@ -698,6 +879,88 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (!event || typeof event !== "object") return false;
     const maybeEvent = event as { type?: unknown };
     return typeof maybeEvent.type === "string";
+  }
+
+  private backgroundRecordToHandle(run: BackgroundRunRecord): BackgroundRunHandle {
+    return {
+      runId: run.id,
+      parentSessionId: run.parentSessionId,
+      parentExternalSessionId: run.parentExternalSessionId,
+      childExternalSessionId: run.childExternalSessionId,
+      status: run.status,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      error: run.error,
+    };
+  }
+
+  private applyBackgroundStatusBySessionId(opencodeSessionId: string, status: OpencodeSessionStatus) {
+    const run = getBackgroundRunByChildExternalSessionId(OPENCODE_RUNTIME_ID, opencodeSessionId);
+    if (!run) return;
+    this.applyOpencodeBackgroundStatus(run, status);
+  }
+
+  private applyOpencodeBackgroundStatus(
+    run: BackgroundRunRecord,
+    status: OpencodeSessionStatus,
+  ): BackgroundRunRecord {
+    if (run.status === "aborted" || run.status === "failed") {
+      return run;
+    }
+
+    const now = Date.now();
+    const hasStarted = Boolean(run.startedAt);
+    let nextStatus: BackgroundRunStatus | null = null;
+    let startedAt: number | undefined;
+    let completedAt: number | null | undefined;
+    let error: string | null | undefined;
+
+    if (status.type === "busy") {
+      nextStatus = "running";
+      startedAt = hasStarted ? undefined : now;
+      completedAt = null;
+      error = null;
+    } else if (status.type === "retry") {
+      nextStatus = "retrying";
+      startedAt = hasStarted ? undefined : now;
+      completedAt = null;
+      error = this.normalizeProviderMessage(status.message) || status.message;
+    } else if (status.type === "idle") {
+      if (!hasStarted && run.status === "created") {
+        nextStatus = "idle";
+      } else if (run.status !== "completed") {
+        nextStatus = "completed";
+        completedAt = now;
+        error = null;
+      }
+    }
+
+    if (!nextStatus || (nextStatus === run.status && typeof completedAt === "undefined" && typeof error === "undefined")) {
+      return run;
+    }
+
+    return (
+      setBackgroundRunStatus({
+        runId: run.id,
+        status: nextStatus,
+        startedAt,
+        completedAt,
+        error,
+      }) ?? run
+    );
+  }
+
+  private markBackgroundRunFailed(opencodeSessionId: string, message: string) {
+    const run = getBackgroundRunByChildExternalSessionId(OPENCODE_RUNTIME_ID, opencodeSessionId);
+    if (!run || run.status === "aborted" || run.status === "completed") {
+      return;
+    }
+    setBackgroundRunStatus({
+      runId: run.id,
+      status: "failed",
+      completedAt: Date.now(),
+      error: message,
+    });
   }
 
   private resolveModel(rawModel: string): ResolvedModel {
@@ -950,7 +1213,7 @@ export class OpencodeRuntime implements RuntimeEngine {
   }
 
   private async resolveOrCreateOpencodeSession(localSessionId: string, localTitle: string) {
-    const bound = getRuntimeSessionBinding("opencode", localSessionId);
+    const bound = getRuntimeSessionBinding(OPENCODE_RUNTIME_ID, localSessionId);
     if (bound) return bound;
     return this.createOpencodeSession(localSessionId, localTitle);
   }
@@ -965,7 +1228,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         signal: this.defaultRequestSignal(),
       }),
     );
-    setRuntimeSessionBinding("opencode", localSessionId, created.id);
+    setRuntimeSessionBinding(OPENCODE_RUNTIME_ID, localSessionId, created.id);
     return created.id;
   }
 

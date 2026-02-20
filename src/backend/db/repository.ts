@@ -50,8 +50,56 @@ interface UsageAggregateRow {
   cost_micros: number;
 }
 
+export type BackgroundRunStatus =
+  | "created"
+  | "running"
+  | "retrying"
+  | "idle"
+  | "completed"
+  | "failed"
+  | "aborted";
+
+interface BackgroundRunRow {
+  id: string;
+  runtime: string;
+  parent_session_id: string;
+  parent_external_session_id: string;
+  child_external_session_id: string;
+  requested_by: string;
+  prompt: string;
+  status: BackgroundRunStatus;
+  result_summary: string | null;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+}
+
+export interface BackgroundRunRecord {
+  id: string;
+  runtime: string;
+  parentSessionId: string;
+  parentExternalSessionId: string;
+  childExternalSessionId: string;
+  requestedBy: string;
+  prompt: string;
+  status: BackgroundRunStatus;
+  resultSummary: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
 const nowMs = () => Date.now();
 const toIso = (millis: number) => new Date(millis).toISOString();
+const toMillisOrNull = (isoTimestamp: string | null) => {
+  if (!isoTimestamp) return null;
+  const parsed = Date.parse(isoTimestamp);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 const sessionIdPrefix = "session";
 
 function scalar<T>(query: string, ...bindings: SQLQueryBindings[]): T {
@@ -80,6 +128,25 @@ function messageRowToMessage(row: MessageRow): ChatMessage {
     role: row.role,
     content: row.content,
     at: toIso(row.created_at),
+  };
+}
+
+function backgroundRunRowToRecord(row: BackgroundRunRow): BackgroundRunRecord {
+  return {
+    id: row.id,
+    runtime: row.runtime,
+    parentSessionId: row.parent_session_id,
+    parentExternalSessionId: row.parent_external_session_id,
+    childExternalSessionId: row.child_external_session_id,
+    requestedBy: row.requested_by,
+    prompt: row.prompt,
+    status: row.status,
+    resultSummary: row.result_summary,
+    error: row.error,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+    startedAt: row.started_at ? toIso(row.started_at) : null,
+    completedAt: row.completed_at ? toIso(row.completed_at) : null,
   };
 }
 
@@ -203,6 +270,7 @@ export function resetDatabaseToDefaults(): DashboardBootstrap {
     sqlite.query("DELETE FROM heartbeat_events").run();
     sqlite.query("DELETE FROM runtime_config").run();
     sqlite.query("DELETE FROM runtime_session_bindings").run();
+    sqlite.query("DELETE FROM background_runs").run();
     sqlite.query("DELETE FROM sessions").run();
     seedDefaultState(nowMs());
   });
@@ -482,6 +550,159 @@ export function setRuntimeSessionBinding(runtime: string, sessionId: string, ext
     `,
     )
     .run(normalizedRuntime, normalizedSessionId, normalizedExternalSessionId, updatedAt);
+}
+
+export function createBackgroundRun(input: {
+  runtime: string;
+  parentSessionId: string;
+  parentExternalSessionId: string;
+  childExternalSessionId: string;
+  requestedBy?: string;
+  prompt?: string;
+  status?: BackgroundRunStatus;
+  createdAt?: number;
+}): BackgroundRunRecord | null {
+  const normalizedRuntime = input.runtime.trim();
+  const normalizedParentSessionId = input.parentSessionId.trim();
+  const normalizedParentExternalSessionId = input.parentExternalSessionId.trim();
+  const normalizedChildExternalSessionId = input.childExternalSessionId.trim();
+  if (
+    !normalizedRuntime ||
+    !normalizedParentSessionId ||
+    !normalizedParentExternalSessionId ||
+    !normalizedChildExternalSessionId
+  ) {
+    return null;
+  }
+
+  const createdAt = input.createdAt ?? nowMs();
+  const runId = `bg-${crypto.randomUUID().slice(0, 12)}`;
+
+  sqlite
+    .query(
+      `
+      INSERT INTO background_runs (
+        id, runtime, parent_session_id, parent_external_session_id,
+        child_external_session_id, requested_by, prompt, status,
+        result_summary, error, created_at, updated_at, started_at, completed_at
+      )
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, ?9, ?9, NULL, NULL)
+    `,
+    )
+    .run(
+      runId,
+      normalizedRuntime,
+      normalizedParentSessionId,
+      normalizedParentExternalSessionId,
+      normalizedChildExternalSessionId,
+      input.requestedBy?.trim() || "system",
+      input.prompt ?? "",
+      input.status ?? "created",
+      createdAt,
+    );
+
+  return getBackgroundRunById(runId);
+}
+
+export function getBackgroundRunById(runId: string): BackgroundRunRecord | null {
+  const normalizedRunId = runId.trim();
+  if (!normalizedRunId) return null;
+  const row = scalar<BackgroundRunRow | null>(
+    `
+      SELECT *
+      FROM background_runs
+      WHERE id = ?1
+      LIMIT 1
+    `,
+    normalizedRunId,
+  );
+  return row ? backgroundRunRowToRecord(row) : null;
+}
+
+export function getBackgroundRunByChildExternalSessionId(
+  runtime: string,
+  childExternalSessionId: string,
+): BackgroundRunRecord | null {
+  const normalizedRuntime = runtime.trim();
+  const normalizedChildExternalSessionId = childExternalSessionId.trim();
+  if (!normalizedRuntime || !normalizedChildExternalSessionId) return null;
+  const row = scalar<BackgroundRunRow | null>(
+    `
+      SELECT *
+      FROM background_runs
+      WHERE runtime = ?1
+        AND child_external_session_id = ?2
+      LIMIT 1
+    `,
+    normalizedRuntime,
+    normalizedChildExternalSessionId,
+  );
+  return row ? backgroundRunRowToRecord(row) : null;
+}
+
+export function listBackgroundRunsForParentSession(sessionId: string, limit = 50): Array<BackgroundRunRecord> {
+  const normalizedSessionId = sessionId.trim();
+  if (!normalizedSessionId) return [];
+  const normalizedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+  const rows = allRows<BackgroundRunRow>(
+    `
+      SELECT *
+      FROM background_runs
+      WHERE parent_session_id = ?1
+      ORDER BY created_at DESC
+      LIMIT ?2
+    `,
+    normalizedSessionId,
+    normalizedLimit,
+  );
+  return rows.map(backgroundRunRowToRecord);
+}
+
+export function setBackgroundRunStatus(input: {
+  runId: string;
+  status: BackgroundRunStatus;
+  updatedAt?: number;
+  startedAt?: number | null;
+  completedAt?: number | null;
+  prompt?: string | null;
+  resultSummary?: string | null;
+  error?: string | null;
+}): BackgroundRunRecord | null {
+  const existing = getBackgroundRunById(input.runId);
+  if (!existing) return null;
+
+  const updatedAt = input.updatedAt ?? nowMs();
+  const startedAt =
+    typeof input.startedAt === "undefined"
+      ? toMillisOrNull(existing.startedAt)
+      : input.startedAt;
+  const completedAt =
+    typeof input.completedAt === "undefined"
+      ? toMillisOrNull(existing.completedAt)
+      : input.completedAt;
+  const prompt = typeof input.prompt === "undefined" ? existing.prompt : input.prompt ?? "";
+  const resultSummary =
+    typeof input.resultSummary === "undefined" ? existing.resultSummary : input.resultSummary;
+  const error = typeof input.error === "undefined" ? existing.error : input.error;
+
+  sqlite
+    .query(
+      `
+      UPDATE background_runs
+      SET
+        status = ?2,
+        prompt = ?3,
+        result_summary = ?4,
+        error = ?5,
+        updated_at = ?6,
+        started_at = ?7,
+        completed_at = ?8
+      WHERE id = ?1
+    `,
+    )
+    .run(existing.id, input.status, prompt, resultSummary, error, updatedAt, startedAt, completedAt);
+
+  return getBackgroundRunById(existing.id);
 }
 
 export function getDashboardBootstrap(): DashboardBootstrap {

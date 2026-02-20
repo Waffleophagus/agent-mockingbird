@@ -37,10 +37,24 @@ type PromptInput = {
   signal?: AbortSignal;
 };
 
+type PromptAsyncInput = {
+  path: { id: string };
+  body?: {
+    model?: {
+      providerID?: string;
+      modelID?: string;
+    };
+    parts?: Array<{ type: string; text?: string }>;
+  };
+  signal?: AbortSignal;
+};
+
 interface MockClient {
   session: {
     create: (input: unknown) => Promise<unknown>;
     prompt: (input: PromptInput) => Promise<unknown>;
+    promptAsync: (input: PromptAsyncInput) => Promise<unknown>;
+    status: (input: unknown) => Promise<unknown>;
     get: (input: unknown) => Promise<unknown>;
     abort: (input: unknown) => Promise<unknown>;
     summarize: (input: unknown) => Promise<unknown>;
@@ -106,6 +120,38 @@ type RuntimeCtor = new (input: {
     sessionId: string;
     messages: Array<{ id: string; role: "user" | "assistant"; content: string }>;
   }>;
+  spawnBackgroundSession: (input: {
+    parentSessionId: string;
+    title?: string;
+    requestedBy?: string;
+    prompt?: string;
+  }) => Promise<{
+    runId: string;
+    parentSessionId: string;
+    parentExternalSessionId: string;
+    childExternalSessionId: string;
+    status: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    error: string | null;
+  }>;
+  promptBackgroundAsync: (input: {
+    runId: string;
+    content: string;
+    model?: string;
+    system?: string;
+    agent?: string;
+    noReply?: boolean;
+  }) => Promise<{
+    runId: string;
+    status: string;
+  }>;
+  getBackgroundStatus: (runId: string) => Promise<{
+    runId: string;
+    status: string;
+    completedAt: string | null;
+  } | null>;
+  abortBackground: (runId: string) => Promise<boolean>;
 };
 
 let repository: RepositoryApi;
@@ -173,13 +219,15 @@ function assistantResponse(sessionID: string, text: string) {
 
 function createMockClient(input: {
   prompt: (request: PromptInput) => Promise<unknown>;
-  create?: () => Promise<unknown>;
+  create?: (request: unknown) => Promise<unknown>;
+  promptAsync?: (request: PromptAsyncInput) => Promise<unknown>;
+  status?: () => Promise<unknown>;
 }): MockClient {
   let createCount = 0;
   return {
     session: {
-      create: async () => {
-        if (input.create) return input.create();
+      create: async (request) => {
+        if (input.create) return input.create(request);
         createCount += 1;
         return {
           data: {
@@ -189,6 +237,16 @@ function createMockClient(input: {
         };
       },
       prompt: input.prompt,
+      promptAsync: async (request) => {
+        if (input.promptAsync) return input.promptAsync(request);
+        return { data: undefined };
+      },
+      status: async () => {
+        if (input.status) return input.status();
+        return {
+          data: {},
+        };
+      },
       get: async () => ({
         data: {
           id: "ses-1",
@@ -463,6 +521,121 @@ describe("opencode runtime failover contract", () => {
     await expect(runtime.sendUserMessage({ sessionId: "main", content: "hello" })).rejects.toBeInstanceOf(
       RuntimeProviderRateLimitError,
     );
+  });
+
+  test("spawns a background child session with parent linkage", async () => {
+    const createBodies: Array<Record<string, unknown>> = [];
+    let createCount = 0;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        create: async (request) => {
+          const body = ((request as { body?: Record<string, unknown> }).body ?? {}) as Record<string, unknown>;
+          createBodies.push(body);
+          createCount += 1;
+          return {
+            data: {
+              id: `ses-${createCount}`,
+              title: createCount === 1 ? "main" : "background",
+            },
+          };
+        },
+        prompt: async (request) => assistantResponse(request.path.id, "OK"),
+      }),
+    );
+
+    const spawned = await runtime.spawnBackgroundSession({
+      parentSessionId: "main",
+      title: "Planner child",
+      requestedBy: "test",
+    });
+
+    expect(spawned.parentSessionId).toBe("main");
+    expect(spawned.parentExternalSessionId).toBe("ses-1");
+    expect(spawned.childExternalSessionId).toBe("ses-2");
+    expect(spawned.status).toBe("created");
+    expect(createBodies[1]?.parentID).toBe("ses-1");
+  });
+
+  test("dispatches async background prompt and completes when session becomes idle", async () => {
+    let createCount = 0;
+    let statusType: "busy" | "idle" = "busy";
+    const asyncPrompts: Array<PromptAsyncInput> = [];
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        create: async () => {
+          createCount += 1;
+          return {
+            data: {
+              id: `ses-${createCount}`,
+              title: createCount === 1 ? "main" : "background",
+            },
+          };
+        },
+        prompt: async (request) => assistantResponse(request.path.id, "OK"),
+        promptAsync: async (request) => {
+          asyncPrompts.push(request);
+          return { data: undefined };
+        },
+        status: async () => ({
+          data: {
+            "ses-2": {
+              type: statusType,
+            },
+          },
+        }),
+      }),
+    );
+
+    const spawned = await runtime.spawnBackgroundSession({
+      parentSessionId: "main",
+      title: "Planner child",
+    });
+
+    const running = await runtime.promptBackgroundAsync({
+      runId: spawned.runId,
+      content: "Investigate and report back.",
+    });
+    expect(running.status).toBe("running");
+    expect(asyncPrompts.length).toBe(1);
+    expect(asyncPrompts[0]?.path.id).toBe("ses-2");
+    expect(asyncPrompts[0]?.body?.parts?.[0]?.text).toBe("Investigate and report back.");
+
+    statusType = "idle";
+    const completed = await runtime.getBackgroundStatus(spawned.runId);
+    expect(completed?.status).toBe("completed");
+    expect(completed?.completedAt).toBeTruthy();
+  });
+
+  test("aborts background runs against the child session id", async () => {
+    let createCount = 0;
+    const abortedSessionIds: Array<string> = [];
+    const client = createMockClient({
+      create: async () => {
+        createCount += 1;
+        return {
+          data: {
+            id: `ses-${createCount}`,
+            title: createCount === 1 ? "main" : "background",
+          },
+        };
+      },
+      prompt: async (request) => assistantResponse(request.path.id, "OK"),
+    });
+    client.session.abort = async (request) => {
+      abortedSessionIds.push((request as { path: { id: string } }).path.id);
+      return { data: true };
+    };
+
+    const runtime = createRuntimeWithClient(client);
+    const spawned = await runtime.spawnBackgroundSession({
+      parentSessionId: "main",
+      title: "Planner child",
+    });
+
+    const aborted = await runtime.abortBackground(spawned.runId);
+    expect(aborted).toBe(true);
+    expect(abortedSessionIds).toEqual(["ses-2"]);
   });
 
   test("health check runs prompt probe and serves cached result", async () => {
