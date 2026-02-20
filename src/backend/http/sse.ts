@@ -30,6 +30,10 @@ function toSseEventName(event: RuntimeEvent): string {
       return "session-compacted";
     case "session.run.error":
       return "session-error";
+    case "config.updated":
+      return "config-updated";
+    case "config.update.failed":
+      return "config-error";
     default:
       return "runtime-event";
   }

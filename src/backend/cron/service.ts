@@ -1,7 +1,7 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { CronTime, validateCronExpression } from "cron";
 
-import type { RuntimeEngine } from "../contracts/runtime";
+import { getConfigSnapshot } from "../config/service";
 import { env } from "../env";
 import { getCronHandler, listCronHandlerKeys } from "./handlers";
 import { ensureCronTables } from "./storage";
@@ -20,6 +20,7 @@ import type {
   CronStepKind,
   CronStepStatus,
 } from "./types";
+import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
 
 interface CronDefinitionRow {
@@ -211,7 +212,7 @@ function validateMode(input: {
 
 function computeBackoffMs(base: number, attempt: number): number {
   const cappedAttempt = Math.max(1, Math.min(10, attempt));
-  return Math.min(base * 2 ** (cappedAttempt - 1), 60 * 60 * 1000);
+  return Math.min(base * 2 ** (cappedAttempt - 1), getConfigSnapshot().config.runtime.cron.retryBackoffCapMs);
 }
 
 function renderTemplate(template: string, ctx: Record<string, unknown>): string {
@@ -403,8 +404,8 @@ export class CronService {
       handlerKey: input.handlerKey?.trim() ?? null,
       agentPromptTemplate: input.agentPromptTemplate?.trim() ?? null,
       agentModelOverride: input.agentModelOverride?.trim() ?? null,
-      maxAttempts: Math.max(1, input.maxAttempts ?? 3),
-      retryBackoffMs: Math.max(1_000, input.retryBackoffMs ?? 30_000),
+      maxAttempts: Math.max(1, input.maxAttempts ?? getConfigSnapshot().config.runtime.cron.defaultMaxAttempts),
+      retryBackoffMs: Math.max(1_000, input.retryBackoffMs ?? getConfigSnapshot().config.runtime.cron.defaultRetryBackoffMs),
       payload: normalizePayload(input.payload),
     };
 

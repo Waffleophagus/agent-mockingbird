@@ -9,6 +9,9 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/workspace/
+data/wafflebot.config.json
+data/wafflebot.config.json.bak
+wafflebot.config.json
 
 # code coverage
 coverage

@@ -1,23 +1,20 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 
+import { sqlite } from "./client";
 import type {
   ChatMessage,
   DashboardBootstrap,
   HeartbeatSnapshot,
   MessageMemoryTrace,
   SessionSummary,
-  SpecialistAgent,
   UsageSnapshot,
 } from "../../types/dashboard";
+import { getConfig as getManagedConfig } from "../config/service";
 import { clearCronTables } from "../cron/storage";
-import { DEFAULT_AGENTS, DEFAULT_MCPS, DEFAULT_SESSIONS, DEFAULT_SKILLS } from "../defaults";
-import { env } from "../env";
-import { sqlite } from "./client";
+import { DEFAULT_SESSIONS } from "../defaults";
 import { clearRunTables } from "../run/storage";
 
-type RuntimeConfigKey = "skills" | "mcps" | "agents" | "sessionBindings";
 type RuntimeEventSource = "api" | "runtime" | "scheduler" | "system";
-type RuntimeSessionBindings = Record<string, string>;
 
 interface SessionRow {
   id: string;
@@ -53,14 +50,8 @@ interface UsageAggregateRow {
   cost_micros: number;
 }
 
-interface ConfigRow {
-  value_json: string;
-}
-
 const nowMs = () => Date.now();
 const toIso = (millis: number) => new Date(millis).toISOString();
-const normalizeStringList = (values: string[]) =>
-  [...new Set(values.map(value => value.trim()).filter(Boolean))];
 const sessionIdPrefix = "session";
 
 function scalar<T>(query: string, ...bindings: SQLQueryBindings[]): T {
@@ -108,37 +99,10 @@ function ensureAuxiliaryTables() {
 
 ensureAuxiliaryTables();
 
-function readConfig<T>(key: RuntimeConfigKey, fallback: T): T {
-  const row = scalar<ConfigRow | null>("SELECT value_json FROM runtime_config WHERE key = ?1", key);
-  if (!row) return fallback;
-  try {
-    return JSON.parse(row.value_json) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeConfig(key: RuntimeConfigKey, value: unknown, updatedAt: number) {
-  sqlite
-    .query(
-      `
-      INSERT INTO runtime_config (key, value_json, updated_at)
-      VALUES (?1, ?2, ?3)
-      ON CONFLICT(key) DO UPDATE SET
-        value_json = excluded.value_json,
-        updated_at = excluded.updated_at
-    `,
-    )
-    .run(key, JSON.stringify(value), updatedAt);
-}
-
-function setConfig(key: RuntimeConfigKey, values: string[]) {
-  writeConfig(key, normalizeStringList(values), nowMs());
-}
-
 function getDefaultSessionModel() {
-  const provider = env.WAFFLEBOT_OPENCODE_PROVIDER_ID.trim();
-  const model = env.WAFFLEBOT_OPENCODE_MODEL_ID.trim();
+  const runtimeConfig = getManagedConfig();
+  const provider = runtimeConfig.runtime.opencode.providerId.trim();
+  const model = runtimeConfig.runtime.opencode.modelId.trim();
   if (provider && model) {
     return `${provider}/${model}`;
   }
@@ -179,10 +143,6 @@ function seedDefaultState(createdAt: number) {
       messageCount: 0,
     });
   }
-
-  writeConfig("skills", DEFAULT_SKILLS, createdAt);
-  writeConfig("mcps", DEFAULT_MCPS, createdAt);
-  writeConfig("agents", DEFAULT_AGENTS, createdAt);
 
   sqlite
     .query(
@@ -242,6 +202,7 @@ export function resetDatabaseToDefaults(): DashboardBootstrap {
     sqlite.query("DELETE FROM usage_events").run();
     sqlite.query("DELETE FROM heartbeat_events").run();
     sqlite.query("DELETE FROM runtime_config").run();
+    sqlite.query("DELETE FROM runtime_session_bindings").run();
     sqlite.query("DELETE FROM sessions").run();
     seedDefaultState(nowMs());
   });
@@ -458,47 +419,69 @@ export function recordHeartbeat(source: RuntimeEventSource, online = true, creat
 }
 
 export function getConfig() {
+  const managedConfig = getManagedConfig();
   return {
-    skills: readConfig<string[]>("skills", DEFAULT_SKILLS),
-    mcps: readConfig<string[]>("mcps", DEFAULT_MCPS),
-    agents: readConfig<SpecialistAgent[]>("agents", DEFAULT_AGENTS),
+    skills: managedConfig.ui.skills,
+    mcps: managedConfig.ui.mcps,
+    agents: managedConfig.ui.agents,
   };
 }
 
-export function setSkillsConfig(skills: string[]) {
-  setConfig("skills", skills);
-  return readConfig<string[]>("skills", DEFAULT_SKILLS);
-}
-
-export function setMcpsConfig(mcps: string[]) {
-  setConfig("mcps", mcps);
-  return readConfig<string[]>("mcps", DEFAULT_MCPS);
-}
-
-function getSessionBindings() {
-  return readConfig<RuntimeSessionBindings>("sessionBindings", {});
-}
-
 export function getRuntimeSessionBinding(runtime: string, sessionId: string): string | null {
-  const bindings = getSessionBindings();
-  return bindings[`${runtime}:${sessionId}`] ?? null;
+  const normalizedRuntime = runtime.trim();
+  const normalizedSessionId = sessionId.trim();
+  if (!normalizedRuntime || !normalizedSessionId) return null;
+  const row = scalar<{ external_session_id: string } | null>(
+    `
+      SELECT external_session_id
+      FROM runtime_session_bindings
+      WHERE runtime = ?1
+        AND session_id = ?2
+      LIMIT 1
+    `,
+    normalizedRuntime,
+    normalizedSessionId,
+  );
+  return row?.external_session_id ?? null;
 }
 
 export function getLocalSessionIdByRuntimeBinding(runtime: string, externalSessionId: string): string | null {
-  const bindings = getSessionBindings();
-  const prefix = `${runtime}:`;
-  for (const [key, value] of Object.entries(bindings)) {
-    if (!key.startsWith(prefix)) continue;
-    if (value !== externalSessionId) continue;
-    return key.slice(prefix.length);
-  }
-  return null;
+  const normalizedRuntime = runtime.trim();
+  const normalizedExternalSessionId = externalSessionId.trim();
+  if (!normalizedRuntime || !normalizedExternalSessionId) return null;
+  const row = scalar<{ session_id: string } | null>(
+    `
+      SELECT session_id
+      FROM runtime_session_bindings
+      WHERE runtime = ?1
+        AND external_session_id = ?2
+      LIMIT 1
+    `,
+    normalizedRuntime,
+    normalizedExternalSessionId,
+  );
+  return row?.session_id ?? null;
 }
 
 export function setRuntimeSessionBinding(runtime: string, sessionId: string, externalSessionId: string) {
-  const bindings = getSessionBindings();
-  bindings[`${runtime}:${sessionId}`] = externalSessionId;
-  writeConfig("sessionBindings", bindings, nowMs());
+  const normalizedRuntime = runtime.trim();
+  const normalizedSessionId = sessionId.trim();
+  const normalizedExternalSessionId = externalSessionId.trim();
+  if (!normalizedRuntime || !normalizedSessionId || !normalizedExternalSessionId) {
+    return;
+  }
+  const updatedAt = nowMs();
+  sqlite
+    .query(
+      `
+      INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+      VALUES (?1, ?2, ?3, ?4)
+      ON CONFLICT(runtime, session_id) DO UPDATE SET
+        external_session_id = excluded.external_session_id,
+        updated_at = excluded.updated_at
+    `,
+    )
+    .run(normalizedRuntime, normalizedSessionId, normalizedExternalSessionId, updatedAt);
 }
 
 export function getDashboardBootstrap(): DashboardBootstrap {

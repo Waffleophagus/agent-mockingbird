@@ -1,3 +1,4 @@
+import type { RuntimeEngine } from "../../contracts/runtime";
 import {
   createSession,
   getDashboardBootstrap,
@@ -8,7 +9,7 @@ import {
 } from "../../db/repository";
 import { listOpencodeModelOptions } from "../../opencode/models";
 
-export function createDashboardRoutes() {
+export function createDashboardRoutes(runtime: RuntimeEngine) {
   return {
     "/api/health": () =>
       Response.json({
@@ -17,6 +18,29 @@ export function createDashboardRoutes() {
       }),
 
     "/api/dashboard/bootstrap": () => Response.json(getDashboardBootstrap()),
+
+    "/api/runtime/health": {
+      GET: async (req: Request) => {
+        if (!runtime.checkHealth) {
+          return Response.json({ error: "Runtime health checks are not supported by this runtime" }, { status: 501 });
+        }
+
+        const force = (() => {
+          const value = new URL(req.url).searchParams.get("force");
+          if (!value) return false;
+          const normalized = value.trim().toLowerCase();
+          return normalized === "1" || normalized === "true" || normalized === "yes";
+        })();
+
+        try {
+          const health = await runtime.checkHealth({ force });
+          return Response.json({ health }, { status: health.ok ? 200 : 503 });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Runtime health check failed";
+          return Response.json({ error: message }, { status: 503 });
+        }
+      },
+    },
 
     "/api/sessions": {
       GET: () => Response.json({ sessions: listSessions() }),

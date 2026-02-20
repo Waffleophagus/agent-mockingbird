@@ -73,15 +73,27 @@ bun run memory:lint
 
 Wafflebot runs with an OpenCode-backed runtime that forwards prompts to OpenCode and stores mirrored messages locally.
 
-OpenCode runtime environment variables:
+Runtime configuration is stored in JSON (`./data/wafflebot.config.json` by default). On first boot, wafflebot migrates legacy env/DB runtime settings into this file.
+Example config template: `wafflebot.config.example.json`.
 
-- `WAFFLEBOT_OPENCODE_BASE_URL` (default `http://127.0.0.1:4096`)
-- `WAFFLEBOT_OPENCODE_PROVIDER_ID` (default `opencode`)
-- `WAFFLEBOT_OPENCODE_MODEL_ID` (default `kimi-k2.5-free`)
-- `WAFFLEBOT_OPENCODE_SMALL_MODEL` (default `opencode/kimi-k2.5-free`)
-- `WAFFLEBOT_OPENCODE_TIMEOUT_MS` (default `120000`)
-- `WAFFLEBOT_OPENCODE_STREAM_PARTS` (default `false`; enables token/part SSE updates)
-- `WAFFLEBOT_OPENCODE_DIRECTORY` (optional, passed as `directory` query param)
+Config API:
+
+- `GET /api/config`
+- `PATCH /api/config` (partial update with optimistic `expectedHash`)
+- `PUT /api/config` (full replace with optimistic `expectedHash`)
+
+After every config change, wafflebot performs:
+
+- schema validation
+- semantic provider/model validation via OpenCode `config/providers`
+- gateway smoke test prompt (expects an `OK` response pattern)
+
+If any validation step fails, the config change is not persisted.
+
+Auth and path env variables:
+
+- `WAFFLEBOT_DB_PATH` (default `./data/wafflebot.db`)
+- `WAFFLEBOT_CONFIG_PATH` (default `./data/wafflebot.config.json`)
 - `WAFFLEBOT_OPENCODE_AUTH_HEADER` (optional full `Authorization` header)
 - `WAFFLEBOT_OPENCODE_USERNAME` / `WAFFLEBOT_OPENCODE_PASSWORD` (optional Basic auth fallback)
 

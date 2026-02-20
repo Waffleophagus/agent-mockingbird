@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 const nowMs = sql`(strftime('%s', 'now') * 1000)`;
 
@@ -63,3 +63,18 @@ export const runtimeConfig = sqliteTable("runtime_config", {
   valueJson: text("value_json").notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
 });
+
+export const runtimeSessionBindings = sqliteTable(
+  "runtime_session_bindings",
+  {
+    runtime: text("runtime").notNull(),
+    sessionId: text("session_id").notNull(),
+    externalSessionId: text("external_session_id").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  table => [
+    primaryKey({ columns: [table.runtime, table.sessionId] }),
+    index("runtime_session_bindings_external_idx").on(table.runtime, table.externalSessionId),
+    index("runtime_session_bindings_updated_idx").on(table.updatedAt),
+  ],
+);

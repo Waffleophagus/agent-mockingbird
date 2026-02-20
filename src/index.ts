@@ -1,7 +1,9 @@
 import { serve } from "bun";
 
+import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { createHeartbeatUpdatedEvent, createUsageUpdatedEvent } from "./backend/contracts/events";
 import { CronService } from "./backend/cron/service";
+import "./backend/db/migrate";
 import {
   ensureSeedData,
   getHeartbeatSnapshot,
@@ -17,6 +19,8 @@ import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
 import index from "./index.html";
 
 ensureSeedData();
+ensureConfigFile();
+const configSnapshot = getConfigSnapshot();
 
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
@@ -75,6 +79,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 console.log("[startup] wafflebot runtime", {
   nodeEnv: env.NODE_ENV,
+  config: {
+    path: configSnapshot.path,
+    hash: configSnapshot.hash,
+  },
   opencode: runtimeInfo.opencode,
   cron: {
     enabled: env.WAFFLEBOT_CRON_ENABLED,

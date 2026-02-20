@@ -17,10 +17,10 @@ export function createApiRoutes(input: {
   runService: RunService;
 }) {
   return {
-    ...createDashboardRoutes(),
+    ...createDashboardRoutes(input.runtime),
     ...createChatRoutes(input.runtime),
     ...createRunRoutes(input.runService),
-    ...createConfigRoutes(),
+    ...createConfigRoutes(input.eventStream),
     ...createCronRoutes(input.cronService),
     ...createMemoryRoutes(),
     ...createEventRoutes(input.eventStream),

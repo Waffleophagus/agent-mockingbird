@@ -15,6 +15,13 @@
       "when": 1771401600000,
       "tag": "0001_cron_memory_aux",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771872000000,
+      "tag": "0002_runtime_session_bindings",
+      "breakpoints": true
     }
   ]
 }

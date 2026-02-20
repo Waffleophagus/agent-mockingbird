@@ -2,6 +2,20 @@ import type { RuntimeEngine } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
 import { RuntimeSessionBusyError, RuntimeSessionNotFoundError, RuntimeTurnTimeoutError } from "../../runtime";
 
+function preflightFailureStatusCode(name: string | undefined, message: string | undefined) {
+  if (
+    name === "RuntimeProviderAuthError" ||
+    name === "RuntimeProviderQuotaError" ||
+    name === "RuntimeProviderRateLimitError"
+  ) {
+    return 502;
+  }
+  if (message && /timed out/i.test(message)) {
+    return 504;
+  }
+  return 503;
+}
+
 export function createChatRoutes(runtime: RuntimeEngine) {
   return {
     "/api/chat": {
@@ -10,6 +24,26 @@ export function createChatRoutes(runtime: RuntimeEngine) {
         const content = body.content?.trim();
         if (!body.sessionId || !content) {
           return Response.json({ error: "sessionId and content are required" }, { status: 400 });
+        }
+
+        if (runtime.checkHealth) {
+          try {
+            const health = await runtime.checkHealth();
+            if (!health.ok) {
+              const message = health.error?.message ?? "Runtime health check failed";
+              const status = preflightFailureStatusCode(health.error?.name, health.error?.message);
+              return Response.json(
+                {
+                  error: `Runtime preflight failed: ${message}`,
+                  health,
+                },
+                { status },
+              );
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Runtime health check failed";
+            return Response.json({ error: `Runtime preflight failed: ${message}` }, { status: 503 });
+          }
         }
 
         let ack;

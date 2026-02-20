@@ -12,9 +12,26 @@ export interface RuntimeMessageAck {
   messages: ChatMessage[];
 }
 
+export interface RuntimeHealthCheckInput {
+  force?: boolean;
+}
+
+export interface RuntimeHealthCheckResult {
+  ok: boolean;
+  checkedAt: string;
+  latencyMs: number | null;
+  fromCache: boolean;
+  cacheTtlMs: number;
+  cacheExpiresAt: string;
+  probeSessionId: string | null;
+  responseText: string | null;
+  error: { name: string; message: string } | null;
+}
+
 export interface RuntimeEngine {
   sendUserMessage(input: SendUserMessageInput): Promise<RuntimeMessageAck>;
   subscribe(onEvent: (event: RuntimeEvent) => void): () => void;
+  checkHealth?(input?: RuntimeHealthCheckInput): Promise<RuntimeHealthCheckResult>;
   abortSession?(sessionId: string): Promise<boolean>;
   compactSession?(sessionId: string): Promise<boolean>;
 }

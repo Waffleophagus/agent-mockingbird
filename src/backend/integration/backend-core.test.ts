@@ -6,9 +6,11 @@ import path from "node:path";
 const testRoot = mkdtempSync(path.join(tmpdir(), "wafflebot-backend-test-"));
 const testDbPath = path.join(testRoot, "wafflebot.test.db");
 const testWorkspacePath = path.join(testRoot, "workspace");
+const testConfigPath = path.join(testRoot, "wafflebot.test.config.json");
 
 process.env.NODE_ENV = "test";
 process.env.WAFFLEBOT_DB_PATH = testDbPath;
+process.env.WAFFLEBOT_CONFIG_PATH = testConfigPath;
 process.env.WAFFLEBOT_MEMORY_WORKSPACE_DIR = testWorkspacePath;
 process.env.WAFFLEBOT_MEMORY_EMBED_PROVIDER = "none";
 process.env.WAFFLEBOT_MEMORY_ENABLED = "true";
@@ -64,6 +66,11 @@ interface MemoryServiceApi {
 interface RuntimeStub {
   sendUserMessage: (input: { sessionId: string; content: string; metadata?: Record<string, unknown> }) => Promise<unknown>;
   subscribe: (_listener: (event: unknown) => void) => () => void;
+  checkHealth?: (_input?: { force?: boolean }) => Promise<{
+    ok: boolean;
+    error: { name: string; message: string } | null;
+    fromCache: boolean;
+  }>;
   abortSession?: (sessionId: string) => Promise<boolean>;
   compactSession?: (sessionId: string) => Promise<boolean>;
 }
@@ -215,10 +222,14 @@ afterAll(() => {
 
 function createRuntimeStub(
   impl: (input: { sessionId: string; content: string; metadata?: Record<string, unknown> }) => Promise<unknown>,
+  options?: {
+    checkHealth?: RuntimeStub["checkHealth"];
+  },
 ) {
   return {
     sendUserMessage: impl,
     subscribe: () => () => {},
+    checkHealth: options?.checkHealth,
     abortSession: async () => true,
     compactSession: async () => true,
   };
@@ -226,8 +237,11 @@ function createRuntimeStub(
 
 function createRouteHarness(
   runtimeImpl: (input: { sessionId: string; content: string; metadata?: Record<string, unknown> }) => Promise<unknown>,
+  options?: {
+    checkHealth?: RuntimeStub["checkHealth"];
+  },
 ) {
-  const runtime = createRuntimeStub(runtimeImpl);
+  const runtime = createRuntimeStub(runtimeImpl, options);
   const cronService = new CronService(runtime);
   const runService = new RunService(runtime);
   runService.start();
@@ -306,6 +320,41 @@ describe("chat routes", () => {
     expect(payload.error).toBe("Unknown session");
   });
 
+  test("POST /api/chat fails fast when runtime preflight is unhealthy", async () => {
+    const session = repository.createSession({ title: "Preflight Failure Session" });
+    let sendCalled = false;
+    const { routes } = createRouteHarness(
+      async () => {
+        sendCalled = true;
+        return { sessionId: session.id, messages: [] };
+      },
+      {
+        checkHealth: async () => ({
+          ok: false,
+          fromCache: false,
+          error: {
+            name: "RuntimeProviderAuthError",
+            message: "Provider authentication failed. Check API key or provider credentials.",
+          },
+        }),
+      },
+    );
+
+    const route = routes["/api/chat"] as { POST: (req: Request) => Promise<Response> };
+    const response = await route.POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session.id, content: "hello runtime" }),
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain("Runtime preflight failed");
+    expect(sendCalled).toBe(false);
+  });
+
   test("POST /api/chat/:id/abort returns aborted=true", async () => {
     const session = repository.createSession({ title: "Abort Session" });
     const { routes } = createRouteHarness(async () => ({ sessionId: session.id, messages: [] }));
@@ -340,6 +389,106 @@ describe("chat routes", () => {
     expect(response.status).toBe(200);
     const payload = (await response.json()) as { compacted: boolean };
     expect(payload.compacted).toBe(true);
+  });
+});
+
+describe("runtime health route", () => {
+  test("GET /api/runtime/health returns probe snapshot", async () => {
+    let receivedForce = false;
+    const { routes } = createRouteHarness(
+      async () => ({ sessionId: "main", messages: [] }),
+      {
+        checkHealth: async (input) => {
+          receivedForce = input?.force === true;
+          return {
+            ok: true,
+            fromCache: false,
+            error: null,
+          };
+        },
+      },
+    );
+
+    const route = routes["/api/runtime/health"] as { GET: (req: Request) => Promise<Response> };
+    const response = await route.GET(new Request("http://localhost/api/runtime/health?force=1"));
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { health: { ok: boolean } };
+    expect(payload.health.ok).toBe(true);
+    expect(receivedForce).toBe(true);
+  });
+
+  test("GET /api/runtime/health returns 503 for unhealthy runtime", async () => {
+    const { routes } = createRouteHarness(
+      async () => ({ sessionId: "main", messages: [] }),
+      {
+        checkHealth: async () => ({
+          ok: false,
+          fromCache: false,
+          error: {
+            name: "RuntimeProviderQuotaError",
+            message: "Provider quota exceeded. Add credits or switch provider/model.",
+          },
+        }),
+      },
+    );
+
+    const route = routes["/api/runtime/health"] as { GET: (req: Request) => Promise<Response> };
+    const response = await route.GET(new Request("http://localhost/api/runtime/health"));
+
+    expect(response.status).toBe(503);
+    const payload = (await response.json()) as { health: { ok: boolean } };
+    expect(payload.health.ok).toBe(false);
+  });
+});
+
+describe("config routes", () => {
+  test("GET /api/config/agents returns agents and hash", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/config/agents"] as { GET: (req: Request) => Response };
+    const response = route.GET(new Request("http://localhost/api/config/agents"));
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      agents?: Array<{ id: string }>;
+      hash?: string;
+    };
+    expect(Array.isArray(payload.agents)).toBe(true);
+    expect(typeof payload.hash).toBe("string");
+  });
+
+  test("PUT /api/config/agents rejects updates when semantic validation fails", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/config/agents"] as {
+      PUT: (req: Request) => Promise<Response>;
+    };
+    const response = await route.PUT(
+      new Request("http://localhost/api/config/agents", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runSmokeTest: false,
+          agents: [
+            {
+              id: "eval-agent",
+              name: "Eval Agent",
+              specialty: "MVP checks",
+              summary: "Runs evaluation tasks.",
+              model: "test-provider/test-model",
+              status: "available",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    const payload = (await response.json()) as {
+      stage?: string;
+      error?: string;
+    };
+    expect(payload.stage === "semantic" || payload.stage === "smoke").toBe(true);
+    expect(typeof payload.error).toBe("string");
   });
 });
 

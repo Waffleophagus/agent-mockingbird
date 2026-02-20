@@ -1,6 +1,6 @@
 import { OpencodeRuntime } from "./opencodeRuntime";
+import { getConfigSnapshot } from "../config/service";
 import type { RuntimeEngine } from "../contracts/runtime";
-import { env } from "../env";
 import { getOpencodeConnectionInfo } from "../opencode/client";
 
 export interface RuntimeStartupInfo {
@@ -8,6 +8,7 @@ export interface RuntimeStartupInfo {
     baseUrl: string;
     providerId: string;
     modelId: string;
+    fallbackModels: Array<string>;
     smallModel: string;
     timeoutMs: number;
     promptTimeoutMs: number;
@@ -17,22 +18,35 @@ export interface RuntimeStartupInfo {
 }
 
 export function createRuntime(): RuntimeEngine {
+  const config = getConfigSnapshot().config;
   return new OpencodeRuntime({
-    defaultProviderId: env.WAFFLEBOT_OPENCODE_PROVIDER_ID,
-    defaultModelId: env.WAFFLEBOT_OPENCODE_MODEL_ID,
+    defaultProviderId: config.runtime.opencode.providerId,
+    defaultModelId: config.runtime.opencode.modelId,
+    fallbackModelRefs: config.runtime.opencode.fallbackModels,
+    getRuntimeConfig: () => getConfigSnapshot().config.runtime.opencode,
+    getEnabledSkills: () => getConfigSnapshot().config.ui.skills,
+    getEnabledMcps: () => getConfigSnapshot().config.ui.mcps,
+    getConfiguredMcpServers: () => getConfigSnapshot().config.ui.mcpServers,
+    getConfiguredAgents: () => getConfigSnapshot().config.ui.agents,
   });
 }
 
 export function getRuntimeStartupInfo(): RuntimeStartupInfo {
-  const connection = getOpencodeConnectionInfo();
+  const config = getConfigSnapshot().config;
+  const connection = getOpencodeConnectionInfo({
+    baseUrl: config.runtime.opencode.baseUrl,
+    timeoutMs: config.runtime.opencode.timeoutMs,
+    directory: config.runtime.opencode.directory,
+  });
   return {
     opencode: {
       baseUrl: connection.baseUrl,
-      providerId: env.WAFFLEBOT_OPENCODE_PROVIDER_ID,
-      modelId: env.WAFFLEBOT_OPENCODE_MODEL_ID,
-      smallModel: env.WAFFLEBOT_OPENCODE_SMALL_MODEL,
+      providerId: config.runtime.opencode.providerId,
+      modelId: config.runtime.opencode.modelId,
+      fallbackModels: config.runtime.opencode.fallbackModels,
+      smallModel: config.runtime.opencode.smallModel,
       timeoutMs: connection.timeoutMs,
-      promptTimeoutMs: env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS,
+      promptTimeoutMs: config.runtime.opencode.promptTimeoutMs,
       directoryConfigured: connection.directoryConfigured,
       authConfigured: connection.authConfigured,
     },

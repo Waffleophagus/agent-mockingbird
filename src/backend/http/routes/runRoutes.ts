@@ -1,9 +1,11 @@
+import { getConfigSnapshot } from "../../config/service";
 import { getSessionById } from "../../db/repository";
 import type { RunService } from "../../run/service";
 import type { AgentRunEvent } from "../../run/types";
 
-const RUN_EVENT_STREAM_HEARTBEAT_MS = 15_000;
-const RUN_EVENT_STREAM_PAGE_SIZE = 200;
+function runStreamConfig() {
+  return getConfigSnapshot().config.runtime.runStream;
+}
 
 function parseAfterSeq(req: Request) {
   const url = new URL(req.url);
@@ -179,7 +181,7 @@ export function createRunRoutes(runService: RunService) {
               const replay = runService.listRunEvents({
                 runId,
                 afterSeq: cursor,
-                limit: RUN_EVENT_STREAM_PAGE_SIZE,
+                limit: runStreamConfig().replayPageSize,
               });
               if (!replay.events.length) break;
               for (const event of replay.events) {
@@ -203,7 +205,7 @@ export function createRunRoutes(runService: RunService) {
               } catch {
                 close();
               }
-            }, RUN_EVENT_STREAM_HEARTBEAT_MS);
+            }, runStreamConfig().heartbeatMs);
           },
           cancel() {
             close();

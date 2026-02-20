@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "runtime": {
+    "opencode": {
+      "baseUrl": "http://127.0.0.1:4096",
+      "providerId": "opencode",
+      "modelId": "kimi-k2.5-free",
+      "fallbackModels": [],
+      "smallModel": "opencode/kimi-k2.5-free",
+      "timeoutMs": 120000,
+      "promptTimeoutMs": 300000,
+      "runWaitTimeoutMs": 180000,
+      "directory": null
+    },
+    "smokeTest": {
+      "prompt": "Just respond \"OK\" to this to confirm the gateway is working.",
+      "expectedResponsePattern": "\\bok\\b"
+    },
+    "runStream": {
+      "heartbeatMs": 15000,
+      "replayPageSize": 200
+    },
+    "memory": {
+      "enabled": true,
+      "workspaceDir": "./data/workspace",
+      "embedProvider": "ollama",
+      "embedModel": "nomic-embed-text",
+      "ollamaBaseUrl": "http://127.0.0.1:11434",
+      "chunkTokens": 400,
+      "chunkOverlap": 80,
+      "maxResults": 6,
+      "minScore": 0.25,
+      "syncCooldownMs": 10000,
+      "toolMode": "hybrid",
+      "writePolicy": "conservative",
+      "minConfidence": 0.7
+    },
+    "cron": {
+      "defaultMaxAttempts": 3,
+      "defaultRetryBackoffMs": 30000,
+      "retryBackoffCapMs": 3600000
+    }
+  },
+  "ui": {
+    "skills": [],
+    "mcps": [],
+    "mcpServers": [],
+    "agents": []
+  }
+}

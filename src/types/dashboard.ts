@@ -47,6 +47,59 @@ export interface SpecialistAgent {
   status: "available" | "busy" | "offline";
 }
 
+export interface RuntimeSkill {
+  id: string;
+  name: string;
+  description: string;
+  location: string;
+  enabled: boolean;
+  managed: boolean;
+}
+
+export type RuntimeMcpStatus =
+  | "connected"
+  | "disabled"
+  | "failed"
+  | "needs_auth"
+  | "needs_client_registration"
+  | "unknown";
+
+export interface RuntimeMcp {
+  id: string;
+  enabled: boolean;
+  status: RuntimeMcpStatus;
+  error?: string;
+}
+
+export interface RuntimeAgent {
+  id: string;
+  mode: "subagent" | "primary" | "all";
+  description?: string;
+  model?: string;
+  native: boolean;
+  hidden: boolean;
+  enabled: boolean;
+}
+
+export type ConfiguredMcpServer =
+  | {
+      id: string;
+      type: "remote";
+      enabled: boolean;
+      url: string;
+      headers: Record<string, string>;
+      oauth: "auto" | "off";
+      timeoutMs?: number;
+    }
+  | {
+      id: string;
+      type: "local";
+      enabled: boolean;
+      command: string[];
+      environment: Record<string, string>;
+      timeoutMs?: number;
+    };
+
 export interface UsageSnapshot {
   requestCount: number;
   inputTokens: number;

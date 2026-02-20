@@ -11,6 +11,9 @@ import {
   RefreshCcw,
   Scissors,
   Send,
+  ShieldCheck,
+  SlidersHorizontal,
+  Trash2,
   Users,
   Wrench,
 } from "lucide-react";
@@ -38,17 +41,21 @@ import type {
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
+  ConfiguredMcpServer,
   SessionCompactedSnapshot,
   SessionRunErrorSnapshot,
   SessionRunStatusSnapshot,
   SessionSummary,
+  RuntimeAgent,
+  RuntimeMcp,
+  RuntimeSkill,
   SpecialistAgent,
   UsageSnapshot,
 } from "@/types/dashboard";
 import "@/index.css";
 
 const RUN_POLL_INTERVAL_MS = 350;
-const RUN_POLL_TIMEOUT_MS = 180_000;
+const DEFAULT_RUN_WAIT_TIMEOUT_MS = 180_000;
 
 type AgentRunState = "queued" | "running" | "completed" | "failed";
 
@@ -57,6 +64,17 @@ interface AgentRunSnapshot {
   sessionId: string;
   state: AgentRunState;
   error?: unknown;
+}
+
+interface ConfigSnapshotResponse {
+  hash?: string;
+  config?: {
+    runtime?: {
+      opencode?: {
+        runWaitTimeoutMs?: number;
+      };
+    };
+  };
 }
 
 function extractRunErrorMessage(error: unknown): string {
@@ -75,6 +93,7 @@ function extractRunErrorMessage(error: unknown): string {
 
 export function App() {
   type StreamStatus = "connecting" | "connected" | "reconnecting";
+  type DashboardPage = "chat" | "skills" | "mcp" | "agents";
 
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -89,12 +108,33 @@ export function App() {
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionError, setSessionError] = useState("");
   const [agents, setAgents] = useState<SpecialistAgent[]>([]);
+  const [dashboardPage, setDashboardPage] = useState<DashboardPage>("chat");
+  const [configHash, setConfigHash] = useState("");
   const [skillsDraft, setSkillsDraft] = useState("");
+  const [availableSkills, setAvailableSkills] = useState<RuntimeSkill[]>([]);
+  const [availableMcps, setAvailableMcps] = useState<RuntimeMcp[]>([]);
+  const [availableAgents, setAvailableAgents] = useState<RuntimeAgent[]>([]);
+  const [mcpServers, setMcpServers] = useState<ConfiguredMcpServer[]>([]);
   const [mcpsDraft, setMcpsDraft] = useState("");
+  const [skillInput, setSkillInput] = useState("");
+  const [mcpInput, setMcpInput] = useState("");
+  const [importSkillId, setImportSkillId] = useState("");
+  const [importSkillContent, setImportSkillContent] = useState("");
   const [isSavingSkills, setIsSavingSkills] = useState(false);
   const [isSavingMcps, setIsSavingMcps] = useState(false);
+  const [isSavingAgents, setIsSavingAgents] = useState(false);
+  const [isImportingSkill, setIsImportingSkill] = useState(false);
+  const [loadingSkillCatalog, setLoadingSkillCatalog] = useState(false);
+  const [loadingMcpCatalog, setLoadingMcpCatalog] = useState(false);
+  const [loadingAgentCatalog, setLoadingAgentCatalog] = useState(false);
   const [skillsError, setSkillsError] = useState("");
+  const [skillCatalogError, setSkillCatalogError] = useState("");
+  const [mcpCatalogError, setMcpCatalogError] = useState("");
   const [mcpsError, setMcpsError] = useState("");
+  const [mcpActionError, setMcpActionError] = useState("");
+  const [mcpActionBusyId, setMcpActionBusyId] = useState("");
+  const [agentsError, setAgentsError] = useState("");
+  const [agentCatalogError, setAgentCatalogError] = useState("");
   const [usage, setUsage] = useState<UsageSnapshot>({
     requestCount: 0,
     inputTokens: 0,
@@ -109,6 +149,7 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [draftMessage, setDraftMessage] = useState("");
   const [activeSend, setActiveSend] = useState<ActiveSend | null>(null);
+  const [runWaitTimeoutMs, setRunWaitTimeoutMs] = useState(DEFAULT_RUN_WAIT_TIMEOUT_MS);
   const [isAborting, setIsAborting] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
   const [chatControlError, setChatControlError] = useState("");
@@ -145,13 +186,25 @@ export function App() {
 
       setLoadingModels(true);
       try {
-        const [modelsResponse, memoryStatusResponse, memoryPolicyResponse, memoryActivityResponse] =
-          await Promise.all([
-            fetch("/api/opencode/models"),
-            fetch("/api/memory/status"),
-            fetch("/api/memory/policy"),
-            fetch("/api/memory/activity?limit=12"),
-          ]);
+        const [
+          modelsResponse,
+          memoryStatusResponse,
+          memoryPolicyResponse,
+          memoryActivityResponse,
+          configResponse,
+          skillsCatalogResponse,
+          mcpsCatalogResponse,
+          agentsCatalogResponse,
+        ] = await Promise.all([
+          fetch("/api/opencode/models"),
+          fetch("/api/memory/status"),
+          fetch("/api/memory/policy"),
+          fetch("/api/memory/activity?limit=12"),
+          fetch("/api/config"),
+          fetch("/api/config/skills/catalog"),
+          fetch("/api/config/mcps/catalog"),
+          fetch("/api/config/agents/catalog"),
+        ]);
         const modelsPayload = (await modelsResponse.json()) as { models?: ModelOption[]; error?: string };
         const memoryStatusPayload = (await memoryStatusResponse.json()) as {
           status?: MemoryStatusSnapshot;
@@ -165,6 +218,26 @@ export function App() {
           events?: MemoryWriteEvent[];
           error?: string;
         };
+        const configPayload = (await configResponse.json()) as ConfigSnapshotResponse;
+        const skillsCatalogPayload = (await skillsCatalogResponse.json()) as {
+          skills?: RuntimeSkill[];
+          enabled?: string[];
+          hash?: string;
+          error?: string;
+        };
+        const mcpsCatalogPayload = (await mcpsCatalogResponse.json()) as {
+          mcps?: RuntimeMcp[];
+          enabled?: string[];
+          servers?: ConfiguredMcpServer[];
+          hash?: string;
+          error?: string;
+        };
+        const agentsCatalogPayload = (await agentsCatalogResponse.json()) as {
+          agents?: RuntimeAgent[];
+          configured?: string[];
+          hash?: string;
+          error?: string;
+        };
         if (!alive) return;
 
         setModelOptions(modelsPayload.models ?? []);
@@ -172,6 +245,25 @@ export function App() {
         setMemoryStatus(memoryStatusPayload.status ?? null);
         setMemoryPolicy(memoryPolicyPayload.policy ?? null);
         setMemoryActivity(memoryActivityPayload.events ?? []);
+        setAvailableSkills(Array.isArray(skillsCatalogPayload.skills) ? skillsCatalogPayload.skills : []);
+        setAvailableMcps(Array.isArray(mcpsCatalogPayload.mcps) ? mcpsCatalogPayload.mcps : []);
+        setAvailableAgents(Array.isArray(agentsCatalogPayload.agents) ? agentsCatalogPayload.agents : []);
+        setMcpServers(Array.isArray(mcpsCatalogPayload.servers) ? mcpsCatalogPayload.servers : []);
+        if (Array.isArray(skillsCatalogPayload.enabled)) {
+          setSkillsDraft(skillsCatalogPayload.enabled.join("\n"));
+        }
+        if (Array.isArray(mcpsCatalogPayload.enabled)) {
+          setMcpsDraft(mcpsCatalogPayload.enabled.join("\n"));
+        }
+        setRunWaitTimeoutMs(
+          typeof configPayload.config?.runtime?.opencode?.runWaitTimeoutMs === "number"
+            ? configPayload.config.runtime.opencode.runWaitTimeoutMs
+            : DEFAULT_RUN_WAIT_TIMEOUT_MS,
+        );
+        setConfigHash(typeof configPayload.hash === "string" ? configPayload.hash : "");
+        setSkillCatalogError(skillsCatalogResponse.ok ? "" : (skillsCatalogPayload.error ?? "Failed to load runtime skills"));
+        setMcpCatalogError(mcpsCatalogResponse.ok ? "" : (mcpsCatalogPayload.error ?? "Failed to load runtime MCP servers"));
+        setAgentCatalogError(agentsCatalogResponse.ok ? "" : (agentsCatalogPayload.error ?? "Failed to load runtime agents"));
         const failedMemoryMessage =
           (!memoryStatusResponse.ok && (memoryStatusPayload.error ?? "Failed to load memory status")) ||
           (!memoryPolicyResponse.ok && (memoryPolicyPayload.error ?? "Failed to load memory policy")) ||
@@ -333,6 +425,24 @@ export function App() {
       }
     });
 
+    events.addEventListener("config-updated", () => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/config");
+          if (!response.ok) return;
+          const payload = (await response.json()) as ConfigSnapshotResponse;
+          setRunWaitTimeoutMs(
+            typeof payload.config?.runtime?.opencode?.runWaitTimeoutMs === "number"
+              ? payload.config.runtime.opencode.runWaitTimeoutMs
+              : DEFAULT_RUN_WAIT_TIMEOUT_MS,
+          );
+          setConfigHash(typeof payload.hash === "string" ? payload.hash : "");
+        } catch {
+          return;
+        }
+      })();
+    });
+
     return () => {
       events.close();
     };
@@ -413,6 +523,38 @@ export function App() {
       return haystack.includes(query);
     });
   }, [availableModels, modelQuery]);
+  const configuredSkills = useMemo(() => normalizeListInput(skillsDraft), [skillsDraft]);
+  const configuredSkillSet = useMemo(() => new Set(configuredSkills), [configuredSkills]);
+  const configuredUnavailableSkills = useMemo(
+    () => configuredSkills.filter(id => !availableSkills.some(skill => skill.id === id)),
+    [availableSkills, configuredSkills],
+  );
+  const normalizedMcpServers = useMemo(() => {
+    const deduped = new Map<string, ConfiguredMcpServer>();
+    for (const server of mcpServers) {
+      const id = server.id.trim();
+      if (!id) continue;
+      deduped.set(id, { ...server, id });
+    }
+    return [...deduped.values()].sort((a, b) => a.id.localeCompare(b.id));
+  }, [mcpServers]);
+  const configuredMcps = useMemo(() => normalizeListInput(mcpsDraft), [mcpsDraft]);
+  const mcpServerIdSet = useMemo(() => new Set(normalizedMcpServers.map(server => server.id)), [normalizedMcpServers]);
+  const configuredMcpSet = useMemo(() => new Set(configuredMcps), [configuredMcps]);
+  const runtimeMcpById = useMemo(() => new Map(availableMcps.map(mcp => [mcp.id, mcp])), [availableMcps]);
+  const discoverableMcps = useMemo(
+    () => availableMcps.filter(mcp => !configuredMcpSet.has(mcp.id)),
+    [availableMcps, configuredMcpSet],
+  );
+  const runtimeAgentById = useMemo(() => new Map(availableAgents.map(agent => [agent.id, agent])), [availableAgents]);
+  const configuredAgentIdSet = useMemo(
+    () => new Set(agents.map(agent => agent.id.trim()).filter(Boolean)),
+    [agents],
+  );
+  const discoverableAgents = useMemo(
+    () => availableAgents.filter(agent => !configuredAgentIdSet.has(agent.id)),
+    [availableAgents, configuredAgentIdSet],
+  );
 
   useEffect(() => {
     setIsModelPickerOpen(false);
@@ -546,7 +688,7 @@ export function App() {
       if (abortSignal.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
-      if (Date.now() - startedAt > RUN_POLL_TIMEOUT_MS) {
+      if (Date.now() - startedAt > runWaitTimeoutMs) {
         throw new Error("Run timed out waiting for completion.");
       }
 
@@ -612,7 +754,7 @@ export function App() {
 
       timeout = setTimeout(() => {
         fail(new Error("Run timed out waiting for completion."));
-      }, RUN_POLL_TIMEOUT_MS);
+      }, runWaitTimeoutMs);
 
       abortSignal.addEventListener("abort", onAbort, { once: true });
       stream.addEventListener("run-event", event => {
@@ -867,6 +1009,305 @@ export function App() {
     }
   }
 
+  async function refreshSkillCatalog() {
+    setLoadingSkillCatalog(true);
+    setSkillCatalogError("");
+    try {
+      const response = await fetch("/api/config/skills/catalog");
+      const payload = (await response.json()) as {
+        skills?: RuntimeSkill[];
+        enabled?: string[];
+        hash?: string;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load runtime skills");
+      }
+      setAvailableSkills(Array.isArray(payload.skills) ? payload.skills : []);
+      if (Array.isArray(payload.enabled)) {
+        setSkillsDraft(payload.enabled.join("\n"));
+      }
+      if (typeof payload.hash === "string") {
+        setConfigHash(payload.hash);
+      }
+    } catch (error) {
+      setSkillCatalogError(error instanceof Error ? error.message : "Failed to load runtime skills");
+    } finally {
+      setLoadingSkillCatalog(false);
+    }
+  }
+
+  async function refreshMcpCatalog() {
+    setLoadingMcpCatalog(true);
+    setMcpCatalogError("");
+    try {
+      const response = await fetch("/api/config/mcps/catalog");
+      const payload = (await response.json()) as {
+        mcps?: RuntimeMcp[];
+        enabled?: string[];
+        servers?: ConfiguredMcpServer[];
+        hash?: string;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load runtime MCP servers");
+      }
+      setAvailableMcps(Array.isArray(payload.mcps) ? payload.mcps : []);
+      setMcpServers(Array.isArray(payload.servers) ? payload.servers : []);
+      if (Array.isArray(payload.enabled)) {
+        setMcpsDraft(payload.enabled.join("\n"));
+      }
+      if (typeof payload.hash === "string") {
+        setConfigHash(payload.hash);
+      }
+    } catch (error) {
+      setMcpCatalogError(error instanceof Error ? error.message : "Failed to load runtime MCP servers");
+    } finally {
+      setLoadingMcpCatalog(false);
+    }
+  }
+
+  async function refreshAgentCatalog() {
+    setLoadingAgentCatalog(true);
+    setAgentCatalogError("");
+    try {
+      const response = await fetch("/api/config/agents/catalog");
+      const payload = (await response.json()) as {
+        agents?: RuntimeAgent[];
+        configured?: string[];
+        hash?: string;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load runtime agents");
+      }
+      setAvailableAgents(Array.isArray(payload.agents) ? payload.agents : []);
+      if (typeof payload.hash === "string") {
+        setConfigHash(payload.hash);
+      }
+    } catch (error) {
+      setAgentCatalogError(error instanceof Error ? error.message : "Failed to load runtime agents");
+    } finally {
+      setLoadingAgentCatalog(false);
+    }
+  }
+
+  function toggleSkillEnabled(skillId: string) {
+    if (configuredSkillSet.has(skillId)) {
+      setSkillsDraft(configuredSkills.filter(value => value !== skillId).join("\n"));
+      return;
+    }
+    setSkillsDraft([...configuredSkills, skillId].join("\n"));
+  }
+
+  function addSkill() {
+    const next = skillInput.trim();
+    if (!next) return;
+    const merged = [...configuredSkills, next];
+    setSkillsDraft(normalizeListInput(merged.join("\n")).join("\n"));
+    setSkillInput("");
+  }
+
+  function removeSkill(skill: string) {
+    setSkillsDraft(configuredSkills.filter(value => value !== skill).join("\n"));
+  }
+
+  function mcpStatusVariant(status: RuntimeMcp["status"]) {
+    if (status === "connected") return "success" as const;
+    if (status === "failed" || status === "needs_client_registration") return "warning" as const;
+    if (status === "needs_auth") return "warning" as const;
+    return "outline" as const;
+  }
+
+  function mcpStatusLabel(status: RuntimeMcp["status"]) {
+    if (status === "needs_auth") return "Needs Auth";
+    if (status === "needs_client_registration") return "Needs Registration";
+    return status.replaceAll("_", " ");
+  }
+
+  async function importSkill() {
+    const id = importSkillId.trim();
+    const content = importSkillContent.trim();
+    if (!id || !content) return;
+
+    setIsImportingSkill(true);
+    setSkillsError("");
+    try {
+      const response = await fetch("/api/config/skills/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          content,
+          expectedHash: configHash || undefined,
+          enable: true,
+        }),
+      });
+      const payload = (await response.json()) as {
+        skills?: string[];
+        hash?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.skills) {
+        throw new Error(payload.error ?? "Failed to import skill");
+      }
+      setImportSkillId("");
+      setImportSkillContent("");
+      setSkillsDraft(payload.skills.join("\n"));
+      if (typeof payload.hash === "string") {
+        setConfigHash(payload.hash);
+      }
+      await refreshSkillCatalog();
+    } catch (error) {
+      setSkillsError(error instanceof Error ? error.message : "Failed to import skill");
+    } finally {
+      setIsImportingSkill(false);
+    }
+  }
+
+  function updateMcpServer(id: string, updater: (server: ConfiguredMcpServer) => ConfiguredMcpServer) {
+    setMcpServers(current => current.map(server => (server.id === id ? updater(server) : server)));
+  }
+
+  function renameMcpServer(id: string, nextId: string) {
+    const trimmed = nextId.trim();
+    if (!trimmed) return;
+    setMcpServers(current => {
+      if (current.some(server => server.id !== id && server.id === trimmed)) return current;
+      return current.map(server => (server.id === id ? { ...server, id: trimmed } : server));
+    });
+    setMcpsDraft(configuredMcps.map(value => (value === id ? trimmed : value)).join("\n"));
+  }
+
+  function setMcpServerType(id: string, type: "remote" | "local") {
+    updateMcpServer(id, server => {
+      if (server.type === type) return server;
+      if (type === "remote") {
+        return {
+          id: server.id,
+          type: "remote",
+          enabled: server.enabled,
+          url: "http://127.0.0.1:8000/mcp",
+          headers: {},
+          oauth: "auto",
+        };
+      }
+      return {
+        id: server.id,
+        type: "local",
+        enabled: server.enabled,
+        command: ["bun", "run", "mcp-server.ts"],
+        environment: {},
+      };
+    });
+  }
+
+  async function runMcpRuntimeAction(id: string, action: "connect" | "disconnect" | "authStart" | "authRemove") {
+    setMcpActionBusyId(`${action}:${id}`);
+    setMcpActionError("");
+    try {
+      const path =
+        action === "connect"
+          ? `/api/config/mcps/${encodeURIComponent(id)}/connect`
+          : action === "disconnect"
+            ? `/api/config/mcps/${encodeURIComponent(id)}/disconnect`
+            : action === "authStart"
+              ? `/api/config/mcps/${encodeURIComponent(id)}/auth/start`
+              : `/api/config/mcps/${encodeURIComponent(id)}/auth/remove`;
+      const response = await fetch(path, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        mcps?: RuntimeMcp[];
+        authorizationUrl?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `Failed to ${action} MCP server`);
+      }
+      if (Array.isArray(payload.mcps)) {
+        setAvailableMcps(payload.mcps);
+      }
+      if (action === "authStart" && typeof payload.authorizationUrl === "string" && payload.authorizationUrl.trim()) {
+        window.open(payload.authorizationUrl, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) {
+      setMcpActionError(error instanceof Error ? error.message : `Failed to ${action} MCP server`);
+    } finally {
+      setMcpActionBusyId("");
+    }
+  }
+
+  function addMcp() {
+    const next = mcpInput.trim();
+    if (!next) return;
+    const merged = [...configuredMcps, next];
+    setMcpsDraft(normalizeListInput(merged.join("\n")).join("\n"));
+    if (!mcpServerIdSet.has(next)) {
+      setMcpServers(current => [
+        ...current,
+        {
+          id: next,
+          type: "remote",
+          enabled: true,
+          url: "http://127.0.0.1:8000/mcp",
+          headers: {},
+          oauth: "auto",
+        },
+      ]);
+    }
+    setMcpInput("");
+  }
+
+  function removeMcp(mcp: string) {
+    setMcpsDraft(configuredMcps.filter(value => value !== mcp).join("\n"));
+    setMcpServers(current => current.filter(server => server.id !== mcp));
+  }
+
+  function addAgent() {
+    const next: SpecialistAgent = {
+      id: `agent-${crypto.randomUUID().slice(0, 8)}`,
+      name: "New Agent",
+      specialty: "Add specialty",
+      summary: "Describe what this agent should handle.",
+      model: activeSession?.model ?? modelOptions[0]?.id ?? "opencode/kimi-k2.5-free",
+      status: "available",
+    };
+    setAgents(current => [...current, next]);
+  }
+
+  function addRuntimeAgent(agent: RuntimeAgent) {
+    if (!agent.id.trim()) return;
+    setAgents(current => {
+      if (current.some(existing => existing.id === agent.id)) return current;
+      const next: SpecialistAgent = {
+        id: agent.id,
+        name: agent.id,
+        specialty: agent.description?.trim() || "Runtime-discovered agent",
+        summary: agent.description?.trim() || "Runtime-discovered OpenCode agent.",
+        model: agent.model?.trim() || activeSession?.model || modelOptions[0]?.id || "opencode/kimi-k2.5-free",
+        status: agent.enabled ? "available" : "offline",
+      };
+      return [...current, next];
+    });
+  }
+
+  function removeAgent(agentId: string) {
+    setAgents(current => current.filter(agent => agent.id !== agentId));
+  }
+
+  function updateAgentField<K extends keyof SpecialistAgent>(agentId: string, field: K, value: SpecialistAgent[K]) {
+    setAgents(current =>
+      current.map(agent => {
+        if (agent.id !== agentId) return agent;
+        return {
+          ...agent,
+          [field]: value,
+        };
+      }),
+    );
+  }
+
   async function saveSkillsConfig() {
     setIsSavingSkills(true);
     setSkillsError("");
@@ -875,15 +1316,18 @@ export function App() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          skills: normalizeListInput(skillsDraft),
+          skills: configuredSkills,
+          expectedHash: configHash || undefined,
         }),
       });
-      const payload = (await response.json()) as { skills?: string[]; error?: string };
+      const payload = (await response.json()) as { skills?: string[]; hash?: string; error?: string };
       if (!response.ok || !payload.skills) {
         throw new Error(payload.error ?? "Failed to save skills");
       }
 
       setSkillsDraft(payload.skills.join("\n"));
+      setConfigHash(typeof payload.hash === "string" ? payload.hash : configHash);
+      await refreshSkillCatalog();
     } catch (error) {
       setSkillsError(error instanceof Error ? error.message : "Failed to save skills");
     } finally {
@@ -895,23 +1339,74 @@ export function App() {
     setIsSavingMcps(true);
     setMcpsError("");
     try {
+      const enabledSet = new Set(configuredMcps);
+      const serversForSave = normalizedMcpServers.map(server => ({
+        ...server,
+        enabled: enabledSet.has(server.id),
+      }));
+      const undefinedEnabledIds = configuredMcps.filter(id => serversForSave.length > 0 && !serversForSave.some(server => server.id === id));
+      if (undefinedEnabledIds.length > 0) {
+        throw new Error(`Missing MCP definition for enabled server(s): ${undefinedEnabledIds.join(", ")}`);
+      }
       const response = await fetch("/api/config/mcps", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mcps: normalizeListInput(mcpsDraft),
+          ...(serversForSave.length > 0 ? { servers: serversForSave } : { mcps: configuredMcps }),
+          expectedHash: configHash || undefined,
         }),
       });
-      const payload = (await response.json()) as { mcps?: string[]; error?: string };
+      const payload = (await response.json()) as {
+        mcps?: string[];
+        servers?: ConfiguredMcpServer[];
+        hash?: string;
+        error?: string;
+      };
       if (!response.ok || !payload.mcps) {
         throw new Error(payload.error ?? "Failed to save MCP servers");
       }
 
       setMcpsDraft(payload.mcps.join("\n"));
+      if (Array.isArray(payload.servers)) {
+        setMcpServers(payload.servers);
+      }
+      setConfigHash(typeof payload.hash === "string" ? payload.hash : configHash);
+      await refreshMcpCatalog();
     } catch (error) {
       setMcpsError(error instanceof Error ? error.message : "Failed to save MCP servers");
     } finally {
       setIsSavingMcps(false);
+    }
+  }
+
+  async function saveAgentsConfig() {
+    setIsSavingAgents(true);
+    setAgentsError("");
+    try {
+      const response = await fetch("/api/config/agents", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agents,
+          expectedHash: configHash || undefined,
+        }),
+      });
+      const payload = (await response.json()) as {
+        agents?: SpecialistAgent[];
+        hash?: string;
+        error?: string;
+      };
+      if (!response.ok || !Array.isArray(payload.agents)) {
+        throw new Error(payload.error ?? "Failed to save agents");
+      }
+
+      setAgents(payload.agents);
+      setConfigHash(typeof payload.hash === "string" ? payload.hash : configHash);
+      await refreshAgentCatalog();
+    } catch (error) {
+      setAgentsError(error instanceof Error ? error.message : "Failed to save agents");
+    } finally {
+      setIsSavingAgents(false);
     }
   }
 
@@ -993,9 +1488,48 @@ export function App() {
               <Badge variant="outline">heartbeat {heartbeatAt ? relativeFromIso(heartbeatAt) : "pending"}</Badge>
             </div>
           </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant={dashboardPage === "chat" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDashboardPage("chat")}
+            >
+              <Activity className="size-4" />
+              Chat
+            </Button>
+            <Button
+              type="button"
+              variant={dashboardPage === "skills" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDashboardPage("skills")}
+            >
+              <Wrench className="size-4" />
+              Skills
+            </Button>
+            <Button
+              type="button"
+              variant={dashboardPage === "mcp" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDashboardPage("mcp")}
+            >
+              <Cpu className="size-4" />
+              MCP
+            </Button>
+            <Button
+              type="button"
+              variant={dashboardPage === "agents" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDashboardPage("agents")}
+            >
+              <Users className="size-4" />
+              Agents
+            </Button>
+          </div>
         </header>
 
-        <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
+        {dashboardPage === "chat" && (
+          <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
           <Card className="panel-noise flex min-h-0 flex-col">
             <CardHeader>
               <div className="flex items-start justify-between gap-2">
@@ -1265,72 +1799,11 @@ export function App() {
               <CardDescription>Manage skill/MCP config and monitor usage telemetry.</CardDescription>
             </CardHeader>
             <CardContent className="min-h-0 overflow-y-auto">
-              <Tabs defaultValue="skills">
+              <Tabs defaultValue="usage">
                 <TabsList className="w-full justify-between">
-                  <TabsTrigger value="agents">Agents</TabsTrigger>
-                  <TabsTrigger value="skills">Skills</TabsTrigger>
-                  <TabsTrigger value="mcp">MCP</TabsTrigger>
                   <TabsTrigger value="usage">Usage</TabsTrigger>
                   <TabsTrigger value="memory">Memory</TabsTrigger>
                 </TabsList>
-
-                <TabsContent value="agents" className="space-y-2">
-                  {agents.length === 0 && (
-                    <p className="rounded-lg border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                      No delegation agents configured yet.
-                    </p>
-                  )}
-                  {agents.map(agent => (
-                    <div key={agent.id} className="rounded-lg border border-border bg-muted/70 p-3">
-                      <div className="flex items-center justify-between">
-                        <p className="flex items-center gap-1 text-sm font-semibold">
-                          <Users className="size-3.5 text-muted-foreground" />
-                          {agent.name}
-                        </p>
-                        <Badge variant={agent.status === "available" ? "success" : "warning"}>{agent.status}</Badge>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">{agent.specialty}</p>
-                      <p className="mt-2 text-xs text-muted-foreground">{agent.summary}</p>
-                    </div>
-                  ))}
-                </TabsContent>
-
-                <TabsContent value="skills" className="space-y-2">
-                  <Textarea
-                    value={skillsDraft}
-                    onChange={event => setSkillsDraft(event.target.value)}
-                    className="min-h-44 resize-y"
-                    placeholder="One skill per line"
-                  />
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs text-muted-foreground">One skill per line.</p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={saveSkillsConfig}
-                      disabled={isSavingSkills}
-                    >
-                      {isSavingSkills ? "Saving..." : "Save skills"}
-                    </Button>
-                  </div>
-                  {skillsError && <p className="text-xs text-destructive">{skillsError}</p>}
-                </TabsContent>
-
-                <TabsContent value="mcp" className="space-y-2">
-                  <Textarea
-                    value={mcpsDraft}
-                    onChange={event => setMcpsDraft(event.target.value)}
-                    className="min-h-44 resize-y"
-                    placeholder="One MCP server per line"
-                  />
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs text-muted-foreground">One MCP server per line.</p>
-                    <Button type="button" size="sm" onClick={saveMcpsConfig} disabled={isSavingMcps}>
-                      {isSavingMcps ? "Saving..." : "Save MCPs"}
-                    </Button>
-                  </div>
-                  {mcpsError && <p className="text-xs text-destructive">{mcpsError}</p>}
-                </TabsContent>
 
                 <TabsContent value="usage" className="space-y-2">
                   <div className="rounded-lg border border-border bg-muted/70 p-3">
@@ -1421,7 +1894,600 @@ export function App() {
               </Tabs>
             </CardContent>
           </Card>
-        </section>
+          </section>
+        )}
+
+        {dashboardPage === "skills" && (
+          <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+            <Card className="panel-noise flex min-h-0 flex-col">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Wrench className="size-4" />
+                  Skill Exposure
+                </CardTitle>
+                <CardDescription>Toggle which OpenCode skills are exposed to runtime sessions.</CardDescription>
+              </CardHeader>
+              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
+                <div className="flex gap-2">
+                  <Input
+                    value={skillInput}
+                    onChange={event => setSkillInput(event.target.value)}
+                    placeholder="skill id (e.g. btca-cli)"
+                    onKeyDown={event => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addSkill();
+                      }
+                    }}
+                  />
+                  <Button type="button" onClick={addSkill} disabled={!skillInput.trim()}>
+                    <Plus className="size-4" />
+                    Add
+                  </Button>
+                </div>
+
+                {loadingSkillCatalog && (
+                  <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                    Loading runtime skills...
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  {!loadingSkillCatalog && availableSkills.length === 0 && (
+                    <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                      No runtime skills discovered yet.
+                    </p>
+                  )}
+                  {availableSkills.map(skill => {
+                    const enabled = configuredSkillSet.has(skill.id);
+                    return (
+                      <div
+                        key={skill.id}
+                        className="space-y-1 rounded-md border border-border bg-muted/70 px-3 py-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium">{skill.name}</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={enabled ? "default" : "outline"}
+                            onClick={() => toggleSkillEnabled(skill.id)}
+                          >
+                            {enabled ? "Enabled" : "Disabled"}
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{skill.description || "No description provided."}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{skill.location}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {configuredUnavailableSkills.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Configured but unavailable</p>
+                    {configuredUnavailableSkills.map(skill => (
+                      <div
+                        key={skill}
+                        className="flex items-center justify-between rounded-md border border-border bg-muted/70 px-3 py-2"
+                      >
+                        <span className="text-sm">{skill}</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0"
+                          onClick={() => removeSkill(skill)}
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => void refreshSkillCatalog()} disabled={loadingSkillCatalog}>
+                    {loadingSkillCatalog ? "Refreshing..." : "Refresh"}
+                  </Button>
+                  <Button type="button" onClick={saveSkillsConfig} disabled={isSavingSkills}>
+                    {isSavingSkills ? "Saving..." : "Save skills"}
+                  </Button>
+                </div>
+                {skillCatalogError && <p className="text-xs text-destructive">{skillCatalogError}</p>}
+                {skillsError && <p className="text-xs text-destructive">{skillsError}</p>}
+              </CardContent>
+            </Card>
+
+            <Card className="panel-noise flex min-h-0 flex-col">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <SlidersHorizontal className="size-4" />
+                  Import + Bulk Editor
+                </CardTitle>
+                <CardDescription>Import managed skills and keep a bulk editable allow-list.</CardDescription>
+              </CardHeader>
+              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
+                <div className="space-y-2 rounded-md border border-border bg-muted/70 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Import managed skill</p>
+                  <Input
+                    value={importSkillId}
+                    onChange={event => setImportSkillId(event.target.value)}
+                    placeholder="new skill id (e.g. my-skill)"
+                  />
+                  <Textarea
+                    value={importSkillContent}
+                    onChange={event => setImportSkillContent(event.target.value)}
+                    className="min-h-28 resize-y"
+                    placeholder="Paste SKILL.md content"
+                  />
+                  <div className="flex items-center justify-end">
+                    <Button
+                      type="button"
+                      onClick={importSkill}
+                      disabled={isImportingSkill || !importSkillId.trim() || !importSkillContent.trim()}
+                    >
+                      {isImportingSkill ? "Importing..." : "Import skill"}
+                    </Button>
+                  </div>
+                </div>
+
+                <Textarea
+                  value={skillsDraft}
+                  onChange={event => setSkillsDraft(event.target.value)}
+                  className="min-h-64 resize-y"
+                  placeholder="One skill per line"
+                />
+                <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                  {configuredSkills.length} configured skill{configuredSkills.length === 1 ? "" : "s"}.
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        )}
+
+        {dashboardPage === "mcp" && (
+          <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+            <Card className="panel-noise flex min-h-0 flex-col">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Cpu className="size-4" />
+                  MCP Management
+                </CardTitle>
+                <CardDescription>Manage MCP allow-list and verify runtime status from OpenCode.</CardDescription>
+              </CardHeader>
+              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
+                <div className="flex gap-2">
+                  <Input
+                    value={mcpInput}
+                    onChange={event => setMcpInput(event.target.value)}
+                    placeholder="mcp id (e.g. github)"
+                    onKeyDown={event => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addMcp();
+                      }
+                    }}
+                  />
+                  <Button type="button" onClick={addMcp} disabled={!mcpInput.trim()}>
+                    <Plus className="size-4" />
+                    Add
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  {configuredMcps.length === 0 && (
+                    <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                      No MCP servers configured yet.
+                    </p>
+                  )}
+                  {configuredMcps.map(mcp => (
+                    <div
+                      key={mcp}
+                      className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/70 px-3 py-2"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <p className="truncate text-sm">{mcp}</p>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={mcpStatusVariant(runtimeMcpById.get(mcp)?.status ?? "unknown")}>
+                            {mcpStatusLabel(runtimeMcpById.get(mcp)?.status ?? "unknown")}
+                          </Badge>
+                          {runtimeMcpById.get(mcp)?.error && (
+                            <p className="truncate text-xs text-muted-foreground">{runtimeMcpById.get(mcp)?.error}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void runMcpRuntimeAction(mcp, "connect")}
+                          disabled={mcpActionBusyId.length > 0}
+                        >
+                          Connect
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void runMcpRuntimeAction(mcp, "disconnect")}
+                          disabled={mcpActionBusyId.length > 0}
+                        >
+                          Disconnect
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void runMcpRuntimeAction(mcp, "authStart")}
+                          disabled={mcpActionBusyId.length > 0}
+                        >
+                          Auth
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void runMcpRuntimeAction(mcp, "authRemove")}
+                          disabled={mcpActionBusyId.length > 0}
+                        >
+                          Reset Auth
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0"
+                          onClick={() => removeMcp(mcp)}
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {discoverableMcps.length > 0 && (
+                  <div className="space-y-2 rounded-md border border-border bg-muted/60 p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Detected in runtime</p>
+                    <div className="space-y-2">
+                      {discoverableMcps.map(mcp => (
+                        <div key={mcp.id} className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm">{mcp.id}</p>
+                            <Badge variant={mcpStatusVariant(mcp.status)}>{mcpStatusLabel(mcp.status)}</Badge>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setMcpsDraft([...configuredMcps, mcp.id].join("\n"));
+                              if (!mcpServerIdSet.has(mcp.id)) {
+                                setMcpServers(current => [
+                                  ...current,
+                                  {
+                                    id: mcp.id,
+                                    type: "remote",
+                                    enabled: true,
+                                    url: "http://127.0.0.1:8000/mcp",
+                                    headers: {},
+                                    oauth: "auto",
+                                  },
+                                ]);
+                              }
+                            }}
+                          >
+                            Enable
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => void refreshMcpCatalog()} disabled={loadingMcpCatalog}>
+                    {loadingMcpCatalog ? "Refreshing..." : "Refresh"}
+                  </Button>
+                  <Button type="button" onClick={saveMcpsConfig} disabled={isSavingMcps}>
+                    {isSavingMcps ? "Saving..." : "Save MCPs"}
+                  </Button>
+                </div>
+                {mcpCatalogError && <p className="text-xs text-destructive">{mcpCatalogError}</p>}
+                {mcpsError && <p className="text-xs text-destructive">{mcpsError}</p>}
+                {mcpActionError && <p className="text-xs text-destructive">{mcpActionError}</p>}
+              </CardContent>
+            </Card>
+
+            <Card className="panel-noise flex min-h-0 flex-col">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <SlidersHorizontal className="size-4" />
+                  Server Definitions
+                </CardTitle>
+                <CardDescription>Configure remote/local MCP server details used by OpenCode.</CardDescription>
+              </CardHeader>
+              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
+                {normalizedMcpServers.length === 0 && (
+                  <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                    No MCP server definitions yet. Add one from the panel on the left.
+                  </p>
+                )}
+                {normalizedMcpServers.map(server => (
+                  <div key={server.id} className="space-y-2 rounded-md border border-border bg-muted/60 p-3">
+                    <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_96px]">
+                      <Input
+                        value={server.id}
+                        onChange={event => renameMcpServer(server.id, event.target.value)}
+                        placeholder="mcp id"
+                      />
+                      <select
+                        value={server.type}
+                        onChange={event => setMcpServerType(server.id, event.target.value === "local" ? "local" : "remote")}
+                        className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value="remote">remote</option>
+                        <option value="local">local</option>
+                      </select>
+                      <label className="flex items-center gap-2 rounded-md border border-input px-3 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={configuredMcpSet.has(server.id)}
+                          onChange={event => {
+                            if (event.target.checked) {
+                              setMcpsDraft([...configuredMcps, server.id].join("\n"));
+                            } else {
+                              setMcpsDraft(configuredMcps.filter(value => value !== server.id).join("\n"));
+                            }
+                          }}
+                        />
+                        enabled
+                      </label>
+                    </div>
+                    {server.type === "remote" ? (
+                      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_140px]">
+                        <Input
+                          value={server.url}
+                          onChange={event =>
+                            updateMcpServer(server.id, current =>
+                              current.type === "remote" ? { ...current, url: event.target.value } : current,
+                            )
+                          }
+                          placeholder="https://example.com/mcp"
+                        />
+                        <select
+                          value={server.oauth}
+                          onChange={event =>
+                            updateMcpServer(server.id, current =>
+                              current.type === "remote"
+                                ? { ...current, oauth: event.target.value === "off" ? "off" : "auto" }
+                                : current,
+                            )
+                          }
+                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="auto">oauth auto</option>
+                          <option value="off">oauth off</option>
+                        </select>
+                        <Input
+                          value={typeof server.timeoutMs === "number" ? String(server.timeoutMs) : ""}
+                          onChange={event =>
+                            updateMcpServer(server.id, current =>
+                              current.type === "remote"
+                                ? {
+                                    ...current,
+                                    timeoutMs: event.target.value.trim()
+                                      ? Number.isFinite(Number(event.target.value))
+                                        ? Number(event.target.value)
+                                        : undefined
+                                      : undefined,
+                                  }
+                                : current,
+                            )
+                          }
+                          placeholder="timeout ms"
+                        />
+                      </div>
+                    ) : (
+                      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px]">
+                        <Input
+                          value={server.command.join(" ")}
+                          onChange={event =>
+                            updateMcpServer(server.id, current =>
+                              current.type === "local"
+                                ? {
+                                    ...current,
+                                    command: event.target.value.split(" ").map(value => value.trim()).filter(Boolean),
+                                  }
+                                : current,
+                            )
+                          }
+                          placeholder="bun run mcp-server.ts"
+                        />
+                        <Input
+                          value={typeof server.timeoutMs === "number" ? String(server.timeoutMs) : ""}
+                          onChange={event =>
+                            updateMcpServer(server.id, current =>
+                              current.type === "local"
+                                ? {
+                                    ...current,
+                                    timeoutMs: event.target.value.trim()
+                                      ? Number.isFinite(Number(event.target.value))
+                                        ? Number(event.target.value)
+                                        : undefined
+                                      : undefined,
+                                  }
+                                : current,
+                            )
+                          }
+                          placeholder="timeout ms"
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                  {configuredMcps.length} enabled MCP server{configuredMcps.length === 1 ? "" : "s"} across {normalizedMcpServers.length} definition
+                  {normalizedMcpServers.length === 1 ? "" : "s"}.
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        )}
+
+        {dashboardPage === "agents" && (
+          <section className="min-h-0 flex-1">
+            <Card className="panel-noise flex min-h-0 flex-col">
+              <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="size-4" />
+                      Agent Config Management
+                    </CardTitle>
+                    <CardDescription>Edit delegation agents and persist config changes.</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" onClick={addAgent}>
+                      <Plus className="size-4" />
+                      Add agent
+                    </Button>
+                    <Button type="button" onClick={saveAgentsConfig} disabled={isSavingAgents}>
+                      {isSavingAgents ? "Saving..." : "Save agents"}
+                    </Button>
+                  </div>
+                </div>
+                {agentsError && <p className="text-xs text-destructive">{agentsError}</p>}
+                {agentCatalogError && <p className="text-xs text-destructive">{agentCatalogError}</p>}
+              </CardHeader>
+              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
+                <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium">Runtime Agents</p>
+                    <Button type="button" variant="outline" size="sm" onClick={() => void refreshAgentCatalog()} disabled={loadingAgentCatalog}>
+                      {loadingAgentCatalog ? "Refreshing..." : "Refresh"}
+                    </Button>
+                  </div>
+                  {availableAgents.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No runtime agents discovered yet.</p>
+                  )}
+                  {availableAgents.map(runtimeAgent => (
+                    <div key={runtimeAgent.id} className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1.5">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm">{runtimeAgent.id}</p>
+                          <Badge variant={runtimeAgent.enabled ? "success" : "outline"}>
+                            {runtimeAgent.enabled ? "enabled" : "disabled"}
+                          </Badge>
+                          <Badge variant="outline">{runtimeAgent.mode}</Badge>
+                          {runtimeAgent.native && <Badge variant="outline">native</Badge>}
+                        </div>
+                        {runtimeAgent.model && <p className="truncate text-xs text-muted-foreground">{runtimeAgent.model}</p>}
+                      </div>
+                      {!configuredAgentIdSet.has(runtimeAgent.id) && (
+                        <Button type="button" variant="outline" size="sm" onClick={() => addRuntimeAgent(runtimeAgent)}>
+                          Add
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  {discoverableAgents.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {discoverableAgents.length} runtime agent{discoverableAgents.length === 1 ? "" : "s"} not yet in Wafflebot config.
+                    </p>
+                  )}
+                </div>
+
+                {agents.length === 0 && (
+                  <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                    No agent configs yet. Add one to get started.
+                  </p>
+                )}
+                {agents.map(agent => {
+                  const runtimeAgent = runtimeAgentById.get(agent.id);
+                  return (
+                    <div key={agent.id} className="space-y-3 rounded-lg border border-border bg-muted/60 p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="truncate font-display text-sm">{agent.name || agent.id}</p>
+                          <Badge variant={runtimeAgent ? "success" : "outline"}>
+                            {runtimeAgent ? "runtime" : "not detected"}
+                          </Badge>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0"
+                          onClick={() => removeAgent(agent.id)}
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </div>
+
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <Input
+                          value={agent.id}
+                          onChange={event => updateAgentField(agent.id, "id", event.target.value)}
+                          placeholder="id"
+                        />
+                        <Input
+                          value={agent.name}
+                          onChange={event => updateAgentField(agent.id, "name", event.target.value)}
+                          placeholder="name"
+                        />
+                      </div>
+
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <Input
+                          value={agent.specialty}
+                          onChange={event => updateAgentField(agent.id, "specialty", event.target.value)}
+                          placeholder="specialty"
+                        />
+                        <Input
+                          value={agent.model}
+                          onChange={event => updateAgentField(agent.id, "model", event.target.value)}
+                          placeholder="provider/model"
+                        />
+                      </div>
+
+                      <Textarea
+                        value={agent.summary}
+                        onChange={event => updateAgentField(agent.id, "summary", event.target.value)}
+                        placeholder="summary"
+                        className="min-h-20 resize-y"
+                      />
+
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="size-4 text-muted-foreground" />
+                        <select
+                          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                          value={agent.status}
+                          onChange={event =>
+                            updateAgentField(
+                              agent.id,
+                              "status",
+                              event.target.value as SpecialistAgent["status"],
+                            )
+                          }
+                        >
+                          <option value="available">available</option>
+                          <option value="busy">busy</option>
+                          <option value="offline">offline</option>
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                  {agents.length} configured agent{agents.length === 1 ? "" : "s"}.
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        )}
       </div>
     </main>
   );

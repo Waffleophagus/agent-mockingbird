@@ -41,6 +41,22 @@ export interface SessionRunErrorPayload {
 }
 export type SessionRunErrorEvent = RuntimeEventBase<"session.run.error", SessionRunErrorPayload>;
 
+export interface ConfigUpdatedPayload {
+  hash: string;
+  path: string;
+  providerCount: number;
+  modelCount: number;
+  smokeTestSessionId: string | null;
+  smokeTestResponse: string | null;
+}
+export type ConfigUpdatedEvent = RuntimeEventBase<"config.updated", ConfigUpdatedPayload>;
+
+export interface ConfigUpdateFailedPayload {
+  stage: string;
+  message: string;
+}
+export type ConfigUpdateFailedEvent = RuntimeEventBase<"config.update.failed", ConfigUpdateFailedPayload>;
+
 export type RuntimeEvent =
   | HeartbeatUpdatedEvent
   | UsageUpdatedEvent
@@ -48,7 +64,9 @@ export type RuntimeEvent =
   | SessionMessageCreatedEvent
   | SessionRunStatusUpdatedEvent
   | SessionCompactedEvent
-  | SessionRunErrorEvent;
+  | SessionRunErrorEvent
+  | ConfigUpdatedEvent
+  | ConfigUpdateFailedEvent;
 
 function baseRuntimeEvent<TType extends RuntimeEvent["type"], TPayload>(
   type: TType,
@@ -102,4 +120,18 @@ export function createSessionRunErrorEvent(
   source: RuntimeEventSource,
 ): SessionRunErrorEvent {
   return baseRuntimeEvent("session.run.error", payload, source);
+}
+
+export function createConfigUpdatedEvent(
+  payload: ConfigUpdatedPayload,
+  source: RuntimeEventSource,
+): ConfigUpdatedEvent {
+  return baseRuntimeEvent("config.updated", payload, source);
+}
+
+export function createConfigUpdateFailedEvent(
+  payload: ConfigUpdateFailedPayload,
+  source: RuntimeEventSource,
+): ConfigUpdateFailedEvent {
+  return baseRuntimeEvent("config.update.failed", payload, source);
 }

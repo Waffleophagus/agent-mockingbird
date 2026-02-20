@@ -2,8 +2,6 @@ import crypto from "node:crypto";
 import { lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { sqlite } from "../db/client";
-import { env } from "../env";
 import {
   createMemoryRecord,
   extractRecordIdFromChunk,
@@ -24,6 +22,8 @@ import type {
   MemoryWritePolicy,
   MemoryWriteValidation,
 } from "./types";
+import { getConfigSnapshot } from "../config/service";
+import { sqlite } from "../db/client";
 
 interface MemoryFileRow {
   path: string;
@@ -116,8 +116,12 @@ let syncPromise: Promise<void> | null = null;
 const nowMs = () => Date.now();
 const hashText = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
 
+function currentMemoryConfig() {
+  return getConfigSnapshot().config.runtime.memory;
+}
+
 function resolveWorkspaceDir() {
-  return path.resolve(env.WAFFLEBOT_MEMORY_WORKSPACE_DIR);
+  return path.resolve(currentMemoryConfig().workspaceDir);
 }
 
 function normalizeRelPath(absPath: string) {
@@ -184,7 +188,7 @@ function normalizeRecordInput(input: MemoryRecordInput): MemoryRecordInput {
 }
 
 function resolveWritePolicy(): MemoryWritePolicy {
-  return env.WAFFLEBOT_MEMORY_WRITE_POLICY;
+  return currentMemoryConfig().writePolicy;
 }
 
 function resolveAllowedTypes(policy: MemoryWritePolicy) {
@@ -438,10 +442,11 @@ async function ensureSchema() {
 }
 
 function getEmbeddingProviderConfig() {
+  const memoryConfig = currentMemoryConfig();
   return {
-    provider: env.WAFFLEBOT_MEMORY_EMBED_PROVIDER,
-    model: env.WAFFLEBOT_MEMORY_EMBED_MODEL,
-    ollamaBaseUrl: env.WAFFLEBOT_MEMORY_OLLAMA_BASE_URL,
+    provider: memoryConfig.embedProvider,
+    model: memoryConfig.embedModel,
+    ollamaBaseUrl: memoryConfig.ollamaBaseUrl,
   };
 }
 
@@ -483,7 +488,7 @@ async function embedWithOllama(texts: string[]): Promise<number[][]> {
 }
 
 async function embedTexts(texts: string[]): Promise<number[][]> {
-  const provider = env.WAFFLEBOT_MEMORY_EMBED_PROVIDER;
+  const provider = currentMemoryConfig().embedProvider;
   if (provider === "none") {
     return texts.map(() => []);
   }
@@ -570,7 +575,8 @@ async function indexMemoryFile(filePath: string, options?: { force?: boolean }) 
     return false;
   }
 
-  const chunks = chunkMarkdown(content, env.WAFFLEBOT_MEMORY_CHUNK_TOKENS, env.WAFFLEBOT_MEMORY_CHUNK_OVERLAP).map(
+  const memoryConfig = currentMemoryConfig();
+  const chunks = chunkMarkdown(content, memoryConfig.chunkTokens, memoryConfig.chunkOverlap).map(
     chunk => ({
       ...chunk,
       id: buildChunkId(relPath, chunk),
@@ -696,6 +702,7 @@ async function pruneStaleFiles(activePaths: Set<string>) {
 }
 
 async function runSync(force = false) {
+  const memoryConfig = currentMemoryConfig();
   await ensureWorkspaceScaffold();
   await ensureSchema();
   const files = await listMemoryFiles();
@@ -719,10 +726,10 @@ async function runSync(force = false) {
     .run(
       MEMORY_META_KEY,
       JSON.stringify({
-        provider: env.WAFFLEBOT_MEMORY_EMBED_PROVIDER,
-        model: env.WAFFLEBOT_MEMORY_EMBED_MODEL,
-        chunkTokens: env.WAFFLEBOT_MEMORY_CHUNK_TOKENS,
-        chunkOverlap: env.WAFFLEBOT_MEMORY_CHUNK_OVERLAP,
+        provider: memoryConfig.embedProvider,
+        model: memoryConfig.embedModel,
+        chunkTokens: memoryConfig.chunkTokens,
+        chunkOverlap: memoryConfig.chunkOverlap,
         indexedAt,
       }),
     );
@@ -730,7 +737,7 @@ async function runSync(force = false) {
 }
 
 export async function syncMemoryIndex(options?: { force?: boolean }) {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  if (!currentMemoryConfig().enabled) {
     return;
   }
   if (syncPromise) {
@@ -744,22 +751,23 @@ export async function syncMemoryIndex(options?: { force?: boolean }) {
 }
 
 async function ensureFreshIndex() {
-  const needsSync = lastSyncMs === 0 || nowMs() - lastSyncMs > env.WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS;
+  const needsSync = lastSyncMs === 0 || nowMs() - lastSyncMs > currentMemoryConfig().syncCooldownMs;
   if (needsSync) {
     await syncMemoryIndex();
   }
 }
 
 export function getMemoryPolicy(): MemoryPolicyInfo {
+  const memoryConfig = currentMemoryConfig();
   const policy = resolveWritePolicy();
   const allowedTypes = [...resolveAllowedTypes(policy)];
   const disallowedTypes = (["decision", "preference", "fact", "todo", "observation"] as const).filter(
     type => !allowedTypes.includes(type),
   );
   return {
-    mode: env.WAFFLEBOT_MEMORY_TOOL_MODE,
+    mode: memoryConfig.toolMode,
     writePolicy: policy,
-    minConfidence: env.WAFFLEBOT_MEMORY_MIN_CONFIDENCE,
+    minConfidence: memoryConfig.minConfidence,
     allowedTypes,
     disallowedTypes,
     guidance: [
@@ -789,6 +797,7 @@ async function findDuplicateRecordId(input: MemoryRecordInput) {
 }
 
 export async function validateMemoryRememberInput(input: MemoryRememberInput): Promise<MemoryWriteValidation> {
+  const memoryConfig = currentMemoryConfig();
   const normalized = normalizeRecordInput(input);
   const content = normalized.content;
   const confidence = typeof normalized.confidence === "number" ? normalized.confidence : 0.75;
@@ -813,10 +822,10 @@ export async function validateMemoryRememberInput(input: MemoryRememberInput): P
     };
   }
 
-  if (confidence < env.WAFFLEBOT_MEMORY_MIN_CONFIDENCE) {
+  if (confidence < memoryConfig.minConfidence) {
     return {
       accepted: false,
-      reason: `confidence ${confidence.toFixed(2)} is below minimum ${env.WAFFLEBOT_MEMORY_MIN_CONFIDENCE.toFixed(2)}`,
+      reason: `confidence ${confidence.toFixed(2)} is below minimum ${memoryConfig.minConfidence.toFixed(2)}`,
       normalizedContent: content,
       normalizedConfidence: confidence,
     };
@@ -908,7 +917,7 @@ async function logMemoryWriteEvent(input: {
 }
 
 export async function listMemoryWriteEvents(limit = 20): Promise<MemoryWriteEvent[]> {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  if (!currentMemoryConfig().enabled) {
     return [];
   }
   await ensureSchema();
@@ -941,7 +950,7 @@ export async function listMemoryWriteEvents(limit = 20): Promise<MemoryWriteEven
 }
 
 export async function lintMemory(): Promise<MemoryLintReport> {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  if (!currentMemoryConfig().enabled) {
     return {
       ok: true,
       totalRecords: 0,
@@ -1024,7 +1033,7 @@ export async function rememberMemory(
   input: MemoryRememberInput,
   options?: { validateOnly?: boolean },
 ): Promise<MemoryRememberResult> {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  if (!currentMemoryConfig().enabled) {
     throw new Error("Memory is disabled.");
   }
 
@@ -1247,7 +1256,8 @@ function mmrRerank(candidates: SearchCandidate[], maxResults: number) {
 }
 
 export async function searchMemory(query: string, options?: { maxResults?: number; minScore?: number }) {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  const memoryConfig = currentMemoryConfig();
+  if (!memoryConfig.enabled) {
     return [] as MemorySearchResult[];
   }
   const normalizedQuery = query.trim();
@@ -1257,8 +1267,8 @@ export async function searchMemory(query: string, options?: { maxResults?: numbe
 
   await ensureFreshIndex();
 
-  const maxResults = Math.max(1, options?.maxResults ?? env.WAFFLEBOT_MEMORY_MAX_RESULTS);
-  const minScore = Math.max(0, Math.min(1, options?.minScore ?? env.WAFFLEBOT_MEMORY_MIN_SCORE));
+  const maxResults = Math.max(1, options?.maxResults ?? memoryConfig.maxResults);
+  const minScore = Math.max(0, Math.min(1, options?.minScore ?? memoryConfig.minScore));
   const candidateLimit = Math.max(maxResults * 6, DEFAULT_CANDIDATE_LIMIT);
 
   let queryVector: number[] = [];
@@ -1324,7 +1334,7 @@ export async function searchMemory(query: string, options?: { maxResults?: numbe
 }
 
 export async function readMemoryFileSlice(input: { relPath: string; from?: number; lines?: number }) {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  if (!currentMemoryConfig().enabled) {
     throw new Error("Memory is disabled.");
   }
 
@@ -1354,7 +1364,7 @@ export async function appendStructuredMemory(input: MemoryRecordInput): Promise<
   record: MemoryRecord;
   path: string;
 }> {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  if (!currentMemoryConfig().enabled) {
     throw new Error("Memory is disabled.");
   }
   const normalized = normalizeRecordInput(input);
@@ -1389,15 +1399,16 @@ export async function appendStructuredMemory(input: MemoryRecordInput): Promise<
 }
 
 export async function getMemoryStatus(): Promise<MemoryStatus> {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  const memoryConfig = currentMemoryConfig();
+  if (!memoryConfig.enabled) {
     return {
       enabled: false,
       workspaceDir: resolveWorkspaceDir(),
-      provider: env.WAFFLEBOT_MEMORY_EMBED_PROVIDER,
-      model: env.WAFFLEBOT_MEMORY_EMBED_MODEL,
-      toolMode: env.WAFFLEBOT_MEMORY_TOOL_MODE,
-      writePolicy: env.WAFFLEBOT_MEMORY_WRITE_POLICY,
-      minConfidence: env.WAFFLEBOT_MEMORY_MIN_CONFIDENCE,
+      provider: memoryConfig.embedProvider,
+      model: memoryConfig.embedModel,
+      toolMode: memoryConfig.toolMode,
+      writePolicy: memoryConfig.writePolicy,
+      minConfidence: memoryConfig.minConfidence,
       files: 0,
       chunks: 0,
       records: 0,
@@ -1418,11 +1429,11 @@ export async function getMemoryStatus(): Promise<MemoryStatus> {
   return {
     enabled: true,
     workspaceDir: resolveWorkspaceDir(),
-    provider: env.WAFFLEBOT_MEMORY_EMBED_PROVIDER,
-    model: env.WAFFLEBOT_MEMORY_EMBED_MODEL,
-    toolMode: env.WAFFLEBOT_MEMORY_TOOL_MODE,
-    writePolicy: env.WAFFLEBOT_MEMORY_WRITE_POLICY,
-    minConfidence: env.WAFFLEBOT_MEMORY_MIN_CONFIDENCE,
+    provider: memoryConfig.embedProvider,
+    model: memoryConfig.embedModel,
+    toolMode: memoryConfig.toolMode,
+    writePolicy: memoryConfig.writePolicy,
+    minConfidence: memoryConfig.minConfidence,
     files: files.count,
     chunks: chunks.count,
     records: records.count,
@@ -1432,7 +1443,7 @@ export async function getMemoryStatus(): Promise<MemoryStatus> {
 }
 
 export async function initializeMemory() {
-  if (!env.WAFFLEBOT_MEMORY_ENABLED) {
+  if (!currentMemoryConfig().enabled) {
     return;
   }
   await ensureWorkspaceScaffold();
