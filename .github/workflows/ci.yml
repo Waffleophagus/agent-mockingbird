@@ -101,6 +101,9 @@ jobs:
           : "${token:?Missing PACKAGE_REGISTRY_TOKEN}"
           : "${scope:?Missing PACKAGE_REGISTRY_SCOPE}"
 
+          registry_url="$(printf '%s' "${registry_url}" | tr -d '\r' | sed 's/[[:space:]]*$//')"
+          token="$(printf '%s' "${token}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          scope="$(printf '%s' "${scope}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           scope="${scope,,}"
           echo "REGISTRY_URL=${registry_url}" >> "${GITHUB_ENV}"
           echo "REGISTRY_TOKEN=${token}" >> "${GITHUB_ENV}"
@@ -169,6 +172,7 @@ jobs:
           set -euo pipefail
           echo "Registry URL: ${REGISTRY_URL%/}/"
           echo "Registry scope: ${REGISTRY_SCOPE}"
+          echo "Token length: ${#REGISTRY_TOKEN}"
           echo "package.json publishConfig.registry:"
           bun -e 'const p=require("./package.json"); console.log(p.publishConfig?.registry || "<missing>")'
           echo ".npmrc (token redacted):"
