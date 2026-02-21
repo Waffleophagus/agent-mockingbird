@@ -21,6 +21,7 @@ jobs:
   pipeline:
     runs-on: ubuntu-latest
     env:
+      REGISTRY_URL: ${{ secrets.PACKAGE_REGISTRY_URL }}
       PACKAGE_REGISTRY_URL: ${{ secrets.PACKAGE_REGISTRY_URL }}
       PACKAGE_REGISTRY_TOKEN: ${{ secrets.PACKAGE_REGISTRY_TOKEN }}
       PACKAGE_REGISTRY_SCOPE: ${{ secrets.PACKAGE_REGISTRY_SCOPE }}
