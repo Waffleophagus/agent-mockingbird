@@ -7,6 +7,10 @@ import {
   patchOpencodeAgentTypes,
   validateOpencodeAgentPatch,
 } from "../../agents/opencodeConfig";
+import {
+  importManagedSkillWithConfigUpdate,
+  runRuntimeMcpAction,
+} from "../../config/orchestration";
 import { configuredMcpServerSchema } from "../../config/schema";
 import {
   applyConfigPatch,
@@ -23,21 +27,14 @@ import {
   createConfigUpdatedEvent,
 } from "../../contracts/events";
 import {
-  connectRuntimeMcp,
-  disconnectRuntimeMcp,
   listRuntimeMcps,
   normalizeMcpIds,
-  removeRuntimeMcpAuth,
   resolveConfiguredMcpIds,
   resolveConfiguredMcpServers,
-  startRuntimeMcpAuth,
 } from "../../mcp/service";
 import {
   getManagedSkillsRootPath,
   listRuntimeSkills,
-  normalizeSkillId,
-  removeManagedSkill,
-  writeManagedSkill,
 } from "../../skills/service";
 import { parseStringListBody } from "../parsers";
 import type { RuntimeEventStream } from "../sse";
@@ -331,24 +328,8 @@ async function runMcpAction(
 
   const snapshot = getConfigSnapshot();
   try {
-    if (action === "connect") {
-      const connected = await connectRuntimeMcp(snapshot.config, id);
-      const mcps = await listRuntimeMcps(snapshot.config);
-      return Response.json({ id, connected, mcps, hash: snapshot.hash });
-    }
-    if (action === "disconnect") {
-      const disconnected = await disconnectRuntimeMcp(snapshot.config, id);
-      const mcps = await listRuntimeMcps(snapshot.config);
-      return Response.json({ id, disconnected, mcps, hash: snapshot.hash });
-    }
-    if (action === "authStart") {
-      const authorizationUrl = await startRuntimeMcpAuth(snapshot.config, id);
-      const mcps = await listRuntimeMcps(snapshot.config);
-      return Response.json({ id, authorizationUrl, mcps, hash: snapshot.hash });
-    }
-    const authRemoved = await removeRuntimeMcpAuth(snapshot.config, id);
-    const mcps = await listRuntimeMcps(snapshot.config);
-    return Response.json({ id, authRemoved, mcps, hash: snapshot.hash });
+    const result = await runRuntimeMcpAction(snapshot.config, id, action, snapshot.hash);
+    return Response.json(result);
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : `Failed to ${action} MCP server ${id}` },
@@ -364,57 +345,26 @@ async function importManagedSkill(eventStream: RuntimeEventStream, req: Request)
   const enable = typeof body.enable === "boolean" ? body.enable : true;
   const runSmokeTest = typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true;
 
-  let id = "";
   try {
-    id = normalizeSkillId(rawId);
-  } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "invalid skill id" }, { status: 400 });
-  }
-  if (!content.trim()) {
-    return Response.json({ error: "skill content is required" }, { status: 400 });
-  }
-
-  let created = false;
-  let filePath = "";
-  try {
-    const writeResult = writeManagedSkill({
-      id,
+    const imported = await importManagedSkillWithConfigUpdate({
+      rawId,
       content,
-      overwrite: false,
-    });
-    created = writeResult.created;
-    filePath = writeResult.filePath;
-
-    const current = getConfigSnapshot();
-    const enabledSkills = new Set(current.config.ui.skills);
-    if (enable) {
-      enabledSkills.add(id);
-    }
-
-    const result = await applyConfigPatch({
-      patch: {
-        ui: {
-          skills: [...enabledSkills],
-        },
-      },
+      enable,
       expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
       runSmokeTest,
     });
-    publishConfigUpdatedEvent(eventStream, result);
+    publishConfigUpdatedEvent(eventStream, imported.result);
 
     return Response.json({
       imported: {
-        id,
-        filePath,
+        id: imported.imported.id,
+        filePath: imported.imported.filePath,
       },
-      skills: result.snapshot.config.ui.skills,
-      hash: result.snapshot.hash,
-      smokeTest: result.smokeTest,
+      skills: imported.result.snapshot.config.ui.skills,
+      hash: imported.result.snapshot.hash,
+      smokeTest: imported.result.smokeTest,
     });
   } catch (error) {
-    if (created) {
-      removeManagedSkill(id);
-    }
     if (error instanceof Error && error.message.includes("already exists")) {
       return Response.json({ error: error.message }, { status: 409 });
     }

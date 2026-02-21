@@ -127,6 +127,8 @@ export function App() {
   const [draftMessage, setDraftMessage] = useState("");
   const [activeSend, setActiveSend] = useState<ActiveSend | null>(null);
   const [runWaitTimeoutMs, setRunWaitTimeoutMs] = useState(DEFAULT_RUN_WAIT_TIMEOUT_MS);
+  const [runtimeDefaultModel, setRuntimeDefaultModel] = useState("");
+  const [isSyncingRuntimeDefaultModel, setIsSyncingRuntimeDefaultModel] = useState(false);
   const [runStatusBySession, setRunStatusBySession] = useState<Record<string, SessionRunStatusSnapshot>>({});
   const [runErrorsBySession, setRunErrorsBySession] = useState<Record<string, string>>({});
   const [compactedAtBySession, setCompactedAtBySession] = useState<Record<string, string>>({});
@@ -171,7 +173,6 @@ export function App() {
     refreshSessionsList,
     setBackgroundActionBusyByRun,
     setBackgroundPrompt,
-    setBackgroundRunsError,
     setBackgroundSteerDraftByRun,
     setFocusedBackgroundRunId,
     spawnBackgroundRun,
@@ -213,6 +214,7 @@ export function App() {
     setMcpServers,
     setRunWaitTimeoutMs,
     setChildSessionHideAfterDays,
+    setRuntimeDefaultModel,
     setConfigHash,
     setSkillCatalogError,
     setMcpCatalogError,
@@ -267,22 +269,12 @@ export function App() {
   useEffect(() => {
     if (!activeSessionId || loadedBackgroundSessionsRef.current.has(activeSessionId)) return;
 
-    let cancelled = false;
     const loadBackgroundRuns = async () => {
-      try {
-        await refreshBackgroundRunsForSession(activeSessionId);
-      } catch (error) {
-        if (!cancelled) {
-          setBackgroundRunsError(error instanceof Error ? error.message : "Failed to load background runs");
-        }
-      }
+      await refreshBackgroundRunsForSession(activeSessionId);
     };
 
     void loadBackgroundRuns();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSessionId, refreshBackgroundRunsForSession, setBackgroundRunsError]);
+  }, [activeSessionId, refreshBackgroundRunsForSession]);
 
   useEffect(() => {
     setNowMs(Date.now());
@@ -411,6 +403,11 @@ export function App() {
     if (!activeSession) return "Select model";
     return availableModels.find(option => option.id === activeSession.model)?.label ?? activeSession.model;
   }, [availableModels, activeSession]);
+  const sessionMatchesRuntimeDefault = useMemo(() => {
+    if (!activeSession) return true;
+    if (!runtimeDefaultModel.trim()) return true;
+    return activeSession.model === runtimeDefaultModel;
+  }, [activeSession, runtimeDefaultModel]);
   const filteredModelOptions = useMemo(() => {
     const query = modelQuery.trim().toLowerCase();
     if (!query) return availableModels;
@@ -422,7 +419,7 @@ export function App() {
 
   useEffect(() => {
     setFocusedModelIndex(0);
-  }, [filteredModelOptions.length]);
+  }, [filteredModelOptions]);
   const configuredSkills = useMemo(() => normalizeListInput(skillsDraft), [skillsDraft]);
   const configuredSkillSet = useMemo(() => new Set(configuredSkills), [configuredSkills]);
   const configuredUnavailableSkills = useMemo(
@@ -606,6 +603,7 @@ export function App() {
   async function refreshSkillCatalog() {
     setLoadingSkillCatalog(true);
     setSkillCatalogError("");
+    setSkillsError("");
     try {
       const payload = await fetchSkillCatalog();
       setAvailableSkills(payload.skills);
@@ -621,6 +619,8 @@ export function App() {
   async function refreshMcpCatalog() {
     setLoadingMcpCatalog(true);
     setMcpCatalogError("");
+    setMcpsError("");
+    setMcpActionError("");
     try {
       const payload = await fetchMcpCatalog();
       setAvailableMcps(payload.mcps);
@@ -962,6 +962,8 @@ export function App() {
         session?: SessionSummary;
         configHash?: string;
         configError?: string;
+        runtimeDefaultModel?: string;
+        sessionMatchesRuntimeDefault?: boolean;
         error?: string;
       };
       if (!response.ok || !payload.session) {
@@ -973,13 +975,49 @@ export function App() {
       if (typeof payload.configHash === "string" && payload.configHash.trim()) {
         setConfigHash(payload.configHash);
       }
+      if (typeof payload.runtimeDefaultModel === "string") {
+        setRuntimeDefaultModel(payload.runtimeDefaultModel);
+      }
       if (typeof payload.configError === "string" && payload.configError.trim()) {
-        setModelError(`Session model updated, but runtime default model was not updated: ${payload.configError}`);
+        setModelError(
+          `Session model updated, but runtime default did not change (${payload.runtimeDefaultModel || "unknown"}): ${payload.configError}`,
+        );
       }
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "Failed to update session model");
     } finally {
       setIsSavingModel(false);
+    }
+  }
+
+  async function syncRuntimeDefaultToActiveModel() {
+    if (!activeSession) return;
+    setIsSyncingRuntimeDefaultModel(true);
+    setModelError("");
+    try {
+      const response = await fetch("/api/runtime/default-model", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: activeSession.model }),
+      });
+      const payload = (await response.json()) as {
+        runtimeDefaultModel?: string;
+        configHash?: string;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to sync runtime default model");
+      }
+      if (typeof payload.runtimeDefaultModel === "string") {
+        setRuntimeDefaultModel(payload.runtimeDefaultModel);
+      }
+      if (typeof payload.configHash === "string" && payload.configHash.trim()) {
+        setConfigHash(payload.configHash);
+      }
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : "Failed to sync runtime default model");
+    } finally {
+      setIsSyncingRuntimeDefaultModel(false);
     }
   }
 
@@ -1150,6 +1188,8 @@ export function App() {
     scrollToBottom,
     selectModelFromPicker,
     selectedModelLabel,
+    runtimeDefaultModel,
+    sessionMatchesRuntimeDefault,
     sendMessage,
     sessionError,
     sessionSearchNeedle,
@@ -1163,6 +1203,8 @@ export function App() {
     setModelQuery,
     setShowAllChildren,
     showAllChildren,
+    syncRuntimeDefaultToActiveModel,
+    isSyncingRuntimeDefaultModel,
     spawnBackgroundRun,
     steerBackgroundRun,
     toggleSessionGroup,

@@ -75,6 +75,8 @@ Wafflebot runs with an OpenCode-backed runtime that forwards prompts to OpenCode
 
 Runtime configuration is stored in JSON (`./data/wafflebot.config.json` by default). On first boot, wafflebot migrates legacy env/DB runtime settings into this file.
 Example config template: `wafflebot.config.example.json`.
+`./config.json` at repo root is OpenCode config, not wafflebot runtime config.
+If runtime config fields are missing, explicitly-set `WAFFLEBOT_*` env vars are used as fallback defaults during config parse.
 
 Config API:
 

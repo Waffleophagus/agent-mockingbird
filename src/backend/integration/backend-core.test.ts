@@ -518,6 +518,41 @@ describe("chat routes", () => {
 
     expect(response.status).toBe(404);
   });
+
+  test("PUT /api/runtime/default-model updates runtime default model", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/runtime/default-model"] as {
+      PUT: (req: Request) => Promise<Response>;
+    };
+    const response = await route.PUT(
+      new Request("http://localhost/api/runtime/default-model", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "opencode/runtime-default-updated" }),
+      }),
+    );
+
+    expect([200, 422]).toContain(response.status);
+    const payload = (await response.json()) as {
+      runtimeDefaultModel?: string;
+      configHash?: string;
+      error?: string;
+    };
+    if (response.status === 200) {
+      expect(payload.runtimeDefaultModel).toBe("opencode/runtime-default-updated");
+      expect(typeof payload.configHash).toBe("string");
+
+      const { getConfigSnapshot } = (await import("../config/service")) as unknown as {
+        getConfigSnapshot: () => { config: { runtime: { opencode: { providerId: string; modelId: string } } } };
+      };
+      const snapshot = getConfigSnapshot();
+      expect(snapshot.config.runtime.opencode.providerId).toBe("opencode");
+      expect(snapshot.config.runtime.opencode.modelId).toBe("runtime-default-updated");
+      return;
+    }
+
+    expect(typeof payload.error).toBe("string");
+  });
 });
 
 describe("runtime health route", () => {

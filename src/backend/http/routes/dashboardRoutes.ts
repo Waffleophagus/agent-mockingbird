@@ -28,6 +28,13 @@ function parseModelSelection(model: string, defaultProviderId: string) {
   return { providerId, modelId };
 }
 
+function toQualifiedModel(providerId: string, modelId: string) {
+  const provider = providerId.trim();
+  const model = modelId.trim();
+  if (!provider || !model) return "";
+  return `${provider}/${model}`;
+}
+
 function toConfigErrorResponse(error: unknown) {
   if (error instanceof ConfigApplyError) {
     if (error.stage === "conflict") {
@@ -175,9 +182,17 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
         }
 
         const snapshot = getConfigSnapshot();
+        const currentRuntimeDefaultModel = toQualifiedModel(
+          snapshot.config.runtime.opencode.providerId,
+          snapshot.config.runtime.opencode.modelId,
+        );
         const parsed = parseModelSelection(model, snapshot.config.runtime.opencode.providerId);
         if (!parsed) {
-          return Response.json({ session });
+          return Response.json({
+            session,
+            runtimeDefaultModel: currentRuntimeDefaultModel,
+            sessionMatchesRuntimeDefault: session.model === currentRuntimeDefaultModel,
+          });
         }
 
         try {
@@ -194,9 +209,12 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
             },
           });
 
+          const runtimeDefaultModel = toQualifiedModel(parsed.providerId, parsed.modelId);
           return Response.json({
             session,
             configHash: configResult.snapshot.hash,
+            runtimeDefaultModel,
+            sessionMatchesRuntimeDefault: session.model === runtimeDefaultModel,
           });
         } catch (error) {
           const details = toConfigErrorResponse(error);
@@ -204,7 +222,49 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
             session,
             configError: details.body.error,
             configStage: details.body.stage,
+            runtimeDefaultModel: currentRuntimeDefaultModel,
+            sessionMatchesRuntimeDefault: session.model === currentRuntimeDefaultModel,
           });
+        }
+      },
+    },
+
+    "/api/runtime/default-model": {
+      PUT: async (req: Request) => {
+        const body = (await req.json()) as { model?: string };
+        const model = body.model?.trim();
+        if (!model) {
+          return Response.json({ error: "model is required" }, { status: 400 });
+        }
+        const snapshot = getConfigSnapshot();
+        const parsed = parseModelSelection(model, snapshot.config.runtime.opencode.providerId);
+        if (!parsed) {
+          return Response.json({ error: "Invalid model format" }, { status: 400 });
+        }
+        try {
+          const configResult = await applyConfigPatch({
+            expectedHash: snapshot.hash,
+            runSmokeTest: false,
+            patch: {
+              runtime: {
+                opencode: {
+                  providerId: parsed.providerId,
+                  modelId: parsed.modelId,
+                },
+              },
+            },
+          });
+          const runtimeDefaultModel = toQualifiedModel(parsed.providerId, parsed.modelId);
+          return Response.json({
+            runtimeDefaultModel,
+            configHash: configResult.snapshot.hash,
+          });
+        } catch (error) {
+          const details = toConfigErrorResponse(error);
+          return Response.json(
+            { error: details.body.error, stage: details.body.stage },
+            { status: details.status },
+          );
         }
       },
     },

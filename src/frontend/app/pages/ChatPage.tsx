@@ -110,6 +110,8 @@ export interface ChatPageModel {
   scrollToBottom: () => void;
   selectModelFromPicker: (model: string) => Promise<void>;
   selectedModelLabel: string;
+  runtimeDefaultModel: string;
+  sessionMatchesRuntimeDefault: boolean;
   sendMessage: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   sessionError: string;
   sessionSearchNeedle: string;
@@ -123,6 +125,8 @@ export interface ChatPageModel {
   setModelQuery: (value: string) => void;
   setShowAllChildren: Dispatch<SetStateAction<boolean>>;
   showAllChildren: boolean;
+  syncRuntimeDefaultToActiveModel: () => Promise<void>;
+  isSyncingRuntimeDefaultModel: boolean;
   spawnBackgroundRun: () => Promise<void>;
   steerBackgroundRun: (runId: string, rawContent?: string) => Promise<void>;
   toggleSessionGroup: (sessionId: string) => void;
@@ -203,6 +207,8 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     scrollToBottom,
     selectModelFromPicker,
     selectedModelLabel,
+    runtimeDefaultModel,
+    sessionMatchesRuntimeDefault,
     sendMessage,
     sessionError,
     sessionSearchNeedle,
@@ -216,6 +222,8 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     setModelQuery,
     setShowAllChildren,
     showAllChildren,
+    syncRuntimeDefaultToActiveModel,
+    isSyncingRuntimeDefaultModel,
     spawnBackgroundRun,
     steerBackgroundRun,
     toggleSessionGroup,
@@ -544,6 +552,25 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
         )}
       </div>
       {isSavingModel && <p className="text-xs text-muted-foreground">Saving model...</p>}
+      {activeSession && runtimeDefaultModel && (
+        <Badge variant={sessionMatchesRuntimeDefault ? "success" : "warning"}>
+          default {sessionMatchesRuntimeDefault ? "synced" : "drift"}
+        </Badge>
+      )}
+      {activeSession && runtimeDefaultModel && !sessionMatchesRuntimeDefault && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            void syncRuntimeDefaultToActiveModel();
+          }}
+          disabled={isSyncingRuntimeDefaultModel || isSavingModel}
+        >
+          <RefreshCcw className="size-3.5" />
+          {isSyncingRuntimeDefaultModel ? "Syncing default..." : "Sync default"}
+        </Button>
+      )}
       <Badge
         variant={
           activeRunStatusLabel === "idle"
@@ -596,6 +623,11 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
       </Button>
     </div>
     {modelError && <p className="text-xs text-destructive">{modelError}</p>}
+    {activeSession && runtimeDefaultModel && (
+      <p className="text-xs text-muted-foreground">
+        session: {activeSession.model} · runtime default: {runtimeDefaultModel}
+      </p>
+    )}
     {activeRunStatusHint && <p className="text-xs text-muted-foreground">{activeRunStatusHint}</p>}
     {activeSessionRunError && <p className="text-xs text-destructive">{activeSessionRunError}</p>}
     {backgroundRunsError && <p className="text-xs text-destructive">{backgroundRunsError}</p>}

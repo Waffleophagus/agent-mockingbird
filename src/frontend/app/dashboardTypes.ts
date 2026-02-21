@@ -26,6 +26,8 @@ export interface ConfigSnapshotResponse {
   config?: {
     runtime?: {
       opencode?: {
+        providerId?: string;
+        modelId?: string;
         runWaitTimeoutMs?: number;
         childSessionHideAfterDays?: number;
       };

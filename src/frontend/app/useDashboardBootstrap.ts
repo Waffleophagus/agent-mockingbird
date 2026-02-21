@@ -68,6 +68,7 @@ interface UseDashboardBootstrapInput {
   setMcpServers: Dispatch<SetStateAction<ConfiguredMcpServer[]>>;
   setRunWaitTimeoutMs: Dispatch<SetStateAction<number>>;
   setChildSessionHideAfterDays: Dispatch<SetStateAction<number>>;
+  setRuntimeDefaultModel: Dispatch<SetStateAction<string>>;
   setConfigHash: Dispatch<SetStateAction<string>>;
   setSkillCatalogError: Dispatch<SetStateAction<string>>;
   setMcpCatalogError: Dispatch<SetStateAction<string>>;
@@ -209,6 +210,9 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
         input.setChildSessionHideAfterDays(
           normalizeChildSessionHideAfterDays(configPayload.config?.runtime?.opencode?.childSessionHideAfterDays),
         );
+        const providerId = configPayload.config?.runtime?.opencode?.providerId?.trim() ?? "";
+        const modelId = configPayload.config?.runtime?.opencode?.modelId?.trim() ?? "";
+        input.setRuntimeDefaultModel(providerId && modelId ? `${providerId}/${modelId}` : "");
         input.setConfigHash(typeof configPayload.hash === "string" ? configPayload.hash : "");
         input.setSkillCatalogError(skillsCatalogResponse.ok ? "" : (skillsCatalogPayload.error ?? "Failed to load runtime skills"));
         input.setMcpCatalogError(mcpsCatalogResponse.ok ? "" : (mcpsCatalogPayload.error ?? "Failed to load runtime MCP servers"));
