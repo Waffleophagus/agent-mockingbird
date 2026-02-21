@@ -5,9 +5,9 @@ node_modules
 out
 dist
 *.tgz
-data/*.db
-data/*.db-shm
-data/*.db-wal
+data/*
+data/*
+bin/*
 data/workspace/
 data/wafflebot.config.json
 data/wafflebot.config.json.bak
@@ -39,5 +39,3 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
-
-
