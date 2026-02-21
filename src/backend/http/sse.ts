@@ -24,6 +24,8 @@ function toSseEventName(event: RuntimeEvent): string {
       return "session-updated";
     case "session.message.created":
       return "session-message";
+    case "session.message.part.updated":
+      return "session-message-part";
     case "session.run.status.updated":
       return "session-status";
     case "session.compacted":

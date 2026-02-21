@@ -65,6 +65,21 @@ import type {
 } from "@/types/dashboard";
 import "@/index.css";
 
+const CHAT_SHOW_THINKING_KEY = "wafflebot.chat.showThinking";
+const CHAT_SHOW_TOOL_CALLS_KEY = "wafflebot.chat.showToolCalls";
+
+function loadBooleanSetting(key: string, fallback: boolean) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function App() {
   type StreamStatus = "connecting" | "connected" | "reconnecting";
   type DashboardPage = "chat" | "skills" | "mcp" | "agents" | "other";
@@ -80,6 +95,12 @@ export function App() {
   const [modelError, setModelError] = useState("");
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  const [showThinkingDetails, setShowThinkingDetails] = useState(() =>
+    loadBooleanSetting(CHAT_SHOW_THINKING_KEY, false),
+  );
+  const [showToolCallDetails, setShowToolCallDetails] = useState(() =>
+    loadBooleanSetting(CHAT_SHOW_TOOL_CALLS_KEY, false),
+  );
   const [openAgentModelPickerId, setOpenAgentModelPickerId] = useState<string | null>(null);
   const [agentModelQuery, setAgentModelQuery] = useState("");
   const [agentFocusedModelIndex, setAgentFocusedModelIndex] = useState(0);
@@ -330,6 +351,22 @@ export function App() {
       clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_SHOW_THINKING_KEY, String(showThinkingDetails));
+    } catch {
+      // ignore localStorage write failures
+    }
+  }, [showThinkingDetails]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_SHOW_TOOL_CALLS_KEY, String(showToolCallDetails));
+    } catch {
+      // ignore localStorage write failures
+    }
+  }, [showToolCallDetails]);
 
   const activeMessages = useMemo(() => messagesBySession[activeSessionId] ?? [], [messagesBySession, activeSessionId]);
   const activeSession = useMemo(
@@ -1348,7 +1385,11 @@ export function App() {
     setDraftMessage,
     setIsModelPickerOpen,
     setModelQuery,
+    setShowThinkingDetails,
+    setShowToolCallDetails,
     setShowAllChildren,
+    showThinkingDetails,
+    showToolCallDetails,
     showAllChildren,
     syncRuntimeDefaultToActiveModel,
     isSyncingRuntimeDefaultModel,

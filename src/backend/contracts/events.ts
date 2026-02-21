@@ -1,4 +1,11 @@
-import type { ChatMessage, HeartbeatSnapshot, SessionSummary, UsageSnapshot } from "../../types/dashboard";
+import type {
+  ChatMessage,
+  ChatMessagePart,
+  HeartbeatSnapshot,
+  SessionMessagePartPhase,
+  SessionSummary,
+  UsageSnapshot,
+} from "../../types/dashboard";
 
 export type RuntimeEventSource = "api" | "runtime" | "scheduler" | "system";
 
@@ -19,6 +26,14 @@ export interface SessionMessageCreatedPayload {
   message: ChatMessage;
 }
 export type SessionMessageCreatedEvent = RuntimeEventBase<"session.message.created", SessionMessageCreatedPayload>;
+
+export interface SessionMessagePartUpdatedPayload {
+  sessionId: string;
+  messageId: string;
+  part: ChatMessagePart;
+  phase: SessionMessagePartPhase;
+}
+export type SessionMessagePartUpdatedEvent = RuntimeEventBase<"session.message.part.updated", SessionMessagePartUpdatedPayload>;
 
 export interface SessionRunStatusPayload {
   sessionId: string;
@@ -87,6 +102,7 @@ export type RuntimeEvent =
   | UsageUpdatedEvent
   | SessionStateUpdatedEvent
   | SessionMessageCreatedEvent
+  | SessionMessagePartUpdatedEvent
   | SessionRunStatusUpdatedEvent
   | SessionCompactedEvent
   | SessionRunErrorEvent
@@ -126,6 +142,13 @@ export function createSessionMessageCreatedEvent(
   source: RuntimeEventSource,
 ): SessionMessageCreatedEvent {
   return baseRuntimeEvent("session.message.created", payload, source);
+}
+
+export function createSessionMessagePartUpdatedEvent(
+  payload: SessionMessagePartUpdatedPayload,
+  source: RuntimeEventSource,
+): SessionMessagePartUpdatedEvent {
+  return baseRuntimeEvent("session.message.part.updated", payload, source);
 }
 
 export function createSessionRunStatusUpdatedEvent(

@@ -58,6 +58,7 @@ export function useChatSession(input: UseChatSessionInput) {
       role: "assistant",
       content: "",
       at: createdAt,
+      parts: [],
       uiMeta: {
         type: "assistant-pending",
         requestId,
@@ -90,10 +91,12 @@ export function useChatSession(input: UseChatSessionInput) {
         return {
           ...message,
           content: "",
+          parts: [],
           uiMeta: {
             ...message.uiMeta,
             status: "pending",
             errorMessage: undefined,
+            runtimeMessageId: undefined,
           },
         };
       }),

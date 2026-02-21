@@ -3,6 +3,7 @@ import type { SQLQueryBindings } from "bun:sqlite";
 import { sqlite } from "./client";
 import type {
   ChatMessage,
+  ChatMessagePart,
   DashboardBootstrap,
   HeartbeatSnapshot,
   MessageMemoryTrace,
@@ -37,6 +38,11 @@ interface MessageRow {
 interface MessageMemoryTraceRow {
   message_id: string;
   trace_json: string;
+}
+
+interface MessagePartsRow {
+  message_id: string;
+  parts_json: string;
 }
 
 interface HeartbeatRow {
@@ -118,6 +124,7 @@ export interface SessionMessageImportInput {
   role: "user" | "assistant";
   content: string;
   createdAt: number;
+  parts?: ChatMessagePart[];
 }
 
 const nowMs = () => Date.now();
@@ -186,6 +193,57 @@ function runtimeSessionBindingRowToRecord(row: RuntimeSessionBindingRow): Runtim
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeChatMessagePart(raw: unknown): ChatMessagePart | null {
+  if (!isRecord(raw)) return null;
+  const id = typeof raw.id === "string" ? raw.id.trim() : "";
+  const type = typeof raw.type === "string" ? raw.type : "";
+  if (!id || !type) return null;
+
+  if (type === "thinking") {
+    const text = typeof raw.text === "string" ? raw.text.trim() : "";
+    if (!text) return null;
+    return {
+      id,
+      type: "thinking",
+      text,
+    };
+  }
+
+  if (type === "tool_call") {
+    const toolCallId = typeof raw.toolCallId === "string" ? raw.toolCallId.trim() : "";
+    const tool = typeof raw.tool === "string" ? raw.tool.trim() : "";
+    const status = typeof raw.status === "string" ? raw.status : "";
+    if (!toolCallId || !tool || (status !== "pending" && status !== "running" && status !== "completed" && status !== "error")) {
+      return null;
+    }
+    const output = typeof raw.output === "string" ? raw.output : undefined;
+    const error = typeof raw.error === "string" ? raw.error : undefined;
+    return {
+      id,
+      type: "tool_call",
+      toolCallId,
+      tool,
+      status,
+      input: isRecord(raw.input) ? raw.input : undefined,
+      output,
+      error,
+    };
+  }
+
+  return null;
+}
+
+function normalizeChatMessageParts(value: unknown): ChatMessagePart[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(part => normalizeChatMessagePart(part))
+    .filter((part): part is ChatMessagePart => Boolean(part));
+}
+
 function ensureAuxiliaryTables() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS message_memory_traces (
@@ -197,6 +255,17 @@ function ensureAuxiliaryTables() {
 
     CREATE INDEX IF NOT EXISTS message_memory_traces_session_idx
       ON message_memory_traces(session_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS message_parts (
+      message_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      parts_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS message_parts_session_updated_idx
+      ON message_parts(session_id, updated_at DESC);
   `);
 }
 
@@ -306,6 +375,7 @@ export function resetDatabaseToDefaults(): DashboardBootstrap {
     clearCronTables();
     clearRunTables();
     sqlite.query("DELETE FROM message_memory_traces").run();
+    sqlite.query("DELETE FROM message_parts").run();
     sqlite.query("DELETE FROM messages").run();
     sqlite.query("DELETE FROM usage_events").run();
     sqlite.query("DELETE FROM heartbeat_events").run();
@@ -411,9 +481,33 @@ export function listMessagesForSession(sessionId: string): ChatMessage[] {
     }
   }
 
+  const partRows = sqlite
+    .query(
+      `
+      SELECT message_id, parts_json
+      FROM message_parts
+      WHERE session_id = ?1
+        AND message_id IN (${placeholders})
+    `,
+    )
+    .all(sessionId, ...messageIds) as MessagePartsRow[];
+  const partMap = new Map<string, ChatMessagePart[]>();
+  for (const row of partRows) {
+    try {
+      const parsed = JSON.parse(row.parts_json) as unknown;
+      const parts = normalizeChatMessageParts(parsed);
+      if (parts.length > 0) {
+        partMap.set(row.message_id, parts);
+      }
+    } catch {
+      // ignore malformed part rows
+    }
+  }
+
   return messages.map(message => ({
     ...message,
     memoryTrace: traceMap.get(message.id),
+    parts: partMap.get(message.id),
   }));
 }
 
@@ -437,6 +531,31 @@ export function setMessageMemoryTrace(input: {
     `,
     )
     .run(input.messageId, input.sessionId, JSON.stringify(input.trace), createdAt);
+}
+
+export function setMessageParts(input: {
+  sessionId: string;
+  messageId: string;
+  parts: ChatMessagePart[];
+  createdAt?: number;
+  updatedAt?: number;
+}) {
+  ensureAuxiliaryTables();
+  const createdAt = input.createdAt ?? nowMs();
+  const updatedAt = input.updatedAt ?? createdAt;
+  const parts = normalizeChatMessageParts(input.parts);
+  sqlite
+    .query(
+      `
+      INSERT INTO message_parts (message_id, session_id, parts_json, created_at, updated_at)
+      VALUES (?1, ?2, ?3, ?4, ?5)
+      ON CONFLICT(message_id) DO UPDATE SET
+        session_id = excluded.session_id,
+        parts_json = excluded.parts_json,
+        updated_at = excluded.updated_at
+    `,
+    )
+    .run(input.messageId, input.sessionId, JSON.stringify(parts), createdAt, updatedAt);
 }
 
 export function getUsageSnapshot(): UsageSnapshot {
@@ -917,6 +1036,7 @@ export function appendChatExchange(input: {
   sessionId: string;
   userContent: string;
   assistantContent: string;
+  assistantParts?: ChatMessagePart[];
   source: RuntimeEventSource;
   createdAt?: number;
   userMessageId?: string;
@@ -938,6 +1058,7 @@ export function appendChatExchange(input: {
     if (!session) return null;
 
     const createdAt = input.createdAt ?? nowMs();
+    const assistantParts = normalizeChatMessageParts(input.assistantParts);
     const userMessage: ChatMessage = {
       id: input.userMessageId ?? crypto.randomUUID(),
       role: "user",
@@ -949,6 +1070,7 @@ export function appendChatExchange(input: {
       role: "assistant",
       content: input.assistantContent,
       at: toIso(createdAt),
+      parts: assistantParts.length > 0 ? assistantParts : undefined,
     };
 
     sqlite
@@ -968,6 +1090,16 @@ export function appendChatExchange(input: {
       `,
       )
       .run(assistantMessage.id, input.sessionId, assistantMessage.role, assistantMessage.content, createdAt);
+
+    if (assistantMessage.parts && assistantMessage.parts.length > 0) {
+      setMessageParts({
+        sessionId: input.sessionId,
+        messageId: assistantMessage.id,
+        parts: assistantMessage.parts,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
 
     sqlite
       .query(
@@ -1011,6 +1143,7 @@ export function appendChatExchange(input: {
 export function appendAssistantMessage(input: {
   sessionId: string;
   content: string;
+  parts?: ChatMessagePart[];
   source: RuntimeEventSource;
   createdAt?: number;
   messageId?: string;
@@ -1025,11 +1158,13 @@ export function appendAssistantMessage(input: {
     if (!session) return null;
 
     const createdAt = input.createdAt ?? nowMs();
+    const messageParts = normalizeChatMessageParts(input.parts);
     const message: ChatMessage = {
       id: input.messageId ?? crypto.randomUUID(),
       role: "assistant",
       content: input.content,
       at: toIso(createdAt),
+      parts: messageParts.length > 0 ? messageParts : undefined,
     };
 
     sqlite
@@ -1040,6 +1175,16 @@ export function appendAssistantMessage(input: {
       `,
       )
       .run(message.id, input.sessionId, message.role, message.content, createdAt);
+
+    if (message.parts && message.parts.length > 0) {
+      setMessageParts({
+        sessionId: input.sessionId,
+        messageId: message.id,
+        parts: message.parts,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
 
     sqlite
       .query(
@@ -1097,6 +1242,7 @@ export function upsertSessionMessages(input: {
         role,
         content: message.content,
         createdAt,
+        parts: message.parts,
       });
     }
     const candidates = [...deduped.values()];
@@ -1136,6 +1282,17 @@ export function upsertSessionMessages(input: {
         `,
         )
         .run(sessionId, message.id, message.content);
+    }
+
+    const messagePartsToUpsert = candidates.filter(message => message.parts !== undefined);
+    for (const message of messagePartsToUpsert) {
+      setMessageParts({
+        sessionId,
+        messageId: message.id,
+        parts: message.parts ?? [],
+        createdAt: message.createdAt,
+        updatedAt: nowMs(),
+      });
     }
 
     const insertedInputs = candidates
@@ -1182,12 +1339,16 @@ export function upsertSessionMessages(input: {
 
     const session = getSessionById(sessionId);
     if (!session) return null;
-    const inserted = insertedInputs.map(message => ({
-      id: message.id,
-      role: message.role,
-      content: message.content,
-      at: toIso(message.createdAt),
-    }));
+    const inserted = insertedInputs.map(message => {
+      const parts = message.parts ? normalizeChatMessageParts(message.parts) : [];
+      return {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        at: toIso(message.createdAt),
+        parts: parts.length > 0 ? parts : undefined,
+      };
+    });
     return { session, inserted };
   });
 

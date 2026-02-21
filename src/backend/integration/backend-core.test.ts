@@ -1239,6 +1239,30 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
+  test("toSseFrame maps session.message.part.updated to session-message-part event", () => {
+    const frame = toSseFrame({
+      id: "evt-part-1",
+      type: "session.message.part.updated",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        sessionId: "main",
+        messageId: "msg-1",
+        phase: "update",
+        part: {
+          id: "part-1",
+          type: "tool_call",
+          toolCallId: "call-1",
+          tool: "search",
+          status: "running",
+          input: { q: "hello" },
+        },
+      },
+    });
+    expect(frame).toContain("event: session-message-part");
+    expect(frame).toContain("data:");
+  });
+
   test("toSseFrame maps background.run.updated to background-run event", () => {
     const frame = toSseFrame({
       id: "evt-bg-1",

@@ -790,7 +790,7 @@ describe("opencode runtime failover contract", () => {
     const latest = parentMessages.at(-1);
     expect(latest?.role).toBe("assistant");
     expect(latest?.content).toContain(`[Background ${spawned.runId}]`);
-    expect(latest?.content).toContain("Background findings complete.");
+    expect(latest?.content).toContain("Open the child session for full output.");
   });
 
   test("reconciles child sessions via session.children into background runs", async () => {

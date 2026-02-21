@@ -14,12 +14,34 @@ export interface MessageMemoryTrace {
   createdAt: string;
 }
 
+export type ChatToolCallStatus = "pending" | "running" | "completed" | "error";
+
+export interface ChatThinkingPart {
+  id: string;
+  type: "thinking";
+  text: string;
+}
+
+export interface ChatToolCallPart {
+  id: string;
+  type: "tool_call";
+  toolCallId: string;
+  tool: string;
+  status: ChatToolCallStatus;
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+}
+
+export type ChatMessagePart = ChatThinkingPart | ChatToolCallPart;
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
   at: string;
   memoryTrace?: MessageMemoryTrace;
+  parts?: ChatMessagePart[];
 }
 
 export interface SessionSummary {
@@ -159,6 +181,8 @@ export interface BackgroundRunSnapshot {
   completedAt: string | null;
 }
 
+export type SessionMessagePartPhase = "start" | "update" | "final";
+
 export interface HeartbeatSnapshot {
   online: boolean;
   at: string;
@@ -205,6 +229,15 @@ export type DashboardEvent =
   | { event: "usage"; payload: UsageSnapshot }
   | { event: "session-updated"; payload: SessionSummary }
   | { event: "session-message"; payload: { sessionId: string; message: ChatMessage } }
+  | {
+      event: "session-message-part";
+      payload: {
+        sessionId: string;
+        messageId: string;
+        part: ChatMessagePart;
+        phase: SessionMessagePartPhase;
+      };
+    }
   | { event: "session-status"; payload: SessionRunStatusSnapshot }
   | { event: "session-compacted"; payload: SessionCompactedSnapshot }
   | { event: "session-error"; payload: SessionRunErrorSnapshot }

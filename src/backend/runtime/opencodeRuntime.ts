@@ -15,7 +15,7 @@ import {
   RuntimeSessionBusyError,
   RuntimeSessionNotFoundError,
 } from "./errors";
-import type { MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
+import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
@@ -24,6 +24,7 @@ import {
   createHeartbeatUpdatedEvent,
   createSessionCompactedEvent,
   createSessionMessageCreatedEvent,
+  createSessionMessagePartUpdatedEvent,
   createSessionRunErrorEvent,
   createSessionRunStatusUpdatedEvent,
   createSessionStateUpdatedEvent,
@@ -88,6 +89,7 @@ import {
 
 type Listener = (event: RuntimeEvent) => void;
 type AssistantInfo = Extract<Message, { role: "assistant" }>;
+type OpencodeMessagePartUpdatedEvent = Extract<OpencodeEvent, { type: "message.part.updated" }>;
 type ResolvedModel = { providerId: string; modelId: string };
 type RuntimeOpencodeConfig = WafflebotConfig["runtime"]["opencode"];
 
@@ -376,6 +378,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       this.startSessionTitlePolling(session.id, opencodeSessionId);
 
       const trace = this.buildMessageMemoryTrace(assistantMessage.parts, promptInput.injectedContextResults);
+      const assistantParts = this.buildChatMessageParts(assistantMessage.parts);
       const assistantError = this.extractAssistantError(assistantMessage.info, assistantMessage.parts);
       if (assistantError) {
         const normalizedAssistantError = this.normalizeProviderMessage(assistantError) || assistantError;
@@ -405,6 +408,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         sessionId: session.id,
         userContent: input.content,
         assistantContent: assistantText,
+        assistantParts,
         source: "runtime",
         createdAt,
         assistantMessageId: assistantMessage.info.id,
@@ -432,6 +436,14 @@ export class OpencodeRuntime implements RuntimeEngine {
         for (const message of result.messages) {
           if (message.id === assistantMessage.info.id && message.role === "assistant") {
             message.memoryTrace = trace;
+          }
+        }
+      }
+
+      if (assistantParts.length > 0) {
+        for (const message of result.messages) {
+          if (message.id === assistantMessage.info.id && message.role === "assistant") {
+            message.parts = assistantParts;
           }
         }
       }
@@ -924,6 +936,9 @@ export class OpencodeRuntime implements RuntimeEngine {
       case "session.updated":
         this.handleSessionUpdatedEvent(event);
         return;
+      case "message.part.updated":
+        this.handleMessagePartUpdatedEvent(event);
+        return;
       case "session.status":
         this.handleSessionStatusEvent(event);
         return;
@@ -939,6 +954,38 @@ export class OpencodeRuntime implements RuntimeEngine {
       default:
         return;
     }
+  }
+
+  private handleMessagePartUpdatedEvent(event: OpencodeMessagePartUpdatedEvent) {
+    const sessionId = event.properties.part.sessionID.trim();
+    if (!sessionId) return;
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, sessionId);
+    if (!localSessionId) return;
+
+    const mappedPart = this.mapChatMessagePart(event.properties.part);
+    if (!mappedPart) return;
+
+    const phase = (() => {
+      if (event.properties.part.type !== "tool") {
+        return "update" as const;
+      }
+      const status = event.properties.part.state.status;
+      if (status === "pending") return "start" as const;
+      if (status === "running") return "update" as const;
+      return "final" as const;
+    })();
+
+    this.emit(
+      createSessionMessagePartUpdatedEvent(
+        {
+          sessionId: localSessionId,
+          messageId: event.properties.part.messageID,
+          part: mappedPart,
+          phase,
+        },
+        "runtime",
+      ),
+    );
   }
 
   private handleSessionCreatedEvent(event: Extract<OpencodeEvent, { type: "session.created" }>) {
@@ -1222,12 +1269,14 @@ export class OpencodeRuntime implements RuntimeEngine {
     const imported = messages.flatMap(entry => {
       const content = this.mapOpencodeMessageContent(entry.info, entry.parts).trim();
       if (!content) return [];
+      const parts = entry.info.role === "assistant" ? this.buildChatMessageParts(entry.parts) : [];
       return [
         {
           id: entry.info.id,
           role: entry.info.role,
           content,
           createdAt: entry.info.time.created,
+          parts: parts.length > 0 ? parts : undefined,
         },
       ];
     });
@@ -1360,8 +1409,8 @@ export class OpencodeRuntime implements RuntimeEngine {
         .reverse()
         .find((entry) => entry.info.role === "assistant")?.parts;
       const assistantText = assistantParts ? this.extractText(assistantParts) : null;
-      const resultSummary = (assistantText?.trim() || "Background run completed.").slice(0, 4_000);
-      const announcementText = `[Background ${latest.id}] ${resultSummary}`;
+      const resultSummary = this.summarizeBackgroundResult(assistantText);
+      const announcementText = `[Background ${latest.id}] run completed. Open the child session for full output.`;
 
       const appended = appendAssistantMessage({
         sessionId: latest.parentSessionId,
@@ -1555,6 +1604,63 @@ export class OpencodeRuntime implements RuntimeEngine {
     const subtask = parts.find((part): part is Extract<Part, { type: "subtask" }> => part.type === "subtask");
     const prompt = subtask?.prompt.trim();
     return prompt || null;
+  }
+
+  private summarizeBackgroundResult(text: string | null): string {
+    const normalized = (text ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!normalized) return "Background run completed.";
+    if (normalized.length <= 800) return normalized;
+    return `${normalized.slice(0, 800)}...`;
+  }
+
+  private mapChatMessagePart(part: Part): ChatMessagePart | null {
+    if (part.type === "reasoning") {
+      const text = part.text.trim();
+      if (!text) return null;
+      return {
+        id: part.id,
+        type: "thinking",
+        text,
+      };
+    }
+
+    if (part.type !== "tool") return null;
+
+    const output = (() => {
+      if (part.state.status !== "completed") return undefined;
+      const trimmed = part.state.output.trim();
+      return trimmed || undefined;
+    })();
+    const error = (() => {
+      if (part.state.status !== "error") return undefined;
+      const trimmed = part.state.error.trim();
+      return trimmed || undefined;
+    })();
+
+    return {
+      id: part.id,
+      type: "tool_call",
+      toolCallId: part.callID,
+      tool: part.tool,
+      status: part.state.status,
+      input: isPlainObject(part.state.input) ? part.state.input : undefined,
+      output,
+      error,
+    };
+  }
+
+  private buildChatMessageParts(parts: Array<Part>): ChatMessagePart[] {
+    const mapped = parts
+      .map(part => this.mapChatMessagePart(part))
+      .filter((part): part is ChatMessagePart => Boolean(part));
+    if (mapped.length === 0) return [];
+    const deduped = new Map<string, ChatMessagePart>();
+    for (const part of mapped) {
+      deduped.set(part.id, part);
+    }
+    return [...deduped.values()];
   }
 
   private extractAssistantError(info: AssistantInfo, parts: Array<Part>): string | null {

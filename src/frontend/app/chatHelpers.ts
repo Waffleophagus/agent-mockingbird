@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@/types/dashboard";
+import type { ChatMessage, ChatMessagePart } from "@/types/dashboard";
 
 export interface OptimisticUserMeta {
   type: "optimistic-user";
@@ -11,6 +11,7 @@ export interface PendingAssistantMeta {
   status: "pending" | "failed";
   retryContent: string;
   errorMessage?: string;
+  runtimeMessageId?: string;
 }
 
 export type LocalMessageMeta = OptimisticUserMeta | PendingAssistantMeta;
@@ -76,4 +77,18 @@ export function normalizeRequestError(error: unknown): string {
     return error.message;
   }
   return "Request failed.";
+}
+
+export function upsertChatMessagePart(
+  parts: ChatMessagePart[] | undefined,
+  part: ChatMessagePart,
+): ChatMessagePart[] {
+  const next = Array.isArray(parts) ? [...parts] : [];
+  const index = next.findIndex(existing => existing.id === part.id);
+  if (index === -1) {
+    next.push(part);
+    return next;
+  }
+  next[index] = part;
+  return next;
 }

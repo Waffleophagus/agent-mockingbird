@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import { mergeMessages } from "@/frontend/app/chatHelpers";
+import { mergeMessages, upsertChatMessagePart } from "@/frontend/app/chatHelpers";
 import type {
   ActiveSend,
   LocalChatMessage,
@@ -25,6 +25,7 @@ import type {
   AgentTypeDefinition,
   BackgroundRunSnapshot,
   ChatMessage,
+  ChatMessagePart,
   ConfiguredMcpServer,
   DashboardBootstrap,
   MemoryStatusSnapshot,
@@ -84,6 +85,22 @@ interface UseDashboardBootstrapInput {
   setBackgroundSteerDraftByRun: Dispatch<SetStateAction<Record<string, string>>>;
   setBackgroundActionBusyByRun: Dispatch<SetStateAction<Record<string, "steer" | "abort">>>;
   setFocusedBackgroundRunId: Dispatch<SetStateAction<string>>;
+}
+
+function shouldClearActiveOptimisticRequest(input: {
+  messages: LocalChatMessage[];
+  requestId: string;
+  message: ChatMessage;
+}): boolean {
+  const pending = input.messages.find(message => {
+    if (message.uiMeta?.type !== "assistant-pending") return false;
+    return message.uiMeta.requestId === input.requestId && message.uiMeta.status === "pending";
+  });
+  if (!pending || pending.uiMeta?.type !== "assistant-pending") return false;
+
+  const runtimeMessageId = pending.uiMeta.runtimeMessageId?.trim();
+  if (runtimeMessageId && runtimeMessageId === input.message.id) return true;
+  return Array.isArray(input.message.parts) && input.message.parts.length > 0;
 }
 
 export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
@@ -285,17 +302,22 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
         message: ChatMessage;
       };
       input.loadedSessionsRef.current.add(payload.sessionId);
-      input.setMessagesBySession(current => ({
-        ...current,
-        [payload.sessionId]: mergeMessages(current[payload.sessionId] ?? [], [payload.message]),
-      }));
-      if (payload.message.role === "assistant" && input.activeSendRef.current?.sessionId === payload.sessionId) {
-        const requestId = input.activeSendRef.current.requestId;
-        input.setMessagesBySession(current => ({
+      input.setMessagesBySession(current => {
+        const merged = mergeMessages(current[payload.sessionId] ?? [], [payload.message]);
+        let nextMessages = merged;
+
+        if (payload.message.role === "assistant" && input.activeSendRef.current?.sessionId === payload.sessionId) {
+          const requestId = input.activeSendRef.current.requestId;
+          if (shouldClearActiveOptimisticRequest({ messages: merged, requestId, message: payload.message })) {
+            nextMessages = merged.filter(message => message.uiMeta?.requestId !== requestId);
+          }
+        }
+
+        return {
           ...current,
-          [payload.sessionId]: (current[payload.sessionId] ?? []).filter(message => message.uiMeta?.requestId !== requestId),
-        }));
-      }
+          [payload.sessionId]: nextMessages,
+        };
+      });
       input.setRunStatusBySession(current => ({
         ...current,
         [payload.sessionId]: {
@@ -308,6 +330,69 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
         const next = { ...current };
         delete next[payload.sessionId];
         return next;
+      });
+    });
+
+    events.addEventListener("session-message-part", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as {
+        sessionId?: string;
+        messageId?: string;
+        part?: ChatMessagePart;
+      };
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+      const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
+      if (!sessionId || !messageId || !payload.part) return;
+
+      input.loadedSessionsRef.current.add(sessionId);
+      input.setMessagesBySession(current => {
+        const existing = current[sessionId] ?? [];
+        if (!existing.length) return current;
+
+        let updated = false;
+        let nextMessages = existing.map(message => {
+          if (message.id === messageId) {
+            updated = true;
+            return {
+              ...message,
+              parts: upsertChatMessagePart(message.parts, payload.part as ChatMessagePart),
+            };
+          }
+          if (message.uiMeta?.type === "assistant-pending" && message.uiMeta.runtimeMessageId === messageId) {
+            updated = true;
+            return {
+              ...message,
+              parts: upsertChatMessagePart(message.parts, payload.part as ChatMessagePart),
+            };
+          }
+          return message;
+        });
+
+        if (!updated && input.activeSendRef.current?.sessionId === sessionId) {
+          const requestId = input.activeSendRef.current.requestId;
+          let pendingUpdated = false;
+          nextMessages = nextMessages.map(message => {
+            if (message.uiMeta?.type !== "assistant-pending") return message;
+            if (message.uiMeta.requestId !== requestId || message.uiMeta.status !== "pending") {
+              return message;
+            }
+            pendingUpdated = true;
+            return {
+              ...message,
+              parts: upsertChatMessagePart(message.parts, payload.part as ChatMessagePart),
+              uiMeta: {
+                ...message.uiMeta,
+                runtimeMessageId: messageId,
+              },
+            };
+          });
+          updated = pendingUpdated;
+        }
+
+        if (!updated) return current;
+        return {
+          ...current,
+          [sessionId]: nextMessages,
+        };
       });
     });
 

@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  Brain,
   BookOpen,
   Bot,
   ChevronDown,
@@ -28,6 +29,7 @@ import { cn, isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
 import { Skeleton } from "@/frontend/app/Skeleton";
 import type {
   BackgroundRunSnapshot,
+  ChatMessagePart,
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
@@ -36,6 +38,78 @@ import type {
 } from "@/types/dashboard";
 
 type ConfigPanelTab = "usage" | "memory" | "background";
+
+function stringifyToolInput(input: Record<string, unknown> | undefined): string {
+  if (!input) return "";
+  try {
+    return JSON.stringify(input, null, 2);
+  } catch {
+    return "";
+  }
+}
+
+function renderAssistantParts(input: {
+  parts?: ChatMessagePart[];
+  showThinkingDetails: boolean;
+  showToolCallDetails: boolean;
+}) {
+  const visibleParts = (input.parts ?? []).filter(part => {
+    if (part.type === "thinking") return input.showThinkingDetails;
+    if (part.type === "tool_call") return input.showToolCallDetails;
+    return false;
+  });
+  if (!visibleParts.length) return null;
+
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
+      {visibleParts.map(part => {
+        if (part.type === "thinking") {
+          return (
+            <div key={part.id} className="space-y-1 rounded-md border border-border/60 bg-muted/40 p-2">
+              <p className="font-medium uppercase tracking-wide text-muted-foreground">thinking</p>
+              <p className="whitespace-pre-wrap leading-relaxed text-muted-foreground">{part.text}</p>
+            </div>
+          );
+        }
+
+        const detailsInput = stringifyToolInput(part.input);
+        const hasDetails = Boolean(detailsInput || part.output || part.error);
+        return (
+          <div key={part.id} className="space-y-1 rounded-md border border-border/60 bg-muted/40 p-2">
+            <p className="font-medium text-foreground">
+              {part.tool} <span className="text-muted-foreground">· {part.status}</span>
+            </p>
+            {hasDetails && (
+              <details className="rounded border border-border/50 bg-background/60 p-1">
+                <summary className="cursor-pointer text-muted-foreground">details</summary>
+                {detailsInput && (
+                  <>
+                    <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">input</p>
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[10px] text-muted-foreground">
+                      {detailsInput}
+                    </pre>
+                  </>
+                )}
+                {part.output && (
+                  <>
+                    <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">output</p>
+                    <p className="mt-1 whitespace-pre-wrap text-[10px] text-muted-foreground">{part.output}</p>
+                  </>
+                )}
+                {part.error && (
+                  <>
+                    <p className="mt-2 text-[10px] uppercase tracking-wide text-destructive">error</p>
+                    <p className="mt-1 whitespace-pre-wrap text-[10px] text-destructive">{part.error}</p>
+                  </>
+                )}
+              </details>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export interface ChatPageModel {
   activeBackgroundInFlightCount: number;
@@ -123,7 +197,11 @@ export interface ChatPageModel {
   setDraftMessage: (value: string) => void;
   setIsModelPickerOpen: Dispatch<SetStateAction<boolean>>;
   setModelQuery: (value: string) => void;
+  setShowThinkingDetails: Dispatch<SetStateAction<boolean>>;
+  setShowToolCallDetails: Dispatch<SetStateAction<boolean>>;
   setShowAllChildren: Dispatch<SetStateAction<boolean>>;
+  showThinkingDetails: boolean;
+  showToolCallDetails: boolean;
   showAllChildren: boolean;
   syncRuntimeDefaultToActiveModel: () => Promise<void>;
   isSyncingRuntimeDefaultModel: boolean;
@@ -220,7 +298,11 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     setDraftMessage,
     setIsModelPickerOpen,
     setModelQuery,
+    setShowThinkingDetails,
+    setShowToolCallDetails,
     setShowAllChildren,
+    showThinkingDetails,
+    showToolCallDetails,
     showAllChildren,
     syncRuntimeDefaultToActiveModel,
     isSyncingRuntimeDefaultModel,
@@ -588,6 +670,24 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
       <Button
         type="button"
         size="sm"
+        variant={showThinkingDetails ? "default" : "outline"}
+        onClick={() => setShowThinkingDetails(current => !current)}
+      >
+        <Brain className="size-3.5" />
+        Thinking
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant={showToolCallDetails ? "default" : "outline"}
+        onClick={() => setShowToolCallDetails(current => !current)}
+      >
+        <Wrench className="size-3.5" />
+        Tools
+      </Button>
+      <Button
+        type="button"
+        size="sm"
         variant="outline"
         onClick={requestAbortRun}
         disabled={!canAbortActiveSession}
@@ -715,6 +815,12 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
               </div>
             )}
             {!isPending && !isFailed && <p className="mt-1 whitespace-pre-wrap leading-relaxed">{message.content}</p>}
+            {message.role === "assistant" &&
+              renderAssistantParts({
+                parts: message.parts,
+                showThinkingDetails,
+                showToolCallDetails,
+              })}
             {!isPending && !isFailed && message.role === "assistant" && message.memoryTrace && (
               <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
                 <p className="font-medium uppercase tracking-wide text-muted-foreground">
