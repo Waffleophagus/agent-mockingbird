@@ -150,12 +150,17 @@ jobs:
         run: |
           set -euo pipefail
           echo "::add-mask::${REGISTRY_TOKEN}"
-          registry="${REGISTRY_URL%/}/"
+          registry="$(printf '%s' "${REGISTRY_URL}" | tr -d '\r' | sed 's/[[:space:]]*$//')"
+          registry="${registry%/}/"
           registry_no_proto="${registry#https://}"
           registry_no_proto="${registry_no_proto#http://}"
+          registry_host="${registry_no_proto%%/*}"
           {
-            echo "@${REGISTRY_SCOPE}:registry=${registry}"
-            echo "//${registry_no_proto}:_authToken=${REGISTRY_TOKEN}"
+            printf "@%s:registry=%s\n" "${REGISTRY_SCOPE}" "${registry}"
+            printf "registry=%s\n" "${registry}"
+            printf "always-auth=true\n"
+            printf "//%s:_authToken=%s\n" "${registry_no_proto}" "${REGISTRY_TOKEN}"
+            printf "//%s/:_authToken=%s\n" "${registry_host}" "${REGISTRY_TOKEN}"
           } > "${HOME}/.npmrc"
 
       - name: Debug registry auth (safe)
@@ -168,6 +173,8 @@ jobs:
           bun -e 'const p=require("./package.json"); console.log(p.publishConfig?.registry || "<missing>")'
           echo ".npmrc (token redacted):"
           sed -E 's#(_authToken=).*#\1***REDACTED***#' "${HOME}/.npmrc"
+          echo ".npmrc visible control chars:"
+          cat -vet "${HOME}/.npmrc"
           echo "bun pm whoami:"
           BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun pm whoami --registry "${REGISTRY_URL%/}/" || true
 
