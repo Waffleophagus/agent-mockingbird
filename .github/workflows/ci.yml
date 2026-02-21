@@ -25,6 +25,9 @@ jobs:
       PACKAGE_REGISTRY_URL: ${{ secrets.PACKAGE_REGISTRY_URL }}
       PACKAGE_REGISTRY_TOKEN: ${{ secrets.PACKAGE_REGISTRY_TOKEN }}
       PACKAGE_REGISTRY_SCOPE: ${{ secrets.PACKAGE_REGISTRY_SCOPE }}
+      REGISTRY_SCOPE: ${{ secrets.PACKAGE_REGISTRY_SCOPE }}
+      REGISTRY_TOKEN: ${{ secrets.PACKAGE_REGISTRY_TOKEN }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
