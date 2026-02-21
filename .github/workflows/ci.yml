@@ -1,14 +1,32 @@
-name: CI
+name: CI/CD
 
 on:
   pull_request:
   push:
     branches:
       - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version override (example: v0.1.0)"
+        required: false
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  quality:
+  pipeline:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_SERVER_URL: ${{ secrets.GITHUB_SERVER_URL }}
+      GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
+      GITEA_NPM_SCOPE: ${{ secrets.GITEA_NPM_SCOPE }}
+      GITHUB_NPM_REGISTRY_URL: ${{ secrets.GITHUB_SERVER_URL }}
+      GITHUB_NPM_TOKEN: ${{ secrets.GITHUB_NPM_TOKEN }}
+      GITHUB_NPM_SCOPE: ${{ secrets.GITHUB_NPM_SCOPE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,6 +35,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -29,3 +52,115 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      - name: Resolve publish metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          event="${GITHUB_EVENT_NAME:-}"
+          ref="${GITHUB_REF:-}"
+          ref_name="${GITHUB_REF_NAME:-${GITEA_REF_NAME:-}}"
+          input_version="${INPUT_VERSION:-}"
+
+          should_publish="false"
+          release_version=""
+          package_version=""
+          npm_tag="main"
+
+          if [[ "${event}" == "pull_request" ]]; then
+            should_publish="false"
+          elif [[ "${event}" == "push" && "${ref}" == refs/tags/v* ]]; then
+            should_publish="true"
+            release_version="${ref_name}"
+            package_version="${release_version#v}"
+            npm_tag="latest"
+          elif [[ "${event}" == "workflow_dispatch" && -n "${input_version}" ]]; then
+            should_publish="true"
+            release_version="${input_version}"
+            package_version="${release_version#v}"
+            npm_tag="latest"
+          elif [[ "${event}" == "push" && "${ref}" == "refs/heads/main" ]]; then
+            should_publish="true"
+            release_version="main-${GITHUB_SHA::7}"
+            package_version="0.0.0-main.${GITHUB_RUN_NUMBER}.${GITHUB_SHA::7}"
+            npm_tag="main"
+          fi
+
+          echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
+          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
+          echo "npm_tag=${npm_tag}" >> "${GITHUB_OUTPUT}"
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+
+      - name: Validate publish secrets
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          registry_url="${GITHUB_SERVER_URL:-${GITHUB_NPM_REGISTRY_URL:-}}"
+          token="${GITEA_NPM_TOKEN:-${GITHUB_NPM_TOKEN:-}}"
+          scope="${GITEA_NPM_SCOPE:-${GITHUB_NPM_SCOPE:-}}"
+
+          : "${registry_url:?Missing GITHUB_SERVER_URL or GITHUB_SERVER_URL}"
+          : "${token:?Missing GITEA_NPM_TOKEN or GITHUB_NPM_TOKEN}"
+          : "${scope:?Missing GITEA_NPM_SCOPE or GITHUB_NPM_SCOPE}"
+
+          echo "REGISTRY_URL=${registry_url}" >> "${GITHUB_ENV}"
+          echo "REGISTRY_TOKEN=${token}" >> "${GITHUB_ENV}"
+          echo "REGISTRY_SCOPE=${scope}" >> "${GITHUB_ENV}"
+
+      - name: Build package metadata for publish
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          PKG_VERSION="${{ steps.meta.outputs.package_version }}" bun -e '
+            const fs = require("fs");
+            const scope = (process.env.REGISTRY_SCOPE || "").toLowerCase();
+            const version = process.env.PKG_VERSION;
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.name = `@${scope}/wafflebot`;
+            pkg.private = false;
+            pkg.version = version;
+            pkg.publishConfig = { registry: process.env.REGISTRY_URL };
+            pkg.files = [
+              "bin",
+              "dist",
+              "deploy",
+              "scripts",
+              "drizzle",
+              "drizzle.config.ts",
+              "README.md",
+              "bun.lock",
+              "bunfig.toml",
+              "tsconfig.json",
+              "wafflebot.config.example.json"
+            ];
+            fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          '
+
+      - name: Pack built artifact
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          tarball="$(npm pack --silent | tail -n1)"
+          test -f "${tarball}"
+          echo "PACKAGE_TARBALL=${tarball}" >> "${GITHUB_ENV}"
+          ls -lh "${tarball}"
+
+      - name: Configure registry auth
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          registry="${REGISTRY_URL%/}/"
+          registry_no_proto="${registry#https://}"
+          registry_no_proto="${registry_no_proto#http://}"
+          {
+            echo "@${REGISTRY_SCOPE}:registry=${registry}"
+            echo "//${registry_no_proto}:_authToken=${REGISTRY_TOKEN}"
+          } > "${HOME}/.npmrc"
+
+      - name: Publish package tarball
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          npm publish "${PACKAGE_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"

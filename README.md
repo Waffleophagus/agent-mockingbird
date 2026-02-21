@@ -198,16 +198,16 @@ Deployment artifacts:
 
 ## CI/CD Release Bundles
 
-This repo includes GitHub Actions for non-npm distribution:
+This repo uses one CI/CD workflow:
 
-- `.github/workflows/ci.yml` runs lint/typecheck/build on push + PR.
-- `.github/workflows/release-bundle.yml` builds a versioned tarball and publishes it to GitHub Releases.
-- `.github/workflows/publish-github-package.yml` publishes a versioned package to your npm-compatible package registry on `v*` tags.
+- `.github/workflows/ci.yml` runs lint/typecheck/build, then publishes the same packed artifact to your npm-compatible package registry.
+- Pull requests run checks only (no publish).
+- Pushes to `main` publish a prerelease (`0.0.0-main.<run>.<sha>`) with npm tag `main`.
+- Pushes to `v*` tags (and manual dispatch with `version`) publish with npm tag `latest`.
 
-Release artifact contents:
+Published package artifact:
 
-- `wafflebot-<version>.tar.gz`
-- `wafflebot-<version>.tar.gz.sha256`
+- `@<scope>/wafflebot@<version>` generated from a single packed `.tgz` built in CI after lint/typecheck/build.
 
 Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
 
@@ -232,11 +232,11 @@ wafflebot
 
 ## Publish To Package Registry
 
-`publish-github-package.yml` expects these repository secrets:
+`ci.yml` publish steps expect these repository secrets (Gitea names preferred, GitHub-prefixed names also supported):
 
-- `GITHUB_NPM_REGISTRY_URL` (example: `https://gitea.example.com/api/packages/matt/npm/`)
-- `GITHUB_NPM_TOKEN` (token with package write permission)
-- `GITHUB_NPM_SCOPE` (scope/user/org, example: `matt`)
+- `GITEA_NPM_REGISTRY_URL` (or `GITHUB_NPM_REGISTRY_URL`) example: `https://gitea.example.com/api/packages/matt/npm/`
+- `GITEA_NPM_TOKEN` (or `GITHUB_NPM_TOKEN`) token with package write permission
+- `GITEA_NPM_SCOPE` (or `GITHUB_NPM_SCOPE`) scope/user/org, example: `matt`
 
 On tag push like `v0.1.0`, CI publishes `@<scope>/wafflebot@0.1.0` to that registry.
 
