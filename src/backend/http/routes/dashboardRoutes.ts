@@ -1,3 +1,4 @@
+import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import {
   createSession,
@@ -7,7 +8,6 @@ import {
   listSessions,
   setSessionModel,
 } from "../../db/repository";
-import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
 import { listOpencodeModelOptions } from "../../opencode/models";
 import { getRuntimeStartupInfo } from "../../runtime";
 

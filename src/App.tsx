@@ -3723,16 +3723,18 @@ export function App() {
 
                     <div className="grid gap-2 md:grid-cols-2">
                       <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">ID</label>
+                        <p className="text-xs text-muted-foreground">ID</p>
                         <Input
+                          id={`agent-type-${agentType.id}-id`}
                           value={agentType.id}
                           onChange={event => updateAgentTypeField(agentType.id, "id", event.target.value)}
                           placeholder="agent-id"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Name</label>
+                        <p className="text-xs text-muted-foreground">Name</p>
                         <Input
+                          id={`agent-type-${agentType.id}-name`}
                           value={agentType.name ?? ""}
                           onChange={event => updateAgentTypeField(agentType.id, "name", event.target.value)}
                           placeholder="Agent name"
@@ -3742,15 +3744,16 @@ export function App() {
 
                     <div className="grid gap-2 md:grid-cols-2">
                       <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Description</label>
+                        <p className="text-xs text-muted-foreground">Description</p>
                         <Input
+                          id={`agent-type-${agentType.id}-description`}
                           value={agentType.description ?? ""}
                           onChange={event => updateAgentTypeField(agentType.id, "description", event.target.value)}
                           placeholder="When this agent should be used"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Model</label>
+                        <p className="text-xs text-muted-foreground">Model</p>
                         <div className="relative" ref={openAgentModelPickerId === agentType.id ? agentModelPickerRef : undefined}>
                           <button
                             type="button"
@@ -3817,8 +3820,9 @@ export function App() {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Prompt</label>
+                      <p className="text-xs text-muted-foreground">Prompt</p>
                       <Textarea
+                        id={`agent-type-${agentType.id}-prompt`}
                         value={agentType.prompt ?? ""}
                         onChange={event => updateAgentTypeField(agentType.id, "prompt", event.target.value)}
                         placeholder="Instructions for this agent"
@@ -3828,10 +3832,11 @@ export function App() {
 
                     <div className="flex items-center gap-2">
                       <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Mode</label>
+                        <label htmlFor={`agent-type-${agentType.id}-mode`} className="text-xs text-muted-foreground">Mode</label>
                         <div className="flex items-center gap-2">
                           <ShieldCheck className="size-4 text-muted-foreground" />
                           <select
+                            id={`agent-type-${agentType.id}-mode`}
                             className="h-9 rounded-md border border-border bg-background px-2 text-sm"
                             value={agentType.mode}
                             onChange={event =>
@@ -3845,9 +3850,12 @@ export function App() {
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Enabled</label>
-                        <label className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
+                        <label htmlFor={`agent-type-${agentType.id}-enabled`} className="text-xs text-muted-foreground">
+                          Enabled
+                        </label>
+                        <label htmlFor={`agent-type-${agentType.id}-enabled`} className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
                           <input
+                            id={`agent-type-${agentType.id}-enabled`}
                             type="checkbox"
                             checked={!agentType.disable}
                             onChange={event => updateAgentTypeField(agentType.id, "disable", !event.target.checked)}

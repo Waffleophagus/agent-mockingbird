@@ -1,9 +1,9 @@
+import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
+import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
-import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 
 import type { AgentTypeDefinition, WafflebotConfig } from "../config/schema";
 import { agentTypeDefinitionSchema } from "../config/schema";
