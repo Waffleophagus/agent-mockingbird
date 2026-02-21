@@ -202,6 +202,7 @@ This repo includes GitHub Actions for non-npm distribution:
 
 - `.github/workflows/ci.yml` runs lint/typecheck/build on push + PR.
 - `.github/workflows/release-bundle.yml` builds a versioned tarball and publishes it to GitHub Releases.
+- `.github/workflows/publish-github-package.yml` publishes a versioned package to your npm-compatible package registry on `v*` tags.
 
 Release artifact contents:
 
@@ -226,5 +227,30 @@ bun add -g "github:${OWNER}/${REPO}#${VERSION}"
 2. Run:
 
 ```bash
+wafflebot
+```
+
+## Publish To Package Registry
+
+`publish-github-package.yml` expects these repository secrets:
+
+- `GITHUB_NPM_REGISTRY_URL` (example: `https://gitea.example.com/api/packages/matt/npm/`)
+- `GITHUB_NPM_TOKEN` (token with package write permission)
+- `GITHUB_NPM_SCOPE` (scope/user/org, example: `matt`)
+
+On tag push like `v0.1.0`, CI publishes `@<scope>/wafflebot@0.1.0` to that registry.
+
+Install from that registry with Bun:
+
+```bash
+SCOPE="<scope>"
+REGISTRY_URL="https://gitea.example.com/api/packages/${SCOPE}/npm/"
+TOKEN="<gitea-token>"
+
+registry_no_proto="${REGISTRY_URL#https://}"
+registry_no_proto="${registry_no_proto#http://}"
+printf "@%s:registry=%s\n//%s:_authToken=%s\n" "$SCOPE" "$REGISTRY_URL" "$registry_no_proto" "$TOKEN" >> ~/.npmrc
+
+bun add -g "@${SCOPE}/wafflebot"
 wafflebot
 ```

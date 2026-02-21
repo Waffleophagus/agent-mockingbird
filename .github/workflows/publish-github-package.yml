@@ -1,0 +1,87 @@
+name: Publish Package Registry
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_NPM_REGISTRY_URL: ${{ secrets.GITHUB_NPM_REGISTRY_URL }}
+      GITHUB_NPM_TOKEN: ${{ secrets.GITHUB_NPM_TOKEN }}
+      GITHUB_NPM_SCOPE: ${{ secrets.GITHUB_NPM_SCOPE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          : "${GITHUB_NPM_REGISTRY_URL:?Missing secret GITHUB_NPM_REGISTRY_URL}"
+          : "${GITHUB_NPM_TOKEN:?Missing secret GITHUB_NPM_TOKEN}"
+          : "${GITHUB_NPM_SCOPE:?Missing secret GITHUB_NPM_SCOPE}"
+          tag="${GITHUB_REF_NAME:-${GITEA_REF_NAME:-}}"
+          if [[ -z "${tag}" ]]; then
+            echo "Missing tag name from workflow context."
+            exit 1
+          fi
+          echo "TAG_NAME=${tag}" >> "${GITHUB_ENV}"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build package metadata for publish
+        run: |
+          set -euo pipefail
+          version="${TAG_NAME#v}"
+          PKG_VERSION="${version}" bun -e '
+            const fs = require("fs");
+            const scope = (process.env.GITHUB_NPM_SCOPE || "").toLowerCase();
+            const version = process.env.PKG_VERSION;
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.name = `@${scope}/wafflebot`;
+            pkg.private = false;
+            pkg.version = version;
+            pkg.publishConfig = { registry: process.env.GITHUB_NPM_REGISTRY_URL };
+            pkg.files = [
+              "bin",
+              "src",
+              "deploy",
+              "scripts",
+              "drizzle",
+              "drizzle.config.ts",
+              "README.md",
+              "bun.lock",
+              "bunfig.toml",
+              "tsconfig.json",
+              "wafflebot.config.example.json"
+            ];
+            fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+          '
+
+      - name: Configure npm auth for package registry
+        run: |
+          set -euo pipefail
+          registry="${GITHUB_NPM_REGISTRY_URL%/}/"
+          registry_no_proto="${registry#https://}"
+          registry_no_proto="${registry_no_proto#http://}"
+          {
+            echo "@${GITHUB_NPM_SCOPE}:registry=${registry}"
+            echo "//${registry_no_proto}:_authToken=${GITHUB_NPM_TOKEN}"
+          } > "${HOME}/.npmrc"
+
+      - name: Publish package
+        run: npm publish --registry "${GITHUB_NPM_REGISTRY_URL%/}/"
