@@ -32,6 +32,7 @@ export interface SessionMessagePartUpdatedPayload {
   messageId: string;
   part: ChatMessagePart;
   phase: SessionMessagePartPhase;
+  observedAt: string;
 }
 export type SessionMessagePartUpdatedEvent = RuntimeEventBase<"session.message.part.updated", SessionMessagePartUpdatedPayload>;
 

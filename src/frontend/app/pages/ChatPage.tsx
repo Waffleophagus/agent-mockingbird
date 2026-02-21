@@ -24,7 +24,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { type LocalChatMessage, relativeFromIso } from "@/frontend/app/chatHelpers";
+import {
+  formatCompactTimestamp,
+  formatElapsedFrom,
+  type LocalChatMessage,
+  relativeFromIso,
+} from "@/frontend/app/chatHelpers";
 import { cn, isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
 import { Skeleton } from "@/frontend/app/Skeleton";
 import type {
@@ -48,67 +53,26 @@ function stringifyToolInput(input: Record<string, unknown> | undefined): string 
   }
 }
 
-function renderAssistantParts(input: {
-  parts?: ChatMessagePart[];
-  showThinkingDetails: boolean;
-  showToolCallDetails: boolean;
-}) {
-  const visibleParts = (input.parts ?? []).filter(part => {
-    if (part.type === "thinking") return input.showThinkingDetails;
-    if (part.type === "tool_call") return input.showToolCallDetails;
-    return false;
+function formatTimestampSummary(iso: string): string {
+  const compact = formatCompactTimestamp(iso);
+  if (!compact) return relativeFromIso(iso);
+  return `${compact} · ${relativeFromIso(iso)}`;
+}
+
+function resolvePartTimestamp(part: ChatMessagePart, fallbackIso: string): string {
+  const iso = part.startedAt ?? part.observedAt ?? fallbackIso;
+  return iso;
+}
+
+function sortPartsChronologically(parts: ChatMessagePart[], fallbackIso: string): ChatMessagePart[] {
+  return [...parts].sort((left, right) => {
+    const leftTs = Date.parse(resolvePartTimestamp(left, fallbackIso));
+    const rightTs = Date.parse(resolvePartTimestamp(right, fallbackIso));
+    if (Number.isFinite(leftTs) && Number.isFinite(rightTs) && leftTs !== rightTs) {
+      return leftTs - rightTs;
+    }
+    return left.id.localeCompare(right.id);
   });
-  if (!visibleParts.length) return null;
-
-  return (
-    <div className="mt-2 space-y-2 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
-      {visibleParts.map(part => {
-        if (part.type === "thinking") {
-          return (
-            <div key={part.id} className="space-y-1 rounded-md border border-border/60 bg-muted/40 p-2">
-              <p className="font-medium uppercase tracking-wide text-muted-foreground">thinking</p>
-              <p className="whitespace-pre-wrap leading-relaxed text-muted-foreground">{part.text}</p>
-            </div>
-          );
-        }
-
-        const detailsInput = stringifyToolInput(part.input);
-        const hasDetails = Boolean(detailsInput || part.output || part.error);
-        return (
-          <div key={part.id} className="space-y-1 rounded-md border border-border/60 bg-muted/40 p-2">
-            <p className="font-medium text-foreground">
-              {part.tool} <span className="text-muted-foreground">· {part.status}</span>
-            </p>
-            {hasDetails && (
-              <details className="rounded border border-border/50 bg-background/60 p-1">
-                <summary className="cursor-pointer text-muted-foreground">details</summary>
-                {detailsInput && (
-                  <>
-                    <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">input</p>
-                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[10px] text-muted-foreground">
-                      {detailsInput}
-                    </pre>
-                  </>
-                )}
-                {part.output && (
-                  <>
-                    <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">output</p>
-                    <p className="mt-1 whitespace-pre-wrap text-[10px] text-muted-foreground">{part.output}</p>
-                  </>
-                )}
-                {part.error && (
-                  <>
-                    <p className="mt-2 text-[10px] uppercase tracking-wide text-destructive">error</p>
-                    <p className="mt-1 whitespace-pre-wrap text-[10px] text-destructive">{part.error}</p>
-                  </>
-                )}
-              </details>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 export interface ChatPageModel {
@@ -441,7 +405,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
               </div>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              {session.messageCount} msgs • {relativeFromIso(session.lastActiveAt)}
+              {session.messageCount} msgs • {formatTimestampSummary(session.lastActiveAt)}
               {inFlightRuns.length > 0 ? ` • ${inFlightRuns.length} bg running` : ""}
             </p>
           </button>
@@ -503,7 +467,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                             </p>
                           )}
                           <p className="mt-1 text-[11px] text-muted-foreground">
-                            {childSession.messageCount} msgs • {relativeFromIso(childSession.lastActiveAt)}
+                            {childSession.messageCount} msgs • {formatTimestampSummary(childSession.lastActiveAt)}
                           </p>
                         </button>
                         {childRun && (
@@ -733,7 +697,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     {backgroundRunsError && <p className="text-xs text-destructive">{backgroundRunsError}</p>}
     {chatControlError && <p className="text-xs text-destructive">{chatControlError}</p>}
     {activeSessionCompactedAt && (
-      <p className="text-xs text-muted-foreground">Last compacted {relativeFromIso(activeSessionCompactedAt)}</p>
+      <p className="text-xs text-muted-foreground">Last compacted {formatTimestampSummary(activeSessionCompactedAt)}</p>
     )}
   </CardHeader>
   <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
@@ -757,92 +721,180 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
         const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
         const isPending = pendingMeta?.status === "pending";
         const isFailed = pendingMeta?.status === "failed";
+        const visibleTimelineParts =
+          message.role === "assistant"
+            ? sortPartsChronologically(
+                (message.parts ?? []).filter(part => {
+                  if (part.type === "thinking") return showThinkingDetails;
+                  if (part.type === "tool_call") return showToolCallDetails;
+                  return false;
+                }),
+                message.at,
+              )
+            : [];
+        const shouldRenderMessageRow =
+          message.role !== "assistant" ||
+          isPending ||
+          isFailed ||
+          Boolean(message.content.trim()) ||
+          Boolean(message.memoryTrace);
+        const messageTimestamp = formatCompactTimestamp(message.at) || relativeFromIso(message.at);
 
         return (
-          <article
-            key={message.id}
-            className="max-w-[92%] rounded-xl border border-border px-3 py-2 text-sm data-[role=assistant]:self-start data-[role=assistant]:bg-muted/80 data-[role=user]:self-end data-[role=user]:bg-primary/20"
-            data-role={message.role}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <p className="font-medium uppercase tracking-wide text-[10px] text-muted-foreground">{message.role}</p>
-              {isOptimisticUser && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <LoaderCircle className="size-3 animate-spin" />
-                  submitted
-                </span>
-              )}
-              {isPending && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <LoaderCircle className="size-3 animate-spin" />
-                  working
-                </span>
-              )}
-            </div>
-            {isPending && (
-              <div className="mt-1 space-y-2">
-                <p className="inline-flex items-center gap-2 leading-relaxed text-muted-foreground">
-                  <LoaderCircle className="size-4 animate-spin" />
-                  OpenCode is responding...
-                </p>
-                {message.content && (
-                  <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
-                )}
-              </div>
-            )}
-            {isFailed && pendingMeta && (
-              <div className="mt-1 space-y-2">
-                <p className="inline-flex items-center gap-2 leading-relaxed text-destructive">
-                  <AlertTriangle className="size-4" />
-                  Failed to send request.
-                </p>
-                {message.content && (
-                  <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
-                )}
-                {pendingMeta.errorMessage && (
-                  <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => retryFailedRequest(pendingMeta.requestId)}
-                  disabled={isSending}
-                >
-                  <RefreshCcw className="size-3.5" />
-                  Retry
-                </Button>
-              </div>
-            )}
-            {!isPending && !isFailed && <p className="mt-1 whitespace-pre-wrap leading-relaxed">{message.content}</p>}
-            {message.role === "assistant" &&
-              renderAssistantParts({
-                parts: message.parts,
-                showThinkingDetails,
-                showToolCallDetails,
-              })}
-            {!isPending && !isFailed && message.role === "assistant" && message.memoryTrace && (
-              <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
-                <p className="font-medium uppercase tracking-wide text-muted-foreground">
-                  memory trace · {message.memoryTrace.mode}
-                </p>
-                <p className="text-muted-foreground">
-                  injected results: {message.memoryTrace.injectedContextResults}
-                </p>
-                {message.memoryTrace.toolCalls.length > 0 && (
-                  <div className="space-y-1">
-                    {message.memoryTrace.toolCalls.map((call, index) => (
-                      <p key={`${message.id}-trace-${index}`} className="text-muted-foreground">
-                        {call.tool} · {call.status}
-                        {call.summary ? ` · ${call.summary}` : ""}
-                        {call.error ? ` · ${call.error}` : ""}
+          <div key={message.id} className="flex flex-col gap-2">
+            {visibleTimelineParts.map(part => {
+              const partIso = resolvePartTimestamp(part, message.at);
+              const partTimestamp = formatCompactTimestamp(partIso) || relativeFromIso(partIso);
+              const elapsed = formatElapsedFrom(message.at, partIso);
+
+              if (part.type === "thinking") {
+                return (
+                  <article
+                    key={`${message.id}-part-${part.id}`}
+                    className="max-w-[92%] self-start rounded-xl border border-border bg-muted/80 px-3 py-2 text-sm"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium uppercase tracking-wide text-[10px] text-muted-foreground">thinking</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {elapsed ? `${elapsed} · ` : ""}
+                        {partTimestamp}
                       </p>
-                    ))}
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap leading-relaxed text-muted-foreground">{part.text}</p>
+                  </article>
+                );
+              }
+
+              const detailsInput = stringifyToolInput(part.input);
+              const hasDetails = Boolean(detailsInput || part.output || part.error);
+              return (
+                <article
+                  key={`${message.id}-part-${part.id}`}
+                  className="max-w-[92%] self-start rounded-xl border border-border bg-muted/80 px-3 py-2 text-sm"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium uppercase tracking-wide text-[10px] text-muted-foreground">
+                      tool · {part.tool}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {elapsed ? `${elapsed} · ` : ""}
+                      {partTimestamp}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">status: {part.status}</p>
+                  {hasDetails && (
+                    <details className="mt-2 rounded border border-border/50 bg-background/60 p-1">
+                      <summary className="cursor-pointer text-[11px] text-muted-foreground">details</summary>
+                      {detailsInput && (
+                        <>
+                          <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">input</p>
+                          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[10px] text-muted-foreground">
+                            {detailsInput}
+                          </pre>
+                        </>
+                      )}
+                      {part.output && (
+                        <>
+                          <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">output</p>
+                          <p className="mt-1 whitespace-pre-wrap text-[10px] text-muted-foreground">{part.output}</p>
+                        </>
+                      )}
+                      {part.error && (
+                        <>
+                          <p className="mt-2 text-[10px] uppercase tracking-wide text-destructive">error</p>
+                          <p className="mt-1 whitespace-pre-wrap text-[10px] text-destructive">{part.error}</p>
+                        </>
+                      )}
+                    </details>
+                  )}
+                </article>
+              );
+            })}
+            {shouldRenderMessageRow && (
+              <article
+                className="max-w-[92%] rounded-xl border border-border px-3 py-2 text-sm data-[role=assistant]:self-start data-[role=assistant]:bg-muted/80 data-[role=user]:self-end data-[role=user]:bg-primary/20"
+                data-role={message.role}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium uppercase tracking-wide text-[10px] text-muted-foreground">{message.role}</p>
+                  <div className="flex items-center gap-2">
+                    {isOptimisticUser && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <LoaderCircle className="size-3 animate-spin" />
+                        submitted
+                      </span>
+                    )}
+                    {isPending && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <LoaderCircle className="size-3 animate-spin" />
+                        working
+                      </span>
+                    )}
+                    <span className="text-[10px] text-muted-foreground" title={message.at}>
+                      {messageTimestamp}
+                    </span>
+                  </div>
+                </div>
+                {isPending && (
+                  <div className="mt-1 space-y-2">
+                    <p className="inline-flex items-center gap-2 leading-relaxed text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      OpenCode is responding...
+                    </p>
+                    {message.content && (
+                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
+                    )}
                   </div>
                 )}
-              </div>
+                {isFailed && pendingMeta && (
+                  <div className="mt-1 space-y-2">
+                    <p className="inline-flex items-center gap-2 leading-relaxed text-destructive">
+                      <AlertTriangle className="size-4" />
+                      Failed to send request.
+                    </p>
+                    {message.content && (
+                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
+                    )}
+                    {pendingMeta.errorMessage && (
+                      <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => retryFailedRequest(pendingMeta.requestId)}
+                      disabled={isSending}
+                    >
+                      <RefreshCcw className="size-3.5" />
+                      Retry
+                    </Button>
+                  </div>
+                )}
+                {!isPending && !isFailed && <p className="mt-1 whitespace-pre-wrap leading-relaxed">{message.content}</p>}
+                {!isPending && !isFailed && message.role === "assistant" && message.memoryTrace && (
+                  <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
+                    <p className="font-medium uppercase tracking-wide text-muted-foreground">
+                      memory trace · {message.memoryTrace.mode}
+                    </p>
+                    <p className="text-muted-foreground">
+                      injected results: {message.memoryTrace.injectedContextResults}
+                    </p>
+                    {message.memoryTrace.toolCalls.length > 0 && (
+                      <div className="space-y-1">
+                        {message.memoryTrace.toolCalls.map((call, index) => (
+                          <p key={`${message.id}-trace-${index}`} className="text-muted-foreground">
+                            {call.tool} · {call.status}
+                            {call.summary ? ` · ${call.summary}` : ""}
+                            {call.error ? ` · ${call.error}` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </article>
             )}
-          </article>
+          </div>
         );
       })}
     </div>
@@ -950,7 +1002,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                     <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                       {event.status}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">{relativeFromIso(event.createdAt)}</p>
+                    <p className="text-[11px] text-muted-foreground">{formatTimestampSummary(event.createdAt)}</p>
                   </div>
                   <p className="mt-1 text-xs leading-relaxed">{event.content}</p>
                   {event.status === "rejected" && (
@@ -1027,9 +1079,10 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                 </Badge>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                updated {relativeFromIso(run.updatedAt)}
-                {run.startedAt ? ` · started ${relativeFromIso(run.startedAt)}` : ""}
-                {run.completedAt ? ` · completed ${relativeFromIso(run.completedAt)}` : ""}
+                created {formatTimestampSummary(run.createdAt)}
+                {run.startedAt ? ` · started ${formatTimestampSummary(run.startedAt)}` : ""}
+                {run.completedAt ? ` · completed ${formatTimestampSummary(run.completedAt)}` : ""}
+                {` · updated ${formatTimestampSummary(run.updatedAt)}`}
               </p>
               {run.prompt && <p className="text-xs">prompt: {run.prompt}</p>}
               {run.resultSummary && <p className="text-xs text-muted-foreground">result: {run.resultSummary}</p>}

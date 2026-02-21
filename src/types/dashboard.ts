@@ -20,6 +20,9 @@ export interface ChatThinkingPart {
   id: string;
   type: "thinking";
   text: string;
+  startedAt?: string;
+  endedAt?: string;
+  observedAt?: string;
 }
 
 export interface ChatToolCallPart {
@@ -31,6 +34,9 @@ export interface ChatToolCallPart {
   input?: Record<string, unknown>;
   output?: string;
   error?: string;
+  startedAt?: string;
+  endedAt?: string;
+  observedAt?: string;
 }
 
 export type ChatMessagePart = ChatThinkingPart | ChatToolCallPart;
@@ -236,6 +242,7 @@ export type DashboardEvent =
         messageId: string;
         part: ChatMessagePart;
         phase: SessionMessagePartPhase;
+        observedAt: string;
       };
     }
   | { event: "session-status"; payload: SessionRunStatusSnapshot }

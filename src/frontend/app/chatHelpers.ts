@@ -34,6 +34,34 @@ export function relativeFromIso(iso: string): string {
   return `${hours}h ago`;
 }
 
+const compactTimestampFormatter = new Intl.DateTimeFormat("en-US", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  month: "short",
+  day: "2-digit",
+});
+
+export function formatCompactTimestamp(iso: string): string {
+  const parsed = Date.parse(iso);
+  if (!Number.isFinite(parsed)) return "";
+  const parts = compactTimestampFormatter.formatToParts(new Date(parsed));
+  const hour = parts.find(part => part.type === "hour")?.value ?? "";
+  const minute = parts.find(part => part.type === "minute")?.value ?? "";
+  const month = (parts.find(part => part.type === "month")?.value ?? "").toUpperCase();
+  const day = parts.find(part => part.type === "day")?.value ?? "";
+  if (!hour || !minute || !month || !day) return "";
+  return `${hour}${minute} ${month} ${day}`;
+}
+
+export function formatElapsedFrom(startIso: string, endIso: string): string {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "";
+  const deltaSeconds = (end - start) / 1_000;
+  return `+${deltaSeconds.toFixed(1)}s`;
+}
+
 export function normalizeListInput(value: string): string[] {
   const seen = new Set<string>();
   const list: string[] = [];

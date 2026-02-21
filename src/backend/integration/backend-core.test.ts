@@ -1249,6 +1249,7 @@ describe("sse contract", () => {
         sessionId: "main",
         messageId: "msg-1",
         phase: "update",
+        observedAt: new Date().toISOString(),
         part: {
           id: "part-1",
           type: "tool_call",

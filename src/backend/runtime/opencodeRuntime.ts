@@ -982,6 +982,7 @@ export class OpencodeRuntime implements RuntimeEngine {
           messageId: event.properties.part.messageID,
           part: mappedPart,
           phase,
+          observedAt: new Date().toISOString(),
         },
         "runtime",
       ),
@@ -1616,6 +1617,11 @@ export class OpencodeRuntime implements RuntimeEngine {
   }
 
   private mapChatMessagePart(part: Part): ChatMessagePart | null {
+    const toIsoIfFiniteMillis = (value: unknown): string | undefined => {
+      if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+      return new Date(value).toISOString();
+    };
+
     if (part.type === "reasoning") {
       const text = part.text.trim();
       if (!text) return null;
@@ -1623,10 +1629,22 @@ export class OpencodeRuntime implements RuntimeEngine {
         id: part.id,
         type: "thinking",
         text,
+        startedAt: toIsoIfFiniteMillis(part.time.start),
+        endedAt: toIsoIfFiniteMillis(part.time.end),
       };
     }
 
     if (part.type !== "tool") return null;
+
+    const stateTime = "time" in part.state && part.state.time && typeof part.state.time === "object" ? part.state.time : null;
+    const startedAt =
+      stateTime && "start" in stateTime
+        ? toIsoIfFiniteMillis(stateTime.start)
+        : undefined;
+    const endedAt =
+      stateTime && "end" in stateTime
+        ? toIsoIfFiniteMillis(stateTime.end)
+        : undefined;
 
     const output = (() => {
       if (part.state.status !== "completed") return undefined;
@@ -1648,6 +1666,8 @@ export class OpencodeRuntime implements RuntimeEngine {
       input: isPlainObject(part.state.input) ? part.state.input : undefined,
       output,
       error,
+      startedAt,
+      endedAt,
     };
   }
 

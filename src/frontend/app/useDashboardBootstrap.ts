@@ -338,10 +338,13 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
         sessionId?: string;
         messageId?: string;
         part?: ChatMessagePart;
+        observedAt?: string;
       };
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
       const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
       if (!sessionId || !messageId || !payload.part) return;
+      const observedAt = typeof payload.observedAt === "string" ? payload.observedAt : new Date().toISOString();
+      const partWithObservedAt = { ...payload.part, observedAt } as ChatMessagePart;
 
       input.loadedSessionsRef.current.add(sessionId);
       input.setMessagesBySession(current => {
@@ -354,14 +357,14 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
             updated = true;
             return {
               ...message,
-              parts: upsertChatMessagePart(message.parts, payload.part as ChatMessagePart),
+              parts: upsertChatMessagePart(message.parts, partWithObservedAt),
             };
           }
           if (message.uiMeta?.type === "assistant-pending" && message.uiMeta.runtimeMessageId === messageId) {
             updated = true;
             return {
               ...message,
-              parts: upsertChatMessagePart(message.parts, payload.part as ChatMessagePart),
+              parts: upsertChatMessagePart(message.parts, partWithObservedAt),
             };
           }
           return message;
@@ -378,7 +381,7 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
             pendingUpdated = true;
             return {
               ...message,
-              parts: upsertChatMessagePart(message.parts, payload.part as ChatMessagePart),
+              parts: upsertChatMessagePart(message.parts, partWithObservedAt),
               uiMeta: {
                 ...message.uiMeta,
                 runtimeMessageId: messageId,

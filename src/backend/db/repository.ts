@@ -197,6 +197,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeIsoTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) return undefined;
+  return new Date(parsed).toISOString();
+}
+
 function normalizeChatMessagePart(raw: unknown): ChatMessagePart | null {
   if (!isRecord(raw)) return null;
   const id = typeof raw.id === "string" ? raw.id.trim() : "";
@@ -210,6 +219,9 @@ function normalizeChatMessagePart(raw: unknown): ChatMessagePart | null {
       id,
       type: "thinking",
       text,
+      startedAt: normalizeIsoTimestamp(raw.startedAt),
+      endedAt: normalizeIsoTimestamp(raw.endedAt),
+      observedAt: normalizeIsoTimestamp(raw.observedAt),
     };
   }
 
@@ -231,6 +243,9 @@ function normalizeChatMessagePart(raw: unknown): ChatMessagePart | null {
       input: isRecord(raw.input) ? raw.input : undefined,
       output,
       error,
+      startedAt: normalizeIsoTimestamp(raw.startedAt),
+      endedAt: normalizeIsoTimestamp(raw.endedAt),
+      observedAt: normalizeIsoTimestamp(raw.observedAt),
     };
   }
 

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import {
   type ActiveSend,
+  formatCompactTimestamp,
   type LocalChatMessage,
   normalizeListInput,
   relativeFromIso,
@@ -78,6 +79,12 @@ function loadBooleanSetting(key: string, fallback: boolean) {
   } catch {
     return fallback;
   }
+}
+
+function formatTimestampSummary(iso: string): string {
+  const compact = formatCompactTimestamp(iso);
+  if (!compact) return relativeFromIso(iso);
+  return `${compact} · ${relativeFromIso(iso)}`;
 }
 
 export function App() {
@@ -433,7 +440,7 @@ export function App() {
   const activeRunStatusHint =
     activeSessionRunStatus?.status === "retry"
       ? `${activeSessionRunStatus.message ?? "retrying"}${
-          activeSessionRunStatus.nextAt ? ` · next ${relativeFromIso(activeSessionRunStatus.nextAt)}` : ""
+          activeSessionRunStatus.nextAt ? ` · next ${formatTimestampSummary(activeSessionRunStatus.nextAt)}` : ""
         }`
       : "";
   const availableModels = useMemo(() => {
@@ -1418,7 +1425,7 @@ export function App() {
             <div className="flex items-center gap-2">
               <Badge variant="success">online</Badge>
               <Badge variant={streamStatus === "connected" ? "success" : "warning"}>{streamStatus}</Badge>
-              <Badge variant="outline">heartbeat {heartbeatAt ? relativeFromIso(heartbeatAt) : "pending"}</Badge>
+              <Badge variant="outline">heartbeat {heartbeatAt ? formatTimestampSummary(heartbeatAt) : "pending"}</Badge>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
