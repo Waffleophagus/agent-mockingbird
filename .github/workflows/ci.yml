@@ -179,11 +179,11 @@ jobs:
           sed -E 's#(_authToken=).*#\1***REDACTED***#' "${HOME}/.npmrc"
           echo ".npmrc visible control chars:"
           cat -vet "${HOME}/.npmrc"
-          echo "bun pm whoami:"
-          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun pm whoami --registry "${REGISTRY_URL%/}/" || true
+          echo "npm whoami via bunx:"
+          bunx npm whoami --registry "${REGISTRY_URL%/}/" || true
 
       - name: Publish package tarball
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun publish --verbose --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}" "${PACKAGE_TARBALL}"
+          bunx npm publish "${PACKAGE_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
