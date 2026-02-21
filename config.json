@@ -110,8 +110,8 @@
   "plugin": [
     "file:///var/home/matt/.config/opencode/plugin/tokenscope.ts"
   ],
-  "model": "opencode/kimi-k2.5-free",
-  "small_model": "opencode/kimi-k2.5-free",
+  "model": "opencode/minimax-m2.5-free",
+  "small_model": "opencode/minimax-m2.5-free",
   "username": "matt",
   "mode": {},
   "agent": {
