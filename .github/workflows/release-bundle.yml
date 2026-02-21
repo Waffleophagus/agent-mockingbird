@@ -7,6 +7,8 @@ on:
         description: "Release version (example: v0.1.0)"
         required: true
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -19,6 +21,7 @@ jobs:
     env:
       INPUT_VERSION: ${{ github.event.inputs.version }}
       TAG_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      IS_MAIN_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,6 +31,9 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG_VERSION:-${INPUT_VERSION:-}}"
+          if [[ -z "${version}" && "${IS_MAIN_PUSH}" == "true" ]]; then
+            version="main-${GITHUB_SHA::7}"
+          fi
           if [[ -z "${version}" ]]; then
             echo "Version is required."
             exit 1
@@ -47,6 +53,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
+        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.value }}
