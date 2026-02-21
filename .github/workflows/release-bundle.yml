@@ -43,17 +43,13 @@ jobs:
       - name: Build release bundle
         run: bash scripts/build-release-bundle.sh "${{ steps.version.outputs.value }}"
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wafflebot-${{ steps.version.outputs.value }}
-          path: |
-            dist/wafflebot-${{ steps.version.outputs.value }}.tar.gz
-            dist/wafflebot-${{ steps.version.outputs.value }}.tar.gz.sha256
-          if-no-files-found: error
+      - name: Verify built bundle files
+        run: |
+          set -euo pipefail
+          ls -lh "dist/wafflebot-${{ steps.version.outputs.value }}.tar.gz"
+          ls -lh "dist/wafflebot-${{ steps.version.outputs.value }}.tar.gz.sha256"
 
-      - name: Publish GitHub release
-        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.value }}
