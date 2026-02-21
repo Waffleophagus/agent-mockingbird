@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import path from "node:path";
 import { z } from "zod";
 
+import { legacySpecialistToAgentType } from "../../shared/agentTypes";
 import { sqlite } from "../db/client";
 import { DEFAULT_AGENTS, DEFAULT_MCPS, DEFAULT_SKILLS } from "../defaults";
 import { env } from "../env";
@@ -100,24 +101,6 @@ function readLegacyAgentTypeConfig(fallback: WafflebotConfig["ui"]["agentTypes"]
   return parsed.data;
 }
 
-function mapLegacyAgentToAgentType(agent: WafflebotConfig["ui"]["agents"][number]): AgentTypeDefinition {
-  return {
-    id: agent.id.trim(),
-    name: agent.name.trim() || undefined,
-    description: agent.specialty.trim() || undefined,
-    prompt: agent.summary.trim() || undefined,
-    model: agent.model.trim() || undefined,
-    mode: "subagent",
-    disable: agent.status === "offline",
-    hidden: false,
-    options: {
-      wafflebotManagedLegacy: true,
-      wafflebotDisplayName: agent.name.trim(),
-      wafflebotStatus: agent.status,
-    },
-  };
-}
-
 function mergeAgentTypesWithLegacyAgents(
   agentTypes: WafflebotConfig["ui"]["agentTypes"],
   agents: WafflebotConfig["ui"]["agents"],
@@ -126,7 +109,7 @@ function mergeAgentTypesWithLegacyAgents(
   for (const agent of agents) {
     const id = agent.id.trim();
     if (!id || merged.has(id)) continue;
-    merged.set(id, mapLegacyAgentToAgentType(agent));
+    merged.set(id, legacySpecialistToAgentType(agent) as AgentTypeDefinition);
   }
   return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
 }

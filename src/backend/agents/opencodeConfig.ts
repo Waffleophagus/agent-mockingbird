@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import os from "node:os";
 import path from "node:path";
 
+import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft, normalizeAgentTypeMode } from "../../shared/agentTypes";
 import type { AgentTypeDefinition, WafflebotConfig } from "../config/schema";
 import { agentTypeDefinitionSchema } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
@@ -42,11 +43,6 @@ function stableSerialize(value: unknown): string {
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`).join(",")}}`;
 }
 
-function normalizeMode(value: unknown): AgentTypeDefinition["mode"] {
-  if (value === "primary" || value === "all" || value === "subagent") return value;
-  return "subagent";
-}
-
 function normalizeRuntimeAgentConfigMap(value: unknown): Record<string, OpenCodeAgentConfigRecord> {
   if (!isPlainObject(value)) return {};
   const normalized: Record<string, OpenCodeAgentConfigRecord> = {};
@@ -60,19 +56,7 @@ function normalizeRuntimeAgentConfigMap(value: unknown): Record<string, OpenCode
 
 function normalizeAgentTypeDraft(input: AgentTypeDefinition): AgentTypeDefinition {
   const parsed = agentTypeDefinitionSchema.parse(input);
-  return {
-    ...parsed,
-    id: parsed.id.trim(),
-    name: parsed.name?.trim() || undefined,
-    description: parsed.description?.trim() || undefined,
-    prompt: parsed.prompt?.trim() || undefined,
-    model: parsed.model?.trim() || undefined,
-    variant: parsed.variant?.trim() || undefined,
-    mode: normalizeMode(parsed.mode),
-    hidden: parsed.hidden === true,
-    disable: parsed.disable === true,
-    options: isPlainObject(parsed.options) ? { ...parsed.options } : {},
-  };
+  return normalizeSharedAgentTypeDraft(parsed) as AgentTypeDefinition;
 }
 
 function toAgentTypeDefinition(id: string, config: OpenCodeAgentConfigRecord): AgentTypeDefinition {
@@ -85,7 +69,7 @@ function toAgentTypeDefinition(id: string, config: OpenCodeAgentConfigRecord): A
     prompt: typeof config.prompt === "string" ? config.prompt : undefined,
     model: typeof config.model === "string" ? config.model : undefined,
     variant: typeof config.variant === "string" ? config.variant : undefined,
-    mode: normalizeMode(config.mode),
+    mode: normalizeAgentTypeMode(config.mode),
     hidden: config.hidden === true,
     disable: config.disable === true,
     temperature: typeof config.temperature === "number" ? config.temperature : undefined,
@@ -107,7 +91,7 @@ function toOpenCodeAgentConfig(
     prompt: agentType.prompt?.trim() || undefined,
     model: agentType.model?.trim() || undefined,
     variant: agentType.variant?.trim() || undefined,
-    mode: normalizeMode(agentType.mode),
+    mode: normalizeAgentTypeMode(agentType.mode),
     hidden: agentType.hidden === true,
     disable: agentType.disable === true,
     temperature: agentType.temperature,

@@ -60,6 +60,7 @@ interface RuntimeSessionBindingRow {
 
 interface ExistingMessageIdRow {
   id: string;
+  content: string;
 }
 
 export interface RuntimeSessionBindingRecord {
@@ -1109,14 +1110,33 @@ export function upsertSessionMessages(input: {
     const existingRows = sqlite
       .query(
         `
-        SELECT id
+        SELECT id, content
         FROM messages
         WHERE session_id = ?1
           AND id IN (${placeholders})
       `,
       )
       .all(sessionId, ...messageIds) as ExistingMessageIdRow[];
-    const existingIds = new Set(existingRows.map(row => row.id));
+    const existingContentById = new Map(existingRows.map(row => [row.id, row.content] as const));
+    const existingIds = new Set(existingContentById.keys());
+
+    const updatedInputs = candidates.filter(message => {
+      const existingContent = existingContentById.get(message.id);
+      if (typeof existingContent !== "string") return false;
+      return !existingContent.trim() && Boolean(message.content.trim());
+    });
+    for (const message of updatedInputs) {
+      sqlite
+        .query(
+          `
+          UPDATE messages
+          SET content = ?3
+          WHERE session_id = ?1
+            AND id = ?2
+        `,
+        )
+        .run(sessionId, message.id, message.content);
+    }
 
     const insertedInputs = candidates
       .filter(message => !existingIds.has(message.id))

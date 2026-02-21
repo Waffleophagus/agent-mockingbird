@@ -110,6 +110,7 @@ type RuntimeCtor = new (input: {
     responseText: string | null;
     latencyMs: number | null;
   }>;
+  syncSessionMessages: (sessionId: string) => Promise<void>;
   sendUserMessage: (input: { sessionId: string; content: string }) => Promise<{
     sessionId: string;
     messages: Array<{ id: string; role: "user" | "assistant"; content: string }>;
@@ -219,6 +220,38 @@ function assistantResponse(sessionID: string, text: string) {
         {
           type: "text",
           text,
+        },
+      ],
+    },
+  };
+}
+
+function assistantReasoningOnlyResponse(sessionID: string, text: string) {
+  const now = Date.now();
+  return {
+    data: {
+      info: {
+        id: `msg-${crypto.randomUUID().slice(0, 8)}`,
+        sessionID,
+        role: "assistant",
+        summary: false,
+        mode: "build",
+        finish: "stop",
+        time: {
+          created: now,
+          completed: now,
+        },
+        tokens: {
+          input: 10,
+          output: 20,
+        },
+        cost: 0,
+      },
+      parts: [
+        {
+          type: "reasoning",
+          text,
+          time: { start: now, end: now },
         },
       ],
     },
@@ -741,6 +774,40 @@ describe("opencode runtime failover contract", () => {
 
     const listed = await runtime.listBackgroundRuns({ parentSessionId: "main", limit: 20 });
     expect(listed.some((run) => run.childExternalSessionId === "ses-child-1")).toBe(true);
+  });
+
+  test("syncSessionMessages maps reasoning-only assistant parts into visible message content", async () => {
+    let createCount = 0;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        create: async () => {
+          createCount += 1;
+          return {
+            data: {
+              id: `ses-${createCount}`,
+              title: createCount === 1 ? "main" : "child",
+            },
+          };
+        },
+        prompt: async (request) => assistantResponse(request.path.id, "Initial response"),
+        messages: async () => ({
+          data: [assistantReasoningOnlyResponse("ses-2", "Subagent completed work item A").data],
+        }),
+      }),
+    );
+
+    const spawned = await runtime.spawnBackgroundSession({
+      parentSessionId: "main",
+      title: "Reasoning child",
+    });
+    expect(spawned.childSessionId).toBeTruthy();
+
+    await runtime.syncSessionMessages(spawned.childSessionId as string);
+
+    const messages = repository.listMessagesForSession(spawned.childSessionId as string);
+    expect(
+      messages.some(message => message.role === "assistant" && message.content.includes("Subagent completed work item A")),
+    ).toBe(true);
   });
 
   test("health check runs prompt probe and serves cached result", async () => {

@@ -1,3 +1,11 @@
+import {
+  agentTypeToLegacySpecialist,
+  legacySpecialistToAgentType,
+  normalizeAgentTypeDraft,
+  normalizeAgentTypeList,
+  normalizeAgentTypeMode,
+  normalizeLegacySpecialistAgents,
+} from "../../shared/agentTypes";
 import type { RuntimeAgent, SpecialistAgent } from "../../types/dashboard";
 import type { AgentTypeDefinition, WafflebotConfig } from "../config/schema";
 import { createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";
@@ -8,13 +16,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function normalizeAgentMode(value: unknown): RuntimeAgent["mode"] {
-  if (value === "subagent") return value;
-  if (value === "primary") return value;
-  if (value === "all") return value;
-  return "subagent";
-}
-
 function toModelRef(value: unknown) {
   if (!isPlainObject(value)) return undefined;
   const providerID = typeof value.providerID === "string" ? value.providerID.trim() : "";
@@ -23,94 +24,25 @@ function toModelRef(value: unknown) {
   return `${providerID}/${modelID}`;
 }
 
-function normalizeAgentStatus(value: unknown): SpecialistAgent["status"] {
-  if (value === "available") return value;
-  if (value === "busy") return value;
-  if (value === "offline") return value;
-  return "available";
-}
-
 export function normalizeConfiguredAgents(agents: Array<SpecialistAgent>) {
-  const deduped = new Map<string, SpecialistAgent>();
-  for (const rawAgent of agents) {
-    const id = rawAgent.id.trim();
-    if (!id) continue;
-    deduped.set(id, {
-      id,
-      name: rawAgent.name.trim() || id,
-      specialty: rawAgent.specialty.trim() || "General",
-      summary: rawAgent.summary.trim() || "General assistant tasks.",
-      model: rawAgent.model.trim(),
-      status: normalizeAgentStatus(rawAgent.status),
-    });
-  }
-  return [...deduped.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return normalizeLegacySpecialistAgents(agents) as SpecialistAgent[];
 }
 
 export function resolveConfiguredAgentIds(config: WafflebotConfig) {
   return normalizeConfiguredAgentTypes(config.ui.agentTypes).map(agent => agent.id);
 }
 
-function normalizeAgentTypeMode(value: unknown): AgentTypeDefinition["mode"] {
-  if (value === "subagent") return value;
-  if (value === "primary") return value;
-  if (value === "all") return value;
-  return "subagent";
-}
-
 export function normalizeConfiguredAgentTypes(agentTypes: Array<AgentTypeDefinition>) {
-  const deduped = new Map<string, AgentTypeDefinition>();
-  for (const rawType of agentTypes) {
-    const id = rawType.id.trim();
-    if (!id) continue;
-    deduped.set(id, {
-      ...rawType,
-      id,
-      name: rawType.name?.trim() || undefined,
-      description: rawType.description?.trim() || undefined,
-      prompt: rawType.prompt?.trim() || undefined,
-      model: rawType.model?.trim() || undefined,
-      variant: rawType.variant?.trim() || undefined,
-      mode: normalizeAgentTypeMode(rawType.mode),
-      hidden: rawType.hidden === true,
-      disable: rawType.disable === true,
-      options: isPlainObject(rawType.options) ? { ...rawType.options } : {},
-    });
-  }
-  return [...deduped.values()].sort((a, b) => a.id.localeCompare(b.id));
-}
-
-function toLegacySpecialistStatus(agentType: AgentTypeDefinition): SpecialistAgent["status"] {
-  return agentType.disable ? "offline" : "available";
+  return normalizeAgentTypeList(agentTypes) as AgentTypeDefinition[];
 }
 
 export function toLegacySpecialistAgent(agentType: AgentTypeDefinition): SpecialistAgent {
-  return {
-    id: agentType.id,
-    name: agentType.name?.trim() || agentType.id,
-    specialty: agentType.description?.trim() || "General",
-    summary: agentType.prompt?.trim() || "General assistant tasks.",
-    model: agentType.model?.trim() || "",
-    status: toLegacySpecialistStatus(agentType),
-  };
+  return agentTypeToLegacySpecialist(agentType) as SpecialistAgent;
 }
 
 export function resolveConfiguredAgentTypesFromLegacyAgents(agents: Array<SpecialistAgent>) {
-  return normalizeConfiguredAgents(agents).map(agent => ({
-    id: agent.id,
-    name: agent.name,
-    description: agent.specialty,
-    prompt: agent.summary,
-    model: agent.model,
-    mode: "subagent" as const,
-    hidden: false,
-    disable: agent.status === "offline",
-    options: {
-      wafflebotManagedLegacy: true,
-      wafflebotDisplayName: agent.name,
-      wafflebotStatus: agent.status,
-    },
-  }));
+  const normalizedAgents = normalizeConfiguredAgents(agents);
+  return normalizeConfiguredAgentTypes(normalizedAgents.map(agent => legacySpecialistToAgentType(agent) as AgentTypeDefinition));
 }
 
 function createAgentClient(config: WafflebotConfig) {
@@ -138,7 +70,7 @@ export async function listRuntimeAgents(config: WafflebotConfig): Promise<Runtim
     const model = toModelRef(record.model);
     agents.push({
       id,
-      mode: normalizeAgentMode(record.mode),
+      mode: normalizeAgentTypeMode(record.mode),
       description: typeof record.description === "string" ? record.description : undefined,
       model,
       native: Boolean(record.native),
@@ -168,25 +100,26 @@ function isManagedRuntimeAgentConfig(value: unknown) {
 }
 
 function toRuntimeAgentConfig(agent: AgentTypeDefinition, previous?: Record<string, unknown>) {
+  const normalizedAgent = normalizeAgentTypeDraft(agent) as AgentTypeDefinition;
   const currentOptions = isPlainObject(previous?.options) ? previous.options : {};
   return {
     ...(isPlainObject(previous) ? previous : {}),
-    mode: normalizeAgentTypeMode(agent.mode),
-    model: agent.model?.trim() || undefined,
-    description: agent.description?.trim() || undefined,
-    prompt: agent.prompt?.trim() || undefined,
-    variant: agent.variant?.trim() || undefined,
-    temperature: agent.temperature,
-    top_p: agent.topP,
-    steps: agent.steps,
-    permission: agent.permission,
-    disable: agent.disable === true,
-    hidden: agent.hidden === true,
+    mode: normalizedAgent.mode,
+    model: normalizedAgent.model,
+    description: normalizedAgent.description,
+    prompt: normalizedAgent.prompt,
+    variant: normalizedAgent.variant,
+    temperature: normalizedAgent.temperature,
+    top_p: normalizedAgent.topP,
+    steps: normalizedAgent.steps,
+    permission: normalizedAgent.permission,
+    disable: normalizedAgent.disable === true,
+    hidden: normalizedAgent.hidden === true,
     options: {
       ...currentOptions,
       [WAFFLEBOT_AGENT_MANAGED_FLAG]: true,
-      ...(isPlainObject(agent.options) ? agent.options : {}),
-      wafflebotDisplayName: agent.name ?? agent.id,
+      ...(isPlainObject(normalizedAgent.options) ? normalizedAgent.options : {}),
+      wafflebotDisplayName: normalizedAgent.name ?? normalizedAgent.id,
     },
   };
 }

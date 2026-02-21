@@ -1148,6 +1148,22 @@ export class OpencodeRuntime implements RuntimeEngine {
       return text;
     }
     if (info.role === "assistant") {
+      const reasoningText = this.extractReasoningText(parts);
+      if (reasoningText) {
+        return reasoningText;
+      }
+      const toolOutputText = this.extractCompletedToolOutputText(parts);
+      if (toolOutputText) {
+        return toolOutputText;
+      }
+    }
+    if (info.role === "user") {
+      const subtaskPrompt = this.extractSubtaskPrompt(parts);
+      if (subtaskPrompt) {
+        return subtaskPrompt;
+      }
+    }
+    if (info.role === "assistant") {
       const failure = this.extractAssistantError(info, parts);
       if (failure) {
         return `[assistant error] ${failure}`;
@@ -1203,12 +1219,18 @@ export class OpencodeRuntime implements RuntimeEngine {
       );
     }
 
-    const imported = messages.map(entry => ({
-      id: entry.info.id,
-      role: entry.info.role,
-      content: this.mapOpencodeMessageContent(entry.info, entry.parts),
-      createdAt: entry.info.time.created,
-    }));
+    const imported = messages.flatMap(entry => {
+      const content = this.mapOpencodeMessageContent(entry.info, entry.parts).trim();
+      if (!content) return [];
+      return [
+        {
+          id: entry.info.id,
+          role: entry.info.role,
+          content,
+          createdAt: entry.info.time.created,
+        },
+      ];
+    });
 
     const synced = upsertSessionMessages({
       sessionId: localSessionId,
@@ -1507,6 +1529,32 @@ export class OpencodeRuntime implements RuntimeEngine {
       .filter(Boolean)
       .join("\n\n");
     return text || null;
+  }
+
+  private extractReasoningText(parts: Array<Part>): string | null {
+    const text = parts
+      .filter((part): part is Extract<Part, { type: "reasoning" }> => part.type === "reasoning")
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    return text || null;
+  }
+
+  private extractCompletedToolOutputText(parts: Array<Part>): string | null {
+    const outputs: string[] = [];
+    for (const part of parts) {
+      if (part.type !== "tool") continue;
+      if (part.state.status !== "completed") continue;
+      const output = part.state.output.trim();
+      if (output) outputs.push(output);
+    }
+    return outputs.length > 0 ? outputs.join("\n\n") : null;
+  }
+
+  private extractSubtaskPrompt(parts: Array<Part>): string | null {
+    const subtask = parts.find((part): part is Extract<Part, { type: "subtask" }> => part.type === "subtask");
+    const prompt = subtask?.prompt.trim();
+    return prompt || null;
   }
 
   private extractAssistantError(info: AssistantInfo, parts: Array<Part>): string | null {

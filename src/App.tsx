@@ -19,13 +19,19 @@ import {
   relativeFromIso,
 } from "@/frontend/app/chatHelpers";
 import {
+  fetchAgentCatalog,
+  fetchMcpCatalog,
+  fetchSkillCatalog,
+  importManagedSkill,
+  saveAgentTypeChanges,
+  saveMcps,
+  saveSkills,
+  validateAgentTypeChanges,
+} from "@/frontend/app/configApi";
+import {
   type AgentRunSnapshot,
   type BackgroundRunsResponse,
-  type ConfigSnapshotResponse,
   type ConfirmAction,
-  type OpencodeAgentStorageResponse,
-  type RuntimeInfoResponse,
-  fromLegacyAgent,
   getConfirmDialogProps,
 } from "@/frontend/app/dashboardTypes";
 import {
@@ -35,7 +41,6 @@ import {
   extractRunErrorMessage,
   mergeBackgroundRunsBySession,
   normalizeAgentTypeDraft,
-  normalizeChildSessionHideAfterDays,
   sortBackgroundRuns,
   sortSessionsByActivity,
   upsertSessionList,
@@ -44,18 +49,16 @@ import { AgentsPage } from "@/frontend/app/pages/AgentsPage";
 import { type ChatPageModel, ChatPage } from "@/frontend/app/pages/ChatPage";
 import { McpPage } from "@/frontend/app/pages/McpPage";
 import { SkillsPage } from "@/frontend/app/pages/SkillsPage";
+import { useDashboardBootstrap } from "@/frontend/app/useDashboardBootstrap";
 import { useSessionHierarchy } from "@/frontend/app/useSessionHierarchy";
 import type {
   AgentTypeDefinition,
   BackgroundRunSnapshot,
   ChatMessage,
-  DashboardBootstrap,
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
   ConfiguredMcpServer,
-  SessionCompactedSnapshot,
-  SessionRunErrorSnapshot,
   SessionRunStatusSnapshot,
   SessionSummary,
   RuntimeMcp,
@@ -170,158 +173,48 @@ export function App() {
   const previousActiveSessionIdRef = useRef("");
   const isSending = activeSend !== null;
 
-  useEffect(() => {
-    let alive = true;
-    const bootstrap = async () => {
-      const response = await fetch("/api/dashboard/bootstrap");
-      const payload = (await response.json()) as DashboardBootstrap;
-      if (!alive) return;
-
-      setSessions(sortSessionsByActivity(payload.sessions));
-      setSkillsDraft(payload.skills.join("\n"));
-      setMcpsDraft(payload.mcps.join("\n"));
-      setAgentTypes(payload.agents.map(fromLegacyAgent));
-      setUsage(payload.usage);
-      setHeartbeatAt(payload.heartbeat.at);
-      setActiveSessionId(payload.sessions[0]?.id ?? "");
-      setLoading(false);
-
-      setLoadingModels(true);
-      try {
-        const [
-          modelsResponse,
-          memoryStatusResponse,
-          memoryActivityResponse,
-          configResponse,
-          skillsCatalogResponse,
-          mcpsCatalogResponse,
-          opencodeAgentsResponse,
-          runtimeInfoResponse,
-          backgroundInFlightResponse,
-        ] = await Promise.all([
-          fetch("/api/opencode/models"),
-          fetch("/api/memory/status"),
-          fetch("/api/memory/activity?limit=12"),
-          fetch("/api/config"),
-          fetch("/api/config/skills/catalog"),
-          fetch("/api/config/mcps/catalog"),
-          fetch("/api/opencode/agents"),
-          fetch("/api/runtime/info"),
-          fetch("/api/background?limit=500"),
-        ]);
-        const modelsPayload = (await modelsResponse.json()) as { models?: ModelOption[]; error?: string };
-        const memoryStatusPayload = (await memoryStatusResponse.json()) as {
-          status?: MemoryStatusSnapshot;
-          error?: string;
-        };
-        const memoryActivityPayload = (await memoryActivityResponse.json()) as {
-          events?: MemoryWriteEvent[];
-          error?: string;
-        };
-        const configPayload = (await configResponse.json()) as ConfigSnapshotResponse;
-        const skillsCatalogPayload = (await skillsCatalogResponse.json()) as {
-          skills?: RuntimeSkill[];
-          enabled?: string[];
-          hash?: string;
-          error?: string;
-        };
-        const mcpsCatalogPayload = (await mcpsCatalogResponse.json()) as {
-          mcps?: RuntimeMcp[];
-          enabled?: string[];
-          servers?: ConfiguredMcpServer[];
-          hash?: string;
-          error?: string;
-        };
-        const opencodeAgentsPayload = (await opencodeAgentsResponse.json()) as {
-          agentTypes?: AgentTypeDefinition[];
-          hash?: string;
-          storage?: OpencodeAgentStorageResponse;
-          error?: string;
-        };
-        const runtimeInfoPayload = (await runtimeInfoResponse.json()) as RuntimeInfoResponse;
-        const backgroundInFlightPayload = (await backgroundInFlightResponse.json()) as BackgroundRunsResponse;
-        if (!alive) return;
-
-        setModelOptions(modelsPayload.models ?? []);
-        setModelError(modelsResponse.ok ? "" : (modelsPayload.error ?? "Failed to load OpenCode models"));
-        setMemoryStatus(memoryStatusPayload.status ?? null);
-        setMemoryActivity(memoryActivityPayload.events ?? []);
-        setAvailableSkills(Array.isArray(skillsCatalogPayload.skills) ? skillsCatalogPayload.skills : []);
-        setAvailableMcps(Array.isArray(mcpsCatalogPayload.mcps) ? mcpsCatalogPayload.mcps : []);
-        if (Array.isArray(opencodeAgentsPayload.agentTypes)) {
-          const normalized = opencodeAgentsPayload.agentTypes.map(normalizeAgentTypeDraft);
-          setAgentTypes(normalized);
-          setAgentTypesBaseline(normalized);
-          setAgentConfigHash(typeof opencodeAgentsPayload.hash === "string" ? opencodeAgentsPayload.hash : "");
-        } else if (Array.isArray(configPayload.config?.ui?.agentTypes)) {
-          const fallback = configPayload.config.ui.agentTypes.map(normalizeAgentTypeDraft);
-          setAgentTypes(fallback);
-          setAgentTypesBaseline(fallback);
-          setAgentConfigHash("");
-        }
-        setOpencodeDirectory(
-          (typeof opencodeAgentsPayload.storage?.directory === "string" && opencodeAgentsPayload.storage.directory) ||
-            (typeof runtimeInfoPayload.opencode?.directory === "string" ? runtimeInfoPayload.opencode.directory : ""),
-        );
-        setOpencodeConfigFilePath(
-          (typeof opencodeAgentsPayload.storage?.configFilePath === "string" && opencodeAgentsPayload.storage.configFilePath) ||
-            (typeof runtimeInfoPayload.opencode?.effectiveConfigPath === "string"
-              ? runtimeInfoPayload.opencode.effectiveConfigPath
-              : ""),
-        );
-        setOpencodePersistenceMode(
-          (typeof opencodeAgentsPayload.storage?.persistenceMode === "string" && opencodeAgentsPayload.storage.persistenceMode) ||
-            (typeof runtimeInfoPayload.opencode?.persistenceMode === "string"
-              ? runtimeInfoPayload.opencode.persistenceMode
-              : ""),
-        );
-        setMcpServers(Array.isArray(mcpsCatalogPayload.servers) ? mcpsCatalogPayload.servers : []);
-        if (Array.isArray(skillsCatalogPayload.enabled)) {
-          setSkillsDraft(skillsCatalogPayload.enabled.join("\n"));
-        }
-        if (Array.isArray(mcpsCatalogPayload.enabled)) {
-          setMcpsDraft(mcpsCatalogPayload.enabled.join("\n"));
-        }
-        setRunWaitTimeoutMs(
-          typeof configPayload.config?.runtime?.opencode?.runWaitTimeoutMs === "number"
-            ? configPayload.config.runtime.opencode.runWaitTimeoutMs
-            : DEFAULT_RUN_WAIT_TIMEOUT_MS,
-        );
-        setChildSessionHideAfterDays(
-          normalizeChildSessionHideAfterDays(configPayload.config?.runtime?.opencode?.childSessionHideAfterDays),
-        );
-        setConfigHash(typeof configPayload.hash === "string" ? configPayload.hash : "");
-        setSkillCatalogError(skillsCatalogResponse.ok ? "" : (skillsCatalogPayload.error ?? "Failed to load runtime skills"));
-        setMcpCatalogError(mcpsCatalogResponse.ok ? "" : (mcpsCatalogPayload.error ?? "Failed to load runtime MCP servers"));
-        setAgentCatalogError(opencodeAgentsResponse.ok ? "" : (opencodeAgentsPayload.error ?? "Failed to load OpenCode agent definitions"));
-        if (backgroundInFlightResponse.ok && Array.isArray(backgroundInFlightPayload.runs)) {
-          setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, backgroundInFlightPayload.runs ?? []));
-        }
-        const failedMemoryMessage =
-          (!memoryStatusResponse.ok && (memoryStatusPayload.error ?? "Failed to load memory status")) ||
-          (!memoryActivityResponse.ok && (memoryActivityPayload.error ?? "Failed to load memory activity")) ||
-          "";
-        setMemoryError(failedMemoryMessage);
-      } catch (error) {
-        if (!alive) return;
-        setModelError(error instanceof Error ? error.message : "Failed to load OpenCode models");
-        setMemoryError(error instanceof Error ? error.message : "Failed to load memory data");
-      } finally {
-        if (alive) {
-          setLoadingModels(false);
-        }
-      }
-    };
-
-    bootstrap().catch(error => {
-      console.error("Failed to load dashboard bootstrap", error);
-      setLoading(false);
-    });
-
-    return () => {
-      alive = false;
-    };
-  }, []);
+  useDashboardBootstrap({
+    loadedSessionsRef,
+    loadedBackgroundSessionsRef,
+    activeSendRef,
+    setLoading,
+    setLoadingModels,
+    setSessions,
+    setSkillsDraft,
+    setMcpsDraft,
+    setAgentTypes,
+    setAgentTypesBaseline,
+    setUsage,
+    setHeartbeatAt,
+    setActiveSessionId,
+    setModelOptions,
+    setModelError,
+    setMemoryStatus,
+    setMemoryActivity,
+    setAvailableSkills,
+    setAvailableMcps,
+    setAgentConfigHash,
+    setOpencodeDirectory,
+    setOpencodeConfigFilePath,
+    setOpencodePersistenceMode,
+    setMcpServers,
+    setRunWaitTimeoutMs,
+    setChildSessionHideAfterDays,
+    setConfigHash,
+    setSkillCatalogError,
+    setMcpCatalogError,
+    setAgentCatalogError,
+    setBackgroundRunsBySession,
+    setMemoryError,
+    setStreamStatus,
+    setMessagesBySession,
+    setRunStatusBySession,
+    setRunErrorsBySession,
+    setCompactedAtBySession,
+    setBackgroundSteerDraftByRun,
+    setBackgroundActionBusyByRun,
+    setFocusedBackgroundRunId,
+  });
 
   useEffect(() => {
     if (!activeSessionId || loadedSessionsRef.current.has(activeSessionId)) return;
@@ -420,152 +313,6 @@ export function App() {
     return () => {
       cancelled = true;
       clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
-    const events = new EventSource("/api/events");
-    setStreamStatus("connecting");
-
-    events.onopen = () => {
-      setStreamStatus("connected");
-    };
-    events.onerror = () => {
-      setStreamStatus("reconnecting");
-    };
-
-    events.addEventListener("heartbeat", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as { at: string };
-      setHeartbeatAt(payload.at);
-    });
-
-    events.addEventListener("usage", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as UsageSnapshot;
-      setUsage(payload);
-    });
-
-    events.addEventListener("session-updated", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionSummary;
-      setSessions(current => upsertSessionList(current, payload));
-    });
-
-    events.addEventListener("session-message", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as {
-        sessionId: string;
-        message: ChatMessage;
-      };
-      loadedSessionsRef.current.add(payload.sessionId);
-      setMessagesBySession(current => ({
-        ...current,
-        [payload.sessionId]: mergeMessages(current[payload.sessionId] ?? [], [payload.message]),
-      }));
-      if (payload.message.role === "assistant" && activeSendRef.current?.sessionId === payload.sessionId) {
-        removeOptimisticRequest(payload.sessionId, activeSendRef.current.requestId);
-      }
-      setRunStatusBySession(current => ({
-        ...current,
-        [payload.sessionId]: {
-          sessionId: payload.sessionId,
-          status: "idle",
-        },
-      }));
-      setRunErrorsBySession(current => {
-        if (!current[payload.sessionId]) return current;
-        const next = { ...current };
-        delete next[payload.sessionId];
-        return next;
-      });
-    });
-
-    events.addEventListener("session-status", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionRunStatusSnapshot;
-      setRunStatusBySession(current => ({
-        ...current,
-        [payload.sessionId]: payload,
-      }));
-      if (payload.status === "idle") {
-        setRunErrorsBySession(current => {
-          if (!current[payload.sessionId]) return current;
-          const next = { ...current };
-          delete next[payload.sessionId];
-          return next;
-        });
-      }
-    });
-
-    events.addEventListener("session-compacted", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionCompactedSnapshot;
-      setCompactedAtBySession(current => ({
-        ...current,
-        [payload.sessionId]: new Date().toISOString(),
-      }));
-    });
-
-    events.addEventListener("session-error", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as SessionRunErrorSnapshot;
-      if (payload.sessionId) {
-        const sessionId = payload.sessionId;
-        setRunErrorsBySession(current => ({
-          ...current,
-          [sessionId]: payload.message,
-        }));
-        setRunStatusBySession(current => ({
-          ...current,
-          [sessionId]: {
-            sessionId,
-            status: "idle",
-          },
-        }));
-        if (activeSendRef.current?.sessionId === sessionId) {
-          markRequestFailed(sessionId, activeSendRef.current.requestId, payload.message);
-        }
-      }
-    });
-
-    events.addEventListener("background-run", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as BackgroundRunSnapshot;
-      loadedBackgroundSessionsRef.current.add(payload.parentSessionId);
-      setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, [payload]));
-      if (payload.status === "completed" || payload.status === "failed" || payload.status === "aborted") {
-        setBackgroundSteerDraftByRun(current => {
-          if (!current[payload.runId]) return current;
-          const next = { ...current };
-          delete next[payload.runId];
-          return next;
-        });
-        setBackgroundActionBusyByRun(current => {
-          if (!current[payload.runId]) return current;
-          const next = { ...current };
-          delete next[payload.runId];
-          return next;
-        });
-        setFocusedBackgroundRunId(current => (current === payload.runId ? "" : current));
-      }
-    });
-
-    events.addEventListener("config-updated", () => {
-      void (async () => {
-        try {
-          const response = await fetch("/api/config");
-          if (!response.ok) return;
-          const payload = (await response.json()) as ConfigSnapshotResponse;
-          setRunWaitTimeoutMs(
-            typeof payload.config?.runtime?.opencode?.runWaitTimeoutMs === "number"
-              ? payload.config.runtime.opencode.runWaitTimeoutMs
-              : DEFAULT_RUN_WAIT_TIMEOUT_MS,
-          );
-          setChildSessionHideAfterDays(
-            normalizeChildSessionHideAfterDays(payload.config?.runtime?.opencode?.childSessionHideAfterDays),
-          );
-          setConfigHash(typeof payload.hash === "string" ? payload.hash : "");
-        } catch {
-          return;
-        }
-      })();
-    });
-
-    return () => {
-      events.close();
     };
   }, []);
 
@@ -1478,23 +1225,10 @@ export function App() {
     setLoadingSkillCatalog(true);
     setSkillCatalogError("");
     try {
-      const response = await fetch("/api/config/skills/catalog");
-      const payload = (await response.json()) as {
-        skills?: RuntimeSkill[];
-        enabled?: string[];
-        hash?: string;
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to load runtime skills");
-      }
-      setAvailableSkills(Array.isArray(payload.skills) ? payload.skills : []);
-      if (Array.isArray(payload.enabled)) {
-        setSkillsDraft(payload.enabled.join("\n"));
-      }
-      if (typeof payload.hash === "string") {
-        setConfigHash(payload.hash);
-      }
+      const payload = await fetchSkillCatalog();
+      setAvailableSkills(payload.skills);
+      setSkillsDraft(payload.enabled.join("\n"));
+      if (payload.hash) setConfigHash(payload.hash);
     } catch (error) {
       setSkillCatalogError(error instanceof Error ? error.message : "Failed to load runtime skills");
     } finally {
@@ -1506,25 +1240,11 @@ export function App() {
     setLoadingMcpCatalog(true);
     setMcpCatalogError("");
     try {
-      const response = await fetch("/api/config/mcps/catalog");
-      const payload = (await response.json()) as {
-        mcps?: RuntimeMcp[];
-        enabled?: string[];
-        servers?: ConfiguredMcpServer[];
-        hash?: string;
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to load runtime MCP servers");
-      }
-      setAvailableMcps(Array.isArray(payload.mcps) ? payload.mcps : []);
-      setMcpServers(Array.isArray(payload.servers) ? payload.servers : []);
-      if (Array.isArray(payload.enabled)) {
-        setMcpsDraft(payload.enabled.join("\n"));
-      }
-      if (typeof payload.hash === "string") {
-        setConfigHash(payload.hash);
-      }
+      const payload = await fetchMcpCatalog();
+      setAvailableMcps(payload.mcps);
+      setMcpServers(payload.servers);
+      setMcpsDraft(payload.enabled.join("\n"));
+      if (payload.hash) setConfigHash(payload.hash);
     } catch (error) {
       setMcpCatalogError(error instanceof Error ? error.message : "Failed to load runtime MCP servers");
     } finally {
@@ -1536,25 +1256,13 @@ export function App() {
     setLoadingAgentCatalog(true);
     setAgentCatalogError("");
     try {
-      const response = await fetch("/api/opencode/agents");
-      const payload = (await response.json()) as {
-        agentTypes?: AgentTypeDefinition[];
-        hash?: string;
-        storage?: OpencodeAgentStorageResponse;
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to load OpenCode agent definitions");
-      }
-      const normalized = Array.isArray(payload.agentTypes) ? payload.agentTypes.map(normalizeAgentTypeDraft) : [];
-      setAgentTypes(normalized);
-      setAgentTypesBaseline(normalized);
-      if (typeof payload.hash === "string") {
-        setAgentConfigHash(payload.hash);
-      }
-      setOpencodeDirectory(typeof payload.storage?.directory === "string" ? payload.storage.directory : "");
-      setOpencodeConfigFilePath(typeof payload.storage?.configFilePath === "string" ? payload.storage.configFilePath : "");
-      setOpencodePersistenceMode(typeof payload.storage?.persistenceMode === "string" ? payload.storage.persistenceMode : "");
+      const payload = await fetchAgentCatalog();
+      setAgentTypes(payload.agentTypes);
+      setAgentTypesBaseline(payload.agentTypes);
+      if (payload.hash) setAgentConfigHash(payload.hash);
+      setOpencodeDirectory(typeof payload.storage.directory === "string" ? payload.storage.directory : "");
+      setOpencodeConfigFilePath(typeof payload.storage.configFilePath === "string" ? payload.storage.configFilePath : "");
+      setOpencodePersistenceMode(typeof payload.storage.persistenceMode === "string" ? payload.storage.persistenceMode : "");
     } catch (error) {
       setAgentCatalogError(error instanceof Error ? error.message : "Failed to load OpenCode agent definitions");
     } finally {
@@ -1603,30 +1311,16 @@ export function App() {
     setIsImportingSkill(true);
     setSkillsError("");
     try {
-      const response = await fetch("/api/config/skills/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id,
-          content,
-          expectedHash: configHash || undefined,
-          enable: true,
-        }),
+      const payload = await importManagedSkill({
+        id,
+        content,
+        expectedHash: configHash || undefined,
+        enable: true,
       });
-      const payload = (await response.json()) as {
-        skills?: string[];
-        hash?: string;
-        error?: string;
-      };
-      if (!response.ok || !payload.skills) {
-        throw new Error(payload.error ?? "Failed to import skill");
-      }
       setImportSkillId("");
       setImportSkillContent("");
       setSkillsDraft(payload.skills.join("\n"));
-      if (typeof payload.hash === "string") {
-        setConfigHash(payload.hash);
-      }
+      if (payload.hash) setConfigHash(payload.hash);
       await refreshSkillCatalog();
     } catch (error) {
       setSkillsError(error instanceof Error ? error.message : "Failed to import skill");
@@ -1773,21 +1467,12 @@ export function App() {
     setIsSavingSkills(true);
     setSkillsError("");
     try {
-      const response = await fetch("/api/config/skills", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          skills: configuredSkills,
-          expectedHash: configHash || undefined,
-        }),
+      const payload = await saveSkills({
+        skills: configuredSkills,
+        expectedHash: configHash || undefined,
       });
-      const payload = (await response.json()) as { skills?: string[]; hash?: string; error?: string };
-      if (!response.ok || !payload.skills) {
-        throw new Error(payload.error ?? "Failed to save skills");
-      }
-
       setSkillsDraft(payload.skills.join("\n"));
-      setConfigHash(typeof payload.hash === "string" ? payload.hash : configHash);
+      setConfigHash(payload.hash || configHash);
       await refreshSkillCatalog();
     } catch (error) {
       setSkillsError(error instanceof Error ? error.message : "Failed to save skills");
@@ -1809,29 +1494,14 @@ export function App() {
       if (undefinedEnabledIds.length > 0) {
         throw new Error(`Missing MCP definition for enabled server(s): ${undefinedEnabledIds.join(", ")}`);
       }
-      const response = await fetch("/api/config/mcps", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(serversForSave.length > 0 ? { servers: serversForSave } : { mcps: configuredMcps }),
-          expectedHash: configHash || undefined,
-        }),
+      const payload = await saveMcps({
+        ...(serversForSave.length > 0 ? { servers: serversForSave } : { mcps: configuredMcps }),
+        expectedHash: configHash || undefined,
       });
-      const payload = (await response.json()) as {
-        mcps?: string[];
-        servers?: ConfiguredMcpServer[];
-        hash?: string;
-        error?: string;
-      };
-      if (!response.ok || !payload.mcps) {
-        throw new Error(payload.error ?? "Failed to save MCP servers");
-      }
 
       setMcpsDraft(payload.mcps.join("\n"));
-      if (Array.isArray(payload.servers)) {
-        setMcpServers(payload.servers);
-      }
-      setConfigHash(typeof payload.hash === "string" ? payload.hash : configHash);
+      setMcpServers(payload.servers);
+      setConfigHash(payload.hash || configHash);
       await refreshMcpCatalog();
     } catch (error) {
       setMcpsError(error instanceof Error ? error.message : "Failed to save MCP servers");
@@ -1860,22 +1530,10 @@ export function App() {
         return;
       }
 
-      const validationResponse = await fetch("/api/opencode/agents/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          upserts,
-          deletes,
-        }),
+      const validationPayload = await validateAgentTypeChanges({
+        upserts,
+        deletes,
       });
-      const validationPayload = (await validationResponse.json()) as {
-        ok?: boolean;
-        issues?: Array<{ path?: string; message?: string }>;
-        error?: string;
-      };
-      if (!validationResponse.ok) {
-        throw new Error(validationPayload.error ?? "Failed to validate agent changes");
-      }
       if (validationPayload.ok !== true) {
         const firstIssue = validationPayload.issues?.[0];
         throw new Error(firstIssue?.message || "Agent validation failed");
@@ -1884,35 +1542,21 @@ export function App() {
         throw new Error("Agent config hash missing. Refresh agents and try again.");
       }
 
-      const response = await fetch("/api/opencode/agents", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          upserts,
-          deletes,
-          expectedHash: agentConfigHash || undefined,
-        }),
+      const payload = await saveAgentTypeChanges({
+        upserts,
+        deletes,
+        expectedHash: agentConfigHash,
       });
-      const payload = (await response.json()) as {
-        agentTypes?: AgentTypeDefinition[];
-        hash?: string;
-        storage?: OpencodeAgentStorageResponse;
-        error?: string;
-      };
-      if (!response.ok || !Array.isArray(payload.agentTypes)) {
-        throw new Error(payload.error ?? "Failed to save agent types");
-      }
 
-      const normalized = payload.agentTypes.map(normalizeAgentTypeDraft);
-      setAgentTypes(normalized);
-      setAgentTypesBaseline(normalized);
-      setAgentConfigHash(typeof payload.hash === "string" ? payload.hash : agentConfigHash);
-      setOpencodeDirectory(typeof payload.storage?.directory === "string" ? payload.storage.directory : opencodeDirectory);
+      setAgentTypes(payload.agentTypes);
+      setAgentTypesBaseline(payload.agentTypes);
+      setAgentConfigHash(payload.hash || agentConfigHash);
+      setOpencodeDirectory(typeof payload.storage.directory === "string" ? payload.storage.directory : opencodeDirectory);
       setOpencodeConfigFilePath(
-        typeof payload.storage?.configFilePath === "string" ? payload.storage.configFilePath : opencodeConfigFilePath,
+        typeof payload.storage.configFilePath === "string" ? payload.storage.configFilePath : opencodeConfigFilePath,
       );
       setOpencodePersistenceMode(
-        typeof payload.storage?.persistenceMode === "string" ? payload.storage.persistenceMode : opencodePersistenceMode,
+        typeof payload.storage.persistenceMode === "string" ? payload.storage.persistenceMode : opencodePersistenceMode,
       );
     } catch (error) {
       setAgentsError(error instanceof Error ? error.message : "Failed to save agent types");

@@ -1,3 +1,4 @@
+import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft } from "@/shared/agentTypes";
 import type { AgentTypeDefinition, BackgroundRunSnapshot, SessionSummary } from "@/types/dashboard";
 
 export const RUN_POLL_INTERVAL_MS = 350;
@@ -72,16 +73,7 @@ export function normalizeChildSessionHideAfterDays(value: unknown) {
 }
 
 export function normalizeAgentTypeDraft(agentType: AgentTypeDefinition): AgentTypeDefinition {
-  return {
-    ...agentType,
-    id: agentType.id.trim(),
-    name: agentType.name?.trim() || undefined,
-    description: agentType.description?.trim() || undefined,
-    prompt: agentType.prompt?.trim() || undefined,
-    model: agentType.model?.trim() || undefined,
-    variant: agentType.variant?.trim() || undefined,
-    options: agentType.options ?? {},
-  };
+  return normalizeSharedAgentTypeDraft(agentType) as AgentTypeDefinition;
 }
 
 export function cn(...classes: (string | boolean | undefined | null)[]) {

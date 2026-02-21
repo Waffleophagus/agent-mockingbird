@@ -146,6 +146,20 @@ function publishConfigRollbackEvent(eventStream: RuntimeEventStream, error: unkn
   );
 }
 
+async function respondWithConfigMutation(
+  eventStream: RuntimeEventStream,
+  run: () => Promise<ApplyConfigResult>,
+  onSuccess: (result: ApplyConfigResult) => Response,
+) {
+  try {
+    const result = await run();
+    publishConfigUpdatedEvent(eventStream, result);
+    return onSuccess(result);
+  } catch (error) {
+    return configErrorResponse(eventStream, error);
+  }
+}
+
 async function applyStringListUpdate(
   eventStream: RuntimeEventStream,
   req: Request,
@@ -157,21 +171,21 @@ async function applyStringListUpdate(
     return Response.json({ error: `${field} must be a string array` }, { status: 400 });
   }
 
-  try {
-    const result = await applyConfigPatch({
-      patch: { ui: { [field]: values } },
-      expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-      runSmokeTest: true,
-    });
-    publishConfigUpdatedEvent(eventStream, result);
-    return Response.json({
-      [field]: result.snapshot.config.ui[field],
-      hash: result.snapshot.hash,
-      smokeTest: result.smokeTest,
-    });
-  } catch (error) {
-    return configErrorResponse(eventStream, error);
-  }
+  return respondWithConfigMutation(
+    eventStream,
+    () =>
+      applyConfigPatch({
+        patch: { ui: { [field]: values } },
+        expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+        runSmokeTest: true,
+      }),
+    result =>
+      Response.json({
+        [field]: result.snapshot.config.ui[field],
+        hash: result.snapshot.hash,
+        smokeTest: result.smokeTest,
+      }),
+  );
 }
 
 async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Request) {
@@ -180,22 +194,22 @@ async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Reques
   if (parsedServers.success) {
     const servers = parsedServers.data;
     const enabledIds = normalizeMcpIds(servers.filter(server => server.enabled).map(server => server.id));
-    try {
-      const result = await applyConfigPatch({
-        patch: { ui: { mcpServers: servers, mcps: enabledIds } },
-        expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-        runSmokeTest: true,
-      });
-      publishConfigUpdatedEvent(eventStream, result);
-      return Response.json({
-        mcps: resolveConfiguredMcpIds(result.snapshot.config),
-        servers: resolveConfiguredMcpServers(result.snapshot.config),
-        hash: result.snapshot.hash,
-        smokeTest: result.smokeTest,
-      });
-    } catch (error) {
-      return configErrorResponse(eventStream, error);
-    }
+    return respondWithConfigMutation(
+      eventStream,
+      () =>
+        applyConfigPatch({
+          patch: { ui: { mcpServers: servers, mcps: enabledIds } },
+          expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+          runSmokeTest: true,
+        }),
+      result =>
+        Response.json({
+          mcps: resolveConfiguredMcpIds(result.snapshot.config),
+          servers: resolveConfiguredMcpServers(result.snapshot.config),
+          hash: result.snapshot.hash,
+          smokeTest: result.smokeTest,
+        }),
+    );
   }
 
   const values = parseStringListBody(body, "mcps");
@@ -203,28 +217,28 @@ async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Reques
     return Response.json({ error: "mcps must be a string array or servers must be a valid MCP config array" }, { status: 400 });
   }
 
-  try {
-    const current = getConfigSnapshot();
-    const enabled = new Set(values);
-    const updatedServers = current.config.ui.mcpServers.map(server => ({
-      ...server,
-      enabled: enabled.has(server.id),
-    }));
-    const result = await applyConfigPatch({
-      patch: { ui: { mcps: values, mcpServers: updatedServers } },
-      expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-      runSmokeTest: true,
-    });
-    publishConfigUpdatedEvent(eventStream, result);
-    return Response.json({
-      mcps: resolveConfiguredMcpIds(result.snapshot.config),
-      servers: resolveConfiguredMcpServers(result.snapshot.config),
-      hash: result.snapshot.hash,
-      smokeTest: result.smokeTest,
-    });
-  } catch (error) {
-    return configErrorResponse(eventStream, error);
-  }
+  const current = getConfigSnapshot();
+  const enabled = new Set(values);
+  const updatedServers = current.config.ui.mcpServers.map(server => ({
+    ...server,
+    enabled: enabled.has(server.id),
+  }));
+  return respondWithConfigMutation(
+    eventStream,
+    () =>
+      applyConfigPatch({
+        patch: { ui: { mcps: values, mcpServers: updatedServers } },
+        expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+        runSmokeTest: true,
+      }),
+    result =>
+      Response.json({
+        mcps: resolveConfiguredMcpIds(result.snapshot.config),
+        servers: resolveConfiguredMcpServers(result.snapshot.config),
+        hash: result.snapshot.hash,
+        smokeTest: result.smokeTest,
+      }),
+  );
 }
 
 async function getSkillCatalog() {
@@ -445,17 +459,16 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
           expectedHash?: unknown;
           runSmokeTest?: unknown;
         };
-        try {
-          const result = await applyConfigPatch({
-            patch: body.patch,
-            expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-            runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
-          });
-          publishConfigUpdatedEvent(eventStream, result);
-          return Response.json(result);
-        } catch (error) {
-          return configErrorResponse(eventStream, error);
-        }
+        return respondWithConfigMutation(
+          eventStream,
+          () =>
+            applyConfigPatch({
+              patch: body.patch,
+              expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+              runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+            }),
+          result => Response.json(result),
+        );
       },
       PUT: async (req: Request) => {
         const body = (await req.json()) as {
@@ -463,17 +476,16 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
           expectedHash?: unknown;
           runSmokeTest?: unknown;
         };
-        try {
-          const result = await replaceConfig({
-            config: typeof body === "object" && body !== null && "config" in body ? body.config : body,
-            expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-            runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
-          });
-          publishConfigUpdatedEvent(eventStream, result);
-          return Response.json(result);
-        } catch (error) {
-          return configErrorResponse(eventStream, error);
-        }
+        return respondWithConfigMutation(
+          eventStream,
+          () =>
+            replaceConfig({
+              config: typeof body === "object" && body !== null && "config" in body ? body.config : body,
+              expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+              runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+            }),
+          result => Response.json(result),
+        );
       },
     },
 
@@ -484,17 +496,16 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
           expectedHash?: unknown;
           runSmokeTest?: unknown;
         };
-        try {
-          const result = await applyConfigPatchSafe({
-            patch: body.patch,
-            expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-            runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
-          });
-          publishConfigUpdatedEvent(eventStream, result);
-          return Response.json(result);
-        } catch (error) {
-          return configErrorResponse(eventStream, error);
-        }
+        return respondWithConfigMutation(
+          eventStream,
+          () =>
+            applyConfigPatchSafe({
+              patch: body.patch,
+              expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+              runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+            }),
+          result => Response.json(result),
+        );
       },
     },
 
@@ -505,17 +516,16 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
           expectedHash?: unknown;
           runSmokeTest?: unknown;
         };
-        try {
-          const result = await replaceConfigSafe({
-            config: body.config,
-            expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-            runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
-          });
-          publishConfigUpdatedEvent(eventStream, result);
-          return Response.json(result);
-        } catch (error) {
-          return configErrorResponse(eventStream, error);
-        }
+        return respondWithConfigMutation(
+          eventStream,
+          () =>
+            replaceConfigSafe({
+              config: body.config,
+              expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+              runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+            }),
+          result => Response.json(result),
+        );
       },
     },
 

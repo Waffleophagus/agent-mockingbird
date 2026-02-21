@@ -1,3 +1,4 @@
+import { legacySpecialistToAgentType } from "@/shared/agentTypes";
 import type {
   AgentTypeDefinition,
   BackgroundRunSnapshot,
@@ -59,21 +60,7 @@ export type ConfirmAction =
   | null;
 
 export function fromLegacyAgent(agent: DashboardBootstrap["agents"][number]): AgentTypeDefinition {
-  return {
-    id: agent.id,
-    name: agent.name,
-    description: agent.specialty,
-    prompt: agent.summary,
-    model: agent.model || undefined,
-    mode: "subagent",
-    hidden: false,
-    disable: agent.status === "offline",
-    options: {
-      wafflebotManagedLegacy: true,
-      wafflebotDisplayName: agent.name,
-      wafflebotStatus: agent.status,
-    },
-  };
+  return legacySpecialistToAgentType(agent) as AgentTypeDefinition;
 }
 
 export function getConfirmDialogProps(confirmAction: ConfirmAction): {
