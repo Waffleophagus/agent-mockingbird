@@ -232,11 +232,11 @@ wafflebot
 
 ## Publish To Package Registry
 
-`ci.yml` publish steps expect these repository secrets (Gitea names preferred, GitHub-prefixed names also supported):
+`ci.yml` publish steps expect these repository secrets:
 
-- `GITEA_NPM_REGISTRY_URL` (or `GITHUB_NPM_REGISTRY_URL`) example: `https://gitea.example.com/api/packages/matt/npm/`
-- `GITEA_NPM_TOKEN` (or `GITHUB_NPM_TOKEN`) token with package write permission
-- `GITEA_NPM_SCOPE` (or `GITHUB_NPM_SCOPE`) scope/user/org, example: `matt`
+- `PACKAGE_REGISTRY_URL` example: `https://gitea.example.com/api/packages/matt/npm/`
+- `PACKAGE_REGISTRY_TOKEN` token with package write permission
+- `PACKAGE_REGISTRY_SCOPE` scope/user/org, example: `matt`
 
 On tag push like `v0.1.0`, CI publishes `@<scope>/wafflebot@0.1.0` to that registry.
 
