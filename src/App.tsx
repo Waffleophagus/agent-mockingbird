@@ -4,7 +4,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,9 +13,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import {
   type ActiveSend,
   type LocalChatMessage,
-  mergeMessages,
   normalizeListInput,
-  normalizeRequestError,
   relativeFromIso,
 } from "@/frontend/app/chatHelpers";
 import {
@@ -29,19 +27,13 @@ import {
   validateAgentTypeChanges,
 } from "@/frontend/app/configApi";
 import {
-  type AgentRunSnapshot,
-  type BackgroundRunsResponse,
   type ConfirmAction,
   getConfirmDialogProps,
 } from "@/frontend/app/dashboardTypes";
 import {
   DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS,
   DEFAULT_RUN_WAIT_TIMEOUT_MS,
-  RUN_POLL_INTERVAL_MS,
-  extractRunErrorMessage,
-  mergeBackgroundRunsBySession,
   normalizeAgentTypeDraft,
-  sortBackgroundRuns,
   sortSessionsByActivity,
   upsertSessionList,
 } from "@/frontend/app/dashboardUtils";
@@ -49,6 +41,8 @@ import { AgentsPage } from "@/frontend/app/pages/AgentsPage";
 import { type ChatPageModel, ChatPage } from "@/frontend/app/pages/ChatPage";
 import { McpPage } from "@/frontend/app/pages/McpPage";
 import { SkillsPage } from "@/frontend/app/pages/SkillsPage";
+import { useBackgroundRuns } from "@/frontend/app/useBackgroundRuns";
+import { useChatSession } from "@/frontend/app/useChatSession";
 import { useDashboardBootstrap } from "@/frontend/app/useDashboardBootstrap";
 import { useSessionHierarchy } from "@/frontend/app/useSessionHierarchy";
 import type {
@@ -133,22 +127,11 @@ export function App() {
   const [draftMessage, setDraftMessage] = useState("");
   const [activeSend, setActiveSend] = useState<ActiveSend | null>(null);
   const [runWaitTimeoutMs, setRunWaitTimeoutMs] = useState(DEFAULT_RUN_WAIT_TIMEOUT_MS);
-  const [isAborting, setIsAborting] = useState(false);
-  const [isCompacting, setIsCompacting] = useState(false);
-  const [chatControlError, setChatControlError] = useState("");
   const [runStatusBySession, setRunStatusBySession] = useState<Record<string, SessionRunStatusSnapshot>>({});
   const [runErrorsBySession, setRunErrorsBySession] = useState<Record<string, string>>({});
   const [compactedAtBySession, setCompactedAtBySession] = useState<Record<string, string>>({});
   const [backgroundRunsBySession, setBackgroundRunsBySession] = useState<Record<string, BackgroundRunSnapshot[]>>({});
-  const [loadingBackgroundRuns, setLoadingBackgroundRuns] = useState(false);
-  const [backgroundRunsError, setBackgroundRunsError] = useState("");
-  const [backgroundPrompt, setBackgroundPrompt] = useState("");
-  const [backgroundSpawnBusy, setBackgroundSpawnBusy] = useState(false);
-  const [backgroundSteerDraftByRun, setBackgroundSteerDraftByRun] = useState<Record<string, string>>({});
-  const [backgroundActionBusyByRun, setBackgroundActionBusyByRun] = useState<Record<string, "steer" | "abort">>({});
-  const [backgroundCheckInBusyByRun, setBackgroundCheckInBusyByRun] = useState<Record<string, boolean>>({});
   const [activeConfigPanelTab, setActiveConfigPanelTab] = useState<ConfigPanelTab>("usage");
-  const [focusedBackgroundRunId, setFocusedBackgroundRunId] = useState("");
   const [expandedSessionGroupsById, setExpandedSessionGroupsById] = useState<Record<string, boolean>>({});
   const [showAllChildren, setShowAllChildren] = useState(false);
   const [childSessionSearchQuery, setChildSessionSearchQuery] = useState("");
@@ -172,6 +155,36 @@ export function App() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const previousActiveSessionIdRef = useRef("");
   const isSending = activeSend !== null;
+  const {
+    abortBackgroundRun,
+    backgroundActionBusyByRun,
+    backgroundCheckInBusyByRun,
+    backgroundPrompt,
+    backgroundRunsError,
+    backgroundSpawnBusy,
+    backgroundSteerDraftByRun,
+    checkInBackgroundRun,
+    focusedBackgroundRunId,
+    loadingBackgroundRuns,
+    refreshBackgroundRunsForSession,
+    refreshInFlightBackgroundRuns,
+    refreshSessionsList,
+    setBackgroundActionBusyByRun,
+    setBackgroundPrompt,
+    setBackgroundRunsError,
+    setBackgroundSteerDraftByRun,
+    setFocusedBackgroundRunId,
+    spawnBackgroundRun,
+    steerBackgroundRun,
+  } = useBackgroundRuns({
+    activeSessionId,
+    sessions,
+    loadedBackgroundSessionsRef,
+    setBackgroundRunsBySession,
+    setSessions,
+    setActiveSessionId,
+    setActiveConfigPanelTab,
+  });
 
   useDashboardBootstrap({
     loadedSessionsRef,
@@ -256,29 +269,11 @@ export function App() {
 
     let cancelled = false;
     const loadBackgroundRuns = async () => {
-      setLoadingBackgroundRuns(true);
-      setBackgroundRunsError("");
       try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(activeSessionId)}/background`);
-        const payload = (await response.json()) as BackgroundRunsResponse;
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Failed to load background runs");
-        }
-        if (cancelled) return;
-
-        const runs = Array.isArray(payload.runs) ? sortBackgroundRuns(payload.runs) : [];
-        setBackgroundRunsBySession(current => ({
-          ...current,
-          [activeSessionId]: runs,
-        }));
-        loadedBackgroundSessionsRef.current.add(activeSessionId);
+        await refreshBackgroundRunsForSession(activeSessionId);
       } catch (error) {
         if (!cancelled) {
           setBackgroundRunsError(error instanceof Error ? error.message : "Failed to load background runs");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingBackgroundRuns(false);
         }
       }
     };
@@ -287,34 +282,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const refreshInFlightBackgroundRunsSilently = async () => {
-      try {
-        const response = await fetch("/api/background?inFlightOnly=1&limit=500");
-        const payload = (await response.json()) as BackgroundRunsResponse;
-        if (!response.ok || !Array.isArray(payload.runs) || cancelled) {
-          return;
-        }
-        setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, payload.runs ?? []));
-      } catch {
-        // non-blocking; sidebar hierarchy should degrade gracefully when listing is unavailable
-      }
-    };
-
-    void refreshInFlightBackgroundRunsSilently();
-    const interval = setInterval(() => {
-      void refreshInFlightBackgroundRunsSilently();
-    }, 15_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+  }, [activeSessionId, refreshBackgroundRunsForSession, setBackgroundRunsError]);
 
   useEffect(() => {
     setNowMs(Date.now());
@@ -365,6 +333,33 @@ export function App() {
   const activeSessionRunStatus = activeSession ? runStatusBySession[activeSession.id] : undefined;
   const activeSessionRunError = activeSession ? (runErrorsBySession[activeSession.id] ?? "") : "";
   const activeSessionCompactedAt = activeSession ? (compactedAtBySession[activeSession.id] ?? "") : "";
+  const {
+    abortActiveRun,
+    chatControlError,
+    compactSession,
+    handleComposerKeyDown,
+    isAborting,
+    isCompacting,
+    retryFailedRequest,
+    sendMessage,
+  } = useChatSession({
+    activeSession,
+    draftMessage,
+    runWaitTimeoutMs,
+    composerFormRef,
+    messagesBySession,
+    loadedSessionsRef,
+    activeSendRef,
+    activeAbortControllerRef,
+    abortedRequestIdsRef,
+    setDraftMessage,
+    setMessagesBySession,
+    setRunErrorsBySession,
+    setRunStatusBySession,
+    setSessions,
+    setCompactedAtBySession,
+    setActiveSend,
+  });
   const {
     activeBackgroundRuns,
     inFlightBackgroundRunsBySession,
@@ -548,373 +543,6 @@ export function App() {
     setIsUserScrolledUp(false);
     setHasNewMessages(false);
   }
-
-  function appendOptimisticRequest(sessionId: string, content: string, requestId: string) {
-    const createdAt = new Date().toISOString();
-    const optimisticUserMessage: LocalChatMessage = {
-      id: `local-user-${requestId}`,
-      role: "user",
-      content,
-      at: createdAt,
-      uiMeta: {
-        type: "optimistic-user",
-        requestId,
-      },
-    };
-    const pendingAssistantMessage: LocalChatMessage = {
-      id: `local-assistant-${requestId}`,
-      role: "assistant",
-      content: "",
-      at: createdAt,
-      uiMeta: {
-        type: "assistant-pending",
-        requestId,
-        status: "pending",
-        retryContent: content,
-      },
-    };
-
-    loadedSessionsRef.current.add(sessionId);
-    setMessagesBySession(current => ({
-      ...current,
-      [sessionId]: [...(current[sessionId] ?? []), optimisticUserMessage, pendingAssistantMessage],
-    }));
-  }
-
-  function removeOptimisticRequest(sessionId: string, requestId: string) {
-    setMessagesBySession(current => ({
-      ...current,
-      [sessionId]: (current[sessionId] ?? []).filter(message => message.uiMeta?.requestId !== requestId),
-    }));
-  }
-
-  function markRequestPending(sessionId: string, requestId: string) {
-    setMessagesBySession(current => ({
-      ...current,
-      [sessionId]: (current[sessionId] ?? []).map(message => {
-        if (message.uiMeta?.type !== "assistant-pending" || message.uiMeta.requestId !== requestId) {
-          return message;
-        }
-        return {
-          ...message,
-          content: "",
-          uiMeta: {
-            ...message.uiMeta,
-            status: "pending",
-            errorMessage: undefined,
-          },
-        };
-      }),
-    }));
-  }
-
-  function markRequestFailed(sessionId: string, requestId: string, errorMessage: string) {
-    setMessagesBySession(current => ({
-      ...current,
-      [sessionId]: (current[sessionId] ?? []).map(message => {
-        if (message.uiMeta?.type !== "assistant-pending" || message.uiMeta.requestId !== requestId) {
-          return message;
-        }
-        return {
-          ...message,
-          uiMeta: {
-            ...message.uiMeta,
-            status: "failed",
-            errorMessage,
-          },
-        };
-      }),
-    }));
-    setRunErrorsBySession(current => ({
-      ...current,
-      [sessionId]: errorMessage,
-    }));
-    setRunStatusBySession(current => ({
-      ...current,
-      [sessionId]: {
-        sessionId,
-        status: "idle",
-      },
-    }));
-  }
-
-  async function waitForRunTerminalStateByPolling(runId: string, abortSignal: AbortSignal) {
-    const startedAt = Date.now();
-    while (true) {
-      if (abortSignal.aborted) {
-        throw new DOMException("Aborted", "AbortError");
-      }
-      if (Date.now() - startedAt > runWaitTimeoutMs) {
-        throw new Error("Run timed out waiting for completion.");
-      }
-
-      const runResponse = await fetch(`/api/runs/${encodeURIComponent(runId)}`, {
-        signal: abortSignal,
-      });
-      const runPayload = (await runResponse.json()) as { run?: AgentRunSnapshot; error?: string };
-      if (!runResponse.ok || !runPayload.run) {
-        throw new Error(runPayload.error ?? `Run lookup failed (${runResponse.status})`);
-      }
-
-      const run = runPayload.run;
-      if (run.state === "completed") {
-        return;
-      }
-      if (run.state === "failed") {
-        throw new Error(extractRunErrorMessage(run.error));
-      }
-
-      await new Promise<void>(resolve => {
-        setTimeout(resolve, RUN_POLL_INTERVAL_MS);
-      });
-    }
-  }
-
-  async function waitForRunTerminalState(runId: string, abortSignal: AbortSignal) {
-    if (typeof EventSource !== "function") {
-      await waitForRunTerminalStateByPolling(runId, abortSignal);
-      return;
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const stream = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream?afterSeq=0`);
-      let timeout: ReturnType<typeof setTimeout> | null = null;
-
-      const cleanup = () => {
-        if (timeout) {
-          clearTimeout(timeout);
-          timeout = null;
-        }
-        stream.close();
-        abortSignal.removeEventListener("abort", onAbort);
-      };
-
-      const succeed = () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve();
-      };
-
-      const fail = (error: Error) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(error);
-      };
-
-      const onAbort = () => {
-        fail(new DOMException("Aborted", "AbortError"));
-      };
-
-      timeout = setTimeout(() => {
-        fail(new Error("Run timed out waiting for completion."));
-      }, runWaitTimeoutMs);
-
-      abortSignal.addEventListener("abort", onAbort, { once: true });
-      stream.addEventListener("run-event", event => {
-        try {
-          const payload = JSON.parse((event as MessageEvent<string>).data) as {
-            type?: string;
-            payload?: unknown;
-          };
-          if (payload.type === "run.completed") {
-            succeed();
-            return;
-          }
-          if (payload.type === "run.failed") {
-            fail(new Error(extractRunErrorMessage(payload.payload)));
-          }
-        } catch {
-          // Ignore malformed stream event payloads and continue listening.
-        }
-      });
-      stream.onerror = () => {
-        if (abortSignal.aborted) {
-          onAbort();
-        }
-      };
-    });
-  }
-
-  async function submitChatRequest(input: {
-    sessionId: string;
-    content: string;
-    requestId?: string;
-    retry?: boolean;
-  }) {
-    if (activeSendRef.current) return;
-
-    const requestId = input.requestId ?? crypto.randomUUID();
-    setChatControlError("");
-    setRunErrorsBySession(current => {
-      if (!current[input.sessionId]) return current;
-      const next = { ...current };
-      delete next[input.sessionId];
-      return next;
-    });
-
-    if (input.retry) {
-      markRequestPending(input.sessionId, requestId);
-    } else {
-      appendOptimisticRequest(input.sessionId, input.content, requestId);
-    }
-
-    const nextActiveSend: ActiveSend = {
-      requestId,
-      sessionId: input.sessionId,
-      content: input.content,
-    };
-    const abortController = new AbortController();
-    activeSendRef.current = nextActiveSend;
-    activeAbortControllerRef.current = abortController;
-    setActiveSend(nextActiveSend);
-    setRunStatusBySession(current => ({
-      ...current,
-      [input.sessionId]: {
-        sessionId: input.sessionId,
-        status: "busy",
-      },
-    }));
-
-    try {
-      const response = await fetch("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: abortController.signal,
-        body: JSON.stringify({
-          sessionId: input.sessionId,
-          content: input.content,
-          idempotencyKey: requestId,
-        }),
-      });
-      const payload = (await response.json()) as {
-        run?: AgentRunSnapshot;
-        runId?: string;
-        error?: string;
-      };
-      if (!response.ok || !payload.run) {
-        throw new Error(payload.error ?? `Request failed (${response.status})`);
-      }
-
-      const runId = payload.runId ?? payload.run.id;
-      await waitForRunTerminalState(runId, abortController.signal);
-
-      const [messagesResponse, sessionsResponse] = await Promise.all([
-        fetch(`/api/sessions/${encodeURIComponent(input.sessionId)}/messages`, {
-          signal: abortController.signal,
-        }),
-        fetch("/api/sessions", { signal: abortController.signal }),
-      ]);
-      const messagesPayload = (await messagesResponse.json()) as {
-        messages?: ChatMessage[];
-        error?: string;
-      };
-      const sessionsPayload = (await sessionsResponse.json()) as {
-        sessions?: SessionSummary[];
-        error?: string;
-      };
-
-      if (!messagesResponse.ok || !Array.isArray(messagesPayload.messages)) {
-        throw new Error(messagesPayload.error ?? "Failed to refresh session messages");
-      }
-
-      loadedSessionsRef.current.add(input.sessionId);
-      setMessagesBySession(current => ({
-        ...current,
-        [input.sessionId]: mergeMessages(current[input.sessionId] ?? [], messagesPayload.messages ?? []),
-      }));
-
-      if (sessionsResponse.ok && Array.isArray(sessionsPayload.sessions)) {
-        const updatedSession = sessionsPayload.sessions.find(session => session.id === input.sessionId);
-        if (updatedSession) {
-          setSessions(current => upsertSessionList(current, updatedSession));
-        }
-      }
-
-      removeOptimisticRequest(input.sessionId, requestId);
-      setRunStatusBySession(current => ({
-        ...current,
-        [input.sessionId]: {
-          sessionId: input.sessionId,
-          status: "idle",
-        },
-      }));
-      setRunErrorsBySession(current => {
-        if (!current[input.sessionId]) return current;
-        const next = { ...current };
-        delete next[input.sessionId];
-        return next;
-      });
-    } catch (error) {
-      if (abortedRequestIdsRef.current.has(requestId)) {
-        abortedRequestIdsRef.current.delete(requestId);
-        markRequestFailed(input.sessionId, requestId, "Request aborted.");
-      } else {
-        markRequestFailed(input.sessionId, requestId, normalizeRequestError(error));
-      }
-    } finally {
-      if (activeSendRef.current?.requestId === requestId) {
-        activeSendRef.current = null;
-      }
-      if (activeAbortControllerRef.current === abortController) {
-        activeAbortControllerRef.current = null;
-      }
-      setActiveSend(current => (current?.requestId === requestId ? null : current));
-    }
-  }
-
-  function retryFailedRequest(requestId: string) {
-    if (isSending) return;
-
-    for (const [sessionId, messages] of Object.entries(messagesBySession)) {
-      const failedMessage = messages.find(message => {
-        if (message.uiMeta?.type !== "assistant-pending") return false;
-        return message.uiMeta.requestId === requestId && message.uiMeta.status === "failed";
-      });
-      if (!failedMessage || failedMessage.uiMeta?.type !== "assistant-pending") continue;
-
-      void submitChatRequest({
-        sessionId,
-        content: failedMessage.uiMeta.retryContent,
-        requestId,
-        retry: true,
-      });
-      return;
-    }
-  }
-
-  async function abortActiveRun() {
-    const currentSend = activeSendRef.current;
-    if (!currentSend || isAborting) return;
-
-    setIsAborting(true);
-    setChatControlError("");
-    abortedRequestIdsRef.current.add(currentSend.requestId);
-
-    try {
-      const response = await fetch(`/api/chat/${encodeURIComponent(currentSend.sessionId)}/abort`, {
-        method: "POST",
-      });
-      const payload = (await response.json()) as { aborted?: boolean; error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to abort session run");
-      }
-      if (!payload.aborted) {
-        setChatControlError("No active runtime turn was available to abort.");
-      }
-    } catch (error) {
-      abortedRequestIdsRef.current.delete(currentSend.requestId);
-      setChatControlError(error instanceof Error ? error.message : "Failed to abort session run");
-      return;
-    } finally {
-      setIsAborting(false);
-    }
-
-    activeAbortControllerRef.current?.abort();
-  }
-
   function requestAbortRun() {
     if (!activeSession) return;
     setConfirmAction({ type: "abort-run", sessionId: activeSession.id });
@@ -968,257 +596,11 @@ export function App() {
     }
   }
 
-  async function compactSession(sessionId: string) {
-    if (isCompacting) return;
-
-    setIsCompacting(true);
-    setChatControlError("");
-    try {
-      const response = await fetch(`/api/chat/${encodeURIComponent(sessionId)}/compact`, {
-        method: "POST",
-      });
-      const payload = (await response.json()) as { compacted?: boolean; error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to compact session");
-      }
-      if (!payload.compacted) {
-        throw new Error("Runtime reported session compaction was skipped.");
-      }
-      setCompactedAtBySession(current => ({
-        ...current,
-        [sessionId]: new Date().toISOString(),
-      }));
-    } catch (error) {
-      setChatControlError(error instanceof Error ? error.message : "Failed to compact session");
-    } finally {
-      setIsCompacting(false);
-    }
-  }
-
-  async function refreshBackgroundRunsForSession(sessionId: string) {
-    const normalizedSessionId = sessionId.trim();
-    if (!normalizedSessionId) return;
-
-    setLoadingBackgroundRuns(true);
-    setBackgroundRunsError("");
-    try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(normalizedSessionId)}/background`);
-      const payload = (await response.json()) as BackgroundRunsResponse;
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to load background runs");
-      }
-      const runs = Array.isArray(payload.runs) ? sortBackgroundRuns(payload.runs) : [];
-      setBackgroundRunsBySession(current => ({
-        ...current,
-        [normalizedSessionId]: runs,
-      }));
-      loadedBackgroundSessionsRef.current.add(normalizedSessionId);
-    } catch (error) {
-      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to load background runs");
-    } finally {
-      setLoadingBackgroundRuns(false);
-    }
-  }
-
-  async function refreshSessionsList() {
-    try {
-      const response = await fetch("/api/sessions");
-      const payload = (await response.json()) as { sessions?: SessionSummary[]; error?: string };
-      if (!response.ok || !Array.isArray(payload.sessions)) {
-        throw new Error(payload.error ?? "Failed to refresh sessions");
-      }
-      setSessions(sortSessionsByActivity(payload.sessions));
-    } catch {
-      // best-effort only; caller can continue with local view
-    }
-  }
-
   function toggleSessionGroup(sessionId: string) {
     setExpandedSessionGroupsById(current => ({
       ...current,
       [sessionId]: !current[sessionId],
     }));
-  }
-
-  async function refreshInFlightBackgroundRuns() {
-    setBackgroundRunsError("");
-    try {
-      const response = await fetch("/api/background?inFlightOnly=1&limit=500");
-      const payload = (await response.json()) as BackgroundRunsResponse;
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to refresh in-flight background runs");
-      }
-      if (Array.isArray(payload.runs)) {
-        setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, payload.runs ?? []));
-      }
-    } catch (error) {
-      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to refresh in-flight background runs");
-    }
-  }
-
-  async function spawnBackgroundRun() {
-    if (!activeSession) return;
-    const prompt = backgroundPrompt.trim();
-    if (!prompt) return;
-
-    setBackgroundSpawnBusy(true);
-    setBackgroundRunsError("");
-    try {
-      const response = await fetch("/api/background", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: activeSession.id,
-          prompt,
-          requestedBy: "dashboard-ui",
-        }),
-      });
-      const payload = (await response.json()) as BackgroundRunsResponse;
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to spawn background run");
-      }
-      if (payload.run) {
-        const run = payload.run;
-        loadedBackgroundSessionsRef.current.add(run.parentSessionId);
-        setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, [run]));
-      }
-      setBackgroundPrompt("");
-      await refreshBackgroundRunsForSession(activeSession.id);
-    } catch (error) {
-      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to spawn background run");
-    } finally {
-      setBackgroundSpawnBusy(false);
-    }
-  }
-
-  async function steerBackgroundRun(runId: string, rawContent?: string) {
-    const content = (rawContent ?? backgroundSteerDraftByRun[runId] ?? "").trim();
-    if (!content) return;
-
-    setBackgroundActionBusyByRun(current => ({
-      ...current,
-      [runId]: "steer",
-    }));
-    setBackgroundRunsError("");
-    try {
-      const response = await fetch(`/api/background/${encodeURIComponent(runId)}/steer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
-      const payload = (await response.json()) as BackgroundRunsResponse;
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to steer background run");
-      }
-      if (payload.run) {
-        const run = payload.run;
-        loadedBackgroundSessionsRef.current.add(run.parentSessionId);
-        setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, [run]));
-      }
-      setBackgroundSteerDraftByRun(current => {
-        if (!current[runId]) return current;
-        const next = { ...current };
-        delete next[runId];
-        return next;
-      });
-    } catch (error) {
-      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to steer background run");
-    } finally {
-      setBackgroundActionBusyByRun(current => {
-        if (!current[runId]) return current;
-        const next = { ...current };
-        delete next[runId];
-        return next;
-      });
-    }
-  }
-
-  async function checkInBackgroundRun(run: BackgroundRunSnapshot) {
-    setFocusedBackgroundRunId(run.runId);
-    setBackgroundRunsError("");
-    setBackgroundCheckInBusyByRun(current => ({
-      ...current,
-      [run.runId]: true,
-    }));
-    try {
-      const response = await fetch(`/api/background/${encodeURIComponent(run.runId)}`);
-      const payload = (await response.json()) as BackgroundRunsResponse;
-      if (!response.ok || !payload.run) {
-        throw new Error(payload.error ?? "Failed to check in on background run");
-      }
-      const latest = payload.run;
-      setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, [latest]));
-      await refreshBackgroundRunsForSession(latest.parentSessionId);
-      const targetSessionId = latest.childSessionId ?? run.childSessionId;
-      if (targetSessionId) {
-        await refreshSessionsList();
-        setActiveSessionId(targetSessionId);
-      } else {
-        setActiveSessionId(latest.parentSessionId);
-        setActiveConfigPanelTab("background");
-      }
-    } catch (error) {
-      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to check in on background run");
-    } finally {
-      setBackgroundCheckInBusyByRun(current => {
-        if (!current[run.runId]) return current;
-        const next = { ...current };
-        delete next[run.runId];
-        return next;
-      });
-    }
-  }
-
-  async function abortBackgroundRun(runId: string) {
-    setBackgroundActionBusyByRun(current => ({
-      ...current,
-      [runId]: "abort",
-    }));
-    setBackgroundRunsError("");
-    try {
-      const response = await fetch(`/api/background/${encodeURIComponent(runId)}/abort`, {
-        method: "POST",
-      });
-      const payload = (await response.json()) as BackgroundRunsResponse;
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to abort background run");
-      }
-      if (!payload.aborted) {
-        throw new Error("No active background run was available to abort.");
-      }
-    } catch (error) {
-      setBackgroundRunsError(error instanceof Error ? error.message : "Failed to abort background run");
-    } finally {
-      setBackgroundActionBusyByRun(current => {
-        if (!current[runId]) return current;
-        const next = { ...current };
-        delete next[runId];
-        return next;
-      });
-    }
-  }
-
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (isSending) return;
-
-    const content = draftMessage.trim();
-    if (!content || !activeSession) return;
-
-    setDraftMessage("");
-    await submitChatRequest({
-      sessionId: activeSession.id,
-      content,
-    });
-  }
-
-  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
-    if (isSending) return;
-
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      composerFormRef.current?.requestSubmit();
-    }
   }
 
   async function refreshSkillCatalog() {

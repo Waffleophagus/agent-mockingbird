@@ -1,0 +1,470 @@
+import { useState } from "react";
+import type { Dispatch, FormEvent, KeyboardEvent as ReactKeyboardEvent, MutableRefObject, RefObject, SetStateAction } from "react";
+
+import { mergeMessages, normalizeRequestError } from "@/frontend/app/chatHelpers";
+import type { ActiveSend, LocalChatMessage } from "@/frontend/app/chatHelpers";
+import { extractRunErrorMessage, RUN_POLL_INTERVAL_MS, upsertSessionList } from "@/frontend/app/dashboardUtils";
+import type {
+  ChatMessage,
+  SessionRunStatusSnapshot,
+  SessionSummary,
+} from "@/types/dashboard";
+
+interface AgentRunSnapshot {
+  id: string;
+  sessionId: string;
+  state: "queued" | "running" | "completed" | "failed";
+  error?: unknown;
+}
+
+interface UseChatSessionInput {
+  activeSession: SessionSummary | undefined;
+  draftMessage: string;
+  runWaitTimeoutMs: number;
+  composerFormRef: RefObject<HTMLFormElement | null>;
+  messagesBySession: Record<string, LocalChatMessage[]>;
+  loadedSessionsRef: MutableRefObject<Set<string>>;
+  activeSendRef: MutableRefObject<ActiveSend | null>;
+  activeAbortControllerRef: MutableRefObject<AbortController | null>;
+  abortedRequestIdsRef: MutableRefObject<Set<string>>;
+  setDraftMessage: Dispatch<SetStateAction<string>>;
+  setMessagesBySession: Dispatch<SetStateAction<Record<string, LocalChatMessage[]>>>;
+  setRunErrorsBySession: Dispatch<SetStateAction<Record<string, string>>>;
+  setRunStatusBySession: Dispatch<SetStateAction<Record<string, SessionRunStatusSnapshot>>>;
+  setSessions: Dispatch<SetStateAction<SessionSummary[]>>;
+  setCompactedAtBySession: Dispatch<SetStateAction<Record<string, string>>>;
+  setActiveSend: Dispatch<SetStateAction<ActiveSend | null>>;
+}
+
+export function useChatSession(input: UseChatSessionInput) {
+  const [isAborting, setIsAborting] = useState(false);
+  const [isCompacting, setIsCompacting] = useState(false);
+  const [chatControlError, setChatControlError] = useState("");
+
+  function appendOptimisticRequest(sessionId: string, content: string, requestId: string) {
+    const createdAt = new Date().toISOString();
+    const optimisticUserMessage: LocalChatMessage = {
+      id: `local-user-${requestId}`,
+      role: "user",
+      content,
+      at: createdAt,
+      uiMeta: {
+        type: "optimistic-user",
+        requestId,
+      },
+    };
+    const pendingAssistantMessage: LocalChatMessage = {
+      id: `local-assistant-${requestId}`,
+      role: "assistant",
+      content: "",
+      at: createdAt,
+      uiMeta: {
+        type: "assistant-pending",
+        requestId,
+        status: "pending",
+        retryContent: content,
+      },
+    };
+
+    input.loadedSessionsRef.current.add(sessionId);
+    input.setMessagesBySession(current => ({
+      ...current,
+      [sessionId]: [...(current[sessionId] ?? []), optimisticUserMessage, pendingAssistantMessage],
+    }));
+  }
+
+  function removeOptimisticRequest(sessionId: string, requestId: string) {
+    input.setMessagesBySession(current => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).filter(message => message.uiMeta?.requestId !== requestId),
+    }));
+  }
+
+  function markRequestPending(sessionId: string, requestId: string) {
+    input.setMessagesBySession(current => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map(message => {
+        if (message.uiMeta?.type !== "assistant-pending" || message.uiMeta.requestId !== requestId) {
+          return message;
+        }
+        return {
+          ...message,
+          content: "",
+          uiMeta: {
+            ...message.uiMeta,
+            status: "pending",
+            errorMessage: undefined,
+          },
+        };
+      }),
+    }));
+  }
+
+  function markRequestFailed(sessionId: string, requestId: string, errorMessage: string) {
+    input.setMessagesBySession(current => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map(message => {
+        if (message.uiMeta?.type !== "assistant-pending" || message.uiMeta.requestId !== requestId) {
+          return message;
+        }
+        return {
+          ...message,
+          uiMeta: {
+            ...message.uiMeta,
+            status: "failed",
+            errorMessage,
+          },
+        };
+      }),
+    }));
+    input.setRunErrorsBySession(current => ({
+      ...current,
+      [sessionId]: errorMessage,
+    }));
+    input.setRunStatusBySession(current => ({
+      ...current,
+      [sessionId]: {
+        sessionId,
+        status: "idle",
+      },
+    }));
+  }
+
+  async function waitForRunTerminalStateByPolling(runId: string, abortSignal: AbortSignal) {
+    const startedAt = Date.now();
+    while (true) {
+      if (abortSignal.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      if (Date.now() - startedAt > input.runWaitTimeoutMs) {
+        throw new Error("Run timed out waiting for completion.");
+      }
+
+      const runResponse = await fetch(`/api/runs/${encodeURIComponent(runId)}`, {
+        signal: abortSignal,
+      });
+      const runPayload = (await runResponse.json()) as { run?: AgentRunSnapshot; error?: string };
+      if (!runResponse.ok || !runPayload.run) {
+        throw new Error(runPayload.error ?? `Run lookup failed (${runResponse.status})`);
+      }
+
+      const run = runPayload.run;
+      if (run.state === "completed") {
+        return;
+      }
+      if (run.state === "failed") {
+        throw new Error(extractRunErrorMessage(run.error));
+      }
+
+      await new Promise<void>(resolve => {
+        setTimeout(resolve, RUN_POLL_INTERVAL_MS);
+      });
+    }
+  }
+
+  async function waitForRunTerminalState(runId: string, abortSignal: AbortSignal) {
+    if (typeof EventSource !== "function") {
+      await waitForRunTerminalStateByPolling(runId, abortSignal);
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const stream = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream?afterSeq=0`);
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        stream.close();
+        abortSignal.removeEventListener("abort", onAbort);
+      };
+
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+
+      const onAbort = () => {
+        fail(new DOMException("Aborted", "AbortError"));
+      };
+
+      timeout = setTimeout(() => {
+        fail(new Error("Run timed out waiting for completion."));
+      }, input.runWaitTimeoutMs);
+
+      abortSignal.addEventListener("abort", onAbort, { once: true });
+      stream.addEventListener("run-event", event => {
+        try {
+          const payload = JSON.parse((event as MessageEvent<string>).data) as {
+            type?: string;
+            payload?: unknown;
+          };
+          if (payload.type === "run.completed") {
+            succeed();
+            return;
+          }
+          if (payload.type === "run.failed") {
+            fail(new Error(extractRunErrorMessage(payload.payload)));
+          }
+        } catch {
+          // Ignore malformed stream event payloads and continue listening.
+        }
+      });
+      stream.onerror = () => {
+        if (abortSignal.aborted) {
+          onAbort();
+        }
+      };
+    });
+  }
+
+  async function submitChatRequest(payloadInput: {
+    sessionId: string;
+    content: string;
+    requestId?: string;
+    retry?: boolean;
+  }) {
+    if (input.activeSendRef.current) return;
+
+    const requestId = payloadInput.requestId ?? crypto.randomUUID();
+    setChatControlError("");
+    input.setRunErrorsBySession(current => {
+      if (!current[payloadInput.sessionId]) return current;
+      const next = { ...current };
+      delete next[payloadInput.sessionId];
+      return next;
+    });
+
+    if (payloadInput.retry) {
+      markRequestPending(payloadInput.sessionId, requestId);
+    } else {
+      appendOptimisticRequest(payloadInput.sessionId, payloadInput.content, requestId);
+    }
+
+    const nextActiveSend: ActiveSend = {
+      requestId,
+      sessionId: payloadInput.sessionId,
+      content: payloadInput.content,
+    };
+    const abortController = new AbortController();
+    input.activeSendRef.current = nextActiveSend;
+    input.activeAbortControllerRef.current = abortController;
+    input.setActiveSend(nextActiveSend);
+    input.setRunStatusBySession(current => ({
+      ...current,
+      [payloadInput.sessionId]: {
+        sessionId: payloadInput.sessionId,
+        status: "busy",
+      },
+    }));
+
+    try {
+      const response = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          sessionId: payloadInput.sessionId,
+          content: payloadInput.content,
+          idempotencyKey: requestId,
+        }),
+      });
+      const runPayload = (await response.json()) as {
+        run?: AgentRunSnapshot;
+        runId?: string;
+        error?: string;
+      };
+      if (!response.ok || !runPayload.run) {
+        throw new Error(runPayload.error ?? `Request failed (${response.status})`);
+      }
+
+      const runId = runPayload.runId ?? runPayload.run.id;
+      await waitForRunTerminalState(runId, abortController.signal);
+
+      const [messagesResponse, sessionsResponse] = await Promise.all([
+        fetch(`/api/sessions/${encodeURIComponent(payloadInput.sessionId)}/messages`, {
+          signal: abortController.signal,
+        }),
+        fetch("/api/sessions", { signal: abortController.signal }),
+      ]);
+      const messagesPayload = (await messagesResponse.json()) as {
+        messages?: ChatMessage[];
+        error?: string;
+      };
+      const sessionsPayload = (await sessionsResponse.json()) as {
+        sessions?: SessionSummary[];
+        error?: string;
+      };
+
+      if (!messagesResponse.ok || !Array.isArray(messagesPayload.messages)) {
+        throw new Error(messagesPayload.error ?? "Failed to refresh session messages");
+      }
+
+      input.loadedSessionsRef.current.add(payloadInput.sessionId);
+      input.setMessagesBySession(current => ({
+        ...current,
+        [payloadInput.sessionId]: mergeMessages(current[payloadInput.sessionId] ?? [], messagesPayload.messages ?? []),
+      }));
+
+      if (sessionsResponse.ok && Array.isArray(sessionsPayload.sessions)) {
+        const updatedSession = sessionsPayload.sessions.find(session => session.id === payloadInput.sessionId);
+        if (updatedSession) {
+          input.setSessions(current => upsertSessionList(current, updatedSession));
+        }
+      }
+
+      removeOptimisticRequest(payloadInput.sessionId, requestId);
+      input.setRunStatusBySession(current => ({
+        ...current,
+        [payloadInput.sessionId]: {
+          sessionId: payloadInput.sessionId,
+          status: "idle",
+        },
+      }));
+      input.setRunErrorsBySession(current => {
+        if (!current[payloadInput.sessionId]) return current;
+        const next = { ...current };
+        delete next[payloadInput.sessionId];
+        return next;
+      });
+    } catch (error) {
+      if (input.abortedRequestIdsRef.current.has(requestId)) {
+        input.abortedRequestIdsRef.current.delete(requestId);
+        markRequestFailed(payloadInput.sessionId, requestId, "Request aborted.");
+      } else {
+        markRequestFailed(payloadInput.sessionId, requestId, normalizeRequestError(error));
+      }
+    } finally {
+      if (input.activeSendRef.current?.requestId === requestId) {
+        input.activeSendRef.current = null;
+      }
+      if (input.activeAbortControllerRef.current === abortController) {
+        input.activeAbortControllerRef.current = null;
+      }
+      input.setActiveSend(current => (current?.requestId === requestId ? null : current));
+    }
+  }
+
+  function retryFailedRequest(requestId: string) {
+    if (input.activeSendRef.current) return;
+
+    for (const [sessionId, messages] of Object.entries(input.messagesBySession)) {
+      const failedMessage = messages.find(message => {
+        if (message.uiMeta?.type !== "assistant-pending") return false;
+        return message.uiMeta.requestId === requestId && message.uiMeta.status === "failed";
+      });
+      if (!failedMessage || failedMessage.uiMeta?.type !== "assistant-pending") continue;
+
+      void submitChatRequest({
+        sessionId,
+        content: failedMessage.uiMeta.retryContent,
+        requestId,
+        retry: true,
+      });
+      return;
+    }
+  }
+
+  async function abortActiveRun() {
+    const currentSend = input.activeSendRef.current;
+    if (!currentSend || isAborting) return;
+
+    setIsAborting(true);
+    setChatControlError("");
+    input.abortedRequestIdsRef.current.add(currentSend.requestId);
+
+    try {
+      const response = await fetch(`/api/chat/${encodeURIComponent(currentSend.sessionId)}/abort`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { aborted?: boolean; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to abort session run");
+      }
+      if (!payload.aborted) {
+        setChatControlError("No active runtime turn was available to abort.");
+      }
+    } catch (error) {
+      input.abortedRequestIdsRef.current.delete(currentSend.requestId);
+      setChatControlError(error instanceof Error ? error.message : "Failed to abort session run");
+      return;
+    } finally {
+      setIsAborting(false);
+    }
+
+    input.activeAbortControllerRef.current?.abort();
+  }
+
+  async function compactSession(sessionId: string) {
+    if (isCompacting) return;
+
+    setIsCompacting(true);
+    setChatControlError("");
+    try {
+      const response = await fetch(`/api/chat/${encodeURIComponent(sessionId)}/compact`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { compacted?: boolean; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to compact session");
+      }
+      if (!payload.compacted) {
+        throw new Error("Runtime reported session compaction was skipped.");
+      }
+      input.setCompactedAtBySession(current => ({
+        ...current,
+        [sessionId]: new Date().toISOString(),
+      }));
+    } catch (error) {
+      setChatControlError(error instanceof Error ? error.message : "Failed to compact session");
+    } finally {
+      setIsCompacting(false);
+    }
+  }
+
+  async function sendMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (input.activeSendRef.current) return;
+
+    const content = input.draftMessage.trim();
+    if (!content || !input.activeSession) return;
+
+    input.setDraftMessage("");
+    await submitChatRequest({
+      sessionId: input.activeSession.id,
+      content,
+    });
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (input.activeSendRef.current) return;
+
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      input.composerFormRef.current?.requestSubmit();
+    }
+  }
+
+  return {
+    abortActiveRun,
+    chatControlError,
+    compactSession,
+    handleComposerKeyDown,
+    isAborting,
+    isCompacting,
+    retryFailedRequest,
+    sendMessage,
+  };
+}
