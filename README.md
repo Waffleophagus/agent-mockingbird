@@ -202,8 +202,9 @@ This repo uses one CI/CD workflow:
 
 - `.github/workflows/ci.yml` runs lint/typecheck/build, then publishes the same packed artifact to your npm-compatible package registry.
 - Pull requests run checks only (no publish).
-- Pushes to `main` publish a prerelease (`0.0.0-main.<run>.<sha>`) with npm tag `main`.
-- Pushes to `v*` tags (and manual dispatch with `version`) publish with npm tag `latest`.
+- Publish version is read from `package.json`.
+- Pushes to `main`, pushes to matching `v*` tags, and manual dispatch publish with npm tag `latest`.
+- Tag pushes must match `v<package.json version>` or CI fails.
 
 Published package artifact:
 

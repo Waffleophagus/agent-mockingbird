@@ -8,10 +8,6 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version override (example: v0.1.0)"
-        required: false
 
 permissions:
   contents: read
@@ -56,38 +52,29 @@ jobs:
           event="${GITHUB_EVENT_NAME:-}"
           ref="${GITHUB_REF:-}"
           ref_name="${GITHUB_REF_NAME:-${GITEA_REF_NAME:-}}"
-          input_version="${INPUT_VERSION:-}"
+          package_version="$(bun -e 'const p=require("./package.json"); if(!p.version){process.exit(2)}; console.log(p.version)')"
 
           should_publish="false"
-          release_version=""
-          package_version=""
-          npm_tag="main"
+          npm_tag="latest"
 
           if [[ "${event}" == "pull_request" ]]; then
             should_publish="false"
           elif [[ "${event}" == "push" && "${ref}" == refs/tags/v* ]]; then
             should_publish="true"
-            release_version="${ref_name}"
-            package_version="${release_version#v}"
-            npm_tag="latest"
-          elif [[ "${event}" == "workflow_dispatch" && -n "${input_version}" ]]; then
+            expected_tag="v${package_version}"
+            if [[ "${ref_name}" != "${expected_tag}" ]]; then
+              echo "Tag ${ref_name} does not match package.json version ${package_version} (${expected_tag})."
+              exit 1
+            fi
+          elif [[ "${event}" == "workflow_dispatch" ]]; then
             should_publish="true"
-            release_version="${input_version}"
-            package_version="${release_version#v}"
-            npm_tag="latest"
           elif [[ "${event}" == "push" && "${ref}" == "refs/heads/main" ]]; then
             should_publish="true"
-            release_version="main-${GITHUB_SHA::7}"
-            package_version="0.0.0-main.${GITHUB_RUN_NUMBER}.${GITHUB_SHA::7}"
-            npm_tag="main"
           fi
 
           echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
-          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
           echo "npm_tag=${npm_tag}" >> "${GITHUB_OUTPUT}"
-        env:
-          INPUT_VERSION: ${{ github.event.inputs.version }}
 
       - name: Validate publish secrets
         if: steps.meta.outputs.should_publish == 'true'
@@ -186,4 +173,10 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
+          package_name="@${REGISTRY_SCOPE}/wafflebot"
+          package_version="${{ steps.meta.outputs.package_version }}"
+          if bunx npm view "${package_name}@${package_version}" version --registry "${REGISTRY_URL%/}/" >/dev/null 2>&1; then
+            echo "Version ${package_name}@${package_version} already exists; skipping publish."
+            exit 0
+          fi
           bunx npm publish "${PACKAGE_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
