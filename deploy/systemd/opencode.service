@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenCode Sidecar for Wafflebot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=wafflebot
+Group=wafflebot
+WorkingDirectory=/srv/wafflebot/app
+Environment=WAFFLEBOT_PORT=3001
+Environment=WAFFLEBOT_MEMORY_API_BASE_URL=http://127.0.0.1:3001
+ExecStart=/usr/bin/env opencode serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/wafflebot/app /var/lib/wafflebot
+
+[Install]
+WantedBy=multi-user.target

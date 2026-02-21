@@ -7,7 +7,9 @@ import {
   listSessions,
   setSessionModel,
 } from "../../db/repository";
+import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
 import { listOpencodeModelOptions } from "../../opencode/models";
+import { getRuntimeStartupInfo } from "../../runtime";
 
 export function createDashboardRoutes(runtime: RuntimeEngine) {
   return {
@@ -39,6 +41,21 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
           const message = error instanceof Error ? error.message : "Runtime health check failed";
           return Response.json({ error: message }, { status: 503 });
         }
+      },
+    },
+
+    "/api/runtime/info": {
+      GET: () => {
+        const runtimeInfo = getRuntimeStartupInfo();
+        const storage = getOpencodeAgentStorageInfo();
+        return Response.json({
+          opencode: {
+            ...runtimeInfo.opencode,
+            directory: storage.directory,
+            effectiveConfigPath: storage.configFilePath,
+            persistenceMode: storage.persistenceMode,
+          },
+        });
       },
     },
 

@@ -518,71 +518,77 @@ describe("runtime health route", () => {
     const payload = (await response.json()) as { health: { ok: boolean } };
     expect(payload.health.ok).toBe(false);
   });
-});
 
-describe("config routes", () => {
-  test("GET /api/config/agents returns agents and hash", async () => {
+  test("GET /api/runtime/info returns opencode metadata", async () => {
     const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
-    const route = routes["/api/config/agents"] as { GET: (req: Request) => Response };
-    const response = route.GET(new Request("http://localhost/api/config/agents"));
+    const route = routes["/api/runtime/info"] as { GET: (req: Request) => Promise<Response> };
+    const response = await route.GET(new Request("http://localhost/api/runtime/info"));
 
     expect(response.status).toBe(200);
     const payload = (await response.json()) as {
-      agents?: Array<{ id: string }>;
-      hash?: string;
+      opencode?: { baseUrl?: string; directory?: string; effectiveConfigPath?: string };
     };
-    expect(Array.isArray(payload.agents)).toBe(true);
-    expect(typeof payload.hash).toBe("string");
+    expect(typeof payload.opencode?.baseUrl).toBe("string");
+    expect(typeof payload.opencode?.directory).toBe("string");
+    expect(typeof payload.opencode?.effectiveConfigPath).toBe("string");
+  });
+});
+
+describe("config routes", () => {
+  test("GET /api/opencode/agents is exposed", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/opencode/agents"] as { GET: (req: Request) => Promise<Response> };
+    const response = await route.GET(new Request("http://localhost/api/opencode/agents"));
+    expect([200, 502]).toContain(response.status);
   });
 
-  test("PUT /api/config/agents rejects updates when semantic validation fails", async () => {
+  test("POST /api/opencode/agents/validate reports invalid upserts", async () => {
     const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
-    const route = routes["/api/config/agents"] as {
-      PUT: (req: Request) => Promise<Response>;
+    const route = routes["/api/opencode/agents/validate"] as {
+      POST: (req: Request) => Promise<Response>;
     };
-    const response = await route.PUT(
-      new Request("http://localhost/api/config/agents", {
-        method: "PUT",
+    const response = await route.POST(
+      new Request("http://localhost/api/opencode/agents/validate", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          runSmokeTest: false,
-          agents: [
+          upserts: [
             {
-              id: "eval-agent",
-              name: "Eval Agent",
-              specialty: "MVP checks",
-              summary: "Runs evaluation tasks.",
-              model: "test-provider/test-model",
-              status: "available",
+              id: "",
+              name: "Broken",
             },
           ],
+          deletes: [],
         }),
       }),
     );
 
-    expect(response.status).toBe(422);
-    const payload = (await response.json()) as {
-      stage?: string;
-      error?: string;
-    };
-    expect(payload.stage === "semantic" || payload.stage === "smoke").toBe(true);
-    expect(typeof payload.error).toBe("string");
-  });
-
-  test("GET /api/config/agent-types returns agent types and hash", async () => {
-    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
-    const route = routes["/api/config/agent-types"] as {
-      GET: (req: Request) => Response;
-    };
-    const response = route.GET(new Request("http://localhost/api/config/agent-types"));
-
     expect(response.status).toBe(200);
     const payload = (await response.json()) as {
-      agentTypes?: Array<{ id: string }>;
-      hash?: string;
+      ok?: boolean;
+      issues?: Array<{ message?: string }>;
     };
-    expect(Array.isArray(payload.agentTypes)).toBe(true);
-    expect(typeof payload.hash).toBe("string");
+    expect(payload.ok).toBe(false);
+    expect((payload.issues ?? []).length).toBeGreaterThan(0);
+  });
+
+  test("PATCH /api/opencode/agents requires expectedHash", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/opencode/agents"] as {
+      PATCH: (req: Request) => Promise<Response>;
+    };
+    const response = await route.PATCH(
+      new Request("http://localhost/api/opencode/agents", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          upserts: [],
+          deletes: [],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
   });
 
   test("POST /api/config/patch-safe requires expectedHash", async () => {

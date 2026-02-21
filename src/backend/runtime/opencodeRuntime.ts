@@ -16,12 +16,7 @@ import {
   RuntimeSessionNotFoundError,
 } from "./errors";
 import type { MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
-import {
-  buildDesiredRuntimeAgentConfigMap,
-  normalizeConfiguredAgentTypes,
-  normalizeRuntimeAgentConfigMap,
-} from "../agents/service";
-import type { AgentTypeDefinition, ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
+import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import {
   createBackgroundRunUpdatedEvent,
@@ -104,8 +99,6 @@ interface OpencodeRuntimeOptions {
   getEnabledSkills?: () => Array<string>;
   getEnabledMcps?: () => Array<string>;
   getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
-  getConfiguredAgentTypes?: () => Array<AgentTypeDefinition>;
-  getConfiguredAgents?: () => Array<{ id: string; name: string; specialty: string; summary: string; model: string; status: "available" | "busy" | "offline" }>;
   enableEventSync?: boolean;
   enableSmallModelSync?: boolean;
   enableBackgroundSync?: boolean;
@@ -318,30 +311,6 @@ export class OpencodeRuntime implements RuntimeEngine {
 
   private currentConfiguredMcpServers() {
     return normalizeMcpServerDefinitions(this.options.getConfiguredMcpServers?.() ?? []);
-  }
-
-  private currentConfiguredAgentTypes() {
-    const configured = this.options.getConfiguredAgentTypes?.();
-    if (configured && configured.length > 0) {
-      return normalizeConfiguredAgentTypes(configured);
-    }
-    return normalizeConfiguredAgentTypes(
-      (this.options.getConfiguredAgents?.() ?? []).map(agent => ({
-        id: agent.id,
-        name: agent.name,
-        description: agent.specialty,
-        prompt: agent.summary,
-        model: agent.model,
-        mode: "subagent",
-        hidden: false,
-        disable: agent.status === "offline",
-        options: {
-          wafflebotManagedLegacy: true,
-          wafflebotDisplayName: agent.name,
-          wafflebotStatus: agent.status,
-        },
-      })),
-    );
   }
 
   private getClient() {
@@ -2036,7 +2005,6 @@ export class OpencodeRuntime implements RuntimeEngine {
       enabledSkills: this.currentEnabledSkills(),
       enabledMcps: this.currentEnabledMcps(),
       configuredMcpServers: this.currentConfiguredMcpServers(),
-      configuredAgentTypes: this.currentConfiguredAgentTypes(),
       managedSkillsRoot: getManagedSkillsRootPath(),
     });
   }
@@ -2119,16 +2087,6 @@ export class OpencodeRuntime implements RuntimeEngine {
       });
       if (stableSerialize(currentMcpConfig) !== stableSerialize(desiredMcpConfig)) {
         (nextConfig as Record<string, unknown>).mcp = desiredMcpConfig;
-        changed = true;
-      }
-
-      const currentAgentConfig = normalizeRuntimeAgentConfigMap(currentRecord.agent);
-      const desiredAgentConfig = buildDesiredRuntimeAgentConfigMap({
-        currentAgentConfig: currentRecord.agent,
-        configuredAgentTypes: this.currentConfiguredAgentTypes(),
-      });
-      if (stableSerialize(currentAgentConfig) !== stableSerialize(desiredAgentConfig)) {
-        (nextConfig as Record<string, unknown>).agent = desiredAgentConfig;
         changed = true;
       }
 

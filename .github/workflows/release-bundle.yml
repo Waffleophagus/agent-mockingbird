@@ -1,0 +1,56 @@
+name: Release Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (example: v0.1.0)"
+        required: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    env:
+      INPUT_VERSION: ${{ github.event.inputs.version }}
+      TAG_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          version="${TAG_VERSION:-${INPUT_VERSION:-}}"
+          if [[ -z "${version}" ]]; then
+            echo "Version is required."
+            exit 1
+          fi
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release bundle
+        run: bash scripts/build-release-bundle.sh "${{ steps.version.outputs.value }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafflebot-${{ steps.version.outputs.value }}
+          path: |
+            dist/wafflebot-${{ steps.version.outputs.value }}.tar.gz
+            dist/wafflebot-${{ steps.version.outputs.value }}.tar.gz.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.value }}
+          files: |
+            dist/wafflebot-${{ steps.version.outputs.value }}.tar.gz
+            dist/wafflebot-${{ steps.version.outputs.value }}.tar.gz.sha256
+          generate_release_notes: true

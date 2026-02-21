@@ -31,6 +31,12 @@ const eventStream = createRuntimeEventStream({
   getUsageSnapshot,
 });
 
+if (env.NODE_ENV === "production" && !runtimeInfo.opencode.directoryConfigured) {
+  console.warn(
+    "[startup] WAFFLEBOT_OPENCODE_DIRECTORY is not configured. OpenCode config visibility may differ across workspaces.",
+  );
+}
+
 void initializeMemory().catch(() => {
   // Memory startup should not block server boot.
 });

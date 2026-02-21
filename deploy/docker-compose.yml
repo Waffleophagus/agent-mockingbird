@@ -1,0 +1,34 @@
+version: "3.9"
+services:
+  opencode:
+    image: ghcr.io/sst/opencode:latest
+    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096", "--print-logs", "--log-level", "INFO"]
+    working_dir: /workspace
+    volumes:
+      - ../:/workspace
+    environment:
+      WAFFLEBOT_MEMORY_API_BASE_URL: http://wafflebot:3001
+    ports:
+      - "4096:4096"
+
+  wafflebot:
+    image: oven/bun:1.3
+    working_dir: /workspace
+    command: ["bun", "src/index.ts"]
+    depends_on:
+      - opencode
+    volumes:
+      - ../:/workspace
+      - wafflebot_data:/var/lib/wafflebot
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      WAFFLEBOT_CONFIG_PATH: /var/lib/wafflebot/wafflebot.config.json
+      WAFFLEBOT_DB_PATH: /var/lib/wafflebot/wafflebot.db
+      WAFFLEBOT_OPENCODE_BASE_URL: http://opencode:4096
+      WAFFLEBOT_OPENCODE_DIRECTORY: /workspace
+    ports:
+      - "3001:3001"
+
+volumes:
+  wafflebot_data:

@@ -27,8 +27,6 @@ export function createRuntime(): RuntimeEngine {
     getEnabledSkills: () => getConfigSnapshot().config.ui.skills,
     getEnabledMcps: () => getConfigSnapshot().config.ui.mcps,
     getConfiguredMcpServers: () => getConfigSnapshot().config.ui.mcpServers,
-    getConfiguredAgents: () => getConfigSnapshot().config.ui.agents,
-    getConfiguredAgentTypes: () => getConfigSnapshot().config.ui.agentTypes,
   });
 }
 

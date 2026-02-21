@@ -1,0 +1,27 @@
+[Unit]
+Description=Wafflebot API and Dashboard
+After=network.target opencode.service
+Wants=network.target opencode.service
+
+[Service]
+Type=simple
+User=wafflebot
+Group=wafflebot
+WorkingDirectory=/srv/wafflebot/app
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=WAFFLEBOT_CONFIG_PATH=/var/lib/wafflebot/wafflebot.config.json
+Environment=WAFFLEBOT_DB_PATH=/var/lib/wafflebot/wafflebot.db
+Environment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096
+Environment=WAFFLEBOT_OPENCODE_DIRECTORY=/srv/wafflebot/app
+ExecStart=/usr/bin/env bun src/index.ts
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/wafflebot/app /var/lib/wafflebot
+
+[Install]
+WantedBy=multi-user.target

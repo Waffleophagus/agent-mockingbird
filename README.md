@@ -81,6 +81,7 @@ Config API:
 - `GET /api/config`
 - `PATCH /api/config` (partial update with optimistic `expectedHash`)
 - `PUT /api/config` (full replace with optimistic `expectedHash`)
+- `GET /api/runtime/info` (effective OpenCode connection + directory/config persistence metadata)
 
 After every config change, wafflebot performs:
 
@@ -165,3 +166,65 @@ Environment variables are parsed and validated at startup via `@t3-oss/env-core`
 - `OPENCODE_PORT` (default `4096`)
 - `WAFFLEBOT_PORT` (default `3001`)
 - `OPENCODE_LOG_LEVEL` (default `INFO`)
+
+## OpenCode Agent Persistence
+
+Wafflebot now manages OpenCode agents directly in project-scoped OpenCode config.
+
+- Save target is typically `<workspace>/.opencode/opencode.jsonc` under `WAFFLEBOT_OPENCODE_DIRECTORY`.
+- OpenCode also loads `.opencode/agent/*.md` and `.opencode/agents/*.md`; deleting an agent in Wafflebot removes matching files as well.
+- Agents UI shows `Saving to` and `Bound directory` so you can verify which workspace is authoritative.
+
+If OpenCode UI/TUI looks different from Wafflebot:
+
+1. Confirm `GET /api/runtime/info` reports the directory you expect.
+2. Launch/attach OpenCode against the same workspace directory.
+3. Verify the same `.opencode/opencode.jsonc` file path is being used.
+
+## Deployment
+
+Recommended production topology is **single VM + systemd sidecar**:
+
+- `opencode.service` running on `127.0.0.1:4096`
+- `wafflebot.service` running on `127.0.0.1:3001`
+- both pinned to one workspace path via `WAFFLEBOT_OPENCODE_DIRECTORY`
+
+Deployment artifacts:
+
+- `deploy/systemd/opencode.service`
+- `deploy/systemd/wafflebot.service`
+- `deploy/systemd/README.md`
+- `deploy/docker-compose.yml` (reference stack)
+
+## CI/CD Release Bundles
+
+This repo includes GitHub Actions for non-npm distribution:
+
+- `.github/workflows/ci.yml` runs lint/typecheck/build on push + PR.
+- `.github/workflows/release-bundle.yml` builds a versioned tarball and publishes it to GitHub Releases.
+
+Release artifact contents:
+
+- `wafflebot-<version>.tar.gz`
+- `wafflebot-<version>.tar.gz.sha256`
+
+Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
+
+## Install Directly From GitHub (No npmjs.org)
+
+You can install this project as a global Bun CLI directly from git:
+
+1. Install globally from a tag:
+
+```bash
+OWNER="<github-owner>"
+REPO="<repo-name>"
+VERSION="v0.1.0"
+bun add -g "github:${OWNER}/${REPO}#${VERSION}"
+```
+
+2. Run:
+
+```bash
+wafflebot
+```

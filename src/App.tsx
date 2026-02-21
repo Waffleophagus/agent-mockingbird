@@ -25,6 +25,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,7 +50,6 @@ import type {
   SessionRunErrorSnapshot,
   SessionRunStatusSnapshot,
   SessionSummary,
-  RuntimeAgent,
   RuntimeMcp,
   RuntimeSkill,
   UsageSnapshot,
@@ -89,6 +89,20 @@ interface ConfigSnapshotResponse {
     ui?: {
       agentTypes?: AgentTypeDefinition[];
     };
+  };
+}
+
+interface OpencodeAgentStorageResponse {
+  directory?: string;
+  configFilePath?: string;
+  persistenceMode?: string;
+}
+
+interface RuntimeInfoResponse {
+  opencode?: {
+    directory?: string;
+    effectiveConfigPath?: string;
+    persistenceMode?: string;
   };
 }
 
@@ -189,6 +203,30 @@ function normalizeAgentTypeDraft(agentType: AgentTypeDefinition): AgentTypeDefin
   };
 }
 
+function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        "animate-pulse rounded-md bg-muted/70",
+        className
+      )}
+    />
+  );
+}
+
+function cn(...classes: (string | boolean | undefined | null)[]) {
+  return classes.filter(Boolean).join(" ");
+}
+
+type ConfirmAction =
+  | { type: "abort-run"; sessionId: string }
+  | { type: "abort-background"; runId: string }
+  | { type: "remove-skill"; skillId: string }
+  | { type: "remove-mcp"; mcpId: string }
+  | { type: "disconnect-mcp"; mcpId: string }
+  | { type: "remove-agent"; agentId: string }
+  | null;
+
 export function App() {
   type StreamStatus = "connecting" | "connected" | "reconnecting";
   type DashboardPage = "chat" | "skills" | "mcp" | "agents";
@@ -204,15 +242,21 @@ export function App() {
   const [modelError, setModelError] = useState("");
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  const [openAgentModelPickerId, setOpenAgentModelPickerId] = useState<string | null>(null);
+  const [agentModelQuery, setAgentModelQuery] = useState("");
+  const [agentFocusedModelIndex, setAgentFocusedModelIndex] = useState(0);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionError, setSessionError] = useState("");
   const [agentTypes, setAgentTypes] = useState<AgentTypeDefinition[]>([]);
   const [dashboardPage, setDashboardPage] = useState<DashboardPage>("chat");
   const [configHash, setConfigHash] = useState("");
+  const [agentConfigHash, setAgentConfigHash] = useState("");
+  const [opencodeDirectory, setOpencodeDirectory] = useState("");
+  const [opencodeConfigFilePath, setOpencodeConfigFilePath] = useState("");
+  const [opencodePersistenceMode, setOpencodePersistenceMode] = useState("");
   const [skillsDraft, setSkillsDraft] = useState("");
   const [availableSkills, setAvailableSkills] = useState<RuntimeSkill[]>([]);
   const [availableMcps, setAvailableMcps] = useState<RuntimeMcp[]>([]);
-  const [availableAgents, setAvailableAgents] = useState<RuntimeAgent[]>([]);
   const [mcpServers, setMcpServers] = useState<ConfiguredMcpServer[]>([]);
   const [mcpsDraft, setMcpsDraft] = useState("");
   const [skillInput, setSkillInput] = useState("");
@@ -234,6 +278,7 @@ export function App() {
   const [mcpActionBusyId, setMcpActionBusyId] = useState("");
   const [agentsError, setAgentsError] = useState("");
   const [agentCatalogError, setAgentCatalogError] = useState("");
+  const [agentTypesBaseline, setAgentTypesBaseline] = useState<AgentTypeDefinition[]>([]);
   const [usage, setUsage] = useState<UsageSnapshot>({
     requestCount: 0,
     inputTokens: 0,
@@ -269,6 +314,10 @@ export function App() {
   const [childSessionSearchQuery, setChildSessionSearchQuery] = useState("");
   const [childSessionHideAfterDays, setChildSessionHideAfterDays] = useState(DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [focusedModelIndex, setFocusedModelIndex] = useState(0);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const loadedSessionsRef = useRef(new Set<string>());
   const loadedBackgroundSessionsRef = useRef(new Set<string>());
@@ -277,6 +326,8 @@ export function App() {
   const abortedRequestIdsRef = useRef(new Set<string>());
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
+  const agentModelPickerRef = useRef<HTMLDivElement>(null);
+  const agentModelSearchInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const previousActiveSessionIdRef = useRef("");
   const isSending = activeSend !== null;
@@ -306,8 +357,8 @@ export function App() {
           configResponse,
           skillsCatalogResponse,
           mcpsCatalogResponse,
-          agentsCatalogResponse,
-          agentTypesResponse,
+          opencodeAgentsResponse,
+          runtimeInfoResponse,
           backgroundInFlightResponse,
         ] = await Promise.all([
           fetch("/api/opencode/models"),
@@ -316,8 +367,8 @@ export function App() {
           fetch("/api/config"),
           fetch("/api/config/skills/catalog"),
           fetch("/api/config/mcps/catalog"),
-          fetch("/api/config/agents/catalog"),
-          fetch("/api/config/agent-types"),
+          fetch("/api/opencode/agents"),
+          fetch("/api/runtime/info"),
           fetch("/api/background?limit=500"),
         ]);
         const modelsPayload = (await modelsResponse.json()) as { models?: ModelOption[]; error?: string };
@@ -343,17 +394,13 @@ export function App() {
           hash?: string;
           error?: string;
         };
-        const agentsCatalogPayload = (await agentsCatalogResponse.json()) as {
-          agents?: RuntimeAgent[];
-          configured?: string[];
-          hash?: string;
-          error?: string;
-        };
-        const agentTypesPayload = (await agentTypesResponse.json()) as {
+        const opencodeAgentsPayload = (await opencodeAgentsResponse.json()) as {
           agentTypes?: AgentTypeDefinition[];
           hash?: string;
+          storage?: OpencodeAgentStorageResponse;
           error?: string;
         };
+        const runtimeInfoPayload = (await runtimeInfoResponse.json()) as RuntimeInfoResponse;
         const backgroundInFlightPayload = (await backgroundInFlightResponse.json()) as BackgroundRunsResponse;
         if (!alive) return;
 
@@ -363,12 +410,33 @@ export function App() {
         setMemoryActivity(memoryActivityPayload.events ?? []);
         setAvailableSkills(Array.isArray(skillsCatalogPayload.skills) ? skillsCatalogPayload.skills : []);
         setAvailableMcps(Array.isArray(mcpsCatalogPayload.mcps) ? mcpsCatalogPayload.mcps : []);
-        setAvailableAgents(Array.isArray(agentsCatalogPayload.agents) ? agentsCatalogPayload.agents : []);
-        if (Array.isArray(agentTypesPayload.agentTypes)) {
-          setAgentTypes(agentTypesPayload.agentTypes.map(normalizeAgentTypeDraft));
+        if (Array.isArray(opencodeAgentsPayload.agentTypes)) {
+          const normalized = opencodeAgentsPayload.agentTypes.map(normalizeAgentTypeDraft);
+          setAgentTypes(normalized);
+          setAgentTypesBaseline(normalized);
+          setAgentConfigHash(typeof opencodeAgentsPayload.hash === "string" ? opencodeAgentsPayload.hash : "");
         } else if (Array.isArray(configPayload.config?.ui?.agentTypes)) {
-          setAgentTypes(configPayload.config.ui.agentTypes.map(normalizeAgentTypeDraft));
+          const fallback = configPayload.config.ui.agentTypes.map(normalizeAgentTypeDraft);
+          setAgentTypes(fallback);
+          setAgentTypesBaseline(fallback);
+          setAgentConfigHash("");
         }
+        setOpencodeDirectory(
+          (typeof opencodeAgentsPayload.storage?.directory === "string" && opencodeAgentsPayload.storage.directory) ||
+            (typeof runtimeInfoPayload.opencode?.directory === "string" ? runtimeInfoPayload.opencode.directory : ""),
+        );
+        setOpencodeConfigFilePath(
+          (typeof opencodeAgentsPayload.storage?.configFilePath === "string" && opencodeAgentsPayload.storage.configFilePath) ||
+            (typeof runtimeInfoPayload.opencode?.effectiveConfigPath === "string"
+              ? runtimeInfoPayload.opencode.effectiveConfigPath
+              : ""),
+        );
+        setOpencodePersistenceMode(
+          (typeof opencodeAgentsPayload.storage?.persistenceMode === "string" && opencodeAgentsPayload.storage.persistenceMode) ||
+            (typeof runtimeInfoPayload.opencode?.persistenceMode === "string"
+              ? runtimeInfoPayload.opencode.persistenceMode
+              : ""),
+        );
         setMcpServers(Array.isArray(mcpsCatalogPayload.servers) ? mcpsCatalogPayload.servers : []);
         if (Array.isArray(skillsCatalogPayload.enabled)) {
           setSkillsDraft(skillsCatalogPayload.enabled.join("\n"));
@@ -387,7 +455,7 @@ export function App() {
         setConfigHash(typeof configPayload.hash === "string" ? configPayload.hash : "");
         setSkillCatalogError(skillsCatalogResponse.ok ? "" : (skillsCatalogPayload.error ?? "Failed to load runtime skills"));
         setMcpCatalogError(mcpsCatalogResponse.ok ? "" : (mcpsCatalogPayload.error ?? "Failed to load runtime MCP servers"));
-        setAgentCatalogError(agentsCatalogResponse.ok ? "" : (agentsCatalogPayload.error ?? "Failed to load runtime agents"));
+        setAgentCatalogError(opencodeAgentsResponse.ok ? "" : (opencodeAgentsPayload.error ?? "Failed to load OpenCode agent definitions"));
         if (backgroundInFlightResponse.ok && Array.isArray(backgroundInFlightPayload.runs)) {
           setBackgroundRunsBySession(current => mergeBackgroundRunsBySession(current, backgroundInFlightPayload.runs ?? []));
         }
@@ -902,6 +970,10 @@ export function App() {
       return haystack.includes(query);
     });
   }, [availableModels, modelQuery]);
+
+  useEffect(() => {
+    setFocusedModelIndex(0);
+  }, [filteredModelOptions.length]);
   const configuredSkills = useMemo(() => normalizeListInput(skillsDraft), [skillsDraft]);
   const configuredSkillSet = useMemo(() => new Set(configuredSkills), [configuredSkills]);
   const configuredUnavailableSkills = useMemo(
@@ -924,15 +996,6 @@ export function App() {
   const discoverableMcps = useMemo(
     () => availableMcps.filter(mcp => !configuredMcpSet.has(mcp.id)),
     [availableMcps, configuredMcpSet],
-  );
-  const runtimeAgentById = useMemo(() => new Map(availableAgents.map(agent => [agent.id, agent])), [availableAgents]);
-  const configuredAgentIdSet = useMemo(
-    () => new Set(agentTypes.map(agentType => agentType.id.trim()).filter(Boolean)),
-    [agentTypes],
-  );
-  const discoverableAgents = useMemo(
-    () => availableAgents.filter(agent => !configuredAgentIdSet.has(agent.id)),
-    [availableAgents, configuredAgentIdSet],
   );
 
   useEffect(() => {
@@ -965,12 +1028,72 @@ export function App() {
   }, [isModelPickerOpen]);
 
   useEffect(() => {
+    if (!openAgentModelPickerId) return;
+    agentModelSearchInputRef.current?.focus();
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!agentModelPickerRef.current?.contains(event.target as Node)) {
+        setOpenAgentModelPickerId(null);
+      }
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenAgentModelPickerId(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [openAgentModelPickerId]);
+
+  useEffect(() => {
+    setAgentFocusedModelIndex(0);
+  }, [agentModelQuery, openAgentModelPickerId]);
+
+  useEffect(() => {
     const container = chatScrollRef.current;
     if (!container) return;
-    const behavior: ScrollBehavior = previousActiveSessionIdRef.current !== activeSessionId ? "auto" : "smooth";
-    container.scrollTo({ top: container.scrollHeight, behavior });
+
+    const handleScroll = () => {
+      const threshold = 100;
+      const isScrolledUp = container.scrollHeight - container.scrollTop - container.clientHeight > threshold;
+      setIsUserScrolledUp(isScrolledUp);
+      if (!isScrolledUp) {
+        setHasNewMessages(false);
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+
+    if (previousActiveSessionIdRef.current !== activeSessionId) {
+      container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+      setIsUserScrolledUp(false);
+      setHasNewMessages(false);
+    } else if (!isUserScrolledUp) {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    } else if (activeMessages.length > 0) {
+      setHasNewMessages(true);
+    }
     previousActiveSessionIdRef.current = activeSessionId;
-  }, [activeSessionId, activeMessages.length, loadingMessages, isSending]);
+  }, [activeSessionId, activeMessages.length, loadingMessages, isSending, isUserScrolledUp]);
+
+  function scrollToBottom() {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    setIsUserScrolledUp(false);
+    setHasNewMessages(false);
+  }
 
   function appendOptimisticRequest(sessionId: string, content: string, requestId: string) {
     const createdAt = new Date().toISOString();
@@ -1338,6 +1461,124 @@ export function App() {
     activeAbortControllerRef.current?.abort();
   }
 
+  function requestAbortRun() {
+    if (!activeSession) return;
+    setConfirmAction({ type: "abort-run", sessionId: activeSession.id });
+  }
+
+  function requestAbortBackgroundRun(runId: string) {
+    setConfirmAction({ type: "abort-background", runId });
+  }
+
+  function requestRemoveSkill(skillId: string) {
+    setConfirmAction({ type: "remove-skill", skillId });
+  }
+
+  function requestRemoveMcp(mcpId: string) {
+    setConfirmAction({ type: "remove-mcp", mcpId });
+  }
+
+  function requestDisconnectMcp(mcpId: string) {
+    setConfirmAction({ type: "disconnect-mcp", mcpId });
+  }
+
+  function requestRemoveAgent(agentId: string) {
+    setConfirmAction({ type: "remove-agent", agentId });
+  }
+
+  function handleConfirmAction() {
+    const action = confirmAction;
+    setConfirmAction(null);
+
+    if (!action) return;
+
+    switch (action.type) {
+      case "abort-run":
+        void abortActiveRun();
+        break;
+      case "abort-background":
+        void abortBackgroundRun(action.runId);
+        break;
+      case "remove-skill":
+        removeSkill(action.skillId);
+        break;
+      case "remove-mcp":
+        removeMcp(action.mcpId);
+        break;
+      case "disconnect-mcp":
+        void runMcpRuntimeAction(action.mcpId, "disconnect");
+        break;
+      case "remove-agent":
+        removeAgentType(action.agentId);
+        break;
+    }
+  }
+
+  function getConfirmDialogProps(): {
+    open: boolean;
+    title: string;
+    description?: string;
+    confirmLabel: string;
+    variant: "default" | "danger";
+  } {
+    if (!confirmAction) {
+      return { open: false, title: "", confirmLabel: "", variant: "default" };
+    }
+
+    switch (confirmAction.type) {
+      case "abort-run":
+        return {
+          open: true,
+          title: "Abort active run?",
+          description: "This will cancel the current OpenCode request. The session state may be inconsistent.",
+          confirmLabel: "Abort",
+          variant: "danger",
+        };
+      case "abort-background":
+        return {
+          open: true,
+          title: "Abort background run?",
+          description: "This will stop the background task. Progress will be lost.",
+          confirmLabel: "Abort",
+          variant: "danger",
+        };
+      case "remove-skill":
+        return {
+          open: true,
+          title: "Remove skill?",
+          description: `This will remove "${confirmAction.skillId}" from the configured skills.`,
+          confirmLabel: "Remove",
+          variant: "danger",
+        };
+      case "remove-mcp":
+        return {
+          open: true,
+          title: "Remove MCP server?",
+          description: `This will remove "${confirmAction.mcpId}" from the allow-list and delete its configuration.`,
+          confirmLabel: "Remove",
+          variant: "danger",
+        };
+      case "disconnect-mcp":
+        return {
+          open: true,
+          title: "Disconnect MCP server?",
+          description: `This will disconnect "${confirmAction.mcpId}" from the runtime. You can reconnect later.`,
+          confirmLabel: "Disconnect",
+          variant: "danger",
+        };
+      case "remove-agent":
+        return {
+          open: true,
+          title: "Remove agent type?",
+          description: "This will delete the agent type configuration.",
+          confirmLabel: "Remove",
+          variant: "danger",
+        };
+      default:
+        return { open: false, title: "", confirmLabel: "", variant: "default" };
+    }
+  }
+
   async function compactSession(sessionId: string) {
     if (isCompacting) return;
 
@@ -1653,22 +1894,27 @@ export function App() {
     setLoadingAgentCatalog(true);
     setAgentCatalogError("");
     try {
-      const response = await fetch("/api/config/agents/catalog");
+      const response = await fetch("/api/opencode/agents");
       const payload = (await response.json()) as {
-        agents?: RuntimeAgent[];
-        configured?: string[];
+        agentTypes?: AgentTypeDefinition[];
         hash?: string;
+        storage?: OpencodeAgentStorageResponse;
         error?: string;
       };
       if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to load runtime agents");
+        throw new Error(payload.error ?? "Failed to load OpenCode agent definitions");
       }
-      setAvailableAgents(Array.isArray(payload.agents) ? payload.agents : []);
+      const normalized = Array.isArray(payload.agentTypes) ? payload.agentTypes.map(normalizeAgentTypeDraft) : [];
+      setAgentTypes(normalized);
+      setAgentTypesBaseline(normalized);
       if (typeof payload.hash === "string") {
-        setConfigHash(payload.hash);
+        setAgentConfigHash(payload.hash);
       }
+      setOpencodeDirectory(typeof payload.storage?.directory === "string" ? payload.storage.directory : "");
+      setOpencodeConfigFilePath(typeof payload.storage?.configFilePath === "string" ? payload.storage.configFilePath : "");
+      setOpencodePersistenceMode(typeof payload.storage?.persistenceMode === "string" ? payload.storage.persistenceMode : "");
     } catch (error) {
-      setAgentCatalogError(error instanceof Error ? error.message : "Failed to load runtime agents");
+      setAgentCatalogError(error instanceof Error ? error.message : "Failed to load OpenCode agent definitions");
     } finally {
       setLoadingAgentCatalog(false);
     }
@@ -1861,25 +2107,6 @@ export function App() {
     setAgentTypes(current => [...current, next]);
   }
 
-  function addRuntimeAgent(agent: RuntimeAgent) {
-    if (!agent.id.trim()) return;
-    setAgentTypes(current => {
-      if (current.some(existing => existing.id === agent.id)) return current;
-      const next: AgentTypeDefinition = {
-        id: agent.id,
-        name: agent.id,
-        description: agent.description?.trim() || "Runtime-discovered agent type.",
-        prompt: agent.description?.trim() || "Runtime-discovered OpenCode agent type.",
-        model: agent.model?.trim() || activeSession?.model || modelOptions[0]?.id || "opencode/kimi-k2.5-free",
-        mode: agent.mode,
-        hidden: agent.hidden,
-        disable: !agent.enabled,
-        options: {},
-      };
-      return [...current, next];
-    });
-  }
-
   function removeAgentType(agentTypeId: string) {
     setAgentTypes(current => current.filter(agentType => agentType.id !== agentTypeId));
   }
@@ -1975,26 +2202,76 @@ export function App() {
     setIsSavingAgents(true);
     setAgentsError("");
     try {
-      const response = await fetch("/api/config/agent-types", {
-        method: "PUT",
+      const normalizedCurrent = agentTypes.map(normalizeAgentTypeDraft);
+      const normalizedBaseline = agentTypesBaseline.map(normalizeAgentTypeDraft);
+      const baselineById = new Map(normalizedBaseline.map(agentType => [agentType.id, agentType]));
+      const currentById = new Map(normalizedCurrent.map(agentType => [agentType.id, agentType]));
+
+      const upserts = normalizedCurrent.filter(agentType => {
+        const previous = baselineById.get(agentType.id);
+        if (!previous) return true;
+        return JSON.stringify(previous) !== JSON.stringify(agentType);
+      });
+      const deletes = normalizedBaseline.map(agentType => agentType.id).filter(id => !currentById.has(id));
+      if (upserts.length === 0 && deletes.length === 0) {
+        setIsSavingAgents(false);
+        return;
+      }
+
+      const validationResponse = await fetch("/api/opencode/agents/validate", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentTypes: agentTypes.map(normalizeAgentTypeDraft),
-          expectedHash: configHash || undefined,
+          upserts,
+          deletes,
+        }),
+      });
+      const validationPayload = (await validationResponse.json()) as {
+        ok?: boolean;
+        issues?: Array<{ path?: string; message?: string }>;
+        error?: string;
+      };
+      if (!validationResponse.ok) {
+        throw new Error(validationPayload.error ?? "Failed to validate agent changes");
+      }
+      if (validationPayload.ok !== true) {
+        const firstIssue = validationPayload.issues?.[0];
+        throw new Error(firstIssue?.message || "Agent validation failed");
+      }
+      if (!agentConfigHash.trim()) {
+        throw new Error("Agent config hash missing. Refresh agents and try again.");
+      }
+
+      const response = await fetch("/api/opencode/agents", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          upserts,
+          deletes,
+          expectedHash: agentConfigHash || undefined,
         }),
       });
       const payload = (await response.json()) as {
         agentTypes?: AgentTypeDefinition[];
         hash?: string;
+        storage?: OpencodeAgentStorageResponse;
         error?: string;
       };
       if (!response.ok || !Array.isArray(payload.agentTypes)) {
         throw new Error(payload.error ?? "Failed to save agent types");
       }
 
-      setAgentTypes(payload.agentTypes.map(normalizeAgentTypeDraft));
-      setConfigHash(typeof payload.hash === "string" ? payload.hash : configHash);
-      await refreshAgentCatalog();
+      const normalized = payload.agentTypes.map(normalizeAgentTypeDraft);
+      setAgentTypes(normalized);
+      setAgentTypesBaseline(normalized);
+      setAgentConfigHash(typeof payload.hash === "string" ? payload.hash : agentConfigHash);
+      setOpencodeDirectory(typeof payload.storage?.directory === "string" ? payload.storage.directory : opencodeDirectory);
+      setOpencodeConfigFilePath(
+        typeof payload.storage?.configFilePath === "string" ? payload.storage.configFilePath : opencodeConfigFilePath,
+      );
+      setOpencodePersistenceMode(
+        typeof payload.storage?.persistenceMode === "string" ? payload.storage.persistenceMode : opencodePersistenceMode,
+      );
     } catch (error) {
       setAgentsError(error instanceof Error ? error.message : "Failed to save agent types");
     } finally {
@@ -2033,6 +2310,63 @@ export function App() {
     await saveSessionModel(model);
   }
 
+  function handleModelSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setFocusedModelIndex(current => Math.min(current + 1, filteredModelOptions.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setFocusedModelIndex(current => Math.max(current - 1, 0));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const focusedModel = filteredModelOptions[focusedModelIndex];
+      if (focusedModel) {
+        void selectModelFromPicker(focusedModel.id);
+      }
+    }
+  }
+
+  function filteredAgentModelOptions() {
+    const query = agentModelQuery.trim().toLowerCase();
+    if (!query) return availableModels;
+    return availableModels.filter(option => {
+      const haystack = `${option.label} ${option.id} ${option.providerId} ${option.modelId}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }
+
+  function selectAgentModelFromPicker(agentId: string, model: string) {
+    updateAgentTypeField(agentId, "model", model.trim() || undefined);
+    setAgentModelQuery("");
+    setOpenAgentModelPickerId(null);
+  }
+
+  function handleAgentModelSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>, agentId: string) {
+    const options = filteredAgentModelOptions();
+    const maxIndex = options.length;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setAgentFocusedModelIndex(current => Math.min(current + 1, maxIndex));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setAgentFocusedModelIndex(current => Math.max(current - 1, 0));
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (agentFocusedModelIndex === 0) {
+        selectAgentModelFromPicker(agentId, "");
+        return;
+      }
+      const focused = options[agentFocusedModelIndex - 1];
+      if (focused?.id) {
+        selectAgentModelFromPicker(agentId, focused.id);
+      }
+    }
+  }
+
   async function createNewSession() {
     setIsCreatingSession(true);
     setSessionError("");
@@ -2069,6 +2403,7 @@ export function App() {
 
   return (
     <main className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6 lg:h-screen lg:overflow-hidden lg:px-8">
+      {renderConfirmDialog()}
       <div className="mx-auto flex h-full w-full max-w-7xl flex-col gap-4">
         <header className="panel-noise rounded-2xl border border-border bg-card px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2161,12 +2496,23 @@ export function App() {
                 </Button>
               </div>
               <div className="space-y-2">
-                <Input
-                  value={childSessionSearchQuery}
-                  onChange={event => setChildSessionSearchQuery(event.target.value)}
-                  placeholder="Search threads and topics..."
-                  className="h-8 text-xs"
-                />
+                <div className="relative">
+                  <Input
+                    value={childSessionSearchQuery}
+                    onChange={event => setChildSessionSearchQuery(event.target.value)}
+                    placeholder="Search threads and topics..."
+                    className="h-8 pr-8 text-xs"
+                  />
+                  {childSessionSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setChildSessionSearchQuery("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <CircleSlash className="size-4" />
+                    </button>
+                  )}
+                </div>
                 {sessionSearchNeedle && (
                   <p className="px-1 text-[11px] text-muted-foreground">
                     {totalSessionSearchMatches} match{totalSessionSearchMatches === 1 ? "" : "es"}
@@ -2187,8 +2533,18 @@ export function App() {
               {sessionError && <p className="text-xs text-destructive">{sessionError}</p>}
             </CardHeader>
             <CardContent className="space-y-2 overflow-y-auto">
-              {loading && <p className="text-sm text-muted-foreground">Loading sessions...</p>}
-              {rootSessions.map(session => {
+              {loading && (
+                <div className="space-y-2">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="rounded-xl border border-border bg-muted/70 p-3">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="mt-2 h-3 w-1/2" />
+                      <Skeleton className="mt-2 h-3 w-1/4" />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!loading && rootSessions.map(session => {
                 const childSessions = childSessionsByParentSessionId[session.id] ?? [];
                 const visibleChildSessions = childSessionVisibilityByParentSessionId.visible[session.id] ?? [];
                 const hiddenChildrenByAge = childSessionVisibilityByParentSessionId.hiddenByAgeCount[session.id] ?? 0;
@@ -2392,6 +2748,7 @@ export function App() {
                         ref={modelSearchInputRef}
                         value={modelQuery}
                         onChange={event => setModelQuery(event.target.value)}
+                        onKeyDown={handleModelSearchKeyDown}
                         placeholder="Search model..."
                         className="h-8"
                       />
@@ -2399,14 +2756,17 @@ export function App() {
                         {filteredModelOptions.length === 0 ? (
                           <p className="px-2 py-2 text-xs text-muted-foreground">No models match your search.</p>
                         ) : (
-                          filteredModelOptions.map(option => (
+                          filteredModelOptions.map((option, index) => (
                             <button
                               key={option.id}
                               type="button"
                               onClick={() => {
                                 void selectModelFromPicker(option.id);
                               }}
-                              className="w-full rounded-md px-2 py-1.5 text-left text-sm transition hover:bg-muted data-[active=true]:bg-primary/10"
+                              className={cn(
+                                "w-full rounded-md px-2 py-1.5 text-left text-sm transition",
+                                index === focusedModelIndex ? "bg-primary/10" : "hover:bg-muted",
+                              )}
                               data-active={activeSession?.model === option.id}
                             >
                               <p className="truncate">{option.label}</p>
@@ -2437,9 +2797,7 @@ export function App() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => {
-                    void abortActiveRun();
-                  }}
+                  onClick={requestAbortRun}
                   disabled={!canAbortActiveSession}
                 >
                   <CircleSlash className="size-3.5" />
@@ -2483,9 +2841,18 @@ export function App() {
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
               <div
-                className="scrollbar-thin flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-input/50 p-3"
+                className="scrollbar-thin relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-input/50 p-3"
                 ref={chatScrollRef}
               >
+                {hasNewMessages && isUserScrolledUp && (
+                  <button
+                    type="button"
+                    onClick={scrollToBottom}
+                    className="sticky top-2 z-10 mx-auto rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition hover:bg-primary/85"
+                  >
+                    New messages
+                  </button>
+                )}
                 {loadingMessages && <p className="text-sm text-muted-foreground">Loading messages...</p>}
                 {!loadingMessages && activeMessages.length === 0 && <p className="text-sm text-muted-foreground">No messages yet.</p>}
                 {activeMessages.map(message => {
@@ -2766,47 +3133,68 @@ export function App() {
                         {run.error && <p className="text-xs text-destructive">{run.error}</p>}
 
                         <div className="space-y-2">
-                          <Textarea
-                            value={backgroundSteerDraftByRun[run.runId] ?? ""}
-                            onChange={event =>
-                              setBackgroundSteerDraftByRun(current => ({
-                                ...current,
-                                [run.runId]: event.target.value,
-                              }))
-                            }
-                            className="min-h-16 resize-y"
-                            placeholder="Steer this background run with additional instructions..."
-                            disabled={isTerminal || busyAction === "abort"}
-                          />
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                void abortBackgroundRun(run.runId);
-                              }}
-                              disabled={isTerminal || Boolean(busyAction)}
-                            >
-                              <CircleSlash className="size-3.5" />
-                              {busyAction === "abort" ? "Aborting..." : "Abort"}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => {
-                                void steerBackgroundRun(run.runId);
-                              }}
-                              disabled={
-                                isTerminal ||
-                                busyAction === "abort" ||
-                                !(backgroundSteerDraftByRun[run.runId]?.trim())
-                              }
-                            >
-                              <Send className="size-3.5" />
-                              {busyAction === "steer" ? "Steering..." : "Steer"}
-                            </Button>
-                          </div>
+                          {!isTerminal && (
+                            <>
+                              <Textarea
+                                value={backgroundSteerDraftByRun[run.runId] ?? ""}
+                                onChange={event =>
+                                  setBackgroundSteerDraftByRun(current => ({
+                                    ...current,
+                                    [run.runId]: event.target.value,
+                                  }))
+                                }
+                                className="min-h-16 max-h-48 resize-y"
+                                placeholder="Steer this background run with additional instructions..."
+                                disabled={busyAction === "abort"}
+                              />
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => requestAbortBackgroundRun(run.runId)}
+                                  disabled={Boolean(busyAction)}
+                                >
+                                  <CircleSlash className="size-3.5" />
+                                  {busyAction === "abort" ? "Aborting..." : "Abort"}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => {
+                                    void steerBackgroundRun(run.runId);
+                                  }}
+                                  disabled={
+                                    busyAction === "abort" ||
+                                    !(backgroundSteerDraftByRun[run.runId]?.trim())
+                                  }
+                                >
+                                  <Send className="size-3.5" />
+                                  {busyAction === "steer" ? "Sending..." : "Steer"}
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                          {isTerminal && (
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  if (run.childSessionId) {
+                                    void refreshSessionsList();
+                                    setActiveSessionId(run.childSessionId);
+                                  } else {
+                                    setActiveSessionId(run.parentSessionId);
+                                    setActiveConfigPanelTab("background");
+                                  }
+                                }}
+                              >
+                                View session
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -2828,7 +3216,7 @@ export function App() {
                 </CardTitle>
                 <CardDescription>Toggle which OpenCode skills are exposed to runtime sessions.</CardDescription>
               </CardHeader>
-              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
+              <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
                 <div className="flex gap-2">
                   <Input
                     value={skillInput}
@@ -2893,15 +3281,15 @@ export function App() {
                         className="flex items-center justify-between rounded-md border border-border bg-muted/70 px-3 py-2"
                       >
                         <span className="text-sm">{skill}</span>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0"
-                          onClick={() => removeSkill(skill)}
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
+<Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            onClick={() => requestRemoveSkill(skill)}
+                          >
+                            <Trash2 className="size-4 text-destructive" />
+                          </Button>
                       </div>
                     ))}
                   </div>
@@ -3032,7 +3420,7 @@ export function App() {
                           type="button"
                           size="sm"
                           variant="outline"
-                          onClick={() => void runMcpRuntimeAction(mcp, "disconnect")}
+                          onClick={() => requestDisconnectMcp(mcp)}
                           disabled={mcpActionBusyId.length > 0}
                         >
                           Disconnect
@@ -3060,7 +3448,7 @@ export function App() {
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0"
-                          onClick={() => removeMcp(mcp)}
+                          onClick={() => requestRemoveMcp(mcp)}
                         >
                           <Trash2 className="size-4 text-destructive" />
                         </Button>
@@ -3259,8 +3647,8 @@ export function App() {
         )}
 
         {dashboardPage === "agents" && (
-          <section className="min-h-0 flex-1">
-            <Card className="panel-noise flex min-h-0 flex-col">
+          <section className="min-h-0 flex-1 overflow-hidden">
+            <Card className="panel-noise flex h-full min-h-0 flex-col overflow-hidden">
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -3268,12 +3656,19 @@ export function App() {
                       <Users className="size-4" />
                       Agent Type Management
                     </CardTitle>
-                    <CardDescription>Edit agent types and persist config changes.</CardDescription>
+                    <CardDescription>
+                      Edit OpenCode agent definitions directly. Changes are applied to OpenCode config immediately on save.
+                    </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" onClick={addAgentType}>
-                      <Plus className="size-4" />
-                      Add agent type
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void refreshAgentCatalog()}
+                      disabled={loadingAgentCatalog}
+                    >
+                      {loadingAgentCatalog ? "Refreshing..." : "Refresh"}
                     </Button>
                     <Button type="button" onClick={saveAgentTypesConfig} disabled={isSavingAgents}>
                       {isSavingAgents ? "Saving..." : "Save agent types"}
@@ -3283,131 +3678,188 @@ export function App() {
                 {agentsError && <p className="text-xs text-destructive">{agentsError}</p>}
                 {agentCatalogError && <p className="text-xs text-destructive">{agentCatalogError}</p>}
               </CardHeader>
-              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
-                <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">Runtime Agent Types</p>
-                    <Button type="button" variant="outline" size="sm" onClick={() => void refreshAgentCatalog()} disabled={loadingAgentCatalog}>
-                      {loadingAgentCatalog ? "Refreshing..." : "Refresh"}
-                    </Button>
-                  </div>
-                  {availableAgents.length === 0 && (
-                    <p className="text-xs text-muted-foreground">No runtime agent types discovered yet.</p>
-                  )}
-                  {availableAgents.map(runtimeAgent => (
-                    <div key={runtimeAgent.id} className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1.5">
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <p className="truncate text-sm">{runtimeAgent.id}</p>
-                          <Badge variant={runtimeAgent.enabled ? "success" : "outline"}>
-                            {runtimeAgent.enabled ? "enabled" : "disabled"}
-                          </Badge>
-                          <Badge variant="outline">{runtimeAgent.mode}</Badge>
-                          {runtimeAgent.native && <Badge variant="outline">native</Badge>}
-                        </div>
-                        {runtimeAgent.model && <p className="truncate text-xs text-muted-foreground">{runtimeAgent.model}</p>}
-                      </div>
-                      {!configuredAgentIdSet.has(runtimeAgent.id) && (
-                        <Button type="button" variant="outline" size="sm" onClick={() => addRuntimeAgent(runtimeAgent)}>
-                          Add
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                  {discoverableAgents.length > 0 && (
+              <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 p-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">OpenCode Agents</p>
                     <p className="text-xs text-muted-foreground">
-                      {discoverableAgents.length} runtime agent{discoverableAgents.length === 1 ? "" : "s"} not yet in Wafflebot config.
+                      Add, edit, or remove agent definitions managed in OpenCode.
                     </p>
-                  )}
+                    {(opencodeConfigFilePath || opencodeDirectory) && (
+                      <div className="space-y-0.5 pt-1 text-xs text-muted-foreground">
+                        {opencodeConfigFilePath && <p>Saving to: <code>{opencodeConfigFilePath}</code></p>}
+                        {opencodeDirectory && <p>Bound directory: <code>{opencodeDirectory}</code></p>}
+                        {opencodePersistenceMode && <p>Mode: <code>{opencodePersistenceMode}</code></p>}
+                      </div>
+                    )}
+                  </div>
+                  <Button type="button" variant="outline" onClick={addAgentType}>
+                    <Plus className="size-4" />
+                    Create custom type
+                  </Button>
                 </div>
 
                 {agentTypes.length === 0 && (
                   <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                    No agent types configured yet. Add one to get started.
+                    No OpenCode agent definitions found. Create one to get started.
                   </p>
                 )}
-                {agentTypes.map(agentType => {
-                  const runtimeAgent = runtimeAgentById.get(agentType.id);
-                  return (
-                    <div key={agentType.id} className="space-y-3 rounded-lg border border-border bg-muted/60 p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <p className="truncate font-display text-sm">{agentType.name || agentType.id}</p>
-                          <Badge variant={runtimeAgent ? "success" : "outline"}>
-                            {runtimeAgent ? "runtime" : "not detected"}
-                          </Badge>
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0"
-                          onClick={() => removeAgentType(agentType.id)}
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
+                {agentTypes.map(agentType => (
+                  <div key={agentType.id} className="space-y-3 rounded-lg border border-border bg-muted/60 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate font-display text-sm">{agentType.name || agentType.id}</p>
                       </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 p-0"
+                        onClick={() => requestRemoveAgent(agentType.id)}
+                      >
+                        <Trash2 className="size-4 text-destructive" />
+                      </Button>
+                    </div>
 
-                      <div className="grid gap-2 md:grid-cols-2">
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">ID</label>
                         <Input
                           value={agentType.id}
                           onChange={event => updateAgentTypeField(agentType.id, "id", event.target.value)}
-                          placeholder="id"
+                          placeholder="agent-id"
                         />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Name</label>
                         <Input
                           value={agentType.name ?? ""}
                           onChange={event => updateAgentTypeField(agentType.id, "name", event.target.value)}
-                          placeholder="name"
+                          placeholder="Agent name"
                         />
                       </div>
+                    </div>
 
-                      <div className="grid gap-2 md:grid-cols-2">
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Description</label>
                         <Input
                           value={agentType.description ?? ""}
                           onChange={event => updateAgentTypeField(agentType.id, "description", event.target.value)}
-                          placeholder="description"
-                        />
-                        <Input
-                          value={agentType.model ?? ""}
-                          onChange={event => updateAgentTypeField(agentType.id, "model", event.target.value)}
-                          placeholder="provider/model"
+                          placeholder="When this agent should be used"
                         />
                       </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Model</label>
+                        <div className="relative" ref={openAgentModelPickerId === agentType.id ? agentModelPickerRef : undefined}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAgentModelQuery("");
+                              setOpenAgentModelPickerId(current => (current === agentType.id ? null : agentType.id));
+                            }}
+                            className="flex h-9 w-full items-center justify-between rounded-md border border-border bg-background px-2 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/70"
+                            aria-expanded={openAgentModelPickerId === agentType.id}
+                            aria-haspopup="listbox"
+                          >
+                            <span className="truncate">
+                              {agentType.model
+                                ? availableModels.find(model => model.id === agentType.model)?.label ?? agentType.model
+                                : "Default runtime model"}
+                            </span>
+                            <ChevronsUpDown className="size-4 text-muted-foreground" />
+                          </button>
+                          {openAgentModelPickerId === agentType.id && (
+                            <div className="absolute z-30 mt-1 w-full rounded-lg border border-border bg-card p-2 shadow-lg">
+                              <Input
+                                ref={agentModelSearchInputRef}
+                                value={agentModelQuery}
+                                onChange={event => setAgentModelQuery(event.target.value)}
+                                onKeyDown={event => handleAgentModelSearchKeyDown(event, agentType.id)}
+                                placeholder="Search model..."
+                                className="h-8"
+                              />
+                              <div className="mt-2 max-h-64 overflow-y-auto" role="listbox">
+                                <button
+                                  type="button"
+                                  onClick={() => selectAgentModelFromPicker(agentType.id, "")}
+                                  className={cn(
+                                    "w-full rounded-md px-2 py-1.5 text-left text-sm transition",
+                                    !agentType.model && agentFocusedModelIndex === 0 ? "bg-primary/10" : "hover:bg-muted",
+                                  )}
+                                >
+                                  <p className="truncate">Default runtime model</p>
+                                </button>
+                                {filteredAgentModelOptions().length === 0 ? (
+                                  <p className="px-2 py-2 text-xs text-muted-foreground">No models match your search.</p>
+                                ) : (
+                                  filteredAgentModelOptions().map((option, index) => (
+                                    <button
+                                      key={option.id}
+                                      type="button"
+                                      onClick={() => selectAgentModelFromPicker(agentType.id, option.id)}
+                                      className={cn(
+                                        "w-full rounded-md px-2 py-1.5 text-left text-sm transition",
+                                        index + 1 === agentFocusedModelIndex ? "bg-primary/10" : "hover:bg-muted",
+                                      )}
+                                      data-active={agentType.model === option.id}
+                                    >
+                                      <p className="truncate">{option.label}</p>
+                                      <p className="truncate text-xs text-muted-foreground">{option.id}</p>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Prompt</label>
                       <Textarea
                         value={agentType.prompt ?? ""}
                         onChange={event => updateAgentTypeField(agentType.id, "prompt", event.target.value)}
-                        placeholder="prompt"
+                        placeholder="Instructions for this agent"
                         className="min-h-20 resize-y"
                       />
+                    </div>
 
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="size-4 text-muted-foreground" />
-                        <select
-                          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-                          value={agentType.mode}
-                          onChange={event =>
-                            updateAgentTypeField(agentType.id, "mode", event.target.value as AgentTypeDefinition["mode"])
-                          }
-                        >
-                          <option value="subagent">subagent</option>
-                          <option value="primary">primary</option>
-                          <option value="all">all</option>
-                        </select>
-                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Mode</label>
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="size-4 text-muted-foreground" />
+                          <select
+                            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                            value={agentType.mode}
+                            onChange={event =>
+                              updateAgentTypeField(agentType.id, "mode", event.target.value as AgentTypeDefinition["mode"])
+                            }
+                          >
+                            <option value="subagent">subagent</option>
+                            <option value="primary">primary</option>
+                            <option value="all">all</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Enabled</label>
+                        <label className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
                           <input
                             type="checkbox"
                             checked={!agentType.disable}
                             onChange={event => updateAgentTypeField(agentType.id, "disable", !event.target.checked)}
                           />
-                          enabled
+                          Active
                         </label>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
                 <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                  {agentTypes.length} configured agent type{agentTypes.length === 1 ? "" : "s"}.
+                  {agentTypes.length} OpenCode agent definition{agentTypes.length === 1 ? "" : "s"}.
                 </div>
               </CardContent>
             </Card>
@@ -3416,4 +3868,19 @@ export function App() {
       </div>
     </main>
   );
+
+  function renderConfirmDialog() {
+    const props = getConfirmDialogProps();
+    return (
+      <ConfirmDialog
+        open={props.open}
+        title={props.title}
+        description={props.description}
+        confirmLabel={props.confirmLabel}
+        variant={props.variant}
+        onConfirm={handleConfirmAction}
+        onCancel={() => setConfirmAction(null)}
+      />
+    );
+  }
 }

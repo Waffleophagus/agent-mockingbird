@@ -90,15 +90,6 @@ type ConfiguredMcpServer =
       timeoutMs?: number;
     };
 
-type SpecialistAgent = {
-  id: string;
-  name: string;
-  specialty: string;
-  summary: string;
-  model: string;
-  status: "available" | "busy" | "offline";
-};
-
 type RuntimeCtor = new (input: {
   defaultProviderId: string;
   defaultModelId: string;
@@ -107,7 +98,6 @@ type RuntimeCtor = new (input: {
   getEnabledSkills?: () => Array<string>;
   getEnabledMcps?: () => Array<string>;
   getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
-  getConfiguredAgents?: () => Array<SpecialistAgent>;
   enableEventSync?: boolean;
   enableSmallModelSync?: boolean;
   enableBackgroundSync?: boolean;
@@ -311,7 +301,6 @@ function createRuntimeWithClient(
     getEnabledSkills?: () => Array<string>;
     getEnabledMcps?: () => Array<string>;
     getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
-    getConfiguredAgents?: () => Array<SpecialistAgent>;
     enableSmallModelSync?: boolean;
     enableBackgroundSync?: boolean;
   },
@@ -323,7 +312,6 @@ function createRuntimeWithClient(
     getEnabledSkills: options?.getEnabledSkills,
     getEnabledMcps: options?.getEnabledMcps,
     getConfiguredMcpServers: options?.getConfiguredMcpServers,
-    getConfiguredAgents: options?.getConfiguredAgents,
     client: client as unknown,
     enableEventSync: false,
     enableSmallModelSync: options?.enableSmallModelSync ?? false,
@@ -487,16 +475,6 @@ describe("opencode runtime failover contract", () => {
           oauth: "auto",
         },
       ],
-      getConfiguredAgents: () => [
-        {
-          id: "planner",
-          name: "Planner",
-          specialty: "Planning and decomposition",
-          summary: "Break work into pragmatic execution plans.",
-          model: "test-provider/test-model",
-          status: "available",
-        },
-      ],
     });
     const ack = await runtime.sendUserMessage({
       sessionId: "main",
@@ -528,11 +506,7 @@ describe("opencode runtime failover contract", () => {
     expect(updated?.mcp?.github?.enabled).toBe(true);
     expect(updated?.mcp?.github?.url).toBe("https://api.github.com/mcp");
     expect(updated?.mcp?.linear?.enabled).toBe(false);
-    expect(updated?.agent?.planner?.model).toBe("test-provider/test-model");
-    expect(updated?.agent?.planner?.description).toBe("Planning and decomposition");
-    expect(updated?.agent?.planner?.prompt).toBe("Break work into pragmatic execution plans.");
-    expect(updated?.agent?.planner?.disable).toBe(false);
-    expect(updated?.agent?.planner?.options?.wafflebotManaged).toBe(true);
+    expect(updated?.agent).toBeUndefined();
   });
 
   test("maps authentication errors to RuntimeProviderAuthError", async () => {

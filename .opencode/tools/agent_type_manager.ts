@@ -40,42 +40,59 @@ const argsSchema = z.discriminatedUnion("action", [
     action: z.literal("list"),
   }),
   z.object({
-    action: z.literal("replace"),
-    agentTypes: z.array(agentTypeSchema),
+    action: z.literal("validate_patch"),
+    upserts: z.array(agentTypeSchema).default([]),
+    deletes: z.array(z.string().min(1)).default([]),
+  }),
+  z.object({
+    action: z.literal("apply_patch"),
+    upserts: z.array(agentTypeSchema).default([]),
+    deletes: z.array(z.string().min(1)).default([]),
     expectedHash: z.string().min(1),
-    runSmokeTest: z.boolean().optional(),
   }),
 ]);
 
 export default tool({
   description:
-    "Read or replace Wafflebot agent type definitions through validated APIs with hash conflict detection.",
+    "Manage OpenCode agent definitions through Wafflebot's OpenCode-backed APIs with validation and hash conflict detection.",
   args: {
-    action: tool.schema.enum(["list", "replace"]),
-    agentTypes: tool.schema.array(tool.schema.unknown()).optional(),
+    action: tool.schema.enum(["list", "validate_patch", "apply_patch"]),
+    upserts: tool.schema.array(tool.schema.unknown()).optional(),
+    deletes: tool.schema.array(tool.schema.string().min(1)).optional(),
     expectedHash: tool.schema.string().min(1).optional(),
-    runSmokeTest: tool.schema.boolean().optional(),
   },
   async execute(rawArgs: {
-    action: "list" | "replace";
-    agentTypes?: unknown[];
+    action: "list" | "validate_patch" | "apply_patch";
+    upserts?: unknown[];
+    deletes?: string[];
     expectedHash?: string;
-    runSmokeTest?: boolean;
   }) {
     const args = argsSchema.parse(rawArgs);
 
     if (args.action === "list") {
-      const payload = await requestJson("/api/config/agent-types");
+      const payload = await requestJson("/api/opencode/agents");
       return JSON.stringify({ ok: true, ...payload });
     }
 
-    const payload = await requestJson("/api/config/agent-types", {
-      method: "PUT",
+    if (args.action === "validate_patch") {
+      const payload = await requestJson("/api/opencode/agents/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          upserts: args.upserts,
+          deletes: args.deletes,
+        }),
+      });
+      return JSON.stringify({ ok: true, ...payload });
+    }
+
+    const payload = await requestJson("/api/opencode/agents", {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        agentTypes: args.agentTypes,
+        upserts: args.upserts,
+        deletes: args.deletes,
         expectedHash: args.expectedHash,
-        runSmokeTest: args.runSmokeTest,
       }),
     });
     return JSON.stringify({ ok: true, ...payload });

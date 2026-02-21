@@ -1,13 +1,12 @@
 import { z } from "zod";
 
 import {
-  listRuntimeAgents,
-  normalizeConfiguredAgentTypes,
-  resolveConfiguredAgentIds,
-  resolveConfiguredAgentTypesFromLegacyAgents,
-  toLegacySpecialistAgent,
-} from "../../agents/service";
-import { agentTypeDefinitionSchema, configuredMcpServerSchema, specialistAgentSchema } from "../../config/schema";
+  getOpencodeAgentStorageInfo,
+  listOpencodeAgentTypes,
+  patchOpencodeAgentTypes,
+  validateOpencodeAgentPatch,
+} from "../../agents/opencodeConfig";
+import { configuredMcpServerSchema } from "../../config/schema";
 import {
   applyConfigPatch,
   applyConfigPatchSafe,
@@ -227,77 +226,6 @@ async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Reques
   }
 }
 
-async function applyAgentsUpdate(eventStream: RuntimeEventStream, req: Request) {
-  const body = (await req.json()) as Record<string, unknown>;
-  const parsedAgents = z.array(specialistAgentSchema).safeParse(body.agents);
-  if (!parsedAgents.success) {
-    return Response.json(
-      {
-        error: "agents must be a valid agent config array",
-        details: parsedAgents.error.flatten(),
-      },
-      { status: 400 },
-    );
-  }
-
-  try {
-    const agentTypes = resolveConfiguredAgentTypesFromLegacyAgents(parsedAgents.data);
-    const result = await applyConfigPatch({
-      patch: { ui: { agents: parsedAgents.data, agentTypes } },
-      expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-      runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
-    });
-    publishConfigUpdatedEvent(eventStream, result);
-    return Response.json({
-      agents: result.snapshot.config.ui.agents,
-      hash: result.snapshot.hash,
-      smokeTest: result.smokeTest,
-    });
-  } catch (error) {
-    return configErrorResponse(eventStream, error);
-  }
-}
-
-async function applyAgentTypesUpdate(eventStream: RuntimeEventStream, req: Request) {
-  const body = (await req.json()) as Record<string, unknown>;
-  const parsedAgentTypes = z.array(agentTypeDefinitionSchema).safeParse(body.agentTypes);
-  if (!parsedAgentTypes.success) {
-    return Response.json(
-      {
-        error: "agentTypes must be a valid agent type config array",
-        details: parsedAgentTypes.error.flatten(),
-      },
-      { status: 400 },
-    );
-  }
-
-  try {
-    const normalized = normalizeConfiguredAgentTypes(parsedAgentTypes.data);
-    const result = await applyConfigPatch({
-      patch: { ui: { agentTypes: normalized } },
-      expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-      runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
-    });
-    publishConfigUpdatedEvent(eventStream, result);
-    return Response.json({
-      agentTypes: result.snapshot.config.ui.agentTypes,
-      hash: result.snapshot.hash,
-      smokeTest: result.smokeTest,
-    });
-  } catch (error) {
-    return configErrorResponse(eventStream, error);
-  }
-}
-
-function toLegacyAgentsForResponse() {
-  const snapshot = getConfigSnapshot();
-  const hasLegacyConfiguredAgents = snapshot.config.ui.agents.length > 0;
-  const legacyAgents = hasLegacyConfiguredAgents
-    ? snapshot.config.ui.agents
-    : snapshot.config.ui.agentTypes.map(toLegacySpecialistAgent);
-  return { agents: legacyAgents, hash: snapshot.hash };
-}
-
 async function getSkillCatalog() {
   const snapshot = getConfigSnapshot();
   try {
@@ -352,22 +280,24 @@ async function getMcpCatalog() {
   }
 }
 
-async function getAgentCatalog() {
-  const snapshot = getConfigSnapshot();
+async function getOpencodeAgents() {
   try {
-    const agents = await listRuntimeAgents(snapshot.config);
+    const payload = await listOpencodeAgentTypes();
     return Response.json({
-      agents,
-      configured: resolveConfiguredAgentIds(snapshot.config),
-      hash: snapshot.hash,
+      agentTypes: payload.agentTypes,
+      hash: payload.hash,
+      storage: payload.storage,
+      source: "opencode",
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load runtime agents";
+    const storage = getOpencodeAgentStorageInfo();
+    const message = error instanceof Error ? error.message : "Failed to load OpenCode agent definitions";
     return Response.json(
       {
-        agents: [],
-        configured: resolveConfiguredAgentIds(snapshot.config),
-        hash: snapshot.hash,
+        agentTypes: [],
+        hash: "",
+        storage,
+        source: "opencode",
         error: message,
       },
       { status: 502 },
@@ -615,25 +545,69 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
       POST: async (req: Request & { params: { id: string } }) => runMcpAction(req, "authRemove"),
     },
 
-    "/api/config/agents": {
-      GET: () => Response.json(toLegacyAgentsForResponse()),
-      PUT: async (req: Request) => applyAgentsUpdate(eventStream, req),
-    },
-
-    "/api/config/agents/catalog": {
-      GET: async () => getAgentCatalog(),
-    },
-
-    "/api/config/agent-types": {
-      GET: () => {
-        const snapshot = getConfigSnapshot();
-        return Response.json({ agentTypes: snapshot.config.ui.agentTypes, hash: snapshot.hash });
+    "/api/opencode/agents": {
+      GET: async () => getOpencodeAgents(),
+      PATCH: async (req: Request) => {
+        const body = (await req.json()) as Record<string, unknown>;
+        const expectedHash = typeof body.expectedHash === "string" ? body.expectedHash.trim() : "";
+        if (!expectedHash) {
+          return Response.json({ error: "expectedHash is required" }, { status: 400 });
+        }
+        const validation = await validateOpencodeAgentPatch({
+          upserts: body.upserts,
+          deletes: body.deletes,
+        });
+        if (!validation.ok) {
+          return Response.json(
+            {
+              error: "Agent patch validation failed",
+              issues: validation.issues,
+              warnings: validation.warnings,
+            },
+            { status: 400 },
+          );
+        }
+        try {
+          const result = await patchOpencodeAgentTypes({
+            upserts: validation.normalized.upserts,
+            deletes: validation.normalized.deletes,
+            expectedHash,
+          });
+          if (!result.ok) {
+            return Response.json(
+              {
+                error: result.error,
+                hash: result.currentHash,
+              },
+              { status: result.status },
+            );
+          }
+          return Response.json({
+            agentTypes: result.agentTypes,
+            hash: result.hash,
+            storage: result.storage,
+            applied: result.applied,
+          });
+        } catch (error) {
+          return Response.json(
+            {
+              error: error instanceof Error ? error.message : "Failed to update OpenCode agent definitions",
+            },
+            { status: 502 },
+          );
+        }
       },
-      PUT: async (req: Request) => applyAgentTypesUpdate(eventStream, req),
     },
 
-    "/api/config/agent-types/catalog": {
-      GET: async () => getAgentCatalog(),
+    "/api/opencode/agents/validate": {
+      POST: async (req: Request) => {
+        const body = (await req.json()) as Record<string, unknown>;
+        const validation = await validateOpencodeAgentPatch({
+          upserts: body.upserts,
+          deletes: body.deletes,
+        });
+        return Response.json(validation);
+      },
     },
   };
 }
