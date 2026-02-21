@@ -101,6 +101,7 @@ jobs:
           : "${token:?Missing PACKAGE_REGISTRY_TOKEN}"
           : "${scope:?Missing PACKAGE_REGISTRY_SCOPE}"
 
+          scope="${scope,,}"
           echo "REGISTRY_URL=${registry_url}" >> "${GITHUB_ENV}"
           echo "REGISTRY_TOKEN=${token}" >> "${GITHUB_ENV}"
           echo "REGISTRY_SCOPE=${scope}" >> "${GITHUB_ENV}"
@@ -160,4 +161,4 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun publish -- "${PACKAGE_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
+          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun publish --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}" "${PACKAGE_TARBALL}"
