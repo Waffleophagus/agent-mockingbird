@@ -37,6 +37,7 @@ import {
   relativeFromIso,
 } from "@/frontend/app/chatHelpers";
 import type {
+  AgentTypeDefinition,
   BackgroundRunSnapshot,
   ChatMessage,
   DashboardBootstrap,
@@ -51,7 +52,6 @@ import type {
   RuntimeAgent,
   RuntimeMcp,
   RuntimeSkill,
-  SpecialistAgent,
   UsageSnapshot,
 } from "@/types/dashboard";
 import "@/index.css";
@@ -85,6 +85,9 @@ interface ConfigSnapshotResponse {
         runWaitTimeoutMs?: number;
         childSessionHideAfterDays?: number;
       };
+    };
+    ui?: {
+      agentTypes?: AgentTypeDefinition[];
     };
   };
 }
@@ -155,6 +158,37 @@ function normalizeChildSessionHideAfterDays(value: unknown) {
   return Math.max(0, Math.min(365, Math.floor(value)));
 }
 
+function fromLegacyAgent(agent: DashboardBootstrap["agents"][number]): AgentTypeDefinition {
+  return {
+    id: agent.id,
+    name: agent.name,
+    description: agent.specialty,
+    prompt: agent.summary,
+    model: agent.model || undefined,
+    mode: "subagent",
+    hidden: false,
+    disable: agent.status === "offline",
+    options: {
+      wafflebotManagedLegacy: true,
+      wafflebotDisplayName: agent.name,
+      wafflebotStatus: agent.status,
+    },
+  };
+}
+
+function normalizeAgentTypeDraft(agentType: AgentTypeDefinition): AgentTypeDefinition {
+  return {
+    ...agentType,
+    id: agentType.id.trim(),
+    name: agentType.name?.trim() || undefined,
+    description: agentType.description?.trim() || undefined,
+    prompt: agentType.prompt?.trim() || undefined,
+    model: agentType.model?.trim() || undefined,
+    variant: agentType.variant?.trim() || undefined,
+    options: agentType.options ?? {},
+  };
+}
+
 export function App() {
   type StreamStatus = "connecting" | "connected" | "reconnecting";
   type DashboardPage = "chat" | "skills" | "mcp" | "agents";
@@ -172,7 +206,7 @@ export function App() {
   const [modelQuery, setModelQuery] = useState("");
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionError, setSessionError] = useState("");
-  const [agents, setAgents] = useState<SpecialistAgent[]>([]);
+  const [agentTypes, setAgentTypes] = useState<AgentTypeDefinition[]>([]);
   const [dashboardPage, setDashboardPage] = useState<DashboardPage>("chat");
   const [configHash, setConfigHash] = useState("");
   const [skillsDraft, setSkillsDraft] = useState("");
@@ -257,7 +291,7 @@ export function App() {
       setSessions(sortSessionsByActivity(payload.sessions));
       setSkillsDraft(payload.skills.join("\n"));
       setMcpsDraft(payload.mcps.join("\n"));
-      setAgents(payload.agents);
+      setAgentTypes(payload.agents.map(fromLegacyAgent));
       setUsage(payload.usage);
       setHeartbeatAt(payload.heartbeat.at);
       setActiveSessionId(payload.sessions[0]?.id ?? "");
@@ -273,6 +307,7 @@ export function App() {
           skillsCatalogResponse,
           mcpsCatalogResponse,
           agentsCatalogResponse,
+          agentTypesResponse,
           backgroundInFlightResponse,
         ] = await Promise.all([
           fetch("/api/opencode/models"),
@@ -282,6 +317,7 @@ export function App() {
           fetch("/api/config/skills/catalog"),
           fetch("/api/config/mcps/catalog"),
           fetch("/api/config/agents/catalog"),
+          fetch("/api/config/agent-types"),
           fetch("/api/background?limit=500"),
         ]);
         const modelsPayload = (await modelsResponse.json()) as { models?: ModelOption[]; error?: string };
@@ -313,6 +349,11 @@ export function App() {
           hash?: string;
           error?: string;
         };
+        const agentTypesPayload = (await agentTypesResponse.json()) as {
+          agentTypes?: AgentTypeDefinition[];
+          hash?: string;
+          error?: string;
+        };
         const backgroundInFlightPayload = (await backgroundInFlightResponse.json()) as BackgroundRunsResponse;
         if (!alive) return;
 
@@ -323,6 +364,11 @@ export function App() {
         setAvailableSkills(Array.isArray(skillsCatalogPayload.skills) ? skillsCatalogPayload.skills : []);
         setAvailableMcps(Array.isArray(mcpsCatalogPayload.mcps) ? mcpsCatalogPayload.mcps : []);
         setAvailableAgents(Array.isArray(agentsCatalogPayload.agents) ? agentsCatalogPayload.agents : []);
+        if (Array.isArray(agentTypesPayload.agentTypes)) {
+          setAgentTypes(agentTypesPayload.agentTypes.map(normalizeAgentTypeDraft));
+        } else if (Array.isArray(configPayload.config?.ui?.agentTypes)) {
+          setAgentTypes(configPayload.config.ui.agentTypes.map(normalizeAgentTypeDraft));
+        }
         setMcpServers(Array.isArray(mcpsCatalogPayload.servers) ? mcpsCatalogPayload.servers : []);
         if (Array.isArray(skillsCatalogPayload.enabled)) {
           setSkillsDraft(skillsCatalogPayload.enabled.join("\n"));
@@ -881,8 +927,8 @@ export function App() {
   );
   const runtimeAgentById = useMemo(() => new Map(availableAgents.map(agent => [agent.id, agent])), [availableAgents]);
   const configuredAgentIdSet = useMemo(
-    () => new Set(agents.map(agent => agent.id.trim()).filter(Boolean)),
-    [agents],
+    () => new Set(agentTypes.map(agentType => agentType.id.trim()).filter(Boolean)),
+    [agentTypes],
   );
   const discoverableAgents = useMemo(
     () => availableAgents.filter(agent => !configuredAgentIdSet.has(agent.id)),
@@ -1800,44 +1846,54 @@ export function App() {
     setMcpServers(current => current.filter(server => server.id !== mcp));
   }
 
-  function addAgent() {
-    const next: SpecialistAgent = {
+  function addAgentType() {
+    const next: AgentTypeDefinition = {
       id: `agent-${crypto.randomUUID().slice(0, 8)}`,
-      name: "New Agent",
-      specialty: "Add specialty",
-      summary: "Describe what this agent should handle.",
+      name: "New Agent Type",
+      description: "Describe when to use this agent type.",
+      prompt: "Describe how this agent type should behave.",
       model: activeSession?.model ?? modelOptions[0]?.id ?? "opencode/kimi-k2.5-free",
-      status: "available",
+      mode: "subagent",
+      hidden: false,
+      disable: false,
+      options: {},
     };
-    setAgents(current => [...current, next]);
+    setAgentTypes(current => [...current, next]);
   }
 
   function addRuntimeAgent(agent: RuntimeAgent) {
     if (!agent.id.trim()) return;
-    setAgents(current => {
+    setAgentTypes(current => {
       if (current.some(existing => existing.id === agent.id)) return current;
-      const next: SpecialistAgent = {
+      const next: AgentTypeDefinition = {
         id: agent.id,
         name: agent.id,
-        specialty: agent.description?.trim() || "Runtime-discovered agent",
-        summary: agent.description?.trim() || "Runtime-discovered OpenCode agent.",
+        description: agent.description?.trim() || "Runtime-discovered agent type.",
+        prompt: agent.description?.trim() || "Runtime-discovered OpenCode agent type.",
         model: agent.model?.trim() || activeSession?.model || modelOptions[0]?.id || "opencode/kimi-k2.5-free",
-        status: agent.enabled ? "available" : "offline",
+        mode: agent.mode,
+        hidden: agent.hidden,
+        disable: !agent.enabled,
+        options: {},
       };
       return [...current, next];
     });
   }
 
-  function removeAgent(agentId: string) {
-    setAgents(current => current.filter(agent => agent.id !== agentId));
+  function removeAgentType(agentTypeId: string) {
+    setAgentTypes(current => current.filter(agentType => agentType.id !== agentTypeId));
   }
 
-  function updateAgentField<K extends keyof SpecialistAgent>(agentId: string, field: K, value: SpecialistAgent[K]) {
-    setAgents(current =>
-      current.map(agent => {
-        if (agent.id !== agentId) return agent;
+  function updateAgentTypeField<K extends keyof AgentTypeDefinition>(
+    agentTypeId: string,
+    field: K,
+    value: AgentTypeDefinition[K],
+  ) {
+    setAgentTypes(current =>
+      current.map(agentType => {
+        if (agentType.id !== agentTypeId) return agentType;
         return {
-          ...agent,
+          ...agentType,
           [field]: value,
         };
       }),
@@ -1915,32 +1971,32 @@ export function App() {
     }
   }
 
-  async function saveAgentsConfig() {
+  async function saveAgentTypesConfig() {
     setIsSavingAgents(true);
     setAgentsError("");
     try {
-      const response = await fetch("/api/config/agents", {
+      const response = await fetch("/api/config/agent-types", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agents,
+          agentTypes: agentTypes.map(normalizeAgentTypeDraft),
           expectedHash: configHash || undefined,
         }),
       });
       const payload = (await response.json()) as {
-        agents?: SpecialistAgent[];
+        agentTypes?: AgentTypeDefinition[];
         hash?: string;
         error?: string;
       };
-      if (!response.ok || !Array.isArray(payload.agents)) {
-        throw new Error(payload.error ?? "Failed to save agents");
+      if (!response.ok || !Array.isArray(payload.agentTypes)) {
+        throw new Error(payload.error ?? "Failed to save agent types");
       }
 
-      setAgents(payload.agents);
+      setAgentTypes(payload.agentTypes.map(normalizeAgentTypeDraft));
       setConfigHash(typeof payload.hash === "string" ? payload.hash : configHash);
       await refreshAgentCatalog();
     } catch (error) {
-      setAgentsError(error instanceof Error ? error.message : "Failed to save agents");
+      setAgentsError(error instanceof Error ? error.message : "Failed to save agent types");
     } finally {
       setIsSavingAgents(false);
     }
@@ -3210,17 +3266,17 @@ export function App() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Users className="size-4" />
-                      Agent Config Management
+                      Agent Type Management
                     </CardTitle>
-                    <CardDescription>Edit delegation agents and persist config changes.</CardDescription>
+                    <CardDescription>Edit agent types and persist config changes.</CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" onClick={addAgent}>
+                    <Button type="button" variant="outline" onClick={addAgentType}>
                       <Plus className="size-4" />
-                      Add agent
+                      Add agent type
                     </Button>
-                    <Button type="button" onClick={saveAgentsConfig} disabled={isSavingAgents}>
-                      {isSavingAgents ? "Saving..." : "Save agents"}
+                    <Button type="button" onClick={saveAgentTypesConfig} disabled={isSavingAgents}>
+                      {isSavingAgents ? "Saving..." : "Save agent types"}
                     </Button>
                   </div>
                 </div>
@@ -3230,13 +3286,13 @@ export function App() {
               <CardContent className="min-h-0 space-y-3 overflow-y-auto">
                 <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">Runtime Agents</p>
+                    <p className="text-sm font-medium">Runtime Agent Types</p>
                     <Button type="button" variant="outline" size="sm" onClick={() => void refreshAgentCatalog()} disabled={loadingAgentCatalog}>
                       {loadingAgentCatalog ? "Refreshing..." : "Refresh"}
                     </Button>
                   </div>
                   {availableAgents.length === 0 && (
-                    <p className="text-xs text-muted-foreground">No runtime agents discovered yet.</p>
+                    <p className="text-xs text-muted-foreground">No runtime agent types discovered yet.</p>
                   )}
                   {availableAgents.map(runtimeAgent => (
                     <div key={runtimeAgent.id} className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1.5">
@@ -3265,18 +3321,18 @@ export function App() {
                   )}
                 </div>
 
-                {agents.length === 0 && (
+                {agentTypes.length === 0 && (
                   <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                    No agent configs yet. Add one to get started.
+                    No agent types configured yet. Add one to get started.
                   </p>
                 )}
-                {agents.map(agent => {
-                  const runtimeAgent = runtimeAgentById.get(agent.id);
+                {agentTypes.map(agentType => {
+                  const runtimeAgent = runtimeAgentById.get(agentType.id);
                   return (
-                    <div key={agent.id} className="space-y-3 rounded-lg border border-border bg-muted/60 p-3">
+                    <div key={agentType.id} className="space-y-3 rounded-lg border border-border bg-muted/60 p-3">
                       <div className="flex items-center justify-between">
                         <div className="flex min-w-0 items-center gap-2">
-                          <p className="truncate font-display text-sm">{agent.name || agent.id}</p>
+                          <p className="truncate font-display text-sm">{agentType.name || agentType.id}</p>
                           <Badge variant={runtimeAgent ? "success" : "outline"}>
                             {runtimeAgent ? "runtime" : "not detected"}
                           </Badge>
@@ -3286,7 +3342,7 @@ export function App() {
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0"
-                          onClick={() => removeAgent(agent.id)}
+                          onClick={() => removeAgentType(agentType.id)}
                         >
                           <Trash2 className="size-4 text-destructive" />
                         </Button>
@@ -3294,34 +3350,34 @@ export function App() {
 
                       <div className="grid gap-2 md:grid-cols-2">
                         <Input
-                          value={agent.id}
-                          onChange={event => updateAgentField(agent.id, "id", event.target.value)}
+                          value={agentType.id}
+                          onChange={event => updateAgentTypeField(agentType.id, "id", event.target.value)}
                           placeholder="id"
                         />
                         <Input
-                          value={agent.name}
-                          onChange={event => updateAgentField(agent.id, "name", event.target.value)}
+                          value={agentType.name ?? ""}
+                          onChange={event => updateAgentTypeField(agentType.id, "name", event.target.value)}
                           placeholder="name"
                         />
                       </div>
 
                       <div className="grid gap-2 md:grid-cols-2">
                         <Input
-                          value={agent.specialty}
-                          onChange={event => updateAgentField(agent.id, "specialty", event.target.value)}
-                          placeholder="specialty"
+                          value={agentType.description ?? ""}
+                          onChange={event => updateAgentTypeField(agentType.id, "description", event.target.value)}
+                          placeholder="description"
                         />
                         <Input
-                          value={agent.model}
-                          onChange={event => updateAgentField(agent.id, "model", event.target.value)}
+                          value={agentType.model ?? ""}
+                          onChange={event => updateAgentTypeField(agentType.id, "model", event.target.value)}
                           placeholder="provider/model"
                         />
                       </div>
 
                       <Textarea
-                        value={agent.summary}
-                        onChange={event => updateAgentField(agent.id, "summary", event.target.value)}
-                        placeholder="summary"
+                        value={agentType.prompt ?? ""}
+                        onChange={event => updateAgentTypeField(agentType.id, "prompt", event.target.value)}
+                        placeholder="prompt"
                         className="min-h-20 resize-y"
                       />
 
@@ -3329,25 +3385,29 @@ export function App() {
                         <ShieldCheck className="size-4 text-muted-foreground" />
                         <select
                           className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-                          value={agent.status}
+                          value={agentType.mode}
                           onChange={event =>
-                            updateAgentField(
-                              agent.id,
-                              "status",
-                              event.target.value as SpecialistAgent["status"],
-                            )
+                            updateAgentTypeField(agentType.id, "mode", event.target.value as AgentTypeDefinition["mode"])
                           }
                         >
-                          <option value="available">available</option>
-                          <option value="busy">busy</option>
-                          <option value="offline">offline</option>
+                          <option value="subagent">subagent</option>
+                          <option value="primary">primary</option>
+                          <option value="all">all</option>
                         </select>
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            checked={!agentType.disable}
+                            onChange={event => updateAgentTypeField(agentType.id, "disable", !event.target.checked)}
+                          />
+                          enabled
+                        </label>
                       </div>
                     </div>
                   );
                 })}
                 <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                  {agents.length} configured agent{agents.length === 1 ? "" : "s"}.
+                  {agentTypes.length} configured agent type{agentTypes.length === 1 ? "" : "s"}.
                 </div>
               </CardContent>
             </Card>
