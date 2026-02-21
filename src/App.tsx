@@ -1,21 +1,6 @@
 import {
   Activity,
-  AlertTriangle,
-  BookOpen,
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  ChevronsUpDown,
-  CircleSlash,
   Cpu,
-  LoaderCircle,
-  Plus,
-  RefreshCcw,
-  Scissors,
-  Send,
-  ShieldCheck,
-  SlidersHorizontal,
-  Trash2,
   Users,
   Wrench,
 } from "lucide-react";
@@ -24,11 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import {
   type ActiveSend,
   type LocalChatMessage,
@@ -37,6 +18,33 @@ import {
   normalizeRequestError,
   relativeFromIso,
 } from "@/frontend/app/chatHelpers";
+import {
+  type AgentRunSnapshot,
+  type BackgroundRunsResponse,
+  type ConfigSnapshotResponse,
+  type ConfirmAction,
+  type OpencodeAgentStorageResponse,
+  type RuntimeInfoResponse,
+  fromLegacyAgent,
+  getConfirmDialogProps,
+} from "@/frontend/app/dashboardTypes";
+import {
+  DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS,
+  DEFAULT_RUN_WAIT_TIMEOUT_MS,
+  RUN_POLL_INTERVAL_MS,
+  extractRunErrorMessage,
+  mergeBackgroundRunsBySession,
+  normalizeAgentTypeDraft,
+  normalizeChildSessionHideAfterDays,
+  sortBackgroundRuns,
+  sortSessionsByActivity,
+  upsertSessionList,
+} from "@/frontend/app/dashboardUtils";
+import { AgentsPage } from "@/frontend/app/pages/AgentsPage";
+import { ChatPage } from "@/frontend/app/pages/ChatPage";
+import { McpPage } from "@/frontend/app/pages/McpPage";
+import { SkillsPage } from "@/frontend/app/pages/SkillsPage";
+import { useSessionHierarchy } from "@/frontend/app/useSessionHierarchy";
 import type {
   AgentTypeDefinition,
   BackgroundRunSnapshot,
@@ -55,177 +63,6 @@ import type {
   UsageSnapshot,
 } from "@/types/dashboard";
 import "@/index.css";
-
-const RUN_POLL_INTERVAL_MS = 350;
-const DEFAULT_RUN_WAIT_TIMEOUT_MS = 180_000;
-const DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS = 3;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-type AgentRunState = "queued" | "running" | "completed" | "failed";
-
-interface AgentRunSnapshot {
-  id: string;
-  sessionId: string;
-  state: AgentRunState;
-  error?: unknown;
-}
-
-interface BackgroundRunsResponse {
-  runs?: BackgroundRunSnapshot[];
-  run?: BackgroundRunSnapshot;
-  aborted?: boolean;
-  error?: string;
-}
-
-interface ConfigSnapshotResponse {
-  hash?: string;
-  config?: {
-    runtime?: {
-      opencode?: {
-        runWaitTimeoutMs?: number;
-        childSessionHideAfterDays?: number;
-      };
-    };
-    ui?: {
-      agentTypes?: AgentTypeDefinition[];
-    };
-  };
-}
-
-interface OpencodeAgentStorageResponse {
-  directory?: string;
-  configFilePath?: string;
-  persistenceMode?: string;
-}
-
-interface RuntimeInfoResponse {
-  opencode?: {
-    directory?: string;
-    effectiveConfigPath?: string;
-    persistenceMode?: string;
-  };
-}
-
-const IN_FLIGHT_BACKGROUND_STATUSES = new Set<BackgroundRunSnapshot["status"]>([
-  "created",
-  "running",
-  "retrying",
-  "idle",
-]);
-
-function extractRunErrorMessage(error: unknown): string {
-  if (!error || typeof error !== "object") {
-    return "Run failed.";
-  }
-  const record = error as Record<string, unknown>;
-  if (typeof record.message === "string" && record.message.trim()) {
-    return record.message.trim();
-  }
-  if (typeof record.name === "string" && record.name.trim()) {
-    return record.name.trim();
-  }
-  return "Run failed.";
-}
-
-function sortBackgroundRuns(input: BackgroundRunSnapshot[]) {
-  return [...input].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
-}
-
-function upsertBackgroundRunList(current: BackgroundRunSnapshot[], nextRun: BackgroundRunSnapshot) {
-  const filtered = current.filter(run => run.runId !== nextRun.runId);
-  return sortBackgroundRuns([nextRun, ...filtered]);
-}
-
-function sortSessionsByActivity(input: SessionSummary[]) {
-  return [...input].sort((left, right) => {
-    if (left.id === "main" && right.id !== "main") return -1;
-    if (right.id === "main" && left.id !== "main") return 1;
-    return Date.parse(right.lastActiveAt) - Date.parse(left.lastActiveAt);
-  });
-}
-
-function upsertSessionList(current: SessionSummary[], nextSession: SessionSummary) {
-  const filtered = current.filter(session => session.id !== nextSession.id);
-  return sortSessionsByActivity([nextSession, ...filtered]);
-}
-
-function mergeBackgroundRunsBySession(
-  current: Record<string, BackgroundRunSnapshot[]>,
-  runs: BackgroundRunSnapshot[],
-) {
-  if (runs.length === 0) return current;
-  const next = { ...current };
-  for (const run of runs) {
-    next[run.parentSessionId] = upsertBackgroundRunList(next[run.parentSessionId] ?? [], run);
-  }
-  return next;
-}
-
-function isBackgroundRunInFlight(run: BackgroundRunSnapshot) {
-  return IN_FLIGHT_BACKGROUND_STATUSES.has(run.status);
-}
-
-function normalizeChildSessionHideAfterDays(value: unknown) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS;
-  }
-  return Math.max(0, Math.min(365, Math.floor(value)));
-}
-
-function fromLegacyAgent(agent: DashboardBootstrap["agents"][number]): AgentTypeDefinition {
-  return {
-    id: agent.id,
-    name: agent.name,
-    description: agent.specialty,
-    prompt: agent.summary,
-    model: agent.model || undefined,
-    mode: "subagent",
-    hidden: false,
-    disable: agent.status === "offline",
-    options: {
-      wafflebotManagedLegacy: true,
-      wafflebotDisplayName: agent.name,
-      wafflebotStatus: agent.status,
-    },
-  };
-}
-
-function normalizeAgentTypeDraft(agentType: AgentTypeDefinition): AgentTypeDefinition {
-  return {
-    ...agentType,
-    id: agentType.id.trim(),
-    name: agentType.name?.trim() || undefined,
-    description: agentType.description?.trim() || undefined,
-    prompt: agentType.prompt?.trim() || undefined,
-    model: agentType.model?.trim() || undefined,
-    variant: agentType.variant?.trim() || undefined,
-    options: agentType.options ?? {},
-  };
-}
-
-function Skeleton({ className }: { className?: string }) {
-  return (
-    <div
-      className={cn(
-        "animate-pulse rounded-md bg-muted/70",
-        className
-      )}
-    />
-  );
-}
-
-function cn(...classes: (string | boolean | undefined | null)[]) {
-  return classes.filter(Boolean).join(" ");
-}
-
-type ConfirmAction =
-  | { type: "abort-run"; sessionId: string }
-  | { type: "abort-background"; runId: string }
-  | { type: "remove-skill"; skillId: string }
-  | { type: "remove-mcp"; mcpId: string }
-  | { type: "disconnect-mcp"; mcpId: string }
-  | { type: "remove-agent"; agentId: string }
-  | null;
 
 export function App() {
   type StreamStatus = "connecting" | "connected" | "reconnecting";
@@ -318,6 +155,7 @@ export function App() {
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [focusedModelIndex, setFocusedModelIndex] = useState(0);
+  const [nowMs, setNowMs] = useState(0);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const loadedSessionsRef = useRef(new Set<string>());
   const loadedBackgroundSessionsRef = useRef(new Set<string>());
@@ -732,6 +570,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    setNowMs(Date.now());
+    const timer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 60_000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const refreshMemory = async () => {
       try {
@@ -768,172 +616,31 @@ export function App() {
     [sessions, activeSessionId],
   );
   const activeSessionRunStatus = activeSession ? runStatusBySession[activeSession.id] : undefined;
-  const activeSessionRunError = activeSession ? runErrorsBySession[activeSession.id] : "";
-  const activeSessionCompactedAt = activeSession ? compactedAtBySession[activeSession.id] : "";
-  const activeBackgroundRuns = useMemo(
-    () => sortBackgroundRuns(backgroundRunsBySession[activeSessionId] ?? []),
-    [backgroundRunsBySession, activeSessionId],
-  );
-  const inFlightBackgroundRunsBySession = useMemo(() => {
-    const next: Record<string, BackgroundRunSnapshot[]> = {};
-    for (const [sessionId, runs] of Object.entries(backgroundRunsBySession)) {
-      const inFlight = runs.filter(isBackgroundRunInFlight);
-      if (inFlight.length > 0) {
-        next[sessionId] = sortBackgroundRuns(inFlight);
-      }
-    }
-    return next;
-  }, [backgroundRunsBySession]);
-  const latestBackgroundRunByChildSessionId = useMemo(() => {
-    const next = new Map<string, BackgroundRunSnapshot>();
-    for (const runs of Object.values(backgroundRunsBySession)) {
-      for (const run of runs) {
-        if (!run.childSessionId) continue;
-        const current = next.get(run.childSessionId);
-        if (!current || Date.parse(run.updatedAt) > Date.parse(current.updatedAt)) {
-          next.set(run.childSessionId, run);
-        }
-      }
-    }
-    return next;
-  }, [backgroundRunsBySession]);
-  const childParentSessionIdByChildSessionId = useMemo(() => {
-    const next = new Map<string, string>();
-    for (const runs of Object.values(backgroundRunsBySession)) {
-      for (const run of runs) {
-        if (!run.childSessionId) continue;
-        next.set(run.childSessionId, run.parentSessionId);
-      }
-    }
-    return next;
-  }, [backgroundRunsBySession]);
-  const sessionsById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
-  const rootSessions = useMemo(
-    () =>
-      sessions.filter(session => {
-        const parentSessionId = childParentSessionIdByChildSessionId.get(session.id);
-        if (!parentSessionId) return true;
-        return !sessionsById.has(parentSessionId);
-      }),
-    [sessions, childParentSessionIdByChildSessionId, sessionsById],
-  );
-  const childSessionsByParentSessionId = useMemo(() => {
-    const next: Record<string, SessionSummary[]> = {};
-    for (const session of sessions) {
-      const parentSessionId = childParentSessionIdByChildSessionId.get(session.id);
-      if (!parentSessionId || !sessionsById.has(parentSessionId)) continue;
-      if (!next[parentSessionId]) next[parentSessionId] = [];
-      next[parentSessionId].push(session);
-    }
-    for (const [parentSessionId, children] of Object.entries(next)) {
-      next[parentSessionId] = sortSessionsByActivity(children);
-    }
-    return next;
-  }, [sessions, childParentSessionIdByChildSessionId, sessionsById]);
-  const sessionSearchNeedle = useMemo(() => childSessionSearchQuery.trim().toLowerCase(), [childSessionSearchQuery]);
-  const childSessionVisibilityByParentSessionId = useMemo(() => {
-    const visible: Record<string, SessionSummary[]> = {};
-    const hiddenByAgeCount: Record<string, number> = {};
-    const hideAfterMs = childSessionHideAfterDays * DAY_MS;
-    const now = Date.now();
-
-    for (const [parentSessionId, children] of Object.entries(childSessionsByParentSessionId)) {
-      const nextVisible: SessionSummary[] = [];
-      let hidden = 0;
-
-      for (const child of children) {
-        const childRun = latestBackgroundRunByChildSessionId.get(child.id) ?? null;
-        const inFlight = childRun ? isBackgroundRunInFlight(childRun) : false;
-        const lastActiveAtMs = Date.parse(child.lastActiveAt);
-        const hiddenByAge =
-          !showAllChildren &&
-          hideAfterMs > 0 &&
-          Number.isFinite(lastActiveAtMs) &&
-          now - lastActiveAtMs > hideAfterMs &&
-          child.id !== activeSessionId &&
-          !inFlight;
-        if (hiddenByAge) {
-          hidden += 1;
-          continue;
-        }
-        nextVisible.push(child);
-      }
-
-      visible[parentSessionId] = nextVisible;
-      hiddenByAgeCount[parentSessionId] = hidden;
-    }
-
-    return { visible, hiddenByAgeCount };
-  }, [
-    childSessionsByParentSessionId,
+  const activeSessionRunError = activeSession ? (runErrorsBySession[activeSession.id] ?? "") : "";
+  const activeSessionCompactedAt = activeSession ? (compactedAtBySession[activeSession.id] ?? "") : "";
+  const {
+    activeBackgroundRuns,
+    inFlightBackgroundRunsBySession,
     latestBackgroundRunByChildSessionId,
+    rootSessions,
+    childSessionsByParentSessionId,
+    sessionSearchNeedle,
+    childSessionVisibilityByParentSessionId,
+    childSessionSearchMatchBySessionId,
+    parentSessionSearchMatchBySessionId,
+    totalSessionSearchMatches,
+    totalHiddenChildSessionsByAge,
+    totalInFlightBackgroundRuns,
+    activeBackgroundInFlightCount,
+  } = useSessionHierarchy({
+    activeSessionId,
+    sessions,
+    backgroundRunsBySession,
+    childSessionSearchQuery,
     showAllChildren,
     childSessionHideAfterDays,
-    activeSessionId,
-  ]);
-  const childSessionSearchMatchBySessionId = useMemo(() => {
-    const matches = new Map<string, boolean>();
-    if (!sessionSearchNeedle) return matches;
-    for (const [parentSessionId, children] of Object.entries(childSessionVisibilityByParentSessionId.visible)) {
-      for (const child of children) {
-        const childRun = latestBackgroundRunByChildSessionId.get(child.id) ?? null;
-        const haystack = `${child.title}\n${child.model}\n${childRun?.prompt ?? ""}`.toLowerCase();
-        matches.set(child.id, haystack.includes(sessionSearchNeedle));
-      }
-      if (!children.length) {
-        matches.set(parentSessionId, false);
-      }
-    }
-    return matches;
-  }, [childSessionVisibilityByParentSessionId.visible, latestBackgroundRunByChildSessionId, sessionSearchNeedle]);
-  const parentSessionSearchMatchBySessionId = useMemo(() => {
-    const matches = new Map<string, boolean>();
-    if (!sessionSearchNeedle) return matches;
-
-    for (const session of rootSessions) {
-      const inFlightRuns = inFlightBackgroundRunsBySession[session.id] ?? [];
-      const children = childSessionVisibilityByParentSessionId.visible[session.id] ?? [];
-      const parentMatch = `${session.title}\n${session.model}`.toLowerCase().includes(sessionSearchNeedle);
-      const childMatch = children.some(child => childSessionSearchMatchBySessionId.get(child.id) === true);
-      const runMatch = inFlightRuns.some(run => (run.prompt ?? "").toLowerCase().includes(sessionSearchNeedle));
-      matches.set(session.id, parentMatch || childMatch || runMatch);
-    }
-
-    return matches;
-  }, [
-    sessionSearchNeedle,
-    rootSessions,
-    inFlightBackgroundRunsBySession,
-    childSessionVisibilityByParentSessionId.visible,
-    childSessionSearchMatchBySessionId,
-  ]);
-  const totalSessionSearchMatches = useMemo(() => {
-    if (!sessionSearchNeedle) return 0;
-    let count = 0;
-    for (const matched of parentSessionSearchMatchBySessionId.values()) {
-      if (matched) count += 1;
-    }
-    for (const matched of childSessionSearchMatchBySessionId.values()) {
-      if (matched) count += 1;
-    }
-    return count;
-  }, [sessionSearchNeedle, parentSessionSearchMatchBySessionId, childSessionSearchMatchBySessionId]);
-  const totalHiddenChildSessionsByAge = useMemo(
-    () =>
-      Object.values(childSessionVisibilityByParentSessionId.hiddenByAgeCount).reduce((count, value) => count + value, 0),
-    [childSessionVisibilityByParentSessionId.hiddenByAgeCount],
-  );
-  const totalInFlightBackgroundRuns = useMemo(
-    () =>
-      Object.values(inFlightBackgroundRunsBySession).reduce((count, runs) => {
-        return count + runs.length;
-      }, 0),
-    [inFlightBackgroundRunsBySession],
-  );
-  const activeBackgroundInFlightCount = useMemo(
-    () => activeBackgroundRuns.filter(run => isBackgroundRunInFlight(run)).length,
-    [activeBackgroundRuns],
-  );
+    referenceNowMs: nowMs,
+  });
   const isActiveSessionRunning =
     Boolean(activeSend) && Boolean(activeSession) && activeSend?.sessionId === activeSession?.id;
   const canAbortActiveSession = isActiveSessionRunning && !isAborting;
@@ -1511,71 +1218,6 @@ export function App() {
       case "remove-agent":
         removeAgentType(action.agentId);
         break;
-    }
-  }
-
-  function getConfirmDialogProps(): {
-    open: boolean;
-    title: string;
-    description?: string;
-    confirmLabel: string;
-    variant: "default" | "danger";
-  } {
-    if (!confirmAction) {
-      return { open: false, title: "", confirmLabel: "", variant: "default" };
-    }
-
-    switch (confirmAction.type) {
-      case "abort-run":
-        return {
-          open: true,
-          title: "Abort active run?",
-          description: "This will cancel the current OpenCode request. The session state may be inconsistent.",
-          confirmLabel: "Abort",
-          variant: "danger",
-        };
-      case "abort-background":
-        return {
-          open: true,
-          title: "Abort background run?",
-          description: "This will stop the background task. Progress will be lost.",
-          confirmLabel: "Abort",
-          variant: "danger",
-        };
-      case "remove-skill":
-        return {
-          open: true,
-          title: "Remove skill?",
-          description: `This will remove "${confirmAction.skillId}" from the configured skills.`,
-          confirmLabel: "Remove",
-          variant: "danger",
-        };
-      case "remove-mcp":
-        return {
-          open: true,
-          title: "Remove MCP server?",
-          description: `This will remove "${confirmAction.mcpId}" from the allow-list and delete its configuration.`,
-          confirmLabel: "Remove",
-          variant: "danger",
-        };
-      case "disconnect-mcp":
-        return {
-          open: true,
-          title: "Disconnect MCP server?",
-          description: `This will disconnect "${confirmAction.mcpId}" from the runtime. You can reconnect later.`,
-          confirmLabel: "Disconnect",
-          variant: "danger",
-        };
-      case "remove-agent":
-        return {
-          open: true,
-          title: "Remove agent type?",
-          description: "This will delete the agent type configuration.",
-          confirmLabel: "Remove",
-          variant: "danger",
-        };
-      default:
-        return { open: false, title: "", confirmLabel: "", variant: "default" };
     }
   }
 
@@ -2461,1424 +2103,193 @@ export function App() {
         </header>
 
         {dashboardPage === "chat" && (
-          <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
-          <Card className="panel-noise flex min-h-0 flex-col">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <CardTitle className="flex items-center gap-2">
-                    <Bot className="size-4" />
-                    Sessions
-                  </CardTitle>
-                  <CardDescription>Switch sessions and set the model for each conversation.</CardDescription>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void refreshInFlightBackgroundRuns()}
-                  className="w-full justify-center"
-                >
-                  <RefreshCcw className="size-4" />
-                  runs {totalInFlightBackgroundRuns}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={createNewSession}
-                  disabled={isCreatingSession}
-                  className="w-full justify-center"
-                >
-                  <Plus className="size-4" />
-                  {isCreatingSession ? "Creating..." : "New"}
-                </Button>
-              </div>
-              <div className="space-y-2">
-                <div className="relative">
-                  <Input
-                    value={childSessionSearchQuery}
-                    onChange={event => setChildSessionSearchQuery(event.target.value)}
-                    placeholder="Search threads and topics..."
-                    className="h-8 pr-8 text-xs"
-                  />
-                  {childSessionSearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setChildSessionSearchQuery("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      <CircleSlash className="size-4" />
-                    </button>
-                  )}
-                </div>
-                {sessionSearchNeedle && (
-                  <p className="px-1 text-[11px] text-muted-foreground">
-                    {totalSessionSearchMatches} match{totalSessionSearchMatches === 1 ? "" : "es"}
-                  </p>
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 w-full justify-start px-2 text-xs text-muted-foreground"
-                  onClick={() => setShowAllChildren(current => !current)}
-                >
-                  {showAllChildren
-                    ? "Hide old children"
-                    : `Show all children${totalHiddenChildSessionsByAge > 0 ? ` (${totalHiddenChildSessionsByAge} hidden)` : ""}`}
-                </Button>
-              </div>
-              {sessionError && <p className="text-xs text-destructive">{sessionError}</p>}
-            </CardHeader>
-            <CardContent className="space-y-2 overflow-y-auto">
-              {loading && (
-                <div className="space-y-2">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="rounded-xl border border-border bg-muted/70 p-3">
-                      <Skeleton className="h-4 w-3/4" />
-                      <Skeleton className="mt-2 h-3 w-1/2" />
-                      <Skeleton className="mt-2 h-3 w-1/4" />
-                    </div>
-                  ))}
-                </div>
-              )}
-              {!loading && rootSessions.map(session => {
-                const childSessions = childSessionsByParentSessionId[session.id] ?? [];
-                const visibleChildSessions = childSessionVisibilityByParentSessionId.visible[session.id] ?? [];
-                const hiddenChildrenByAge = childSessionVisibilityByParentSessionId.hiddenByAgeCount[session.id] ?? 0;
-                const parentSearchMatch = sessionSearchNeedle
-                  ? parentSessionSearchMatchBySessionId.get(session.id) === true
-                  : false;
-                const matchingVisibleChildCount = sessionSearchNeedle
-                  ? visibleChildSessions.filter(child => childSessionSearchMatchBySessionId.get(child.id) === true).length
-                  : 0;
-                const hasChildren = childSessions.length > 0;
-                const inFlightRuns = inFlightBackgroundRunsBySession[session.id] ?? [];
-                const expanded = Boolean(expandedSessionGroupsById[session.id]);
-                return (
-                  <div
-                    key={session.id}
-                    className="space-y-2 rounded-xl border border-border bg-muted/70 p-2 transition data-[active=true]:border-primary/40 data-[active=true]:bg-primary/10 data-[search-match=true]:border-amber-500/40 data-[search-match=true]:bg-amber-500/5"
-                    data-active={activeSessionId === session.id}
-                    data-search-match={parentSearchMatch}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setActiveSessionId(session.id)}
-                      className="w-full rounded-lg p-1.5 text-left transition hover:bg-muted"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="line-clamp-2 break-words font-display text-sm">{session.title}</p>
-                          <p className="mt-1 truncate text-xs text-muted-foreground" title={session.model}>
-                            {session.model}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          {parentSearchMatch && <Badge variant="warning">match</Badge>}
-                          {matchingVisibleChildCount > 0 && (
-                            <Badge variant="outline">{matchingVisibleChildCount} child match</Badge>
-                          )}
-                          {hasChildren && <Badge variant="outline">{childSessions.length} child</Badge>}
-                          <Badge variant={session.status === "active" ? "success" : "warning"}>{session.status}</Badge>
-                        </div>
-                      </div>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {session.messageCount} msgs • {relativeFromIso(session.lastActiveAt)}
-                        {inFlightRuns.length > 0 ? ` • ${inFlightRuns.length} bg running` : ""}
-                      </p>
-                    </button>
-
-                    {hasChildren && (
-                      <div className="space-y-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-full justify-start px-2 text-xs text-muted-foreground"
-                          onClick={() => toggleSessionGroup(session.id)}
-                        >
-                          {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                          {expanded ? "Hide child sessions" : "Show child sessions"}
-                        </Button>
-                        {expanded && (
-                          <div className="space-y-2 border-l border-border/70 pl-2">
-                            {visibleChildSessions.map(childSession => {
-                              const childRun = latestBackgroundRunByChildSessionId.get(childSession.id) ?? null;
-                              const childRunInFlight = childRun ? isBackgroundRunInFlight(childRun) : false;
-                              const childSearchMatch = sessionSearchNeedle
-                                ? childSessionSearchMatchBySessionId.get(childSession.id) === true
-                                : false;
-                              const checkInBusy = childRun ? Boolean(backgroundCheckInBusyByRun[childRun.runId]) : false;
-                              const steerBusy = childRun ? backgroundActionBusyByRun[childRun.runId] === "steer" : false;
-                              const nudgeDraft = childRun ? (backgroundSteerDraftByRun[childRun.runId] ?? "") : "";
-                              return (
-                                <div
-                                  key={childSession.id}
-                                  className="space-y-2 rounded-md border border-border/70 bg-background/60 p-2 data-[active=true]:border-primary/40 data-[active=true]:bg-primary/10 data-[search-match=true]:border-amber-500/40 data-[search-match=true]:bg-amber-500/5"
-                                  data-active={activeSessionId === childSession.id}
-                                  data-search-match={childSearchMatch}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveSessionId(childSession.id)}
-                                    className="w-full rounded-md p-1 text-left transition hover:bg-muted"
-                                  >
-                                    <div className="space-y-1">
-                                      <p className="line-clamp-2 break-words text-xs font-medium leading-tight">
-                                        {childSession.title}
-                                      </p>
-                                      <div className="flex flex-wrap items-center gap-1">
-                                        {childSearchMatch && <Badge variant="warning">match</Badge>}
-                                        {childRun && (
-                                          <Badge variant={childRunInFlight ? "warning" : "outline"}>
-                                            {childRun.status}
-                                          </Badge>
-                                        )}
-                                        <Badge variant={childSession.status === "active" ? "success" : "outline"}>
-                                          {childSession.status}
-                                        </Badge>
-                                      </div>
-                                    </div>
-                                    {childRun?.prompt && (
-                                      <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
-                                        {childRun.prompt}
-                                      </p>
-                                    )}
-                                    <p className="mt-1 text-[11px] text-muted-foreground">
-                                      {childSession.messageCount} msgs • {relativeFromIso(childSession.lastActiveAt)}
-                                    </p>
-                                  </button>
-                                  {childRun && (
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 px-2 text-[11px]"
-                                        onClick={() => {
-                                          void checkInBackgroundRun(childRun);
-                                        }}
-                                        disabled={checkInBusy}
-                                      >
-                                        {checkInBusy ? "Opening..." : "Open"}
-                                      </Button>
-                                      {childRunInFlight && (
-                                        <>
-                                          <Input
-                                            value={nudgeDraft}
-                                            onChange={event =>
-                                              setBackgroundSteerDraftByRun(current => ({
-                                                ...current,
-                                                [childRun.runId]: event.target.value,
-                                              }))
-                                            }
-                                            className="h-7 text-[11px]"
-                                            placeholder="Nudge..."
-                                            disabled={steerBusy}
-                                          />
-                                          <Button
-                                            type="button"
-                                            size="sm"
-                                            className="h-7 px-2 text-[11px]"
-                                            onClick={() => {
-                                              void steerBackgroundRun(childRun.runId);
-                                            }}
-                                            disabled={steerBusy || !nudgeDraft.trim()}
-                                          >
-                                            {steerBusy ? "..." : "Nudge"}
-                                          </Button>
-                                        </>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {visibleChildSessions.length === 0 && (
-                              <p className="rounded-md border border-border/70 bg-background/60 px-2 py-1.5 text-[11px] text-muted-foreground">
-                                No child sessions visible with current filters.
-                              </p>
-                            )}
-                            {hiddenChildrenByAge > 0 && !showAllChildren && (
-                              <p className="text-[11px] text-muted-foreground">
-                                {hiddenChildrenByAge} old child session{hiddenChildrenByAge === 1 ? "" : "s"} hidden by age
-                                filter ({childSessionHideAfterDays}d).
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-
-          <Card className="panel-noise flex min-h-0 flex-col">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="size-4" />
-                {activeSession?.title ?? "Chat"}
-              </CardTitle>
-              <CardDescription>Chat with the selected OpenCode session.</CardDescription>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <label htmlFor="session-model" className="text-xs font-medium text-muted-foreground">
-                  Model
-                </label>
-                <div className="relative w-full max-w-sm" ref={modelPickerRef}>
-                  <button
-                    id="session-model"
-                    type="button"
-                    onClick={() => setIsModelPickerOpen(open => !open)}
-                    disabled={!activeSession || isSavingModel || loadingModels || availableModels.length === 0}
-                    className="flex h-9 w-full items-center justify-between rounded-md border border-border bg-background px-2 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/70 disabled:opacity-50"
-                    aria-expanded={isModelPickerOpen}
-                    aria-haspopup="listbox"
-                  >
-                    <span className="truncate">{selectedModelLabel}</span>
-                    <ChevronsUpDown className="size-4 text-muted-foreground" />
-                  </button>
-                  {isModelPickerOpen && (
-                    <div className="absolute z-30 mt-1 w-full rounded-lg border border-border bg-card p-2 shadow-lg">
-                      <Input
-                        ref={modelSearchInputRef}
-                        value={modelQuery}
-                        onChange={event => setModelQuery(event.target.value)}
-                        onKeyDown={handleModelSearchKeyDown}
-                        placeholder="Search model..."
-                        className="h-8"
-                      />
-                      <div className="mt-2 max-h-64 overflow-y-auto" role="listbox">
-                        {filteredModelOptions.length === 0 ? (
-                          <p className="px-2 py-2 text-xs text-muted-foreground">No models match your search.</p>
-                        ) : (
-                          filteredModelOptions.map((option, index) => (
-                            <button
-                              key={option.id}
-                              type="button"
-                              onClick={() => {
-                                void selectModelFromPicker(option.id);
-                              }}
-                              className={cn(
-                                "w-full rounded-md px-2 py-1.5 text-left text-sm transition",
-                                index === focusedModelIndex ? "bg-primary/10" : "hover:bg-muted",
-                              )}
-                              data-active={activeSession?.model === option.id}
-                            >
-                              <p className="truncate">{option.label}</p>
-                              <p className="truncate text-xs text-muted-foreground">{option.id}</p>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {isSavingModel && <p className="text-xs text-muted-foreground">Saving model...</p>}
-                <Badge
-                  variant={
-                    activeRunStatusLabel === "idle"
-                      ? "success"
-                      : activeRunStatusLabel === "retry"
-                        ? "warning"
-                        : "outline"
-                  }
-                >
-                  run {activeRunStatusLabel}
-                </Badge>
-                <Badge variant={activeBackgroundInFlightCount > 0 ? "warning" : "outline"}>
-                  bg {activeBackgroundInFlightCount}
-                </Badge>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={requestAbortRun}
-                  disabled={!canAbortActiveSession}
-                >
-                  <CircleSlash className="size-3.5" />
-                  {isAborting ? "Aborting..." : "Abort"}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    if (!activeSession) return;
-                    void refreshBackgroundRunsForSession(activeSession.id);
-                  }}
-                  disabled={!activeSession || loadingBackgroundRuns}
-                >
-                  <RefreshCcw className="size-3.5" />
-                  {loadingBackgroundRuns ? "Refreshing..." : "Refresh BG"}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    if (!activeSession) return;
-                    void compactSession(activeSession.id);
-                  }}
-                  disabled={!activeSession || isCompacting || isActiveSessionRunning}
-                >
-                  <Scissors className="size-3.5" />
-                  {isCompacting ? "Compacting..." : "Compact"}
-                </Button>
-              </div>
-              {modelError && <p className="text-xs text-destructive">{modelError}</p>}
-              {activeRunStatusHint && <p className="text-xs text-muted-foreground">{activeRunStatusHint}</p>}
-              {activeSessionRunError && <p className="text-xs text-destructive">{activeSessionRunError}</p>}
-              {backgroundRunsError && <p className="text-xs text-destructive">{backgroundRunsError}</p>}
-              {chatControlError && <p className="text-xs text-destructive">{chatControlError}</p>}
-              {activeSessionCompactedAt && (
-                <p className="text-xs text-muted-foreground">Last compacted {relativeFromIso(activeSessionCompactedAt)}</p>
-              )}
-            </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-              <div
-                className="scrollbar-thin relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-input/50 p-3"
-                ref={chatScrollRef}
-              >
-                {hasNewMessages && isUserScrolledUp && (
-                  <button
-                    type="button"
-                    onClick={scrollToBottom}
-                    className="sticky top-2 z-10 mx-auto rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition hover:bg-primary/85"
-                  >
-                    New messages
-                  </button>
-                )}
-                {loadingMessages && <p className="text-sm text-muted-foreground">Loading messages...</p>}
-                {!loadingMessages && activeMessages.length === 0 && <p className="text-sm text-muted-foreground">No messages yet.</p>}
-                {activeMessages.map(message => {
-                  const isOptimisticUser = message.uiMeta?.type === "optimistic-user";
-                  const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
-                  const isPending = pendingMeta?.status === "pending";
-                  const isFailed = pendingMeta?.status === "failed";
-
-                  return (
-                    <article
-                      key={message.id}
-                      className="max-w-[92%] rounded-xl border border-border px-3 py-2 text-sm data-[role=assistant]:self-start data-[role=assistant]:bg-muted/80 data-[role=user]:self-end data-[role=user]:bg-primary/20"
-                      data-role={message.role}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-medium uppercase tracking-wide text-[10px] text-muted-foreground">{message.role}</p>
-                        {isOptimisticUser && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                            <LoaderCircle className="size-3 animate-spin" />
-                            submitted
-                          </span>
-                        )}
-                        {isPending && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                            <LoaderCircle className="size-3 animate-spin" />
-                            working
-                          </span>
-                        )}
-                      </div>
-                      {isPending && (
-                        <div className="mt-1 space-y-2">
-                          <p className="inline-flex items-center gap-2 leading-relaxed text-muted-foreground">
-                            <LoaderCircle className="size-4 animate-spin" />
-                            OpenCode is responding...
-                          </p>
-                          {message.content && (
-                            <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
-                          )}
-                        </div>
-                      )}
-                      {isFailed && pendingMeta && (
-                        <div className="mt-1 space-y-2">
-                          <p className="inline-flex items-center gap-2 leading-relaxed text-destructive">
-                            <AlertTriangle className="size-4" />
-                            Failed to send request.
-                          </p>
-                          {message.content && (
-                            <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
-                          )}
-                          {pendingMeta.errorMessage && (
-                            <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
-                          )}
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => retryFailedRequest(pendingMeta.requestId)}
-                            disabled={isSending}
-                          >
-                            <RefreshCcw className="size-3.5" />
-                            Retry
-                          </Button>
-                        </div>
-                      )}
-                      {!isPending && !isFailed && <p className="mt-1 whitespace-pre-wrap leading-relaxed">{message.content}</p>}
-                      {!isPending && !isFailed && message.role === "assistant" && message.memoryTrace && (
-                        <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
-                          <p className="font-medium uppercase tracking-wide text-muted-foreground">
-                            memory trace · {message.memoryTrace.mode}
-                          </p>
-                          <p className="text-muted-foreground">
-                            injected results: {message.memoryTrace.injectedContextResults}
-                          </p>
-                          {message.memoryTrace.toolCalls.length > 0 && (
-                            <div className="space-y-1">
-                              {message.memoryTrace.toolCalls.map((call, index) => (
-                                <p key={`${message.id}-trace-${index}`} className="text-muted-foreground">
-                                  {call.tool} · {call.status}
-                                  {call.summary ? ` · ${call.summary}` : ""}
-                                  {call.error ? ` · ${call.error}` : ""}
-                                </p>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </article>
-                  );
-                })}
-              </div>
-
-              <form className="space-y-2" onSubmit={sendMessage} ref={composerFormRef} aria-busy={isSending}>
-                <Textarea
-                  value={draftMessage}
-                  onChange={event => setDraftMessage(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
-                  placeholder={isSending ? "Waiting for response..." : "Send a message to the active session..."}
-                  disabled={isSending}
-                  className="min-h-24 resize-y"
-                />
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">
-                    {isSending ? "Working on your request..." : "Enter to send, Shift+Enter for newline."}
-                  </p>
-                  <Button type="submit" disabled={isSending || !draftMessage.trim()}>
-                    <Send className="size-4" />
-                    {isSending ? "Sending..." : "Send"}
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-
-          <Card className="panel-noise flex min-h-0 flex-col">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Wrench className="size-4" />
-                OpenCode Config
-              </CardTitle>
-              <CardDescription>Manage skill/MCP config and monitor usage telemetry.</CardDescription>
-            </CardHeader>
-            <CardContent className="min-h-0 overflow-y-auto">
-              <Tabs
-                value={activeConfigPanelTab}
-                onValueChange={value => setActiveConfigPanelTab(value as ConfigPanelTab)}
-              >
-                <TabsList className="w-full justify-between">
-                  <TabsTrigger value="usage">Usage</TabsTrigger>
-                  <TabsTrigger value="memory">Memory</TabsTrigger>
-                  <TabsTrigger value="background">Background</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="usage" className="space-y-2">
-                  <div className="rounded-lg border border-border bg-muted/70 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Requests</p>
-                    <p className="mt-1 font-display text-2xl">{usage.requestCount.toLocaleString()}</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-lg border border-border bg-muted/70 p-3">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Input tokens</p>
-                      <p className="mt-1 text-base font-semibold">{usage.inputTokens.toLocaleString()}</p>
-                    </div>
-                    <div className="rounded-lg border border-border bg-muted/70 p-3">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Output tokens</p>
-                      <p className="mt-1 text-base font-semibold">{usage.outputTokens.toLocaleString()}</p>
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-muted/70 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated cost</p>
-                    <p className="mt-1 flex items-center gap-1 text-xl font-semibold">
-                      <Cpu className="size-4 text-muted-foreground" />${usage.estimatedCostUsd.toFixed(4)}
-                    </p>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="memory" className="space-y-2">
-                  {memoryError && <p className="text-xs text-destructive">{memoryError}</p>}
-                  <div className="rounded-lg border border-border bg-muted/70 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Mode</p>
-                    <p className="mt-1 flex items-center gap-2 text-sm font-semibold">
-                      <BookOpen className="size-4 text-muted-foreground" />
-                      {memoryStatus?.toolMode ?? "unknown"}
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-lg border border-border bg-muted/70 p-3">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Files</p>
-                      <p className="mt-1 text-base font-semibold">{memoryStatus?.files ?? 0}</p>
-                    </div>
-                    <div className="rounded-lg border border-border bg-muted/70 p-3">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Chunks</p>
-                      <p className="mt-1 text-base font-semibold">{memoryStatus?.chunks ?? 0}</p>
-                    </div>
-                    <div className="rounded-lg border border-border bg-muted/70 p-3">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Records</p>
-                      <p className="mt-1 text-base font-semibold">{memoryStatus?.records ?? 0}</p>
-                    </div>
-                    <div className="rounded-lg border border-border bg-muted/70 p-3">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Cache</p>
-                      <p className="mt-1 text-base font-semibold">{memoryStatus?.cacheEntries ?? 0}</p>
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-muted/70 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Recent writes</p>
-                    {memoryActivity.length === 0 ? (
-                      <p className="mt-2 text-xs text-muted-foreground">No memory write activity yet.</p>
-                    ) : (
-                      <div className="mt-2 space-y-2">
-                        {memoryActivity.slice(0, 6).map(event => (
-                          <div key={event.id} className="rounded-md border border-border/70 bg-background/60 p-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                                {event.status}
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">{relativeFromIso(event.createdAt)}</p>
-                            </div>
-                            <p className="mt-1 text-xs leading-relaxed">{event.content}</p>
-                            {event.status === "rejected" && (
-                              <p className="mt-1 text-[11px] text-destructive">{event.reason}</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="background" className="space-y-3">
-                  <div className="rounded-lg border border-border bg-muted/70 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Spawn background run</p>
-                    <Textarea
-                      value={backgroundPrompt}
-                      onChange={event => setBackgroundPrompt(event.target.value)}
-                      className="mt-2 min-h-20 resize-y"
-                      placeholder="Describe a background task for this session..."
-                    />
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <p className="text-[11px] text-muted-foreground">
-                        Runs are attached to this session and report back automatically.
-                      </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => {
-                          void spawnBackgroundRun();
-                        }}
-                        disabled={!activeSession || !backgroundPrompt.trim() || backgroundSpawnBusy}
-                      >
-                        <Plus className="size-3.5" />
-                        {backgroundSpawnBusy ? "Spawning..." : "Spawn"}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {loadingBackgroundRuns && (
-                    <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                      Loading background runs...
-                    </p>
-                  )}
-
-                  {!loadingBackgroundRuns && activeBackgroundRuns.length === 0 && (
-                    <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                      No background runs for this session yet.
-                    </p>
-                  )}
-
-                  {activeBackgroundRuns.map(run => {
-                    const isTerminal =
-                      run.status === "completed" || run.status === "failed" || run.status === "aborted";
-                    const busyAction = backgroundActionBusyByRun[run.runId];
-                    return (
-                      <div
-                        key={run.runId}
-                        className="space-y-2 rounded-md border border-border bg-muted/70 p-3 data-[focused=true]:border-primary/40 data-[focused=true]:bg-primary/10"
-                        data-focused={focusedBackgroundRunId === run.runId}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-xs font-medium">{run.runId}</p>
-                          <Badge
-                            variant={
-                              run.status === "completed"
-                                ? "success"
-                                : run.status === "failed" || run.status === "aborted"
-                                  ? "warning"
-                                  : "outline"
-                            }
-                          >
-                            {run.status}
-                          </Badge>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          updated {relativeFromIso(run.updatedAt)}
-                          {run.startedAt ? ` · started ${relativeFromIso(run.startedAt)}` : ""}
-                          {run.completedAt ? ` · completed ${relativeFromIso(run.completedAt)}` : ""}
-                        </p>
-                        {run.prompt && <p className="text-xs">prompt: {run.prompt}</p>}
-                        {run.resultSummary && <p className="text-xs text-muted-foreground">result: {run.resultSummary}</p>}
-                        {run.error && <p className="text-xs text-destructive">{run.error}</p>}
-
-                        <div className="space-y-2">
-                          {!isTerminal && (
-                            <>
-                              <Textarea
-                                value={backgroundSteerDraftByRun[run.runId] ?? ""}
-                                onChange={event =>
-                                  setBackgroundSteerDraftByRun(current => ({
-                                    ...current,
-                                    [run.runId]: event.target.value,
-                                  }))
-                                }
-                                className="min-h-16 max-h-48 resize-y"
-                                placeholder="Steer this background run with additional instructions..."
-                                disabled={busyAction === "abort"}
-                              />
-                              <div className="flex items-center justify-end gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => requestAbortBackgroundRun(run.runId)}
-                                  disabled={Boolean(busyAction)}
-                                >
-                                  <CircleSlash className="size-3.5" />
-                                  {busyAction === "abort" ? "Aborting..." : "Abort"}
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={() => {
-                                    void steerBackgroundRun(run.runId);
-                                  }}
-                                  disabled={
-                                    busyAction === "abort" ||
-                                    !(backgroundSteerDraftByRun[run.runId]?.trim())
-                                  }
-                                >
-                                  <Send className="size-3.5" />
-                                  {busyAction === "steer" ? "Sending..." : "Steer"}
-                                </Button>
-                              </div>
-                            </>
-                          )}
-                          {isTerminal && (
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  if (run.childSessionId) {
-                                    void refreshSessionsList();
-                                    setActiveSessionId(run.childSessionId);
-                                  } else {
-                                    setActiveSessionId(run.parentSessionId);
-                                    setActiveConfigPanelTab("background");
-                                  }
-                                }}
-                              >
-                                View session
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-          </section>
+          <ChatPage
+            activeBackgroundInFlightCount={activeBackgroundInFlightCount}
+            activeBackgroundRuns={activeBackgroundRuns}
+            activeConfigPanelTab={activeConfigPanelTab}
+            activeMessages={activeMessages}
+            activeRunStatusHint={activeRunStatusHint}
+            activeRunStatusLabel={activeRunStatusLabel}
+            activeSession={activeSession}
+            activeSessionCompactedAt={activeSessionCompactedAt}
+            activeSessionId={activeSessionId}
+            activeSessionRunError={activeSessionRunError}
+            availableModels={availableModels}
+            backgroundActionBusyByRun={backgroundActionBusyByRun}
+            backgroundCheckInBusyByRun={backgroundCheckInBusyByRun}
+            backgroundPrompt={backgroundPrompt}
+            backgroundRunsError={backgroundRunsError}
+            backgroundSpawnBusy={backgroundSpawnBusy}
+            backgroundSteerDraftByRun={backgroundSteerDraftByRun}
+            canAbortActiveSession={canAbortActiveSession}
+            chatControlError={chatControlError}
+            chatScrollRef={chatScrollRef}
+            checkInBackgroundRun={checkInBackgroundRun}
+            childSessionHideAfterDays={childSessionHideAfterDays}
+            childSessionSearchMatchBySessionId={childSessionSearchMatchBySessionId}
+            childSessionSearchQuery={childSessionSearchQuery}
+            childSessionVisibilityByParentSessionId={childSessionVisibilityByParentSessionId}
+            childSessionsByParentSessionId={childSessionsByParentSessionId}
+            compactSession={compactSession}
+            composerFormRef={composerFormRef}
+            createNewSession={createNewSession}
+            draftMessage={draftMessage}
+            expandedSessionGroupsById={expandedSessionGroupsById}
+            filteredModelOptions={filteredModelOptions}
+            focusedBackgroundRunId={focusedBackgroundRunId}
+            focusedModelIndex={focusedModelIndex}
+            handleComposerKeyDown={handleComposerKeyDown}
+            handleModelSearchKeyDown={handleModelSearchKeyDown}
+            hasNewMessages={hasNewMessages}
+            inFlightBackgroundRunsBySession={inFlightBackgroundRunsBySession}
+            isAborting={isAborting}
+            isActiveSessionRunning={isActiveSessionRunning}
+            isCompacting={isCompacting}
+            isCreatingSession={isCreatingSession}
+            isModelPickerOpen={isModelPickerOpen}
+            isSavingModel={isSavingModel}
+            isSending={isSending}
+            isUserScrolledUp={isUserScrolledUp}
+            latestBackgroundRunByChildSessionId={latestBackgroundRunByChildSessionId}
+            loading={loading}
+            loadingBackgroundRuns={loadingBackgroundRuns}
+            loadingMessages={loadingMessages}
+            loadingModels={loadingModels}
+            memoryActivity={memoryActivity}
+            memoryError={memoryError}
+            memoryStatus={memoryStatus}
+            modelError={modelError}
+            modelPickerRef={modelPickerRef}
+            modelQuery={modelQuery}
+            modelSearchInputRef={modelSearchInputRef}
+            parentSessionSearchMatchBySessionId={parentSessionSearchMatchBySessionId}
+            refreshBackgroundRunsForSession={refreshBackgroundRunsForSession}
+            refreshInFlightBackgroundRuns={refreshInFlightBackgroundRuns}
+            refreshSessionsList={refreshSessionsList}
+            requestAbortBackgroundRun={requestAbortBackgroundRun}
+            requestAbortRun={requestAbortRun}
+            retryFailedRequest={retryFailedRequest}
+            rootSessions={rootSessions}
+            scrollToBottom={scrollToBottom}
+            selectModelFromPicker={selectModelFromPicker}
+            selectedModelLabel={selectedModelLabel}
+            sendMessage={sendMessage}
+            sessionError={sessionError}
+            sessionSearchNeedle={sessionSearchNeedle}
+            setActiveConfigPanelTab={setActiveConfigPanelTab}
+            setActiveSessionId={setActiveSessionId}
+            setBackgroundPrompt={setBackgroundPrompt}
+            setBackgroundSteerDraftByRun={setBackgroundSteerDraftByRun}
+            setChildSessionSearchQuery={setChildSessionSearchQuery}
+            setDraftMessage={setDraftMessage}
+            setIsModelPickerOpen={setIsModelPickerOpen}
+            setModelQuery={setModelQuery}
+            setShowAllChildren={setShowAllChildren}
+            showAllChildren={showAllChildren}
+            spawnBackgroundRun={spawnBackgroundRun}
+            steerBackgroundRun={steerBackgroundRun}
+            toggleSessionGroup={toggleSessionGroup}
+            totalHiddenChildSessionsByAge={totalHiddenChildSessionsByAge}
+            totalInFlightBackgroundRuns={totalInFlightBackgroundRuns}
+            totalSessionSearchMatches={totalSessionSearchMatches}
+            usage={usage}
+          />
         )}
 
         {dashboardPage === "skills" && (
-          <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-            <Card className="panel-noise flex min-h-0 flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Wrench className="size-4" />
-                  Skill Exposure
-                </CardTitle>
-                <CardDescription>Toggle which OpenCode skills are exposed to runtime sessions.</CardDescription>
-              </CardHeader>
-              <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-                <div className="flex gap-2">
-                  <Input
-                    value={skillInput}
-                    onChange={event => setSkillInput(event.target.value)}
-                    placeholder="skill id (e.g. btca-cli)"
-                    onKeyDown={event => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        addSkill();
-                      }
-                    }}
-                  />
-                  <Button type="button" onClick={addSkill} disabled={!skillInput.trim()}>
-                    <Plus className="size-4" />
-                    Add
-                  </Button>
-                </div>
-
-                {loadingSkillCatalog && (
-                  <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                    Loading runtime skills...
-                  </p>
-                )}
-
-                <div className="space-y-2">
-                  {!loadingSkillCatalog && availableSkills.length === 0 && (
-                    <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                      No runtime skills discovered yet.
-                    </p>
-                  )}
-                  {availableSkills.map(skill => {
-                    const enabled = configuredSkillSet.has(skill.id);
-                    return (
-                      <div
-                        key={skill.id}
-                        className="space-y-1 rounded-md border border-border bg-muted/70 px-3 py-2"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">{skill.name}</span>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={enabled ? "default" : "outline"}
-                            onClick={() => toggleSkillEnabled(skill.id)}
-                          >
-                            {enabled ? "Enabled" : "Disabled"}
-                          </Button>
-                        </div>
-                        <p className="text-xs text-muted-foreground">{skill.description || "No description provided."}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">{skill.location}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {configuredUnavailableSkills.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Configured but unavailable</p>
-                    {configuredUnavailableSkills.map(skill => (
-                      <div
-                        key={skill}
-                        className="flex items-center justify-between rounded-md border border-border bg-muted/70 px-3 py-2"
-                      >
-                        <span className="text-sm">{skill}</span>
-<Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 w-8 p-0"
-                            onClick={() => requestRemoveSkill(skill)}
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex items-center justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => void refreshSkillCatalog()} disabled={loadingSkillCatalog}>
-                    {loadingSkillCatalog ? "Refreshing..." : "Refresh"}
-                  </Button>
-                  <Button type="button" onClick={saveSkillsConfig} disabled={isSavingSkills}>
-                    {isSavingSkills ? "Saving..." : "Save skills"}
-                  </Button>
-                </div>
-                {skillCatalogError && <p className="text-xs text-destructive">{skillCatalogError}</p>}
-                {skillsError && <p className="text-xs text-destructive">{skillsError}</p>}
-              </CardContent>
-            </Card>
-
-            <Card className="panel-noise flex min-h-0 flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <SlidersHorizontal className="size-4" />
-                  Import + Bulk Editor
-                </CardTitle>
-                <CardDescription>Import managed skills and keep a bulk editable allow-list.</CardDescription>
-              </CardHeader>
-              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
-                <div className="space-y-2 rounded-md border border-border bg-muted/70 p-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Import managed skill</p>
-                  <Input
-                    value={importSkillId}
-                    onChange={event => setImportSkillId(event.target.value)}
-                    placeholder="new skill id (e.g. my-skill)"
-                  />
-                  <Textarea
-                    value={importSkillContent}
-                    onChange={event => setImportSkillContent(event.target.value)}
-                    className="min-h-28 resize-y"
-                    placeholder="Paste SKILL.md content"
-                  />
-                  <div className="flex items-center justify-end">
-                    <Button
-                      type="button"
-                      onClick={importSkill}
-                      disabled={isImportingSkill || !importSkillId.trim() || !importSkillContent.trim()}
-                    >
-                      {isImportingSkill ? "Importing..." : "Import skill"}
-                    </Button>
-                  </div>
-                </div>
-
-                <Textarea
-                  value={skillsDraft}
-                  onChange={event => setSkillsDraft(event.target.value)}
-                  className="min-h-64 resize-y"
-                  placeholder="One skill per line"
-                />
-                <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                  {configuredSkills.length} configured skill{configuredSkills.length === 1 ? "" : "s"}.
-                </div>
-              </CardContent>
-            </Card>
-          </section>
+          <SkillsPage
+            skillInput={skillInput}
+            setSkillInput={setSkillInput}
+            addSkill={addSkill}
+            loadingSkillCatalog={loadingSkillCatalog}
+            availableSkills={availableSkills}
+            configuredSkillSet={configuredSkillSet}
+            toggleSkillEnabled={toggleSkillEnabled}
+            configuredUnavailableSkills={configuredUnavailableSkills}
+            requestRemoveSkill={requestRemoveSkill}
+            refreshSkillCatalog={refreshSkillCatalog}
+            saveSkillsConfig={saveSkillsConfig}
+            isSavingSkills={isSavingSkills}
+            skillCatalogError={skillCatalogError}
+            skillsError={skillsError}
+            importSkillId={importSkillId}
+            setImportSkillId={setImportSkillId}
+            importSkillContent={importSkillContent}
+            setImportSkillContent={setImportSkillContent}
+            importSkill={importSkill}
+            isImportingSkill={isImportingSkill}
+            skillsDraft={skillsDraft}
+            setSkillsDraft={setSkillsDraft}
+            configuredSkills={configuredSkills}
+          />
         )}
 
         {dashboardPage === "mcp" && (
-          <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-            <Card className="panel-noise flex min-h-0 flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Cpu className="size-4" />
-                  MCP Management
-                </CardTitle>
-                <CardDescription>Manage MCP allow-list and verify runtime status from OpenCode.</CardDescription>
-              </CardHeader>
-              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
-                <div className="flex gap-2">
-                  <Input
-                    value={mcpInput}
-                    onChange={event => setMcpInput(event.target.value)}
-                    placeholder="mcp id (e.g. github)"
-                    onKeyDown={event => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        addMcp();
-                      }
-                    }}
-                  />
-                  <Button type="button" onClick={addMcp} disabled={!mcpInput.trim()}>
-                    <Plus className="size-4" />
-                    Add
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  {configuredMcps.length === 0 && (
-                    <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                      No MCP servers configured yet.
-                    </p>
-                  )}
-                  {configuredMcps.map(mcp => (
-                    <div
-                      key={mcp}
-                      className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/70 px-3 py-2"
-                    >
-                      <div className="min-w-0 space-y-1">
-                        <p className="truncate text-sm">{mcp}</p>
-                        <div className="flex items-center gap-2">
-                          <Badge variant={mcpStatusVariant(runtimeMcpById.get(mcp)?.status ?? "unknown")}>
-                            {mcpStatusLabel(runtimeMcpById.get(mcp)?.status ?? "unknown")}
-                          </Badge>
-                          {runtimeMcpById.get(mcp)?.error && (
-                            <p className="truncate text-xs text-muted-foreground">{runtimeMcpById.get(mcp)?.error}</p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void runMcpRuntimeAction(mcp, "connect")}
-                          disabled={mcpActionBusyId.length > 0}
-                        >
-                          Connect
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => requestDisconnectMcp(mcp)}
-                          disabled={mcpActionBusyId.length > 0}
-                        >
-                          Disconnect
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void runMcpRuntimeAction(mcp, "authStart")}
-                          disabled={mcpActionBusyId.length > 0}
-                        >
-                          Auth
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void runMcpRuntimeAction(mcp, "authRemove")}
-                          disabled={mcpActionBusyId.length > 0}
-                        >
-                          Reset Auth
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0"
-                          onClick={() => requestRemoveMcp(mcp)}
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {discoverableMcps.length > 0 && (
-                  <div className="space-y-2 rounded-md border border-border bg-muted/60 p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Detected in runtime</p>
-                    <div className="space-y-2">
-                      {discoverableMcps.map(mcp => (
-                        <div key={mcp.id} className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm">{mcp.id}</p>
-                            <Badge variant={mcpStatusVariant(mcp.status)}>{mcpStatusLabel(mcp.status)}</Badge>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setMcpsDraft([...configuredMcps, mcp.id].join("\n"));
-                              if (!mcpServerIdSet.has(mcp.id)) {
-                                setMcpServers(current => [
-                                  ...current,
-                                  {
-                                    id: mcp.id,
-                                    type: "remote",
-                                    enabled: true,
-                                    url: "http://127.0.0.1:8000/mcp",
-                                    headers: {},
-                                    oauth: "auto",
-                                  },
-                                ]);
-                              }
-                            }}
-                          >
-                            Enable
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => void refreshMcpCatalog()} disabled={loadingMcpCatalog}>
-                    {loadingMcpCatalog ? "Refreshing..." : "Refresh"}
-                  </Button>
-                  <Button type="button" onClick={saveMcpsConfig} disabled={isSavingMcps}>
-                    {isSavingMcps ? "Saving..." : "Save MCPs"}
-                  </Button>
-                </div>
-                {mcpCatalogError && <p className="text-xs text-destructive">{mcpCatalogError}</p>}
-                {mcpsError && <p className="text-xs text-destructive">{mcpsError}</p>}
-                {mcpActionError && <p className="text-xs text-destructive">{mcpActionError}</p>}
-              </CardContent>
-            </Card>
-
-            <Card className="panel-noise flex min-h-0 flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <SlidersHorizontal className="size-4" />
-                  Server Definitions
-                </CardTitle>
-                <CardDescription>Configure remote/local MCP server details used by OpenCode.</CardDescription>
-              </CardHeader>
-              <CardContent className="min-h-0 space-y-3 overflow-y-auto">
-                {normalizedMcpServers.length === 0 && (
-                  <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                    No MCP server definitions yet. Add one from the panel on the left.
-                  </p>
-                )}
-                {normalizedMcpServers.map(server => (
-                  <div key={server.id} className="space-y-2 rounded-md border border-border bg-muted/60 p-3">
-                    <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_96px]">
-                      <Input
-                        value={server.id}
-                        onChange={event => renameMcpServer(server.id, event.target.value)}
-                        placeholder="mcp id"
-                      />
-                      <select
-                        value={server.type}
-                        onChange={event => setMcpServerType(server.id, event.target.value === "local" ? "local" : "remote")}
-                        className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                      >
-                        <option value="remote">remote</option>
-                        <option value="local">local</option>
-                      </select>
-                      <label className="flex items-center gap-2 rounded-md border border-input px-3 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={configuredMcpSet.has(server.id)}
-                          onChange={event => {
-                            if (event.target.checked) {
-                              setMcpsDraft([...configuredMcps, server.id].join("\n"));
-                            } else {
-                              setMcpsDraft(configuredMcps.filter(value => value !== server.id).join("\n"));
-                            }
-                          }}
-                        />
-                        enabled
-                      </label>
-                    </div>
-                    {server.type === "remote" ? (
-                      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_140px]">
-                        <Input
-                          value={server.url}
-                          onChange={event =>
-                            updateMcpServer(server.id, current =>
-                              current.type === "remote" ? { ...current, url: event.target.value } : current,
-                            )
-                          }
-                          placeholder="https://example.com/mcp"
-                        />
-                        <select
-                          value={server.oauth}
-                          onChange={event =>
-                            updateMcpServer(server.id, current =>
-                              current.type === "remote"
-                                ? { ...current, oauth: event.target.value === "off" ? "off" : "auto" }
-                                : current,
-                            )
-                          }
-                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          <option value="auto">oauth auto</option>
-                          <option value="off">oauth off</option>
-                        </select>
-                        <Input
-                          value={typeof server.timeoutMs === "number" ? String(server.timeoutMs) : ""}
-                          onChange={event =>
-                            updateMcpServer(server.id, current =>
-                              current.type === "remote"
-                                ? {
-                                    ...current,
-                                    timeoutMs: event.target.value.trim()
-                                      ? Number.isFinite(Number(event.target.value))
-                                        ? Number(event.target.value)
-                                        : undefined
-                                      : undefined,
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="timeout ms"
-                        />
-                      </div>
-                    ) : (
-                      <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px]">
-                        <Input
-                          value={server.command.join(" ")}
-                          onChange={event =>
-                            updateMcpServer(server.id, current =>
-                              current.type === "local"
-                                ? {
-                                    ...current,
-                                    command: event.target.value.split(" ").map(value => value.trim()).filter(Boolean),
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="bun run mcp-server.ts"
-                        />
-                        <Input
-                          value={typeof server.timeoutMs === "number" ? String(server.timeoutMs) : ""}
-                          onChange={event =>
-                            updateMcpServer(server.id, current =>
-                              current.type === "local"
-                                ? {
-                                    ...current,
-                                    timeoutMs: event.target.value.trim()
-                                      ? Number.isFinite(Number(event.target.value))
-                                        ? Number(event.target.value)
-                                        : undefined
-                                      : undefined,
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="timeout ms"
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))}
-                <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                  {configuredMcps.length} enabled MCP server{configuredMcps.length === 1 ? "" : "s"} across {normalizedMcpServers.length} definition
-                  {normalizedMcpServers.length === 1 ? "" : "s"}.
-                </div>
-              </CardContent>
-            </Card>
-          </section>
+          <McpPage
+            mcpInput={mcpInput}
+            setMcpInput={setMcpInput}
+            addMcp={addMcp}
+            configuredMcps={configuredMcps}
+            runtimeMcpById={runtimeMcpById}
+            mcpStatusVariant={mcpStatusVariant}
+            mcpStatusLabel={mcpStatusLabel}
+            runMcpRuntimeAction={runMcpRuntimeAction}
+            mcpActionBusyId={mcpActionBusyId}
+            requestDisconnectMcp={requestDisconnectMcp}
+            requestRemoveMcp={requestRemoveMcp}
+            discoverableMcps={discoverableMcps}
+            setMcpsDraft={setMcpsDraft}
+            mcpServerIdSet={mcpServerIdSet}
+            setMcpServers={setMcpServers}
+            refreshMcpCatalog={refreshMcpCatalog}
+            loadingMcpCatalog={loadingMcpCatalog}
+            saveMcpsConfig={saveMcpsConfig}
+            isSavingMcps={isSavingMcps}
+            mcpCatalogError={mcpCatalogError}
+            mcpsError={mcpsError}
+            mcpActionError={mcpActionError}
+            normalizedMcpServers={normalizedMcpServers}
+            renameMcpServer={renameMcpServer}
+            setMcpServerType={setMcpServerType}
+            configuredMcpSet={configuredMcpSet}
+            updateMcpServer={updateMcpServer}
+          />
         )}
 
         {dashboardPage === "agents" && (
-          <section className="min-h-0 flex-1 overflow-hidden">
-            <Card className="panel-noise flex h-full min-h-0 flex-col overflow-hidden">
-              <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Users className="size-4" />
-                      Agent Type Management
-                    </CardTitle>
-                    <CardDescription>
-                      Edit OpenCode agent definitions directly. Changes are applied to OpenCode config immediately on save.
-                    </CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void refreshAgentCatalog()}
-                      disabled={loadingAgentCatalog}
-                    >
-                      {loadingAgentCatalog ? "Refreshing..." : "Refresh"}
-                    </Button>
-                    <Button type="button" onClick={saveAgentTypesConfig} disabled={isSavingAgents}>
-                      {isSavingAgents ? "Saving..." : "Save agent types"}
-                    </Button>
-                  </div>
-                </div>
-                {agentsError && <p className="text-xs text-destructive">{agentsError}</p>}
-                {agentCatalogError && <p className="text-xs text-destructive">{agentCatalogError}</p>}
-              </CardHeader>
-              <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-                <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 p-3">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">OpenCode Agents</p>
-                    <p className="text-xs text-muted-foreground">
-                      Add, edit, or remove agent definitions managed in OpenCode.
-                    </p>
-                    {(opencodeConfigFilePath || opencodeDirectory) && (
-                      <div className="space-y-0.5 pt-1 text-xs text-muted-foreground">
-                        {opencodeConfigFilePath && <p>Saving to: <code>{opencodeConfigFilePath}</code></p>}
-                        {opencodeDirectory && <p>Bound directory: <code>{opencodeDirectory}</code></p>}
-                        {opencodePersistenceMode && <p>Mode: <code>{opencodePersistenceMode}</code></p>}
-                      </div>
-                    )}
-                  </div>
-                  <Button type="button" variant="outline" onClick={addAgentType}>
-                    <Plus className="size-4" />
-                    Create custom type
-                  </Button>
-                </div>
-
-                {agentTypes.length === 0 && (
-                  <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                    No OpenCode agent definitions found. Create one to get started.
-                  </p>
-                )}
-                {agentTypes.map(agentType => (
-                  <div key={agentType.id} className="space-y-3 rounded-lg border border-border bg-muted/60 p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <p className="truncate font-display text-sm">{agentType.name || agentType.id}</p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 w-8 p-0"
-                        onClick={() => requestRemoveAgent(agentType.id)}
-                      >
-                        <Trash2 className="size-4 text-destructive" />
-                      </Button>
-                    </div>
-
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">ID</p>
-                        <Input
-                          id={`agent-type-${agentType.id}-id`}
-                          value={agentType.id}
-                          onChange={event => updateAgentTypeField(agentType.id, "id", event.target.value)}
-                          placeholder="agent-id"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Name</p>
-                        <Input
-                          id={`agent-type-${agentType.id}-name`}
-                          value={agentType.name ?? ""}
-                          onChange={event => updateAgentTypeField(agentType.id, "name", event.target.value)}
-                          placeholder="Agent name"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Description</p>
-                        <Input
-                          id={`agent-type-${agentType.id}-description`}
-                          value={agentType.description ?? ""}
-                          onChange={event => updateAgentTypeField(agentType.id, "description", event.target.value)}
-                          placeholder="When this agent should be used"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Model</p>
-                        <div className="relative" ref={openAgentModelPickerId === agentType.id ? agentModelPickerRef : undefined}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAgentModelQuery("");
-                              setOpenAgentModelPickerId(current => (current === agentType.id ? null : agentType.id));
-                            }}
-                            className="flex h-9 w-full items-center justify-between rounded-md border border-border bg-background px-2 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/70"
-                            aria-expanded={openAgentModelPickerId === agentType.id}
-                            aria-haspopup="listbox"
-                          >
-                            <span className="truncate">
-                              {agentType.model
-                                ? availableModels.find(model => model.id === agentType.model)?.label ?? agentType.model
-                                : "Default runtime model"}
-                            </span>
-                            <ChevronsUpDown className="size-4 text-muted-foreground" />
-                          </button>
-                          {openAgentModelPickerId === agentType.id && (
-                            <div className="absolute z-30 mt-1 w-full rounded-lg border border-border bg-card p-2 shadow-lg">
-                              <Input
-                                ref={agentModelSearchInputRef}
-                                value={agentModelQuery}
-                                onChange={event => setAgentModelQuery(event.target.value)}
-                                onKeyDown={event => handleAgentModelSearchKeyDown(event, agentType.id)}
-                                placeholder="Search model..."
-                                className="h-8"
-                              />
-                              <div className="mt-2 max-h-64 overflow-y-auto" role="listbox">
-                                <button
-                                  type="button"
-                                  onClick={() => selectAgentModelFromPicker(agentType.id, "")}
-                                  className={cn(
-                                    "w-full rounded-md px-2 py-1.5 text-left text-sm transition",
-                                    !agentType.model && agentFocusedModelIndex === 0 ? "bg-primary/10" : "hover:bg-muted",
-                                  )}
-                                >
-                                  <p className="truncate">Default runtime model</p>
-                                </button>
-                                {filteredAgentModelOptions().length === 0 ? (
-                                  <p className="px-2 py-2 text-xs text-muted-foreground">No models match your search.</p>
-                                ) : (
-                                  filteredAgentModelOptions().map((option, index) => (
-                                    <button
-                                      key={option.id}
-                                      type="button"
-                                      onClick={() => selectAgentModelFromPicker(agentType.id, option.id)}
-                                      className={cn(
-                                        "w-full rounded-md px-2 py-1.5 text-left text-sm transition",
-                                        index + 1 === agentFocusedModelIndex ? "bg-primary/10" : "hover:bg-muted",
-                                      )}
-                                      data-active={agentType.model === option.id}
-                                    >
-                                      <p className="truncate">{option.label}</p>
-                                      <p className="truncate text-xs text-muted-foreground">{option.id}</p>
-                                    </button>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Prompt</p>
-                      <Textarea
-                        id={`agent-type-${agentType.id}-prompt`}
-                        value={agentType.prompt ?? ""}
-                        onChange={event => updateAgentTypeField(agentType.id, "prompt", event.target.value)}
-                        placeholder="Instructions for this agent"
-                        className="min-h-20 resize-y"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <div className="space-y-1">
-                        <label htmlFor={`agent-type-${agentType.id}-mode`} className="text-xs text-muted-foreground">Mode</label>
-                        <div className="flex items-center gap-2">
-                          <ShieldCheck className="size-4 text-muted-foreground" />
-                          <select
-                            id={`agent-type-${agentType.id}-mode`}
-                            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-                            value={agentType.mode}
-                            onChange={event =>
-                              updateAgentTypeField(agentType.id, "mode", event.target.value as AgentTypeDefinition["mode"])
-                            }
-                          >
-                            <option value="subagent">subagent</option>
-                            <option value="primary">primary</option>
-                            <option value="all">all</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <label htmlFor={`agent-type-${agentType.id}-enabled`} className="text-xs text-muted-foreground">
-                          Enabled
-                        </label>
-                        <label htmlFor={`agent-type-${agentType.id}-enabled`} className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
-                          <input
-                            id={`agent-type-${agentType.id}-enabled`}
-                            type="checkbox"
-                            checked={!agentType.disable}
-                            onChange={event => updateAgentTypeField(agentType.id, "disable", !event.target.checked)}
-                          />
-                          Active
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                  {agentTypes.length} OpenCode agent definition{agentTypes.length === 1 ? "" : "s"}.
-                </div>
-              </CardContent>
-            </Card>
-          </section>
+          <AgentsPage
+            refreshAgentCatalog={refreshAgentCatalog}
+            loadingAgentCatalog={loadingAgentCatalog}
+            saveAgentTypesConfig={saveAgentTypesConfig}
+            isSavingAgents={isSavingAgents}
+            agentsError={agentsError}
+            agentCatalogError={agentCatalogError}
+            opencodeConfigFilePath={opencodeConfigFilePath}
+            opencodeDirectory={opencodeDirectory}
+            opencodePersistenceMode={opencodePersistenceMode}
+            addAgentType={addAgentType}
+            agentTypes={agentTypes}
+            requestRemoveAgent={requestRemoveAgent}
+            updateAgentTypeField={updateAgentTypeField}
+            openAgentModelPickerId={openAgentModelPickerId}
+            setOpenAgentModelPickerId={setOpenAgentModelPickerId}
+            setAgentModelQuery={setAgentModelQuery}
+            agentModelPickerRef={agentModelPickerRef}
+            availableModels={availableModels}
+            agentModelSearchInputRef={agentModelSearchInputRef}
+            agentModelQuery={agentModelQuery}
+            handleAgentModelSearchKeyDown={handleAgentModelSearchKeyDown}
+            selectAgentModelFromPicker={selectAgentModelFromPicker}
+            filteredAgentModelOptions={filteredAgentModelOptions}
+            agentFocusedModelIndex={agentFocusedModelIndex}
+          />
         )}
       </div>
     </main>
   );
 
   function renderConfirmDialog() {
-    const props = getConfirmDialogProps();
+    const props = getConfirmDialogProps(confirmAction);
     return (
       <ConfirmDialog
         open={props.open}
