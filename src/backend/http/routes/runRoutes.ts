@@ -33,6 +33,7 @@ export function createRunRoutes(runService: RunService) {
         const body = (await req.json()) as {
           sessionId?: string;
           content?: string;
+          agent?: string;
           metadata?: Record<string, unknown>;
           idempotencyKey?: string;
         };
@@ -50,12 +51,14 @@ export function createRunRoutes(runService: RunService) {
           body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
             ? body.metadata
             : undefined;
+        const agent = typeof body.agent === "string" ? body.agent.trim() || undefined : undefined;
         const idempotencyKey = body.idempotencyKey?.trim() || undefined;
 
         try {
           const result = runService.createRun({
             sessionId,
             content,
+            agent,
             metadata,
             idempotencyKey,
           });

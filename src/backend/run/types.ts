@@ -34,6 +34,7 @@ export interface AgentRunEvent {
 export interface CreateAgentRunInput {
   sessionId: string;
   content: string;
+  agent?: string;
   metadata?: Record<string, unknown>;
   idempotencyKey?: string;
 }

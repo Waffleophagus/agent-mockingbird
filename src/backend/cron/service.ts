@@ -855,6 +855,12 @@ export class CronService {
       "main";
 
     const context = input.context ?? {};
+    const agentFromPayload =
+      typeof input.definition.payload.agentId === "string"
+        ? input.definition.payload.agentId.trim()
+        : typeof input.definition.payload.agent === "string"
+          ? input.definition.payload.agent.trim()
+          : "";
     const expanded = renderTemplate(promptText, {
       ...definitionPayloadContext(input.definition),
       ...context,
@@ -866,6 +872,7 @@ export class CronService {
       const ack = await this.runtime.sendUserMessage({
         sessionId: targetSession,
         content: expanded,
+        agent: agentFromPayload || undefined,
       });
       const assistant = [...ack.messages].reverse().find(message => message.role === "assistant");
       return {

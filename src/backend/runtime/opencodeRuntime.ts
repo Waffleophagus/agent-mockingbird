@@ -15,13 +15,13 @@ import {
   RuntimeSessionBusyError,
   RuntimeSessionNotFoundError,
 } from "./errors";
-import type { MemoryToolCallTrace, MessageMemoryTrace, SpecialistAgent } from "../../types/dashboard";
+import type { MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
 import {
   buildDesiredRuntimeAgentConfigMap,
-  normalizeConfiguredAgents,
+  normalizeConfiguredAgentTypes,
   normalizeRuntimeAgentConfigMap,
 } from "../agents/service";
-import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
+import type { AgentTypeDefinition, ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import {
   createBackgroundRunUpdatedEvent,
@@ -104,7 +104,8 @@ interface OpencodeRuntimeOptions {
   getEnabledSkills?: () => Array<string>;
   getEnabledMcps?: () => Array<string>;
   getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
-  getConfiguredAgents?: () => Array<SpecialistAgent>;
+  getConfiguredAgentTypes?: () => Array<AgentTypeDefinition>;
+  getConfiguredAgents?: () => Array<{ id: string; name: string; specialty: string; summary: string; model: string; status: "available" | "busy" | "offline" }>;
   enableEventSync?: boolean;
   enableSmallModelSync?: boolean;
   enableBackgroundSync?: boolean;
@@ -319,8 +320,28 @@ export class OpencodeRuntime implements RuntimeEngine {
     return normalizeMcpServerDefinitions(this.options.getConfiguredMcpServers?.() ?? []);
   }
 
-  private currentConfiguredAgents() {
-    return normalizeConfiguredAgents(this.options.getConfiguredAgents?.() ?? []);
+  private currentConfiguredAgentTypes() {
+    const configured = this.options.getConfiguredAgentTypes?.();
+    if (configured && configured.length > 0) {
+      return normalizeConfiguredAgentTypes(configured);
+    }
+    return normalizeConfiguredAgentTypes(
+      (this.options.getConfiguredAgents?.() ?? []).map(agent => ({
+        id: agent.id,
+        name: agent.name,
+        description: agent.specialty,
+        prompt: agent.summary,
+        model: agent.model,
+        mode: "subagent",
+        hidden: false,
+        disable: agent.status === "offline",
+        options: {
+          wafflebotManagedLegacy: true,
+          wafflebotDisplayName: agent.name,
+          wafflebotStatus: agent.status,
+        },
+      })),
+    );
   }
 
   private getClient() {
@@ -374,6 +395,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         primaryModel: model,
         content: promptInput.content,
         system: memorySystemPrompt,
+        agent: input.agent?.trim() || undefined,
       });
       opencodeSessionId = promptResult.opencodeSessionId;
       const assistantMessage = promptResult.message;
@@ -771,7 +793,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     lines.push(
       "Config policy:",
       "- Use config_manager for runtime configuration changes.",
+      "- Use agent_type_manager for dedicated agent type CRUD operations.",
       "- Prefer patch_config with expectedHash from get_config to avoid conflicts.",
+      "- Safe config writes enforce policy checks and may reject protected paths.",
       "- Keep runSmokeTest enabled unless explicitly instructed otherwise.",
     );
 
@@ -1604,6 +1628,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     model: ResolvedModel,
     content: string,
     system?: string,
+    agent?: string,
   ): Promise<{ info: AssistantInfo; parts: Array<Part> }> {
     const response = unwrapSdkData<{ info: Message; parts: Array<Part> }>(
       await this.getClient().session.prompt({
@@ -1614,6 +1639,7 @@ export class OpencodeRuntime implements RuntimeEngine {
             modelID: model.modelId,
           },
           system,
+          agent,
           parts: [{ type: "text", text: content }],
         },
         responseStyle: "data",
@@ -1634,6 +1660,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     primaryModel: ResolvedModel;
     content: string;
     system?: string;
+    agent?: string;
   }): Promise<{ message: { info: AssistantInfo; parts: Array<Part> }; opencodeSessionId: string }> {
     const models = this.resolvePromptModels(input.primaryModel);
     let sessionId = input.opencodeSessionId;
@@ -1648,7 +1675,7 @@ export class OpencodeRuntime implements RuntimeEngine {
 
       let attemptError: unknown = null;
       try {
-        const message = await this.sendPrompt(sessionId, model, input.content, input.system);
+        const message = await this.sendPrompt(sessionId, model, input.content, input.system, input.agent);
         return { message, opencodeSessionId: sessionId };
       } catch (error) {
         if (getOpencodeErrorStatus(error) === 404) {
@@ -1658,7 +1685,7 @@ export class OpencodeRuntime implements RuntimeEngine {
             throw this.normalizeRuntimeError(createError);
           }
           try {
-            const message = await this.sendPrompt(sessionId, model, input.content, input.system);
+            const message = await this.sendPrompt(sessionId, model, input.content, input.system, input.agent);
             return { message, opencodeSessionId: sessionId };
           } catch (retryError) {
             attemptError = retryError;
@@ -2009,7 +2036,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       enabledSkills: this.currentEnabledSkills(),
       enabledMcps: this.currentEnabledMcps(),
       configuredMcpServers: this.currentConfiguredMcpServers(),
-      configuredAgents: this.currentConfiguredAgents(),
+      configuredAgentTypes: this.currentConfiguredAgentTypes(),
       managedSkillsRoot: getManagedSkillsRootPath(),
     });
   }
@@ -2098,7 +2125,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       const currentAgentConfig = normalizeRuntimeAgentConfigMap(currentRecord.agent);
       const desiredAgentConfig = buildDesiredRuntimeAgentConfigMap({
         currentAgentConfig: currentRecord.agent,
-        configuredAgents: this.currentConfiguredAgents(),
+        configuredAgentTypes: this.currentConfiguredAgentTypes(),
       });
       if (stableSerialize(currentAgentConfig) !== stableSerialize(desiredAgentConfig)) {
         (nextConfig as Record<string, unknown>).agent = desiredAgentConfig;

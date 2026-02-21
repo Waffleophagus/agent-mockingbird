@@ -9,6 +9,7 @@ import type {
   SessionSummary,
   UsageSnapshot,
 } from "../../types/dashboard";
+import { toLegacySpecialistAgent } from "../agents/service";
 import { getConfig as getManagedConfig } from "../config/service";
 import { clearCronTables } from "../cron/storage";
 import { DEFAULT_SESSIONS } from "../defaults";
@@ -527,10 +528,14 @@ export function recordHeartbeat(source: RuntimeEventSource, online = true, creat
 
 export function getConfig() {
   const managedConfig = getManagedConfig();
+  const agents =
+    managedConfig.ui.agents.length > 0
+      ? managedConfig.ui.agents
+      : managedConfig.ui.agentTypes.map(toLegacySpecialistAgent);
   return {
     skills: managedConfig.ui.skills,
     mcps: managedConfig.ui.mcps,
-    agents: managedConfig.ui.agents,
+    agents,
   };
 }
 

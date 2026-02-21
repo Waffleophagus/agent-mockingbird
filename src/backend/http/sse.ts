@@ -36,6 +36,8 @@ function toSseEventName(event: RuntimeEvent): string {
       return "config-updated";
     case "config.update.failed":
       return "config-error";
+    case "config.update.rolled_back":
+      return "config-rollback";
     default:
       return "runtime-event";
   }

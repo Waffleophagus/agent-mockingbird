@@ -6,7 +6,13 @@ import { z } from "zod";
 import { sqlite } from "../db/client";
 import { DEFAULT_AGENTS, DEFAULT_MCPS, DEFAULT_SKILLS } from "../defaults";
 import { env } from "../env";
-import { wafflebotConfigSchema, specialistAgentSchema, type WafflebotConfig } from "./schema";
+import {
+  agentTypeDefinitionSchema,
+  wafflebotConfigSchema,
+  specialistAgentSchema,
+  type AgentTypeDefinition,
+  type WafflebotConfig,
+} from "./schema";
 import { ConfigApplyError, type WafflebotConfigSnapshot } from "./types";
 
 interface ConfigRow {
@@ -20,7 +26,8 @@ const DEFAULT_SMOKE_TEST_PROMPT = 'Just respond "OK" to this to confirm the gate
 const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
 const legacyStringListSchema = z.array(z.string().min(1));
 const legacyAgentListSchema = z.array(specialistAgentSchema);
-type LegacyConfigKey = "skills" | "mcps" | "agents";
+const legacyAgentTypeListSchema = z.array(agentTypeDefinitionSchema);
+type LegacyConfigKey = "skills" | "mcps" | "agents" | "agent_types";
 
 function resolvedConfigPath() {
   const configuredPath = env.WAFFLEBOT_CONFIG_PATH?.trim();
@@ -86,6 +93,44 @@ function readLegacyAgentConfig(fallback: WafflebotConfig["ui"]["agents"]) {
   return parsed.data;
 }
 
+function readLegacyAgentTypeConfig(fallback: WafflebotConfig["ui"]["agentTypes"]) {
+  const value = readLegacyConfigRow("agent_types");
+  const parsed = legacyAgentTypeListSchema.safeParse(value);
+  if (!parsed.success) return fallback;
+  return parsed.data;
+}
+
+function mapLegacyAgentToAgentType(agent: WafflebotConfig["ui"]["agents"][number]): AgentTypeDefinition {
+  return {
+    id: agent.id.trim(),
+    name: agent.name.trim() || undefined,
+    description: agent.specialty.trim() || undefined,
+    prompt: agent.summary.trim() || undefined,
+    model: agent.model.trim() || undefined,
+    mode: "subagent",
+    disable: agent.status === "offline",
+    hidden: false,
+    options: {
+      wafflebotManagedLegacy: true,
+      wafflebotDisplayName: agent.name.trim(),
+      wafflebotStatus: agent.status,
+    },
+  };
+}
+
+function mergeAgentTypesWithLegacyAgents(
+  agentTypes: WafflebotConfig["ui"]["agentTypes"],
+  agents: WafflebotConfig["ui"]["agents"],
+) {
+  const merged = new Map(agentTypes.map(agentType => [agentType.id, agentType]));
+  for (const agent of agents) {
+    const id = agent.id.trim();
+    if (!id || merged.has(id)) continue;
+    merged.set(id, mapLegacyAgentToAgentType(agent));
+  }
+  return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
 function buildLegacyBootstrappedConfig() {
   const candidate: WafflebotConfig = {
     version: CONFIG_VERSION,
@@ -128,14 +173,35 @@ function buildLegacyBootstrappedConfig() {
         defaultRetryBackoffMs: 30_000,
         retryBackoffCapMs: 3_600_000,
       },
+      configPolicy: {
+        mode: "builder",
+        denyPaths: ["version", "runtime.configPolicy", "runtime.smokeTest"],
+        strictAllowPaths: [
+          "runtime.opencode.runWaitTimeoutMs",
+          "runtime.opencode.childSessionHideAfterDays",
+          "runtime.runStream",
+          "runtime.memory",
+          "runtime.cron",
+          "ui.skills",
+          "ui.mcps",
+          "ui.mcpServers",
+          "ui.agents",
+          "ui.agentTypes",
+        ],
+        requireExpectedHash: true,
+        requireSmokeTest: true,
+        autoRollbackOnFailure: true,
+      },
     },
     ui: {
       skills: readLegacyStringListConfig("skills", DEFAULT_SKILLS),
       mcps: readLegacyStringListConfig("mcps", DEFAULT_MCPS),
       mcpServers: [],
       agents: readLegacyAgentConfig(DEFAULT_AGENTS),
+      agentTypes: readLegacyAgentTypeConfig([]),
     },
   };
+  candidate.ui.agentTypes = mergeAgentTypesWithLegacyAgents(candidate.ui.agentTypes, candidate.ui.agents);
   return wafflebotConfigSchema.parse(candidate);
 }
 
@@ -160,7 +226,9 @@ export function parseConfig(raw: unknown) {
   if (!parsed.success) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }
-  return parsed.data;
+  const config = parsed.data;
+  config.ui.agentTypes = mergeAgentTypesWithLegacyAgents(config.ui.agentTypes, config.ui.agents);
+  return config;
 }
 
 function createSnapshot(configPath: string, config: WafflebotConfig): WafflebotConfigSnapshot {

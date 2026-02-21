@@ -158,6 +158,10 @@ export class RunService {
     const runId = createRunId();
     const createdAt = nowMs();
     const metadata = normalizeMetadata(input.metadata);
+    const agent = input.agent?.trim();
+    if (agent) {
+      metadata.agent = agent;
+    }
     const tx = sqlite.transaction(() => {
       sqlite
         .query(
@@ -171,7 +175,7 @@ export class RunService {
         )
         .run(runId, sessionId, content, safeJson(metadata), idempotencyKey, createdAt);
 
-      this.insertRunEvent(runId, "run.accepted", { sessionId, idempotencyKey }, createdAt);
+      this.insertRunEvent(runId, "run.accepted", { sessionId, idempotencyKey, agent: agent ?? null }, createdAt);
     });
     tx();
 
@@ -333,14 +337,17 @@ export class RunService {
   }
 
   private async executeRun(run: AgentRunRow) {
+    const metadata = normalizeMetadata(parseJson(run.metadata_json));
+    const agent = typeof metadata.agent === "string" ? metadata.agent.trim() : "";
     const startedAt = nowMs();
-    this.insertRunEvent(run.id, "run.started", { sessionId: run.session_id }, startedAt);
+    this.insertRunEvent(run.id, "run.started", { sessionId: run.session_id, agent: agent || null }, startedAt);
 
     try {
       const ack = await this.runtime.sendUserMessage({
         sessionId: run.session_id,
         content: run.content,
-        metadata: normalizeMetadata(parseJson(run.metadata_json)),
+        agent: agent || undefined,
+        metadata,
       });
 
       const completedAt = nowMs();

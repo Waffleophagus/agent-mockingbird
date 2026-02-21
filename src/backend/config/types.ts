@@ -1,6 +1,14 @@
 import type { WafflebotConfig } from "./schema";
 
-export type ConfigApplyStage = "request" | "conflict" | "schema" | "semantic" | "smoke" | "write";
+export type ConfigApplyStage =
+  | "request"
+  | "conflict"
+  | "schema"
+  | "semantic"
+  | "smoke"
+  | "policy"
+  | "rollback"
+  | "write";
 
 export class ConfigApplyError extends Error {
   readonly stage: ConfigApplyStage;
@@ -31,20 +39,32 @@ export interface ConfigSmokeTestSummary {
   responseText: string;
 }
 
+export interface ConfigPolicySummary {
+  mode: "builder" | "strict";
+  changedPaths: string[];
+  rejectedPaths: string[];
+  requireExpectedHash: boolean;
+  requireSmokeTest: boolean;
+  autoRollbackOnFailure: boolean;
+}
+
 export interface ApplyConfigPatchInput {
   patch: unknown;
   expectedHash?: string;
   runSmokeTest?: boolean;
+  safeMode?: boolean;
 }
 
 export interface ApplyConfigReplaceInput {
   config: unknown;
   expectedHash?: string;
   runSmokeTest?: boolean;
+  safeMode?: boolean;
 }
 
 export interface ApplyConfigResult {
   snapshot: WafflebotConfigSnapshot;
   semantic: ConfigSemanticSummary;
   smokeTest: ConfigSmokeTestSummary | null;
+  policy: ConfigPolicySummary | null;
 }

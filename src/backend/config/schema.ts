@@ -18,6 +18,49 @@ export const specialistAgentSchema = z.object({
   status: z.enum(["available", "busy", "offline"]),
 });
 
+const agentTypeModeSchema = z.enum(["subagent", "primary", "all"]);
+const openCodePermissionScalarSchema = z.enum(["allow", "deny", "ask"]);
+const openCodePermissionRuleMapSchema = z.record(z.string(), openCodePermissionScalarSchema);
+const openCodePermissionValueSchema = z.union([openCodePermissionScalarSchema, openCodePermissionRuleMapSchema]);
+const openCodePermissionSchema = z.record(z.string(), openCodePermissionValueSchema);
+
+export const agentTypeDefinitionSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+    prompt: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    variant: z.string().min(1).optional(),
+    mode: agentTypeModeSchema.default("subagent"),
+    hidden: z.boolean().default(false),
+    disable: z.boolean().default(false),
+    temperature: z.number().optional(),
+    topP: z.number().optional(),
+    steps: z.number().int().positive().optional(),
+    permission: openCodePermissionSchema.optional(),
+    options: z.record(z.string(), z.unknown()).default({}),
+  })
+  .strict();
+
+const agentTypeDefinitionListSchema = z.array(agentTypeDefinitionSchema).transform(agentTypes => {
+  const deduped = new Map<string, (typeof agentTypes)[number]>();
+  for (const rawType of agentTypes) {
+    const id = rawType.id.trim();
+    if (!id) continue;
+    deduped.set(id, {
+      ...rawType,
+      id,
+      name: rawType.name?.trim() || undefined,
+      description: rawType.description?.trim() || undefined,
+      prompt: rawType.prompt?.trim() || undefined,
+      model: rawType.model?.trim() || undefined,
+      variant: rawType.variant?.trim() || undefined,
+    });
+  }
+  return [...deduped.values()].sort((a, b) => a.id.localeCompare(b.id));
+});
+
 export const configuredMcpServerSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -103,6 +146,28 @@ export const runtimeCronSchema = z
   })
   .strict();
 
+export const runtimeConfigPolicySchema = z
+  .object({
+    mode: z.enum(["builder", "strict"]).default("builder"),
+    denyPaths: stringListSchema.default(["version", "runtime.configPolicy", "runtime.smokeTest"]),
+    strictAllowPaths: stringListSchema.default([
+      "runtime.opencode.runWaitTimeoutMs",
+      "runtime.opencode.childSessionHideAfterDays",
+      "runtime.runStream",
+      "runtime.memory",
+      "runtime.cron",
+      "ui.skills",
+      "ui.mcps",
+      "ui.mcpServers",
+      "ui.agents",
+      "ui.agentTypes",
+    ]),
+    requireExpectedHash: z.boolean().default(true),
+    requireSmokeTest: z.boolean().default(true),
+    autoRollbackOnFailure: z.boolean().default(true),
+  })
+  .strict();
+
 export const wafflebotConfigSchema = z
   .object({
     version: z.literal(1),
@@ -132,6 +197,25 @@ export const wafflebotConfigSchema = z
           defaultRetryBackoffMs: 30_000,
           retryBackoffCapMs: 3_600_000,
         }),
+        configPolicy: runtimeConfigPolicySchema.default({
+          mode: "builder",
+          denyPaths: ["version", "runtime.configPolicy", "runtime.smokeTest"],
+          strictAllowPaths: [
+            "runtime.opencode.runWaitTimeoutMs",
+            "runtime.opencode.childSessionHideAfterDays",
+            "runtime.runStream",
+            "runtime.memory",
+            "runtime.cron",
+            "ui.skills",
+            "ui.mcps",
+            "ui.mcpServers",
+            "ui.agents",
+            "ui.agentTypes",
+          ],
+          requireExpectedHash: true,
+          requireSmokeTest: true,
+          autoRollbackOnFailure: true,
+        }),
       })
       .strict(),
     ui: z
@@ -140,6 +224,7 @@ export const wafflebotConfigSchema = z
         mcps: stringListSchema.default([]),
         mcpServers: configuredMcpServerListSchema.default([]),
         agents: z.array(specialistAgentSchema).default([]),
+        agentTypes: agentTypeDefinitionListSchema.default([]),
       })
       .strict(),
   })
@@ -147,3 +232,4 @@ export const wafflebotConfigSchema = z
 
 export type WafflebotConfig = z.infer<typeof wafflebotConfigSchema>;
 export type ConfiguredMcpServer = z.infer<typeof configuredMcpServerSchema>;
+export type AgentTypeDefinition = z.infer<typeof agentTypeDefinitionSchema>;

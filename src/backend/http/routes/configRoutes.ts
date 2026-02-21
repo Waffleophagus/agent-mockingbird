@@ -1,15 +1,24 @@
 import { z } from "zod";
 
-import { listRuntimeAgents, resolveConfiguredAgentIds } from "../../agents/service";
-import { configuredMcpServerSchema, specialistAgentSchema } from "../../config/schema";
+import {
+  listRuntimeAgents,
+  normalizeConfiguredAgentTypes,
+  resolveConfiguredAgentIds,
+  resolveConfiguredAgentTypesFromLegacyAgents,
+  toLegacySpecialistAgent,
+} from "../../agents/service";
+import { agentTypeDefinitionSchema, configuredMcpServerSchema, specialistAgentSchema } from "../../config/schema";
 import {
   applyConfigPatch,
+  applyConfigPatchSafe,
   ConfigApplyError,
   getConfigSnapshot,
   replaceConfig,
+  replaceConfigSafe,
   type ApplyConfigResult,
 } from "../../config/service";
 import {
+  createConfigRolledBackEvent,
   createConfigUpdateFailedEvent,
   createConfigUpdatedEvent,
 } from "../../contracts/events";
@@ -56,7 +65,7 @@ function toErrorResponse(error: unknown) {
         },
       };
     }
-    if (error.stage === "semantic" || error.stage === "smoke") {
+    if (error.stage === "semantic" || error.stage === "smoke" || error.stage === "policy") {
       return {
         status: 422,
         body: {
@@ -85,6 +94,7 @@ function toErrorResponse(error: unknown) {
 }
 
 function configErrorResponse(eventStream: RuntimeEventStream, error: unknown) {
+  publishConfigRollbackEvent(eventStream, error);
   publishConfigFailedEvent(eventStream, error);
   const details = toErrorResponse(error);
   return Response.json(details.body, { status: details.status });
@@ -113,6 +123,23 @@ function publishConfigFailedEvent(eventStream: RuntimeEventStream, error: unknow
       {
         stage: String((details.body as { stage?: unknown }).stage ?? "unknown"),
         message: String((details.body as { error?: unknown }).error ?? "Config update failed"),
+      },
+      "api",
+    ),
+  );
+}
+
+function publishConfigRollbackEvent(eventStream: RuntimeEventStream, error: unknown) {
+  if (!(error instanceof ConfigApplyError)) return;
+  if (error.stage !== "smoke" && error.stage !== "rollback") return;
+  const details = (error.details ?? {}) as Record<string, unknown>;
+  if (details.rolledBack !== true && error.stage !== "rollback") return;
+  eventStream.publish(
+    createConfigRolledBackEvent(
+      {
+        attemptedHash: typeof details.attemptedHash === "string" ? details.attemptedHash : null,
+        restoredHash: typeof details.restoredHash === "string" ? details.restoredHash : null,
+        message: error.message,
       },
       "api",
     ),
@@ -214,8 +241,9 @@ async function applyAgentsUpdate(eventStream: RuntimeEventStream, req: Request) 
   }
 
   try {
+    const agentTypes = resolveConfiguredAgentTypesFromLegacyAgents(parsedAgents.data);
     const result = await applyConfigPatch({
-      patch: { ui: { agents: parsedAgents.data } },
+      patch: { ui: { agents: parsedAgents.data, agentTypes } },
       expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
       runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
     });
@@ -228,6 +256,46 @@ async function applyAgentsUpdate(eventStream: RuntimeEventStream, req: Request) 
   } catch (error) {
     return configErrorResponse(eventStream, error);
   }
+}
+
+async function applyAgentTypesUpdate(eventStream: RuntimeEventStream, req: Request) {
+  const body = (await req.json()) as Record<string, unknown>;
+  const parsedAgentTypes = z.array(agentTypeDefinitionSchema).safeParse(body.agentTypes);
+  if (!parsedAgentTypes.success) {
+    return Response.json(
+      {
+        error: "agentTypes must be a valid agent type config array",
+        details: parsedAgentTypes.error.flatten(),
+      },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const normalized = normalizeConfiguredAgentTypes(parsedAgentTypes.data);
+    const result = await applyConfigPatch({
+      patch: { ui: { agentTypes: normalized } },
+      expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+      runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+    });
+    publishConfigUpdatedEvent(eventStream, result);
+    return Response.json({
+      agentTypes: result.snapshot.config.ui.agentTypes,
+      hash: result.snapshot.hash,
+      smokeTest: result.smokeTest,
+    });
+  } catch (error) {
+    return configErrorResponse(eventStream, error);
+  }
+}
+
+function toLegacyAgentsForResponse() {
+  const snapshot = getConfigSnapshot();
+  const hasLegacyConfiguredAgents = snapshot.config.ui.agents.length > 0;
+  const legacyAgents = hasLegacyConfiguredAgents
+    ? snapshot.config.ui.agents
+    : snapshot.config.ui.agentTypes.map(toLegacySpecialistAgent);
+  return { agents: legacyAgents, hash: snapshot.hash };
 }
 
 async function getSkillCatalog() {
@@ -457,6 +525,48 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
       },
     },
 
+    "/api/config/patch-safe": {
+      POST: async (req: Request) => {
+        const body = (await req.json()) as {
+          patch?: unknown;
+          expectedHash?: unknown;
+          runSmokeTest?: unknown;
+        };
+        try {
+          const result = await applyConfigPatchSafe({
+            patch: body.patch,
+            expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+            runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+          });
+          publishConfigUpdatedEvent(eventStream, result);
+          return Response.json(result);
+        } catch (error) {
+          return configErrorResponse(eventStream, error);
+        }
+      },
+    },
+
+    "/api/config/replace-safe": {
+      POST: async (req: Request) => {
+        const body = (await req.json()) as {
+          config?: unknown;
+          expectedHash?: unknown;
+          runSmokeTest?: unknown;
+        };
+        try {
+          const result = await replaceConfigSafe({
+            config: body.config,
+            expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+            runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+          });
+          publishConfigUpdatedEvent(eventStream, result);
+          return Response.json(result);
+        } catch (error) {
+          return configErrorResponse(eventStream, error);
+        }
+      },
+    },
+
     "/api/config/skills": {
       GET: () => {
         const snapshot = getConfigSnapshot();
@@ -506,14 +616,23 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
     },
 
     "/api/config/agents": {
-      GET: () => {
-        const snapshot = getConfigSnapshot();
-        return Response.json({ agents: snapshot.config.ui.agents, hash: snapshot.hash });
-      },
+      GET: () => Response.json(toLegacyAgentsForResponse()),
       PUT: async (req: Request) => applyAgentsUpdate(eventStream, req),
     },
 
     "/api/config/agents/catalog": {
+      GET: async () => getAgentCatalog(),
+    },
+
+    "/api/config/agent-types": {
+      GET: () => {
+        const snapshot = getConfigSnapshot();
+        return Response.json({ agentTypes: snapshot.config.ui.agentTypes, hash: snapshot.hash });
+      },
+      PUT: async (req: Request) => applyAgentTypesUpdate(eventStream, req),
+    },
+
+    "/api/config/agent-types/catalog": {
       GET: async () => getAgentCatalog(),
     },
   };

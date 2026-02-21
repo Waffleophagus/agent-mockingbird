@@ -47,6 +47,23 @@ export interface SpecialistAgent {
   status: "available" | "busy" | "offline";
 }
 
+export interface AgentTypeDefinition {
+  id: string;
+  name?: string;
+  description?: string;
+  prompt?: string;
+  model?: string;
+  variant?: string;
+  mode: "subagent" | "primary" | "all";
+  hidden: boolean;
+  disable: boolean;
+  temperature?: number;
+  topP?: number;
+  steps?: number;
+  permission?: Record<string, unknown>;
+  options: Record<string, unknown>;
+}
+
 export interface RuntimeSkill {
   id: string;
   name: string;

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -63,7 +63,12 @@ interface MemoryServiceApi {
 }
 
 interface RuntimeStub {
-  sendUserMessage: (input: { sessionId: string; content: string; metadata?: Record<string, unknown> }) => Promise<unknown>;
+  sendUserMessage: (input: {
+    sessionId: string;
+    content: string;
+    agent?: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<unknown>;
   subscribe: (_listener: (event: unknown) => void) => () => void;
   syncSessionMessages?: (sessionId: string) => Promise<void>;
   checkHealth?: (_input?: { force?: boolean }) => Promise<{
@@ -284,7 +289,12 @@ afterAll(() => {
 });
 
 function createRuntimeStub(
-  impl: (input: { sessionId: string; content: string; metadata?: Record<string, unknown> }) => Promise<unknown>,
+  impl: (input: {
+    sessionId: string;
+    content: string;
+    agent?: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<unknown>,
   options?: {
     checkHealth?: RuntimeStub["checkHealth"];
   },
@@ -299,7 +309,12 @@ function createRuntimeStub(
 }
 
 function createRouteHarness(
-  runtimeImpl: (input: { sessionId: string; content: string; metadata?: Record<string, unknown> }) => Promise<unknown>,
+  runtimeImpl: (input: {
+    sessionId: string;
+    content: string;
+    agent?: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<unknown>,
   options?: {
     checkHealth?: RuntimeStub["checkHealth"];
   },
@@ -553,6 +568,89 @@ describe("config routes", () => {
     expect(payload.stage === "semantic" || payload.stage === "smoke").toBe(true);
     expect(typeof payload.error).toBe("string");
   });
+
+  test("GET /api/config/agent-types returns agent types and hash", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/config/agent-types"] as {
+      GET: (req: Request) => Response;
+    };
+    const response = route.GET(new Request("http://localhost/api/config/agent-types"));
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      agentTypes?: Array<{ id: string }>;
+      hash?: string;
+    };
+    expect(Array.isArray(payload.agentTypes)).toBe(true);
+    expect(typeof payload.hash).toBe("string");
+  });
+
+  test("POST /api/config/patch-safe requires expectedHash", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/config/patch-safe"] as {
+      POST: (req: Request) => Promise<Response>;
+    };
+    const response = await route.POST(
+      new Request("http://localhost/api/config/patch-safe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patch: {
+            runtime: {
+              runStream: {
+                heartbeatMs: 16000,
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const payload = (await response.json()) as {
+      stage?: string;
+      error?: string;
+    };
+    expect(payload.stage).toBe("request");
+    expect(typeof payload.error).toBe("string");
+  });
+
+  test("POST /api/config/patch-safe rejects denylisted paths", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const configRoute = routes["/api/config"] as { GET: (req: Request) => Response };
+    const configResponse = configRoute.GET(new Request("http://localhost/api/config"));
+    const snapshot = (await configResponse.json()) as { hash: string };
+
+    const route = routes["/api/config/patch-safe"] as {
+      POST: (req: Request) => Promise<Response>;
+    };
+    const response = await route.POST(
+      new Request("http://localhost/api/config/patch-safe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedHash: snapshot.hash,
+          runSmokeTest: false,
+          patch: {
+            runtime: {
+              smokeTest: {
+                prompt: "override prompt",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    const payload = (await response.json()) as {
+      stage?: string;
+      details?: { rejectedPaths?: string[] };
+    };
+    expect(payload.stage).toBe("policy");
+    expect(Array.isArray(payload.details?.rejectedPaths)).toBe(true);
+    expect(payload.details?.rejectedPaths?.some(path => path.startsWith("runtime.smokeTest"))).toBe(true);
+  });
 });
 
 describe("run routes", () => {
@@ -631,6 +729,32 @@ describe("run routes", () => {
     expect(eventTypes).toContain("run.completed");
     expect(eventsPayload.hasMore).toBe(false);
     expect(eventsPayload.nextAfterSeq).toBeGreaterThan(0);
+  });
+
+  test("POST /api/runs forwards optional agent to runtime", async () => {
+    const session = repository.createSession({ title: "Agent Run Session" });
+    let seenAgent: string | undefined;
+    const { routes } = createRouteHarness(async input => {
+      seenAgent = input.agent;
+      return { sessionId: input.sessionId, messages: [] };
+    });
+
+    const createRoute = routes["/api/runs"] as { POST: (req: Request) => Promise<Response> };
+    const createResponse = await createRoute.POST(
+      new Request("http://localhost/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.id,
+          content: "run with agent",
+          agent: "planner",
+        }),
+      }),
+    );
+    expect(createResponse.status).toBe(202);
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(seenAgent).toBe("planner");
   });
 
   test("POST /api/runs deduplicates by idempotencyKey", async () => {
@@ -874,6 +998,24 @@ describe("background routes", () => {
 
 describe("memory validation and logging", () => {
   test("duplicate remember writes are rejected and logged in memory_write_events", async () => {
+    const { getConfigPath, getConfigSnapshot } = (await import("../config/service")) as unknown as {
+      getConfigPath: () => string;
+      getConfigSnapshot: () => { hash: string };
+    };
+    getConfigSnapshot();
+    const configPath = getConfigPath();
+    if (!existsSync(configPath)) {
+      throw new Error(`Expected config path to exist: ${configPath}`);
+    }
+
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    const runtime = (config.runtime ?? {}) as Record<string, unknown>;
+    const memory = (runtime.memory ?? {}) as Record<string, unknown>;
+    memory.embedProvider = "none";
+    runtime.memory = memory;
+    config.runtime = runtime;
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+
     const first = await memoryService.rememberMemory({
       source: "system",
       content: "Persist this memory value",

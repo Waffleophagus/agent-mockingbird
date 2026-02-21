@@ -10,6 +10,7 @@
       "timeoutMs": 120000,
       "promptTimeoutMs": 300000,
       "runWaitTimeoutMs": 180000,
+      "childSessionHideAfterDays": 3,
       "directory": null
     },
     "smokeTest": {
@@ -37,12 +38,40 @@
       "defaultMaxAttempts": 3,
       "defaultRetryBackoffMs": 30000,
       "retryBackoffCapMs": 3600000
+    },
+    "configPolicy": {
+      "mode": "builder",
+      "denyPaths": [
+        "version",
+        "runtime.configPolicy",
+        "runtime.smokeTest"
+      ],
+      "strictAllowPaths": [
+        "runtime.opencode.runWaitTimeoutMs",
+        "runtime.opencode.childSessionHideAfterDays",
+        "runtime.runStream",
+        "runtime.memory",
+        "runtime.cron",
+        "ui.skills",
+        "ui.mcps",
+        "ui.mcpServers",
+        "ui.agents",
+        "ui.agentTypes"
+      ],
+      "requireExpectedHash": true,
+      "requireSmokeTest": true,
+      "autoRollbackOnFailure": true
     }
   },
   "ui": {
-    "skills": [],
+    "skills": [
+      "config-editor",
+      "config-auditor",
+      "runtime-diagnose"
+    ],
     "mcps": [],
     "mcpServers": [],
-    "agents": []
+    "agents": [],
+    "agentTypes": []
   }
 }

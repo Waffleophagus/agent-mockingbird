@@ -27,13 +27,13 @@ const argsSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("patch_config"),
     patch: z.unknown(),
-    expectedHash: z.string().min(1).optional(),
+    expectedHash: z.string().min(1),
     runSmokeTest: z.boolean().optional(),
   }),
   z.object({
     action: z.literal("replace_config"),
     config: z.unknown(),
-    expectedHash: z.string().min(1).optional(),
+    expectedHash: z.string().min(1),
     runSmokeTest: z.boolean().optional(),
   }),
 ]);
@@ -63,8 +63,8 @@ export default tool({
     }
 
     if (args.action === "patch_config") {
-      const payload = await requestJson("/api/config", {
-        method: "PATCH",
+      const payload = await requestJson("/api/config/patch-safe", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patch: args.patch,
@@ -75,8 +75,8 @@ export default tool({
       return JSON.stringify({ ok: true, ...payload });
     }
 
-    const payload = await requestJson("/api/config", {
-      method: "PUT",
+    const payload = await requestJson("/api/config/replace-safe", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         config: args.config,

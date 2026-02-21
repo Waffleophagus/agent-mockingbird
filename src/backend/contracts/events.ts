@@ -75,6 +75,13 @@ export interface ConfigUpdateFailedPayload {
 }
 export type ConfigUpdateFailedEvent = RuntimeEventBase<"config.update.failed", ConfigUpdateFailedPayload>;
 
+export interface ConfigRolledBackPayload {
+  attemptedHash: string | null;
+  restoredHash: string | null;
+  message: string;
+}
+export type ConfigRolledBackEvent = RuntimeEventBase<"config.update.rolled_back", ConfigRolledBackPayload>;
+
 export type RuntimeEvent =
   | HeartbeatUpdatedEvent
   | UsageUpdatedEvent
@@ -85,7 +92,8 @@ export type RuntimeEvent =
   | SessionRunErrorEvent
   | BackgroundRunUpdatedEvent
   | ConfigUpdatedEvent
-  | ConfigUpdateFailedEvent;
+  | ConfigUpdateFailedEvent
+  | ConfigRolledBackEvent;
 
 function baseRuntimeEvent<TType extends RuntimeEvent["type"], TPayload>(
   type: TType,
@@ -160,4 +168,11 @@ export function createConfigUpdateFailedEvent(
   source: RuntimeEventSource,
 ): ConfigUpdateFailedEvent {
   return baseRuntimeEvent("config.update.failed", payload, source);
+}
+
+export function createConfigRolledBackEvent(
+  payload: ConfigRolledBackPayload,
+  source: RuntimeEventSource,
+): ConfigRolledBackEvent {
+  return baseRuntimeEvent("config.update.rolled_back", payload, source);
 }

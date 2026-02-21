@@ -1,3 +1,8 @@
+import {
+  assertConfigPolicyAllows,
+  evaluateConfigPolicyForPatch,
+  evaluateConfigPolicyForReplace,
+} from "./policy";
 import type { WafflebotConfig } from "./schema";
 import { runSemanticValidation } from "./semantic";
 import { runSmokeTest } from "./smoke";
@@ -11,25 +16,82 @@ import {
   parseConfig,
   persistConfigSnapshot,
 } from "./store";
-import { ConfigApplyError, type ConfigSemanticSummary, type ConfigSmokeTestSummary } from "./types";
+import {
+  ConfigApplyError,
+  type ConfigPolicySummary,
+  type ConfigSemanticSummary,
+  type ConfigSmokeTestSummary,
+} from "./types";
 
 export {
   ConfigApplyError,
   type ApplyConfigPatchInput,
   type ApplyConfigReplaceInput,
   type ApplyConfigResult,
+  type ConfigPolicySummary,
   type ConfigSemanticSummary,
   type ConfigSmokeTestSummary,
   type WafflebotConfigSnapshot,
 } from "./types";
 
 async function applyCandidateConfig(
-  candidate: WafflebotConfig,
-  runSmokeValidation: boolean,
-): Promise<{ semantic: ConfigSemanticSummary; smokeTest: ConfigSmokeTestSummary | null }> {
-  const semantic = await runSemanticValidation(candidate);
-  const smokeTest = runSmokeValidation ? await runSmokeTest(candidate) : null;
-  return { semantic, smokeTest };
+  input: {
+    currentPath: string;
+    currentConfig: WafflebotConfig;
+    candidate: WafflebotConfig;
+    runSmokeValidation: boolean;
+    autoRollbackOnFailure: boolean;
+  },
+): Promise<{
+  snapshot: ReturnType<typeof persistConfigSnapshot>;
+  semantic: ConfigSemanticSummary;
+  smokeTest: ConfigSmokeTestSummary | null;
+}> {
+  const semantic = await runSemanticValidation(input.candidate);
+  if (!input.runSmokeValidation) {
+    const snapshot = persistConfigSnapshot(input.currentPath, input.candidate);
+    return { snapshot, semantic, smokeTest: null };
+  }
+
+  if (!input.autoRollbackOnFailure) {
+    const smokeTest = await runSmokeTest(input.candidate);
+    const snapshot = persistConfigSnapshot(input.currentPath, input.candidate);
+    return { snapshot, semantic, smokeTest };
+  }
+
+  const attemptedSnapshot = persistConfigSnapshot(input.currentPath, input.candidate);
+  try {
+    const smokeTest = await runSmokeTest(input.candidate);
+    return { snapshot: attemptedSnapshot, semantic, smokeTest };
+  } catch (error) {
+    let rollbackSnapshot: ReturnType<typeof persistConfigSnapshot> | null = null;
+    try {
+      rollbackSnapshot = persistConfigSnapshot(input.currentPath, input.currentConfig);
+    } catch (rollbackError) {
+      const rollbackMessage =
+        rollbackError instanceof Error ? rollbackError.message : "Failed to rollback config";
+      throw new ConfigApplyError("rollback", rollbackMessage, {
+        attemptedHash: attemptedSnapshot.hash,
+        originalError: error instanceof Error ? error.message : "Smoke test failed",
+      });
+    }
+
+    if (error instanceof ConfigApplyError) {
+      throw new ConfigApplyError(error.stage, error.message, {
+        ...(error.details ?? {}),
+        rolledBack: true,
+        attemptedHash: attemptedSnapshot.hash,
+        restoredHash: rollbackSnapshot.hash,
+      });
+    }
+
+    const message = error instanceof Error ? error.message : "Smoke test failed";
+    throw new ConfigApplyError("smoke", message, {
+      rolledBack: true,
+      attemptedHash: attemptedSnapshot.hash,
+      restoredHash: rollbackSnapshot.hash,
+    });
+  }
 }
 
 export { ensureConfigSnapshot as ensureConfigFile, getConfigSnapshot, getConfig, getConfigPath };
@@ -42,22 +104,44 @@ export async function applyConfigPatch(input: {
   patch: unknown;
   expectedHash?: string;
   runSmokeTest?: boolean;
+  safeMode?: boolean;
 }) {
   const current = ensureConfigSnapshot();
-  assertExpectedHashMatches(current.hash, input.expectedHash);
   if (!isPlainObject(input.patch)) {
     throw new ConfigApplyError("request", "patch must be an object");
   }
 
+  let policy: ConfigPolicySummary | null = null;
+  if (input.safeMode) {
+    policy = evaluateConfigPolicyForPatch(current.config, input.patch);
+    assertConfigPolicyAllows(policy);
+    if (policy.requireExpectedHash && !input.expectedHash) {
+      throw new ConfigApplyError("request", "expectedHash is required in safe mode");
+    }
+  }
+  assertExpectedHashMatches(current.hash, input.expectedHash);
+
   const merged = mergeConfigPatch(current.config, input.patch);
   const candidate = parseConfig(merged);
-  const validated = await applyCandidateConfig(candidate, input.runSmokeTest !== false);
-  const snapshot = persistConfigSnapshot(current.path, candidate);
+  if (input.safeMode) {
+    policy = evaluateConfigPolicyForReplace(current.config, candidate);
+    assertConfigPolicyAllows(policy);
+  }
+
+  const runSmokeValidation = policy?.requireSmokeTest ? true : input.runSmokeTest !== false;
+  const validated = await applyCandidateConfig({
+    currentPath: current.path,
+    currentConfig: current.config,
+    candidate,
+    runSmokeValidation,
+    autoRollbackOnFailure: policy?.autoRollbackOnFailure ?? false,
+  });
 
   return {
-    snapshot,
+    snapshot: validated.snapshot,
     semantic: validated.semantic,
     smokeTest: validated.smokeTest,
+    policy,
   };
 }
 
@@ -65,17 +149,55 @@ export async function replaceConfig(input: {
   config: unknown;
   expectedHash?: string;
   runSmokeTest?: boolean;
+  safeMode?: boolean;
 }) {
   const current = ensureConfigSnapshot();
+  const candidate = parseConfig(input.config);
+  let policy: ConfigPolicySummary | null = null;
+  if (input.safeMode) {
+    policy = evaluateConfigPolicyForReplace(current.config, candidate);
+    assertConfigPolicyAllows(policy);
+    if (policy.requireExpectedHash && !input.expectedHash) {
+      throw new ConfigApplyError("request", "expectedHash is required in safe mode");
+    }
+  }
   assertExpectedHashMatches(current.hash, input.expectedHash);
 
-  const candidate = parseConfig(input.config);
-  const validated = await applyCandidateConfig(candidate, input.runSmokeTest !== false);
-  const snapshot = persistConfigSnapshot(current.path, candidate);
+  const runSmokeValidation = policy?.requireSmokeTest ? true : input.runSmokeTest !== false;
+  const validated = await applyCandidateConfig({
+    currentPath: current.path,
+    currentConfig: current.config,
+    candidate,
+    runSmokeValidation,
+    autoRollbackOnFailure: policy?.autoRollbackOnFailure ?? false,
+  });
 
   return {
-    snapshot,
+    snapshot: validated.snapshot,
     semantic: validated.semantic,
     smokeTest: validated.smokeTest,
+    policy,
   };
+}
+
+export async function applyConfigPatchSafe(input: {
+  patch: unknown;
+  expectedHash?: string;
+  runSmokeTest?: boolean;
+}) {
+  return applyConfigPatch({
+    ...input,
+    safeMode: true,
+  });
+}
+
+export async function replaceConfigSafe(input: {
+  config: unknown;
+  expectedHash?: string;
+  runSmokeTest?: boolean;
+}) {
+  return replaceConfig({
+    ...input,
+    safeMode: true,
+  });
 }
