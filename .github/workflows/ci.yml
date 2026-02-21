@@ -149,6 +149,7 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
+          echo "::add-mask::${REGISTRY_TOKEN}"
           registry="${REGISTRY_URL%/}/"
           registry_no_proto="${registry#https://}"
           registry_no_proto="${registry_no_proto#http://}"
@@ -157,8 +158,21 @@ jobs:
             echo "//${registry_no_proto}:_authToken=${REGISTRY_TOKEN}"
           } > "${HOME}/.npmrc"
 
+      - name: Debug registry auth (safe)
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          echo "Registry URL: ${REGISTRY_URL%/}/"
+          echo "Registry scope: ${REGISTRY_SCOPE}"
+          echo "package.json publishConfig.registry:"
+          bun -e 'const p=require("./package.json"); console.log(p.publishConfig?.registry || "<missing>")'
+          echo ".npmrc (token redacted):"
+          sed -E 's#(_authToken=).*#\1***REDACTED***#' "${HOME}/.npmrc"
+          echo "bun pm whoami:"
+          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun pm whoami --registry "${REGISTRY_URL%/}/" || true
+
       - name: Publish package tarball
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun publish --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}" "${PACKAGE_TARBALL}"
+          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun publish --verbose --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}" "${PACKAGE_TARBALL}"
