@@ -70,6 +70,87 @@ function parseFallbackModels(raw: string | undefined) {
   return normalizeStringList(raw.split(","));
 }
 
+function hasExplicitEnvValue(key: string) {
+  const raw = process.env[key];
+  return typeof raw === "string" && raw.trim().length > 0;
+}
+
+function readExplicitEnvString(key: string) {
+  if (!hasExplicitEnvValue(key)) return undefined;
+  return process.env[key]?.trim();
+}
+
+function readExplicitEnvNumber(key: string) {
+  const raw = readExplicitEnvString(key);
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function readExplicitEnvBoolean(key: string) {
+  const raw = readExplicitEnvString(key)?.toLowerCase();
+  if (!raw) return undefined;
+  if (raw === "true" || raw === "1") return true;
+  if (raw === "false" || raw === "0") return false;
+  return undefined;
+}
+
+function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
+  const opencodePatch: Record<string, unknown> = {};
+  const memoryPatch: Record<string, unknown> = {};
+
+  const opencodeBaseUrl = readExplicitEnvString("WAFFLEBOT_OPENCODE_BASE_URL");
+  if (opencodeBaseUrl) opencodePatch.baseUrl = opencodeBaseUrl;
+  const opencodeProviderId = readExplicitEnvString("WAFFLEBOT_OPENCODE_PROVIDER_ID");
+  if (opencodeProviderId) opencodePatch.providerId = opencodeProviderId;
+  const opencodeModelId = readExplicitEnvString("WAFFLEBOT_OPENCODE_MODEL_ID");
+  if (opencodeModelId) opencodePatch.modelId = opencodeModelId;
+  const opencodeFallbacks = readExplicitEnvString("WAFFLEBOT_OPENCODE_MODEL_FALLBACKS");
+  if (opencodeFallbacks) opencodePatch.fallbackModels = parseFallbackModels(opencodeFallbacks);
+  const opencodeSmallModel = readExplicitEnvString("WAFFLEBOT_OPENCODE_SMALL_MODEL");
+  if (opencodeSmallModel) opencodePatch.smallModel = opencodeSmallModel;
+  const opencodeTimeoutMs = readExplicitEnvNumber("WAFFLEBOT_OPENCODE_TIMEOUT_MS");
+  if (typeof opencodeTimeoutMs === "number") opencodePatch.timeoutMs = opencodeTimeoutMs;
+  const opencodePromptTimeoutMs = readExplicitEnvNumber("WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS");
+  if (typeof opencodePromptTimeoutMs === "number") opencodePatch.promptTimeoutMs = opencodePromptTimeoutMs;
+  const opencodeRunWaitTimeoutMs = readExplicitEnvNumber("WAFFLEBOT_OPENCODE_RUN_WAIT_TIMEOUT_MS");
+  if (typeof opencodeRunWaitTimeoutMs === "number") opencodePatch.runWaitTimeoutMs = opencodeRunWaitTimeoutMs;
+  const opencodeDirectory = readExplicitEnvString("WAFFLEBOT_OPENCODE_DIRECTORY");
+  if (opencodeDirectory) opencodePatch.directory = opencodeDirectory;
+
+  const memoryEnabled = readExplicitEnvBoolean("WAFFLEBOT_MEMORY_ENABLED");
+  if (typeof memoryEnabled === "boolean") memoryPatch.enabled = memoryEnabled;
+  const memoryWorkspaceDir = readExplicitEnvString("WAFFLEBOT_MEMORY_WORKSPACE_DIR");
+  if (memoryWorkspaceDir) memoryPatch.workspaceDir = memoryWorkspaceDir;
+  const memoryEmbedProvider = readExplicitEnvString("WAFFLEBOT_MEMORY_EMBED_PROVIDER");
+  if (memoryEmbedProvider) memoryPatch.embedProvider = memoryEmbedProvider;
+  const memoryEmbedModel = readExplicitEnvString("WAFFLEBOT_MEMORY_EMBED_MODEL");
+  if (memoryEmbedModel) memoryPatch.embedModel = memoryEmbedModel;
+  const memoryOllamaBaseUrl = readExplicitEnvString("WAFFLEBOT_MEMORY_OLLAMA_BASE_URL");
+  if (memoryOllamaBaseUrl) memoryPatch.ollamaBaseUrl = memoryOllamaBaseUrl;
+  const memoryChunkTokens = readExplicitEnvNumber("WAFFLEBOT_MEMORY_CHUNK_TOKENS");
+  if (typeof memoryChunkTokens === "number") memoryPatch.chunkTokens = memoryChunkTokens;
+  const memoryChunkOverlap = readExplicitEnvNumber("WAFFLEBOT_MEMORY_CHUNK_OVERLAP");
+  if (typeof memoryChunkOverlap === "number") memoryPatch.chunkOverlap = memoryChunkOverlap;
+  const memoryMaxResults = readExplicitEnvNumber("WAFFLEBOT_MEMORY_MAX_RESULTS");
+  if (typeof memoryMaxResults === "number") memoryPatch.maxResults = memoryMaxResults;
+  const memoryMinScore = readExplicitEnvNumber("WAFFLEBOT_MEMORY_MIN_SCORE");
+  if (typeof memoryMinScore === "number") memoryPatch.minScore = memoryMinScore;
+  const memorySyncCooldownMs = readExplicitEnvNumber("WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS");
+  if (typeof memorySyncCooldownMs === "number") memoryPatch.syncCooldownMs = memorySyncCooldownMs;
+  const memoryToolMode = readExplicitEnvString("WAFFLEBOT_MEMORY_TOOL_MODE");
+  if (memoryToolMode) memoryPatch.toolMode = memoryToolMode;
+
+  const runtimePatch: Record<string, unknown> = {};
+  if (Object.keys(opencodePatch).length) runtimePatch.opencode = opencodePatch;
+  if (Object.keys(memoryPatch).length) runtimePatch.memory = memoryPatch;
+
+  if (!Object.keys(runtimePatch).length) {
+    return {};
+  }
+  return { runtime: runtimePatch };
+}
+
 function readLegacyConfigRow(key: LegacyConfigKey) {
   const row = sqlite.query("SELECT value_json FROM runtime_config WHERE key = ?1").get(key) as ConfigRow | null;
   if (!row?.value_json) return null;
@@ -213,7 +294,9 @@ function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
 }
 
 export function parseConfig(raw: unknown) {
-  const parsed = wafflebotConfigSchema.safeParse(stripLegacyMemoryWriteConfig(raw));
+  const normalized = stripLegacyMemoryWriteConfig(raw);
+  const withExplicitEnvDefaults = deepMerge(buildExplicitEnvConfigDefaultsPatch(), normalized);
+  const parsed = wafflebotConfigSchema.safeParse(withExplicitEnvDefaults);
   if (!parsed.success) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }

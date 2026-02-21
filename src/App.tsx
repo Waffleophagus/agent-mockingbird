@@ -958,13 +958,24 @@ export function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model }),
       });
-      const payload = (await response.json()) as { session?: SessionSummary; error?: string };
+      const payload = (await response.json()) as {
+        session?: SessionSummary;
+        configHash?: string;
+        configError?: string;
+        error?: string;
+      };
       if (!response.ok || !payload.session) {
         throw new Error(payload.error ?? "Failed to update session model");
       }
       const updated = payload.session;
 
       setSessions(current => upsertSessionList(current, updated));
+      if (typeof payload.configHash === "string" && payload.configHash.trim()) {
+        setConfigHash(payload.configHash);
+      }
+      if (typeof payload.configError === "string" && payload.configError.trim()) {
+        setModelError(`Session model updated, but runtime default model was not updated: ${payload.configError}`);
+      }
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "Failed to update session model");
     } finally {

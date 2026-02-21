@@ -1,5 +1,6 @@
 import { buildWorkspaceBootstrapPromptContext } from "../../agents/bootstrapContext";
 import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
+import { applyConfigPatch, ConfigApplyError, getConfigSnapshot } from "../../config/service";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import {
   createSession,
@@ -11,6 +12,56 @@ import {
 } from "../../db/repository";
 import { listOpencodeModelOptions } from "../../opencode/models";
 import { getRuntimeStartupInfo } from "../../runtime";
+
+function parseModelSelection(model: string, defaultProviderId: string) {
+  const trimmed = model.trim();
+  if (!trimmed) return null;
+  if (!trimmed.includes("/")) {
+    const providerId = defaultProviderId.trim();
+    if (!providerId) return null;
+    return { providerId, modelId: trimmed };
+  }
+  const [providerPart = "", ...rest] = trimmed.split("/");
+  const providerId = providerPart.trim();
+  const modelId = rest.join("/").trim();
+  if (!providerId || !modelId) return null;
+  return { providerId, modelId };
+}
+
+function toConfigErrorResponse(error: unknown) {
+  if (error instanceof ConfigApplyError) {
+    if (error.stage === "conflict") {
+      return {
+        status: 409,
+        body: { error: error.message, stage: error.stage },
+      };
+    }
+    if (error.stage === "request" || error.stage === "schema") {
+      return {
+        status: 400,
+        body: { error: error.message, stage: error.stage, details: error.details },
+      };
+    }
+    if (error.stage === "semantic" || error.stage === "smoke" || error.stage === "policy") {
+      return {
+        status: 422,
+        body: { error: error.message, stage: error.stage, details: error.details },
+      };
+    }
+    return {
+      status: 500,
+      body: { error: error.message, stage: error.stage },
+    };
+  }
+
+  return {
+    status: 500,
+    body: {
+      error: error instanceof Error ? error.message : "Failed to update runtime model defaults",
+      stage: "unknown",
+    },
+  };
+}
 
 export function createDashboardRoutes(runtime: RuntimeEngine) {
   return {
@@ -114,11 +165,47 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
         if (!model) {
           return Response.json({ error: "model is required" }, { status: 400 });
         }
+        if (!getSessionById(sessionId)) {
+          return Response.json({ error: "Unknown session" }, { status: 404 });
+        }
+
         const session = setSessionModel(sessionId, model);
         if (!session) {
           return Response.json({ error: "Unknown session" }, { status: 404 });
         }
-        return Response.json({ session });
+
+        const snapshot = getConfigSnapshot();
+        const parsed = parseModelSelection(model, snapshot.config.runtime.opencode.providerId);
+        if (!parsed) {
+          return Response.json({ session });
+        }
+
+        try {
+          const configResult = await applyConfigPatch({
+            expectedHash: snapshot.hash,
+            runSmokeTest: false,
+            patch: {
+              runtime: {
+                opencode: {
+                  providerId: parsed.providerId,
+                  modelId: parsed.modelId,
+                },
+              },
+            },
+          });
+
+          return Response.json({
+            session,
+            configHash: configResult.snapshot.hash,
+          });
+        } catch (error) {
+          const details = toConfigErrorResponse(error);
+          return Response.json({
+            session,
+            configError: details.body.error,
+            configStage: details.body.stage,
+          });
+        }
       },
     },
 

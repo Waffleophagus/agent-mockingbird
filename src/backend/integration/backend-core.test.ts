@@ -38,6 +38,7 @@ interface RepositoryApi {
   ensureSeedData: () => void;
   resetDatabaseToDefaults: () => unknown;
   createSession: (input?: { title?: string; model?: string }) => SessionSummaryLite;
+  getSessionById: (sessionId: string) => { id: string; model: string } | null;
   getUsageSnapshot: () => UsageSnapshotLite;
   getHeartbeatSnapshot: () => HeartbeatSnapshotLite;
 }
@@ -467,6 +468,55 @@ describe("chat routes", () => {
     expect(response.status).toBe(200);
     const payload = (await response.json()) as { compacted: boolean };
     expect(payload.compacted).toBe(true);
+  });
+
+  test("PUT /api/sessions/:id/model updates session model even when runtime-default patch fails", async () => {
+    const session = repository.createSession({ title: "Model Route Session", model: "opencode/old-model" });
+    const { routes } = createRouteHarness(async () => ({ sessionId: session.id, messages: [] }));
+
+    const route = routes["/api/sessions/:id/model"] as {
+      PUT: (req: Request & { params: { id: string } }) => Promise<Response>;
+    };
+    const response = await route.PUT(
+      Object.assign(new Request(`http://localhost/api/sessions/${session.id}/model`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "opencode/new-model" }),
+      }), {
+        params: { id: session.id },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      session?: { id: string; model: string };
+      configError?: string;
+    };
+    expect(payload.session?.id).toBe(session.id);
+    expect(payload.session?.model).toBe("opencode/new-model");
+    const persisted = repository.getSessionById(session.id);
+    expect(persisted?.model).toBe("opencode/new-model");
+    if (typeof payload.configError === "string") {
+      expect(payload.configError.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("PUT /api/sessions/:id/model returns 404 for unknown session", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/sessions/:id/model"] as {
+      PUT: (req: Request & { params: { id: string } }) => Promise<Response>;
+    };
+    const response = await route.PUT(
+      Object.assign(new Request("http://localhost/api/sessions/missing/model", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "opencode/new-model" }),
+      }), {
+        params: { id: "missing" },
+      }),
+    );
+
+    expect(response.status).toBe(404);
   });
 });
 
