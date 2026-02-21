@@ -30,6 +30,11 @@ export interface AgentCatalogResult {
   storage: OpencodeAgentStorageResponse;
 }
 
+export interface OtherConfigResult {
+  fallbackModels: string[];
+  hash: string;
+}
+
 function asErrorMessage(payload: unknown, fallback: string) {
   if (payload && typeof payload === "object" && typeof (payload as ApiErrorPayload).error === "string") {
     return (payload as ApiErrorPayload).error as string;
@@ -97,6 +102,30 @@ export async function fetchAgentCatalog() {
     hash: typeof payload.hash === "string" ? payload.hash : "",
     storage: payload.storage ?? {},
   } satisfies AgentCatalogResult;
+}
+
+export async function fetchOtherConfig() {
+  const response = await fetch("/api/config");
+  const payload = await parseJson<{
+    hash?: string;
+    config?: {
+      runtime?: {
+        opencode?: {
+          fallbackModels?: string[];
+        };
+      };
+    };
+    error?: string;
+  }>(response);
+  if (!response.ok) {
+    throw new Error(asErrorMessage(payload, "Failed to load runtime config"));
+  }
+  return {
+    fallbackModels: Array.isArray(payload.config?.runtime?.opencode?.fallbackModels)
+      ? payload.config.runtime.opencode.fallbackModels
+      : [],
+    hash: typeof payload.hash === "string" ? payload.hash : "",
+  } satisfies OtherConfigResult;
 }
 
 export async function importManagedSkill(input: {
@@ -210,4 +239,43 @@ export async function saveAgentTypeChanges(input: {
     hash: typeof payload.hash === "string" ? payload.hash : "",
     storage: payload.storage ?? {},
   };
+}
+
+export async function saveOtherConfig(input: { fallbackModels: string[]; expectedHash?: string }) {
+  const response = await fetch("/api/config/patch-safe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      patch: {
+        runtime: {
+          opencode: {
+            fallbackModels: input.fallbackModels,
+          },
+        },
+      },
+      expectedHash: input.expectedHash,
+      runSmokeTest: true,
+    }),
+  });
+  const payload = await parseJson<{
+    snapshot?: {
+      hash?: string;
+      config?: {
+        runtime?: {
+          opencode?: {
+            fallbackModels?: string[];
+          };
+        };
+      };
+    };
+    error?: string;
+  }>(response);
+  const nextFallbacks = payload.snapshot?.config?.runtime?.opencode?.fallbackModels;
+  if (!response.ok || !Array.isArray(nextFallbacks)) {
+    throw new Error(asErrorMessage(payload, "Failed to save runtime config"));
+  }
+  return {
+    fallbackModels: nextFallbacks,
+    hash: typeof payload.snapshot?.hash === "string" ? payload.snapshot.hash : "",
+  } satisfies OtherConfigResult;
 }

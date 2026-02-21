@@ -464,6 +464,61 @@ describe("opencode runtime failover contract", () => {
     expect(retryEvent?.payload?.message).toContain("backup-provider/backup-model");
   });
 
+  test("emits explicit unavailable-model retry status before configured fallback", async () => {
+    const modelCalls: Array<string> = [];
+    const events: Array<unknown> = [];
+    let promptCount = 0;
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const providerID = request.body?.model?.providerID ?? "unknown-provider";
+          const modelID = request.body?.model?.modelID ?? "unknown-model";
+          modelCalls.push(`${providerID}/${modelID}`);
+          promptCount += 1;
+          if (promptCount <= 2) {
+            throw Object.assign(new Error("model not found: test-model"), { status: 404 });
+          }
+          return assistantResponse(request.path.id, "Configured fallback reply");
+        },
+      }),
+      {
+        fallbackModelRefs: ["backup-provider/backup-model"],
+      },
+    );
+    runtime.subscribe((event) => {
+      events.push(event);
+    });
+
+    const ack = await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "hello",
+    });
+
+    expect(ack.messages.at(-1)?.content).toBe("Configured fallback reply");
+    expect(modelCalls).toEqual([
+      "test-provider/test-model",
+      "test-provider/test-model",
+      "backup-provider/backup-model",
+    ]);
+
+    const retryEvent = events.find((event) => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as { type?: string; payload?: { status?: string; attempt?: number; message?: string } };
+      return (
+        record.type === "session.run.status.updated" &&
+        record.payload?.status === "retry" &&
+        record.payload.attempt === 2
+      );
+    }) as { payload?: { message?: string } } | undefined;
+
+    expect(retryEvent).toBeTruthy();
+    expect(retryEvent?.payload?.message).toContain(
+      "Model test-provider/test-model is not available at the selected provider.",
+    );
+    expect(retryEvent?.payload?.message).toContain("Retrying with backup-provider/backup-model.");
+  });
+
   test("syncs runtime skill and MCP allow-lists into OpenCode config", async () => {
     const updates: Array<Record<string, unknown>> = [];
     const client = createMockClient({

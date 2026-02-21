@@ -9,7 +9,9 @@ import {
 } from "../../agents/opencodeConfig";
 import {
   importManagedSkillWithConfigUpdate,
-  runRuntimeMcpAction,
+  loadRuntimeMcpCatalog,
+  loadRuntimeSkillCatalog,
+  runRuntimeMcpActionForCurrentConfig,
 } from "../../config/orchestration";
 import { configuredMcpServerSchema } from "../../config/schema";
 import {
@@ -27,15 +29,10 @@ import {
   createConfigUpdatedEvent,
 } from "../../contracts/events";
 import {
-  listRuntimeMcps,
   normalizeMcpIds,
   resolveConfiguredMcpIds,
   resolveConfiguredMcpServers,
 } from "../../mcp/service";
-import {
-  getManagedSkillsRootPath,
-  listRuntimeSkills,
-} from "../../skills/service";
 import { parseStringListBody } from "../parsers";
 import type { RuntimeEventStream } from "../sse";
 
@@ -238,60 +235,6 @@ async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Reques
   );
 }
 
-async function getSkillCatalog() {
-  const snapshot = getConfigSnapshot();
-  try {
-    const skills = await listRuntimeSkills(snapshot.config, snapshot.config.ui.skills);
-    return Response.json({
-      skills,
-      enabled: snapshot.config.ui.skills,
-      hash: snapshot.hash,
-      managedPath: getManagedSkillsRootPath(),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load runtime skills";
-    return Response.json(
-      {
-        skills: [],
-        enabled: snapshot.config.ui.skills,
-        hash: snapshot.hash,
-        managedPath: getManagedSkillsRootPath(),
-        error: message,
-      },
-      { status: 502 },
-    );
-  }
-}
-
-async function getMcpCatalog() {
-  const snapshot = getConfigSnapshot();
-  try {
-    const mcps = await listRuntimeMcps(snapshot.config);
-    return Response.json({
-      mcps,
-      enabled: resolveConfiguredMcpIds(snapshot.config),
-      servers: resolveConfiguredMcpServers(snapshot.config),
-      hash: snapshot.hash,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load runtime MCP servers";
-    return Response.json(
-      {
-        mcps: resolveConfiguredMcpIds(snapshot.config).map(id => ({
-          id,
-          enabled: true,
-          status: "unknown",
-        })),
-        enabled: resolveConfiguredMcpIds(snapshot.config),
-        servers: resolveConfiguredMcpServers(snapshot.config),
-        hash: snapshot.hash,
-        error: message,
-      },
-      { status: 502 },
-    );
-  }
-}
-
 async function getOpencodeAgents() {
   try {
     const payload = await listOpencodeAgentTypes();
@@ -326,9 +269,8 @@ async function runMcpAction(
     return Response.json({ error: "MCP id is required" }, { status: 400 });
   }
 
-  const snapshot = getConfigSnapshot();
   try {
-    const result = await runRuntimeMcpAction(snapshot.config, id, action, snapshot.hash);
+    const result = await runRuntimeMcpActionForCurrentConfig(id, action);
     return Response.json(result);
   } catch (error) {
     return Response.json(
@@ -488,7 +430,10 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
     },
 
     "/api/config/skills/catalog": {
-      GET: async () => getSkillCatalog(),
+      GET: async () => {
+        const result = await loadRuntimeSkillCatalog();
+        return Response.json(result.payload, { status: result.status });
+      },
     },
 
     "/api/config/skills/import": {
@@ -512,7 +457,10 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
     },
 
     "/api/config/mcps/catalog": {
-      GET: async () => getMcpCatalog(),
+      GET: async () => {
+        const result = await loadRuntimeMcpCatalog();
+        return Response.json(result.payload, { status: result.status });
+      },
     },
 
     "/api/config/mcps/:id/connect": {

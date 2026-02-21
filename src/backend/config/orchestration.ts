@@ -4,10 +4,19 @@ import {
   connectRuntimeMcp,
   disconnectRuntimeMcp,
   listRuntimeMcps,
+  normalizeMcpIds,
   removeRuntimeMcpAuth,
+  resolveConfiguredMcpIds,
+  resolveConfiguredMcpServers,
   startRuntimeMcpAuth,
 } from "../mcp/service";
-import { normalizeSkillId, removeManagedSkill, writeManagedSkill } from "../skills/service";
+import {
+  getManagedSkillsRootPath,
+  listRuntimeSkills,
+  normalizeSkillId,
+  removeManagedSkill,
+  writeManagedSkill,
+} from "../skills/service";
 
 interface RuntimeMcpSnapshot {
   id: string;
@@ -26,6 +35,35 @@ export interface RuntimeMcpActionResult {
   disconnected?: boolean;
   authorizationUrl?: string;
   authRemoved?: { success: true };
+}
+
+export interface RuntimeSkillCatalogResult {
+  status: 200 | 502;
+  payload: {
+    skills: Array<{
+      id: string;
+      name: string;
+      description: string;
+      location: string;
+      enabled: boolean;
+      managed: boolean;
+    }>;
+    enabled: string[];
+    hash: string;
+    managedPath: string;
+    error?: string;
+  };
+}
+
+export interface RuntimeMcpCatalogResult {
+  status: 200 | 502;
+  payload: {
+    mcps: RuntimeMcpSnapshot[];
+    enabled: string[];
+    servers: ReturnType<typeof resolveConfiguredMcpServers>;
+    hash: string;
+    error?: string;
+  };
 }
 
 export async function runRuntimeMcpAction(
@@ -52,6 +90,75 @@ export async function runRuntimeMcpAction(
   const authRemoved = await removeRuntimeMcpAuth(config, id);
   const mcps = await listRuntimeMcps(config);
   return { id, authRemoved, mcps, hash };
+}
+
+export async function runRuntimeMcpActionForCurrentConfig(
+  id: string,
+  action: RuntimeMcpAction,
+): Promise<RuntimeMcpActionResult> {
+  const snapshot = getConfigSnapshot();
+  return runRuntimeMcpAction(snapshot.config, id, action, snapshot.hash);
+}
+
+export async function loadRuntimeSkillCatalog(): Promise<RuntimeSkillCatalogResult> {
+  const snapshot = getConfigSnapshot();
+  try {
+    const skills = await listRuntimeSkills(snapshot.config, snapshot.config.ui.skills);
+    return {
+      status: 200,
+      payload: {
+        skills,
+        enabled: snapshot.config.ui.skills,
+        hash: snapshot.hash,
+        managedPath: getManagedSkillsRootPath(),
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to load runtime skills";
+    return {
+      status: 502,
+      payload: {
+        skills: [],
+        enabled: snapshot.config.ui.skills,
+        hash: snapshot.hash,
+        managedPath: getManagedSkillsRootPath(),
+        error: message,
+      },
+    };
+  }
+}
+
+export async function loadRuntimeMcpCatalog(): Promise<RuntimeMcpCatalogResult> {
+  const snapshot = getConfigSnapshot();
+  try {
+    const mcps = await listRuntimeMcps(snapshot.config);
+    return {
+      status: 200,
+      payload: {
+        mcps,
+        enabled: resolveConfiguredMcpIds(snapshot.config),
+        servers: resolveConfiguredMcpServers(snapshot.config),
+        hash: snapshot.hash,
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to load runtime MCP servers";
+    const enabled = resolveConfiguredMcpIds(snapshot.config);
+    return {
+      status: 502,
+      payload: {
+        mcps: normalizeMcpIds(enabled).map(id => ({
+          id,
+          enabled: true,
+          status: "unknown",
+        })),
+        enabled,
+        servers: resolveConfiguredMcpServers(snapshot.config),
+        hash: snapshot.hash,
+        error: message,
+      },
+    };
+  }
 }
 
 export async function importManagedSkillWithConfigUpdate(input: {

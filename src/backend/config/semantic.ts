@@ -4,20 +4,44 @@ import type { WafflebotConfig } from "./schema";
 import { ConfigApplyError, type ConfigSemanticSummary } from "./types";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
 
-function parseModelRef(rawRef: string, defaultProviderId: string) {
+export function resolveModelRefForValidation(
+  rawRef: string,
+  defaultProviderId: string,
+  modelsByProvider: Map<string, Set<string>>,
+) {
   const trimmed = rawRef.trim();
+  const defaultProvider = defaultProviderId.trim();
   if (!trimmed) {
     throw new ConfigApplyError("schema", "Model reference must not be empty");
   }
-  if (!trimmed.includes("/")) {
-    return { providerId: defaultProviderId, modelId: trimmed };
+  if (!defaultProvider) {
+    throw new ConfigApplyError("schema", "Default provider must not be empty");
   }
-  const [providerId, ...rest] = trimmed.split("/");
+
+  // Model IDs can contain "/" (for example "zai-org/GLM-4.7-Flash"). Prefer
+  // exact match on the selected provider before treating the value as a
+  // qualified "provider/model" reference.
+  const defaultProviderModels = modelsByProvider.get(defaultProvider);
+  if (defaultProviderModels?.has(trimmed)) {
+    return { providerId: defaultProvider, modelId: trimmed };
+  }
+
+  if (!trimmed.includes("/")) {
+    return { providerId: defaultProvider, modelId: trimmed };
+  }
+
+  const [providerCandidate = "", ...rest] = trimmed.split("/");
   const modelId = rest.join("/").trim();
+  const providerId = providerCandidate.trim();
   if (!providerId || !modelId) {
     throw new ConfigApplyError("schema", `Invalid model reference: ${rawRef}`);
   }
-  return { providerId: providerId.trim(), modelId };
+
+  if (modelsByProvider.has(providerId)) {
+    return { providerId, modelId };
+  }
+
+  return { providerId: defaultProvider, modelId: trimmed };
 }
 
 async function loadProviderModelMap(config: WafflebotConfig) {
@@ -71,10 +95,18 @@ function assertModelAvailable(
 
 export async function runSemanticValidation(config: WafflebotConfig): Promise<ConfigSemanticSummary> {
   const providerMap = await loadProviderModelMap(config);
-  const primaryRef = parseModelRef(config.runtime.opencode.modelId, config.runtime.opencode.providerId);
+  const primaryRef = resolveModelRefForValidation(
+    config.runtime.opencode.modelId,
+    config.runtime.opencode.providerId,
+    providerMap.modelsByProvider,
+  );
   assertModelAvailable(providerMap.modelsByProvider, primaryRef.providerId, primaryRef.modelId, "runtime.opencode.modelId");
 
-  const smallModelRef = parseModelRef(config.runtime.opencode.smallModel, config.runtime.opencode.providerId);
+  const smallModelRef = resolveModelRefForValidation(
+    config.runtime.opencode.smallModel,
+    config.runtime.opencode.providerId,
+    providerMap.modelsByProvider,
+  );
   assertModelAvailable(
     providerMap.modelsByProvider,
     smallModelRef.providerId,
@@ -83,7 +115,11 @@ export async function runSemanticValidation(config: WafflebotConfig): Promise<Co
   );
 
   for (const fallbackRef of config.runtime.opencode.fallbackModels) {
-    const parsedFallback = parseModelRef(fallbackRef, config.runtime.opencode.providerId);
+    const parsedFallback = resolveModelRefForValidation(
+      fallbackRef,
+      config.runtime.opencode.providerId,
+      providerMap.modelsByProvider,
+    );
     assertModelAvailable(
       providerMap.modelsByProvider,
       parsedFallback.providerId,

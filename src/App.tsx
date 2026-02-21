@@ -1,6 +1,7 @@
 import {
   Activity,
   Cpu,
+  Settings2,
   Users,
   Wrench,
 } from "lucide-react";
@@ -19,10 +20,12 @@ import {
 import {
   fetchAgentCatalog,
   fetchMcpCatalog,
+  fetchOtherConfig,
   fetchSkillCatalog,
   importManagedSkill,
   saveAgentTypeChanges,
   saveMcps,
+  saveOtherConfig as saveOtherConfigPatch,
   saveSkills,
   validateAgentTypeChanges,
 } from "@/frontend/app/configApi";
@@ -40,6 +43,7 @@ import {
 import { AgentsPage } from "@/frontend/app/pages/AgentsPage";
 import { type ChatPageModel, ChatPage } from "@/frontend/app/pages/ChatPage";
 import { McpPage } from "@/frontend/app/pages/McpPage";
+import { OtherConfigPage } from "@/frontend/app/pages/OtherConfigPage";
 import { SkillsPage } from "@/frontend/app/pages/SkillsPage";
 import { useBackgroundRuns } from "@/frontend/app/useBackgroundRuns";
 import { useChatSession } from "@/frontend/app/useChatSession";
@@ -63,7 +67,7 @@ import "@/index.css";
 
 export function App() {
   type StreamStatus = "connecting" | "connected" | "reconnecting";
-  type DashboardPage = "chat" | "skills" | "mcp" | "agents";
+  type DashboardPage = "chat" | "skills" | "mcp" | "agents" | "other";
   type ConfigPanelTab = "usage" | "memory" | "background";
 
   const [loading, setLoading] = useState(true);
@@ -128,7 +132,14 @@ export function App() {
   const [activeSend, setActiveSend] = useState<ActiveSend | null>(null);
   const [runWaitTimeoutMs, setRunWaitTimeoutMs] = useState(DEFAULT_RUN_WAIT_TIMEOUT_MS);
   const [runtimeDefaultModel, setRuntimeDefaultModel] = useState("");
+  const [runtimeFallbackModels, setRuntimeFallbackModels] = useState<string[]>([]);
   const [isSyncingRuntimeDefaultModel, setIsSyncingRuntimeDefaultModel] = useState(false);
+  const [isSavingOtherConfig, setIsSavingOtherConfig] = useState(false);
+  const [loadingOtherConfig, setLoadingOtherConfig] = useState(false);
+  const [otherConfigError, setOtherConfigError] = useState("");
+  const [openFallbackModelPickerIndex, setOpenFallbackModelPickerIndex] = useState<number | null>(null);
+  const [fallbackModelQuery, setFallbackModelQuery] = useState("");
+  const [fallbackFocusedModelIndex, setFallbackFocusedModelIndex] = useState(0);
   const [runStatusBySession, setRunStatusBySession] = useState<Record<string, SessionRunStatusSnapshot>>({});
   const [runErrorsBySession, setRunErrorsBySession] = useState<Record<string, string>>({});
   const [compactedAtBySession, setCompactedAtBySession] = useState<Record<string, string>>({});
@@ -154,6 +165,8 @@ export function App() {
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
   const agentModelPickerRef = useRef<HTMLDivElement>(null);
   const agentModelSearchInputRef = useRef<HTMLInputElement>(null);
+  const fallbackModelPickerRef = useRef<HTMLDivElement>(null);
+  const fallbackModelSearchInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const previousActiveSessionIdRef = useRef("");
   const isSending = activeSend !== null;
@@ -215,6 +228,7 @@ export function App() {
     setRunWaitTimeoutMs,
     setChildSessionHideAfterDays,
     setRuntimeDefaultModel,
+    setRuntimeFallbackModels,
     setConfigHash,
     setSkillCatalogError,
     setMcpCatalogError,
@@ -399,6 +413,22 @@ export function App() {
     }
     return [...byId.values()];
   }, [modelOptions, activeSession?.model]);
+  const availableFallbackModels = useMemo(() => {
+    const byId = new Map(modelOptions.map(option => [option.id, option]));
+    for (const fallbackModel of runtimeFallbackModels) {
+      const id = fallbackModel.trim();
+      if (!id || byId.has(id)) continue;
+      const [providerId, ...rest] = id.split("/");
+      const modelId = rest.join("/") || id;
+      byId.set(id, {
+        id,
+        label: `${id} (configured)`,
+        providerId: providerId || "custom",
+        modelId,
+      });
+    }
+    return [...byId.values()];
+  }, [modelOptions, runtimeFallbackModels]);
   const selectedModelLabel = useMemo(() => {
     if (!activeSession) return "Select model";
     return availableModels.find(option => option.id === activeSession.model)?.label ?? activeSession.model;
@@ -416,6 +446,14 @@ export function App() {
       return haystack.includes(query);
     });
   }, [availableModels, modelQuery]);
+  const filteredFallbackModelOptions = useMemo(() => {
+    const query = fallbackModelQuery.trim().toLowerCase();
+    if (!query) return availableFallbackModels;
+    return availableFallbackModels.filter(option => {
+      const haystack = `${option.label} ${option.id} ${option.providerId} ${option.modelId}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [availableFallbackModels, fallbackModelQuery]);
 
   useEffect(() => {
     setFocusedModelIndex(0);
@@ -499,6 +537,33 @@ export function App() {
   useEffect(() => {
     setAgentFocusedModelIndex(0);
   }, [agentModelQuery, openAgentModelPickerId]);
+
+  useEffect(() => {
+    if (openFallbackModelPickerIndex === null) return;
+    fallbackModelSearchInputRef.current?.focus();
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!fallbackModelPickerRef.current?.contains(event.target as Node)) {
+        setOpenFallbackModelPickerIndex(null);
+      }
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenFallbackModelPickerIndex(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [openFallbackModelPickerIndex]);
+
+  useEffect(() => {
+    setFallbackFocusedModelIndex(0);
+  }, [fallbackModelQuery, openFallbackModelPickerIndex]);
 
   useEffect(() => {
     const container = chatScrollRef.current;
@@ -947,6 +1012,88 @@ export function App() {
     }
   }
 
+  async function refreshOtherConfig() {
+    setLoadingOtherConfig(true);
+    setOtherConfigError("");
+    try {
+      const payload = await fetchOtherConfig();
+      setRuntimeFallbackModels([...new Set(payload.fallbackModels.map(model => model.trim()).filter(Boolean))]);
+      if (payload.hash) setConfigHash(payload.hash);
+    } catch (error) {
+      setOtherConfigError(error instanceof Error ? error.message : "Failed to load runtime config");
+    } finally {
+      setLoadingOtherConfig(false);
+    }
+  }
+
+  async function saveOtherConfig() {
+    setIsSavingOtherConfig(true);
+    setOtherConfigError("");
+    try {
+      const normalizedFallbackModels = [...new Set(runtimeFallbackModels.map(model => model.trim()).filter(Boolean))];
+      const payload = await saveOtherConfigPatch({
+        fallbackModels: normalizedFallbackModels,
+        expectedHash: configHash || undefined,
+      });
+      setRuntimeFallbackModels(payload.fallbackModels);
+      setConfigHash(payload.hash || configHash);
+      setOpenFallbackModelPickerIndex(null);
+      setFallbackModelQuery("");
+    } catch (error) {
+      setOtherConfigError(error instanceof Error ? error.message : "Failed to save runtime config");
+    } finally {
+      setIsSavingOtherConfig(false);
+    }
+  }
+
+  function addFallbackModel() {
+    const firstModelId = availableFallbackModels[0]?.id;
+    if (!firstModelId) {
+      setOtherConfigError("No available models to add as fallback.");
+      return;
+    }
+    setOtherConfigError("");
+    setRuntimeFallbackModels(current => [...current, firstModelId]);
+  }
+
+  function removeFallbackModel(index: number) {
+    setRuntimeFallbackModels(current => current.filter((_, currentIndex) => currentIndex !== index));
+    setOpenFallbackModelPickerIndex(current => {
+      if (current === null) return current;
+      if (current === index) return null;
+      if (current > index) return current - 1;
+      return current;
+    });
+  }
+
+  function selectFallbackModelFromPicker(index: number, model: string) {
+    setRuntimeFallbackModels(current =>
+      current.map((currentModel, currentIndex) => (currentIndex === index ? model.trim() : currentModel)),
+    );
+    setFallbackModelQuery("");
+    setOpenFallbackModelPickerIndex(null);
+  }
+
+  function handleFallbackModelSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>, index: number) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setFallbackFocusedModelIndex(current => Math.min(current + 1, filteredFallbackModelOptions.length - 1));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setFallbackFocusedModelIndex(current => Math.max(current - 1, 0));
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const focusedModel = filteredFallbackModelOptions[fallbackFocusedModelIndex];
+      if (focusedModel?.id) {
+        selectFallbackModelFromPicker(index, focusedModel.id);
+      }
+    }
+  }
+
   async function saveSessionModel(model: string) {
     if (!activeSession || model === activeSession.model) return;
 
@@ -1270,6 +1417,15 @@ export function App() {
               <Users className="size-4" />
               Agents
             </Button>
+            <Button
+              type="button"
+              variant={dashboardPage === "other" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDashboardPage("other")}
+            >
+              <Settings2 className="size-4" />
+              Other Config
+            </Button>
           </div>
         </header>
 
@@ -1361,6 +1517,30 @@ export function App() {
             selectAgentModelFromPicker={selectAgentModelFromPicker}
             filteredAgentModelOptions={filteredAgentModelOptions}
             agentFocusedModelIndex={agentFocusedModelIndex}
+          />
+        )}
+
+        {dashboardPage === "other" && (
+          <OtherConfigPage
+            refreshOtherConfig={refreshOtherConfig}
+            loadingOtherConfig={loadingOtherConfig}
+            saveOtherConfig={saveOtherConfig}
+            isSavingOtherConfig={isSavingOtherConfig}
+            otherConfigError={otherConfigError}
+            runtimeFallbackModels={runtimeFallbackModels}
+            availableFallbackModels={availableFallbackModels}
+            addFallbackModel={addFallbackModel}
+            removeFallbackModel={removeFallbackModel}
+            openFallbackModelPickerIndex={openFallbackModelPickerIndex}
+            setOpenFallbackModelPickerIndex={setOpenFallbackModelPickerIndex}
+            setFallbackModelQuery={setFallbackModelQuery}
+            fallbackModelPickerRef={fallbackModelPickerRef}
+            fallbackModelSearchInputRef={fallbackModelSearchInputRef}
+            fallbackModelQuery={fallbackModelQuery}
+            handleFallbackModelSearchKeyDown={handleFallbackModelSearchKeyDown}
+            selectFallbackModelFromPicker={selectFallbackModelFromPicker}
+            filteredFallbackModelOptions={() => filteredFallbackModelOptions}
+            fallbackFocusedModelIndex={fallbackFocusedModelIndex}
           />
         )}
       </div>

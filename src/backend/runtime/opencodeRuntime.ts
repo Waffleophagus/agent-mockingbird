@@ -1667,7 +1667,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     system?: string,
     agent?: string,
   ): Promise<{ info: AssistantInfo; parts: Array<Part> }> {
-    const response = unwrapSdkData<{ info: Message; parts: Array<Part> }>(
+    const response = unwrapSdkData<{ info?: Message; parts?: Array<Part> }>(
       await this.getClient().session.prompt({
         path: { id: sessionId },
         body: {
@@ -1684,10 +1684,40 @@ export class OpencodeRuntime implements RuntimeEngine {
         signal: this.promptRequestSignal(),
       }),
     );
-    if (response.info.role !== "assistant") {
-      throw new Error(`OpenCode returned unexpected message role: ${response.info.role}`);
+    if (!response || typeof response !== "object") {
+      throw new Error("OpenCode returned an empty prompt response.");
     }
-    return response as { info: AssistantInfo; parts: Array<Part> };
+    const info = response.info;
+    if (!info || typeof info !== "object") {
+      const topLevelError =
+        this.describeUnknownError((response as Record<string, unknown>).error) ?? this.describeUnknownError(response);
+      if (topLevelError) {
+        const wrapped = new Error(topLevelError);
+        const status = this.extractErrorStatusCode((response as Record<string, unknown>).error ?? response);
+        if (typeof status === "number") {
+          (wrapped as Error & { status?: number }).status = status;
+        }
+        throw wrapped;
+      }
+      throw new Error("OpenCode prompt response is missing message metadata.");
+    }
+
+    const infoRecord = info as Record<string, unknown>;
+    const infoError = this.describeUnknownError(infoRecord.error);
+    if (infoError) {
+      const wrapped = new Error(infoError);
+      const status = this.extractErrorStatusCode(infoRecord.error);
+      if (typeof status === "number") {
+        (wrapped as Error & { status?: number }).status = status;
+      }
+      throw wrapped;
+    }
+    if (info.role !== "assistant") {
+      throw new Error(`OpenCode returned unexpected message role: ${info.role}`);
+    }
+
+    const parts = Array.isArray(response.parts) ? response.parts : [];
+    return { info: info as AssistantInfo, parts };
   }
 
   private async sendPromptWithModelFallback(input: {
@@ -1707,7 +1737,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       const model = models[index];
       if (!model) continue;
       if (index > 0) {
-        this.emitPromptRetryStatus(input.localSessionId, index + 1, previousError, model);
+        this.emitPromptRetryStatus(input.localSessionId, index + 1, previousError, models[index - 1] ?? null, model);
       }
 
       let attemptError: unknown = null;
@@ -1734,7 +1764,10 @@ export class OpencodeRuntime implements RuntimeEngine {
 
       previousError = attemptError;
       const hasMoreModels = index < models.length - 1;
-      if (!hasMoreModels || !this.shouldFailoverPromptError(attemptError)) {
+      if (!hasMoreModels) {
+        throw this.normalizeRuntimeError(attemptError);
+      }
+      if (!(this.isModelNotFoundError(attemptError) || this.shouldFailoverPromptError(attemptError))) {
         throw this.normalizeRuntimeError(attemptError);
       }
     }
@@ -1753,8 +1786,15 @@ export class OpencodeRuntime implements RuntimeEngine {
     };
 
     add(primaryModel);
-    for (const fallbackRef of this.currentFallbackModels()) {
+    const fallbackRefs = this.currentFallbackModels();
+    for (const fallbackRef of fallbackRefs) {
       add(this.resolveModel(fallbackRef));
+    }
+    if (fallbackRefs.length === 0) {
+      add({
+        providerId: this.currentProviderId(),
+        modelId: this.currentModelId(),
+      });
     }
 
     return models;
@@ -1768,20 +1808,49 @@ export class OpencodeRuntime implements RuntimeEngine {
     sessionId: string,
     attempt: number,
     error: unknown,
+    previousModel: ResolvedModel | null,
     nextModel: ResolvedModel,
   ) {
     const detail = this.normalizeRuntimeError(error).message;
+    const nextRef = this.formatModelRef(nextModel);
+    const message = this.isModelNotFoundError(error)
+      ? `Model ${previousModel ? this.formatModelRef(previousModel) : "requested"} is not available at the selected provider. Retrying with ${nextRef}.`
+      : `${detail} Retrying with ${nextRef}.`;
     this.emit(
       createSessionRunStatusUpdatedEvent(
         {
           sessionId,
           status: "retry",
           attempt,
-          message: `${detail} Retrying with ${this.formatModelRef(nextModel)}.`,
+          message,
         },
         "runtime",
       ),
     );
+  }
+
+  private extractErrorStatusCode(error: unknown): number | null {
+    if (!error || typeof error !== "object") return null;
+    const record = error as Record<string, unknown>;
+    if (typeof record.status === "number" && Number.isFinite(record.status)) {
+      return record.status;
+    }
+    if (typeof record.statusCode === "number" && Number.isFinite(record.statusCode)) {
+      return record.statusCode;
+    }
+    const data = record.data;
+    if (data && typeof data === "object") {
+      const dataRecord = data as Record<string, unknown>;
+      if (typeof dataRecord.statusCode === "number" && Number.isFinite(dataRecord.statusCode)) {
+        return dataRecord.statusCode;
+      }
+    }
+    return null;
+  }
+
+  private isModelNotFoundError(error: unknown) {
+    const message = (this.describeUnknownError(error) ?? "").toLowerCase();
+    return message.includes("model not found");
   }
 
   private async resolveOrCreateOpencodeSession(localSessionId: string, localTitle: string) {
@@ -1999,7 +2068,10 @@ export class OpencodeRuntime implements RuntimeEngine {
   private async runHealthProbe(): Promise<RuntimeHealthSnapshot> {
     const startedAt = Date.now();
     const timeoutMs = this.healthProbeTimeoutMs();
-    const model = this.resolveModel(this.currentModelId());
+    const model: ResolvedModel = {
+      providerId: this.currentProviderId(),
+      modelId: this.currentModelId(),
+    };
     let probeSessionId: string | null = null;
     let responseText: string | null = null;
     let normalizedError: Error | null = null;
