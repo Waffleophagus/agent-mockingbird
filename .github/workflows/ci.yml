@@ -134,10 +134,11 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          tarball="$(bun pm pack --quiet | tail -n1)"
+          tarball="wafflebot-${{ steps.meta.outputs.package_version }}.tgz"
+          bun pm pack --filename "${tarball}" --quiet >/dev/null
           test -f "${tarball}"
           echo "PACKAGE_TARBALL=${tarball}" >> "${GITHUB_ENV}"
-          ls -lh "${tarball}"
+          ls -lh -- "${tarball}"
 
       - name: Configure registry auth
         if: steps.meta.outputs.should_publish == 'true'
@@ -155,4 +156,4 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun publish "${PACKAGE_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
+          BUN_AUTH_TOKEN="${REGISTRY_TOKEN}" bun publish -- "${PACKAGE_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
