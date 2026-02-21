@@ -40,10 +40,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-# third-party reference repos
-openclaw/
-opencode/
-opencode-sdk-js/
-convex-backend/
-rivet/
-sandbox-agent/
+
