@@ -11,7 +11,14 @@
       "promptTimeoutMs": 300000,
       "runWaitTimeoutMs": 180000,
       "childSessionHideAfterDays": 3,
-      "directory": null
+      "directory": null,
+      "bootstrap": {
+        "enabled": true,
+        "maxCharsPerFile": 20000,
+        "maxCharsTotal": 150000,
+        "subagentMinimal": true,
+        "includeAgentPrompt": true
+      }
     },
     "smokeTest": {
       "prompt": "Just respond \"OK\" to this to confirm the gateway is working.",
@@ -49,6 +56,7 @@
       "strictAllowPaths": [
         "runtime.opencode.runWaitTimeoutMs",
         "runtime.opencode.childSessionHideAfterDays",
+        "runtime.opencode.bootstrap",
         "runtime.runStream",
         "runtime.memory",
         "runtime.cron",

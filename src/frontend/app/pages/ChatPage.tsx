@@ -37,7 +37,7 @@ import type {
 
 type ConfigPanelTab = "usage" | "memory" | "background";
 
-interface ChatPageProps {
+export interface ChatPageModel {
   activeBackgroundInFlightCount: number;
   activeBackgroundRuns: BackgroundRunSnapshot[];
   activeConfigPanelTab: ConfigPanelTab;
@@ -132,7 +132,7 @@ interface ChatPageProps {
   usage: UsageSnapshot;
 }
 
-export function ChatPage(props: ChatPageProps) {
+export function ChatPage({ model }: { model: ChatPageModel }) {
   const {
     activeBackgroundInFlightCount,
     activeBackgroundRuns,
@@ -223,7 +223,7 @@ export function ChatPage(props: ChatPageProps) {
     totalInFlightBackgroundRuns,
     totalSessionSearchMatches,
     usage,
-  } = props;
+  } = model;
 
   return (
 <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">

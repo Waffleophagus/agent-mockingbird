@@ -146,6 +146,13 @@ function buildLegacyBootstrappedConfig() {
         runWaitTimeoutMs: env.WAFFLEBOT_OPENCODE_RUN_WAIT_TIMEOUT_MS,
         childSessionHideAfterDays: 3,
         directory: env.WAFFLEBOT_OPENCODE_DIRECTORY?.trim() || null,
+        bootstrap: {
+          enabled: true,
+          maxCharsPerFile: 20_000,
+          maxCharsTotal: 150_000,
+          subagentMinimal: true,
+          includeAgentPrompt: true,
+        },
       },
       smokeTest: {
         prompt: DEFAULT_SMOKE_TEST_PROMPT,
@@ -179,6 +186,7 @@ function buildLegacyBootstrappedConfig() {
         strictAllowPaths: [
           "runtime.opencode.runWaitTimeoutMs",
           "runtime.opencode.childSessionHideAfterDays",
+          "runtime.opencode.bootstrap",
           "runtime.runStream",
           "runtime.memory",
           "runtime.cron",

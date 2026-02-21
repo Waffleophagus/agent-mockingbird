@@ -41,7 +41,7 @@ import {
   upsertSessionList,
 } from "@/frontend/app/dashboardUtils";
 import { AgentsPage } from "@/frontend/app/pages/AgentsPage";
-import { ChatPage } from "@/frontend/app/pages/ChatPage";
+import { type ChatPageModel, ChatPage } from "@/frontend/app/pages/ChatPage";
 import { McpPage } from "@/frontend/app/pages/McpPage";
 import { SkillsPage } from "@/frontend/app/pages/SkillsPage";
 import { useSessionHierarchy } from "@/frontend/app/useSessionHierarchy";
@@ -2043,6 +2043,98 @@ export function App() {
     }
   }
 
+  const chatPageModel: ChatPageModel = {
+    activeBackgroundInFlightCount,
+    activeBackgroundRuns,
+    activeConfigPanelTab,
+    activeMessages,
+    activeRunStatusHint,
+    activeRunStatusLabel,
+    activeSession,
+    activeSessionCompactedAt,
+    activeSessionId,
+    activeSessionRunError,
+    availableModels,
+    backgroundActionBusyByRun,
+    backgroundCheckInBusyByRun,
+    backgroundPrompt,
+    backgroundRunsError,
+    backgroundSpawnBusy,
+    backgroundSteerDraftByRun,
+    canAbortActiveSession,
+    chatControlError,
+    chatScrollRef,
+    checkInBackgroundRun,
+    childSessionHideAfterDays,
+    childSessionSearchMatchBySessionId,
+    childSessionSearchQuery,
+    childSessionVisibilityByParentSessionId,
+    childSessionsByParentSessionId,
+    compactSession,
+    composerFormRef,
+    createNewSession,
+    draftMessage,
+    expandedSessionGroupsById,
+    filteredModelOptions,
+    focusedBackgroundRunId,
+    focusedModelIndex,
+    handleComposerKeyDown,
+    handleModelSearchKeyDown,
+    hasNewMessages,
+    inFlightBackgroundRunsBySession,
+    isAborting,
+    isActiveSessionRunning,
+    isCompacting,
+    isCreatingSession,
+    isModelPickerOpen,
+    isSavingModel,
+    isSending,
+    isUserScrolledUp,
+    latestBackgroundRunByChildSessionId,
+    loading,
+    loadingBackgroundRuns,
+    loadingMessages,
+    loadingModels,
+    memoryActivity,
+    memoryError,
+    memoryStatus,
+    modelError,
+    modelPickerRef,
+    modelQuery,
+    modelSearchInputRef,
+    parentSessionSearchMatchBySessionId,
+    refreshBackgroundRunsForSession,
+    refreshInFlightBackgroundRuns,
+    refreshSessionsList,
+    requestAbortBackgroundRun,
+    requestAbortRun,
+    retryFailedRequest,
+    rootSessions,
+    scrollToBottom,
+    selectModelFromPicker,
+    selectedModelLabel,
+    sendMessage,
+    sessionError,
+    sessionSearchNeedle,
+    setActiveConfigPanelTab,
+    setActiveSessionId,
+    setBackgroundPrompt,
+    setBackgroundSteerDraftByRun,
+    setChildSessionSearchQuery,
+    setDraftMessage,
+    setIsModelPickerOpen,
+    setModelQuery,
+    setShowAllChildren,
+    showAllChildren,
+    spawnBackgroundRun,
+    steerBackgroundRun,
+    toggleSessionGroup,
+    totalHiddenChildSessionsByAge,
+    totalInFlightBackgroundRuns,
+    totalSessionSearchMatches,
+    usage,
+  };
+
   return (
     <main className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6 lg:h-screen lg:overflow-hidden lg:px-8">
       {renderConfirmDialog()}
@@ -2102,99 +2194,7 @@ export function App() {
           </div>
         </header>
 
-        {dashboardPage === "chat" && (
-          <ChatPage
-            activeBackgroundInFlightCount={activeBackgroundInFlightCount}
-            activeBackgroundRuns={activeBackgroundRuns}
-            activeConfigPanelTab={activeConfigPanelTab}
-            activeMessages={activeMessages}
-            activeRunStatusHint={activeRunStatusHint}
-            activeRunStatusLabel={activeRunStatusLabel}
-            activeSession={activeSession}
-            activeSessionCompactedAt={activeSessionCompactedAt}
-            activeSessionId={activeSessionId}
-            activeSessionRunError={activeSessionRunError}
-            availableModels={availableModels}
-            backgroundActionBusyByRun={backgroundActionBusyByRun}
-            backgroundCheckInBusyByRun={backgroundCheckInBusyByRun}
-            backgroundPrompt={backgroundPrompt}
-            backgroundRunsError={backgroundRunsError}
-            backgroundSpawnBusy={backgroundSpawnBusy}
-            backgroundSteerDraftByRun={backgroundSteerDraftByRun}
-            canAbortActiveSession={canAbortActiveSession}
-            chatControlError={chatControlError}
-            chatScrollRef={chatScrollRef}
-            checkInBackgroundRun={checkInBackgroundRun}
-            childSessionHideAfterDays={childSessionHideAfterDays}
-            childSessionSearchMatchBySessionId={childSessionSearchMatchBySessionId}
-            childSessionSearchQuery={childSessionSearchQuery}
-            childSessionVisibilityByParentSessionId={childSessionVisibilityByParentSessionId}
-            childSessionsByParentSessionId={childSessionsByParentSessionId}
-            compactSession={compactSession}
-            composerFormRef={composerFormRef}
-            createNewSession={createNewSession}
-            draftMessage={draftMessage}
-            expandedSessionGroupsById={expandedSessionGroupsById}
-            filteredModelOptions={filteredModelOptions}
-            focusedBackgroundRunId={focusedBackgroundRunId}
-            focusedModelIndex={focusedModelIndex}
-            handleComposerKeyDown={handleComposerKeyDown}
-            handleModelSearchKeyDown={handleModelSearchKeyDown}
-            hasNewMessages={hasNewMessages}
-            inFlightBackgroundRunsBySession={inFlightBackgroundRunsBySession}
-            isAborting={isAborting}
-            isActiveSessionRunning={isActiveSessionRunning}
-            isCompacting={isCompacting}
-            isCreatingSession={isCreatingSession}
-            isModelPickerOpen={isModelPickerOpen}
-            isSavingModel={isSavingModel}
-            isSending={isSending}
-            isUserScrolledUp={isUserScrolledUp}
-            latestBackgroundRunByChildSessionId={latestBackgroundRunByChildSessionId}
-            loading={loading}
-            loadingBackgroundRuns={loadingBackgroundRuns}
-            loadingMessages={loadingMessages}
-            loadingModels={loadingModels}
-            memoryActivity={memoryActivity}
-            memoryError={memoryError}
-            memoryStatus={memoryStatus}
-            modelError={modelError}
-            modelPickerRef={modelPickerRef}
-            modelQuery={modelQuery}
-            modelSearchInputRef={modelSearchInputRef}
-            parentSessionSearchMatchBySessionId={parentSessionSearchMatchBySessionId}
-            refreshBackgroundRunsForSession={refreshBackgroundRunsForSession}
-            refreshInFlightBackgroundRuns={refreshInFlightBackgroundRuns}
-            refreshSessionsList={refreshSessionsList}
-            requestAbortBackgroundRun={requestAbortBackgroundRun}
-            requestAbortRun={requestAbortRun}
-            retryFailedRequest={retryFailedRequest}
-            rootSessions={rootSessions}
-            scrollToBottom={scrollToBottom}
-            selectModelFromPicker={selectModelFromPicker}
-            selectedModelLabel={selectedModelLabel}
-            sendMessage={sendMessage}
-            sessionError={sessionError}
-            sessionSearchNeedle={sessionSearchNeedle}
-            setActiveConfigPanelTab={setActiveConfigPanelTab}
-            setActiveSessionId={setActiveSessionId}
-            setBackgroundPrompt={setBackgroundPrompt}
-            setBackgroundSteerDraftByRun={setBackgroundSteerDraftByRun}
-            setChildSessionSearchQuery={setChildSessionSearchQuery}
-            setDraftMessage={setDraftMessage}
-            setIsModelPickerOpen={setIsModelPickerOpen}
-            setModelQuery={setModelQuery}
-            setShowAllChildren={setShowAllChildren}
-            showAllChildren={showAllChildren}
-            spawnBackgroundRun={spawnBackgroundRun}
-            steerBackgroundRun={steerBackgroundRun}
-            toggleSessionGroup={toggleSessionGroup}
-            totalHiddenChildSessionsByAge={totalHiddenChildSessionsByAge}
-            totalInFlightBackgroundRuns={totalInFlightBackgroundRuns}
-            totalSessionSearchMatches={totalSessionSearchMatches}
-            usage={usage}
-          />
-        )}
+        {dashboardPage === "chat" && <ChatPage model={chatPageModel} />}
 
         {dashboardPage === "skills" && (
           <SkillsPage

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { importOpenclawBootstrapFromDirectory } from "../../agents/bootstrapContext";
 import {
   getOpencodeAgentStorageInfo,
   listOpencodeAgentTypes,
@@ -410,6 +411,27 @@ async function importManagedSkill(eventStream: RuntimeEventStream, req: Request)
   }
 }
 
+async function importOpenclawBootstrap(req: Request) {
+  const body = (await req.json()) as Record<string, unknown>;
+  const sourceDirectory =
+    typeof body.sourceDirectory === "string" ? body.sourceDirectory.trim() : "";
+  if (!sourceDirectory) {
+    return Response.json({ error: "sourceDirectory is required" }, { status: 400 });
+  }
+  const overwrite = body.overwrite === true;
+  try {
+    const imported = importOpenclawBootstrapFromDirectory({
+      sourceDirectory,
+      overwrite,
+      files: body.files,
+    });
+    return Response.json({ imported });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to import OpenClaw workspace files";
+    return Response.json({ error: message }, { status: 400 });
+  }
+}
+
 export function createConfigRoutes(eventStream: RuntimeEventStream) {
   return {
     "/api/config": {
@@ -511,6 +533,10 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
 
     "/api/config/skills/import": {
       POST: async (req: Request) => importManagedSkill(eventStream, req),
+    },
+
+    "/api/config/opencode/bootstrap/import-openclaw": {
+      POST: async (req: Request) => importOpenclawBootstrap(req),
     },
 
     "/api/config/mcps": {

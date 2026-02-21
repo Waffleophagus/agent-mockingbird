@@ -1,3 +1,4 @@
+import { buildWorkspaceBootstrapPromptContext } from "../../agents/bootstrapContext";
 import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import {
@@ -48,12 +49,25 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
       GET: () => {
         const runtimeInfo = getRuntimeStartupInfo();
         const storage = getOpencodeAgentStorageInfo();
+        const bootstrap = buildWorkspaceBootstrapPromptContext();
         return Response.json({
           opencode: {
             ...runtimeInfo.opencode,
             directory: storage.directory,
             effectiveConfigPath: storage.configFilePath,
             persistenceMode: storage.persistenceMode,
+            identity: bootstrap.identity,
+            bootstrap: {
+              mode: bootstrap.mode,
+              files: bootstrap.files.map(file => ({
+                name: file.name,
+                path: file.path,
+                missing: file.missing,
+                truncated: file.truncated,
+                originalLength: file.originalLength,
+                injectedLength: file.content.length,
+              })),
+            },
           },
         });
       },

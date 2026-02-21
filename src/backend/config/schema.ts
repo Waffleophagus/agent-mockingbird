@@ -105,6 +105,22 @@ export const runtimeOpencodeSchema = z
     runWaitTimeoutMs: z.number().int().positive().default(180_000),
     childSessionHideAfterDays: z.number().int().min(0).max(365).default(3),
     directory: z.string().min(1).nullable().default(null),
+    bootstrap: z
+      .object({
+        enabled: z.boolean().default(true),
+        maxCharsPerFile: z.number().int().positive().default(20_000),
+        maxCharsTotal: z.number().int().positive().default(150_000),
+        subagentMinimal: z.boolean().default(true),
+        includeAgentPrompt: z.boolean().default(true),
+      })
+      .strict()
+      .default({
+        enabled: true,
+        maxCharsPerFile: 20_000,
+        maxCharsTotal: 150_000,
+        subagentMinimal: true,
+        includeAgentPrompt: true,
+      }),
   })
   .strict();
 
@@ -153,6 +169,7 @@ export const runtimeConfigPolicySchema = z
     strictAllowPaths: stringListSchema.default([
       "runtime.opencode.runWaitTimeoutMs",
       "runtime.opencode.childSessionHideAfterDays",
+      "runtime.opencode.bootstrap",
       "runtime.runStream",
       "runtime.memory",
       "runtime.cron",
@@ -203,6 +220,7 @@ export const wafflebotConfigSchema = z
           strictAllowPaths: [
             "runtime.opencode.runWaitTimeoutMs",
             "runtime.opencode.childSessionHideAfterDays",
+            "runtime.opencode.bootstrap",
             "runtime.runStream",
             "runtime.memory",
             "runtime.cron",

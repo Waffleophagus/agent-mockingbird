@@ -16,6 +16,7 @@ import {
   RuntimeSessionNotFoundError,
 } from "./errors";
 import type { MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
+import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import {
@@ -355,7 +356,9 @@ export class OpencodeRuntime implements RuntimeEngine {
       let opencodeSessionId = await this.resolveOrCreateOpencodeSession(session.id, session.title);
 
       const promptInput = await this.buildPromptInputWithMemory(input.content);
-      const memorySystemPrompt = this.buildWafflebotSystemPrompt();
+      const memorySystemPrompt = this.buildWafflebotSystemPrompt({
+        agentId: input.agent?.trim() || undefined,
+      });
 
       const promptResult = await this.sendPromptWithModelFallback({
         localSessionId: session.id,
@@ -755,8 +758,13 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
   }
 
-  private buildWafflebotSystemPrompt(): string | undefined {
+  private buildWafflebotSystemPrompt(input?: { agentId?: string }): string | undefined {
     const memoryConfig = currentMemoryConfig();
+    const config = getConfigSnapshot().config;
+    const workspaceContext = buildWorkspaceBootstrapPromptContext({
+      config,
+      agentId: input?.agentId,
+    });
     const lines: string[] = [];
 
     lines.push(
@@ -786,6 +794,18 @@ export class OpencodeRuntime implements RuntimeEngine {
         "- Use cron_manager for recurring automation and background checks.",
         "- Prefer deterministic jobs when possible; only invoke the model when useful.",
         "- Review existing jobs before creating new ones to avoid duplicates.",
+      );
+    }
+
+    if (workspaceContext.section) {
+      lines.push("", workspaceContext.section);
+    }
+
+    if (workspaceContext.agentPrompt) {
+      lines.push(
+        "",
+        `## Active Agent Prompt (${workspaceContext.agentPromptSource ?? input?.agentId ?? "selected"})`,
+        workspaceContext.agentPrompt,
       );
     }
 

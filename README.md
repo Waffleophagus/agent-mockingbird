@@ -175,6 +175,31 @@ Wafflebot now manages OpenCode agents directly in project-scoped OpenCode config
 - OpenCode also loads `.opencode/agent/*.md` and `.opencode/agents/*.md`; deleting an agent in Wafflebot removes matching files as well.
 - Agents UI shows `Saving to` and `Bound directory` so you can verify which workspace is authoritative.
 
+## Workspace Bootstrap Context (OpenClaw-style)
+
+Wafflebot now injects workspace markdown context into runtime system prompts using OpenClaw-style files from your bound workspace root (not `.opencode/`):
+
+- `AGENTS.md`
+- `SOUL.md`
+- `TOOLS.md`
+- `IDENTITY.md`
+- `USER.md`
+- `HEARTBEAT.md`
+- `BOOTSTRAP.md`
+- `MEMORY.md` / `memory.md`
+
+Behavior:
+
+- Per-file and total prompt injection caps are configurable at `runtime.opencode.bootstrap`.
+- If a selected OpenCode agent is `mode: "subagent"` and `runtime.opencode.bootstrap.subagentMinimal=true`, only `AGENTS.md` and `TOOLS.md` are injected.
+- `IDENTITY.md` is parsed for metadata (name/emoji/avatar/theme/creature/vibe) and returned via `GET /api/runtime/info`.
+- Selected agent prompt text can also be mirrored into runtime system prompts with `runtime.opencode.bootstrap.includeAgentPrompt=true`.
+
+OpenClaw import helper:
+
+- `POST /api/config/opencode/bootstrap/import-openclaw`
+- Body: `{ "sourceDirectory": "/path/to/openclaw/workspace", "overwrite": false, "files": ["AGENTS.md","SOUL.md","IDENTITY.md"] }`
+
 If OpenCode UI/TUI looks different from Wafflebot:
 
 1. Confirm `GET /api/runtime/info` reports the directory you expect.
