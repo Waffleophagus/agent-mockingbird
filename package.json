@@ -12,7 +12,7 @@
     "dev:stack": "bash scripts/dev-stack.sh",
     "start": "NODE_ENV=production bun src/index.ts",
     "build": "bun run build.ts",
-    "build:bin": "bun build --compile src/index.ts --outfile dist/wafflebot",
+    "build:bin": "bun run build-bin.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

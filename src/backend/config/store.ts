@@ -7,6 +7,7 @@ import { legacySpecialistToAgentType } from "../../shared/agentTypes";
 import { sqlite } from "../db/client";
 import { DEFAULT_AGENTS, DEFAULT_MCPS, DEFAULT_SKILLS } from "../defaults";
 import { env } from "../env";
+import { resolveDataPath } from "../paths";
 import {
   agentTypeDefinitionSchema,
   wafflebotConfigSchema,
@@ -35,7 +36,7 @@ function resolvedConfigPath() {
   if (configuredPath) {
     return path.resolve(configuredPath);
   }
-  return path.resolve(process.cwd(), "data", DEFAULT_CONFIG_FILENAME);
+  return resolveDataPath(DEFAULT_CONFIG_FILENAME);
 }
 
 function backupPathFor(configPath: string) {

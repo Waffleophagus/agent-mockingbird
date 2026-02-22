@@ -4,8 +4,9 @@ import path from "node:path";
 
 import { resolvedDbPath, sqlite } from "./client";
 import * as schema from "./schema";
+import { getBinaryDir } from "../paths";
 
-const migrationsFolder = path.resolve(process.cwd(), "drizzle");
+const migrationsFolder = path.resolve(getBinaryDir(), "drizzle");
 const migrationDb = drizzle({ client: sqlite, schema });
 
 console.log(`Running SQLite migrations from ${migrationsFolder}`);

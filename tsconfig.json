@@ -33,6 +33,7 @@
     "src/**/*.tsx",
     ".opencode/tools/**/*.ts",
     "build.ts",
+    "build-bin.ts",
     "bun-env.d.ts",
     "eslint.config.mjs",
     "drizzle.config.ts"

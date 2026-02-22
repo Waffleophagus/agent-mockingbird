@@ -3,10 +3,11 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { env } from "../env";
+import { resolveDataPath } from "../paths";
 
 const resolvedDbPath = env.WAFFLEBOT_DB_PATH
   ? path.resolve(env.WAFFLEBOT_DB_PATH)
-  : path.resolve(process.cwd(), "data", "wafflebot.db");
+  : resolveDataPath("wafflebot.db");
 
 mkdirSync(path.dirname(resolvedDbPath), { recursive: true });
 

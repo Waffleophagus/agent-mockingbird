@@ -22,6 +22,7 @@ import type {
 } from "./types";
 import { getConfigSnapshot } from "../config/service";
 import { sqlite } from "../db/client";
+import { getBinaryDir } from "../paths";
 
 interface MemoryFileRow {
   path: string;
@@ -101,7 +102,11 @@ function currentMemoryConfig() {
 }
 
 function resolveWorkspaceDir() {
-  return path.resolve(currentMemoryConfig().workspaceDir);
+  const workspaceDir = currentMemoryConfig().workspaceDir;
+  if (path.isAbsolute(workspaceDir)) {
+    return workspaceDir;
+  }
+  return path.resolve(getBinaryDir(), workspaceDir);
 }
 
 function normalizeRelPath(absPath: string) {
