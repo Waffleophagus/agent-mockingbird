@@ -40,6 +40,16 @@ function toSseEventName(event: RuntimeEvent): string {
       return "config-error";
     case "config.update.rolled_back":
       return "config-rollback";
+    case "channel.signal.status.updated":
+      return "signal-status";
+    case "channel.signal.pairing.requested":
+      return "signal-pairing";
+    case "channel.signal.message.received":
+      return "signal-message-received";
+    case "channel.signal.message.sent":
+      return "signal-message-sent";
+    case "channel.signal.error":
+      return "signal-error";
     default:
       return "runtime-event";
   }

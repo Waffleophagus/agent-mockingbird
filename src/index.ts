@@ -16,6 +16,7 @@ import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
+import { SignalChannelService } from "./backend/channels/signal/service";
 import index from "./index.html";
 
 ensureSeedData();
@@ -25,6 +26,7 @@ const configSnapshot = getConfigSnapshot();
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
 const runService = new RunService(runtime);
+const signalService = new SignalChannelService(runtime);
 const runtimeInfo = getRuntimeStartupInfo();
 const eventStream = createRuntimeEventStream({
   getHeartbeatSnapshot,
@@ -44,8 +46,12 @@ void initializeMemory().catch(() => {
 runtime.subscribe(event => {
   eventStream.publish(event);
 });
+signalService.subscribe(event => {
+  eventStream.publish(event);
+});
 cronService.start();
 runService.start();
+signalService.start();
 
 const heartbeatTimer = setInterval(() => {
   const heartbeat = recordHeartbeat("scheduler");
@@ -62,6 +68,7 @@ const server = serve({
       cronService,
       eventStream,
       runService,
+      signalService,
     }),
   },
   development: env.NODE_ENV !== "production" && {
@@ -74,6 +81,7 @@ const shutdown = () => {
   clearInterval(heartbeatTimer);
   cronService.stop();
   runService.stop();
+  signalService.stop();
 };
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

@@ -105,3 +105,66 @@ export const backgroundRuns = sqliteTable(
     index("background_runs_status_updated_idx").on(table.status, table.updatedAt),
   ],
 );
+
+export const channelConversationBindings = sqliteTable(
+  "channel_conversation_bindings",
+  {
+    channel: text("channel").notNull(),
+    conversationKey: text("conversation_key").notNull(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    lastTarget: text("last_target"),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  table => [
+    primaryKey({ columns: [table.channel, table.conversationKey] }),
+    index("channel_conversation_bindings_session_idx").on(table.sessionId),
+    index("channel_conversation_bindings_updated_idx").on(table.updatedAt),
+  ],
+);
+
+export const channelPairingRequests = sqliteTable(
+  "channel_pairing_requests",
+  {
+    channel: text("channel").notNull(),
+    senderId: text("sender_id").notNull(),
+    code: text("code").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    metaJson: text("meta_json").notNull().default("{}"),
+  },
+  table => [
+    primaryKey({ columns: [table.channel, table.senderId] }),
+    index("channel_pairing_requests_code_idx").on(table.channel, table.code),
+    index("channel_pairing_requests_expires_idx").on(table.expiresAt),
+  ],
+);
+
+export const channelAllowlistEntries = sqliteTable(
+  "channel_allowlist_entries",
+  {
+    channel: text("channel").notNull(),
+    senderId: text("sender_id").notNull(),
+    source: text("source").notNull().default("pairing"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  table => [
+    primaryKey({ columns: [table.channel, table.senderId] }),
+    index("channel_allowlist_entries_channel_idx").on(table.channel, table.createdAt),
+  ],
+);
+
+export const channelInboundDedupe = sqliteTable(
+  "channel_inbound_dedupe",
+  {
+    channel: text("channel").notNull(),
+    eventId: text("event_id").notNull(),
+    seenAt: integer("seen_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
+  },
+  table => [
+    primaryKey({ columns: [table.channel, table.eventId] }),
+    index("channel_inbound_dedupe_seen_idx").on(table.seenAt),
+  ],
+);

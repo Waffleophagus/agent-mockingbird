@@ -98,6 +98,50 @@ export interface ConfigRolledBackPayload {
 }
 export type ConfigRolledBackEvent = RuntimeEventBase<"config.update.rolled_back", ConfigRolledBackPayload>;
 
+export interface SignalChannelStatusPayload {
+  connected: boolean;
+  baseUrl: string;
+  account: string | null;
+  lastEventAt: string | null;
+  lastError: string | null;
+}
+export type SignalChannelStatusUpdatedEvent = RuntimeEventBase<
+  "channel.signal.status.updated",
+  SignalChannelStatusPayload
+>;
+
+export interface SignalPairingRequestedPayload {
+  senderId: string;
+  code: string;
+  expiresAt: string;
+}
+export type SignalPairingRequestedEvent = RuntimeEventBase<
+  "channel.signal.pairing.requested",
+  SignalPairingRequestedPayload
+>;
+
+export interface SignalMessageReceivedPayload {
+  senderId: string;
+  groupId: string | null;
+  sessionId: string;
+}
+export type SignalMessageReceivedEvent = RuntimeEventBase<
+  "channel.signal.message.received",
+  SignalMessageReceivedPayload
+>;
+
+export interface SignalMessageSentPayload {
+  target: string;
+  sessionId: string;
+}
+export type SignalMessageSentEvent = RuntimeEventBase<"channel.signal.message.sent", SignalMessageSentPayload>;
+
+export interface SignalErrorPayload {
+  message: string;
+  detail?: string;
+}
+export type SignalErrorEvent = RuntimeEventBase<"channel.signal.error", SignalErrorPayload>;
+
 export type RuntimeEvent =
   | HeartbeatUpdatedEvent
   | UsageUpdatedEvent
@@ -110,7 +154,12 @@ export type RuntimeEvent =
   | BackgroundRunUpdatedEvent
   | ConfigUpdatedEvent
   | ConfigUpdateFailedEvent
-  | ConfigRolledBackEvent;
+  | ConfigRolledBackEvent
+  | SignalChannelStatusUpdatedEvent
+  | SignalPairingRequestedEvent
+  | SignalMessageReceivedEvent
+  | SignalMessageSentEvent
+  | SignalErrorEvent;
 
 function baseRuntimeEvent<TType extends RuntimeEvent["type"], TPayload>(
   type: TType,
@@ -199,4 +248,39 @@ export function createConfigRolledBackEvent(
   source: RuntimeEventSource,
 ): ConfigRolledBackEvent {
   return baseRuntimeEvent("config.update.rolled_back", payload, source);
+}
+
+export function createSignalChannelStatusUpdatedEvent(
+  payload: SignalChannelStatusPayload,
+  source: RuntimeEventSource,
+): SignalChannelStatusUpdatedEvent {
+  return baseRuntimeEvent("channel.signal.status.updated", payload, source);
+}
+
+export function createSignalPairingRequestedEvent(
+  payload: SignalPairingRequestedPayload,
+  source: RuntimeEventSource,
+): SignalPairingRequestedEvent {
+  return baseRuntimeEvent("channel.signal.pairing.requested", payload, source);
+}
+
+export function createSignalMessageReceivedEvent(
+  payload: SignalMessageReceivedPayload,
+  source: RuntimeEventSource,
+): SignalMessageReceivedEvent {
+  return baseRuntimeEvent("channel.signal.message.received", payload, source);
+}
+
+export function createSignalMessageSentEvent(
+  payload: SignalMessageSentPayload,
+  source: RuntimeEventSource,
+): SignalMessageSentEvent {
+  return baseRuntimeEvent("channel.signal.message.sent", payload, source);
+}
+
+export function createSignalErrorEvent(
+  payload: SignalErrorPayload,
+  source: RuntimeEventSource,
+): SignalErrorEvent {
+  return baseRuntimeEvent("channel.signal.error", payload, source);
 }

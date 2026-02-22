@@ -36,6 +36,13 @@
       "when": 1771880000000,
       "tag": "0004_memory_open_write",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1772409600000,
+      "tag": "0005_signal_channel",
+      "breakpoints": true
     }
   ]
 }

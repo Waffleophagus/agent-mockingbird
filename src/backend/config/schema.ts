@@ -162,6 +162,96 @@ export const runtimeCronSchema = z
   })
   .strict();
 
+const signalDmPolicySchema = z.enum(["pairing", "allowlist", "open", "disabled"]);
+const signalGroupPolicySchema = z.enum(["open", "allowlist", "disabled"]);
+const signalGroupActivationSchema = z.enum(["mention", "always"]);
+
+const signalGroupConfigSchema = z
+  .object({
+    requireMention: z.boolean().optional(),
+    activation: signalGroupActivationSchema.optional(),
+  })
+  .strict();
+
+export const runtimeSignalChannelSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    httpUrl: z.string().url().default("http://127.0.0.1:8080"),
+    account: z.string().min(1).nullable().default(null),
+    dmPolicy: signalDmPolicySchema.default("pairing"),
+    allowFrom: stringListSchema.default([]),
+    groupPolicy: signalGroupPolicySchema.default("allowlist"),
+    groupAllowFrom: stringListSchema.default([]),
+    groups: z.record(z.string(), signalGroupConfigSchema).default({}),
+    mentionPatterns: stringListSchema.default([]),
+    groupActivationDefault: signalGroupActivationSchema.default("mention"),
+    textChunkLimit: z.number().int().positive().default(4_000),
+    chunkMode: z.enum(["length", "newline"]).default("length"),
+    pairing: z
+      .object({
+        ttlMs: z.number().int().positive().default(3_600_000),
+        maxPending: z.number().int().positive().max(100).default(3),
+      })
+      .strict()
+      .default({
+        ttlMs: 3_600_000,
+        maxPending: 3,
+      }),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.dmPolicy === "open" && !value.allowFrom.includes("*")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'runtime.channels.signal.dmPolicy="open" requires runtime.channels.signal.allowFrom to include "*"',
+        path: ["allowFrom"],
+      });
+    }
+  });
+
+export const runtimeChannelsSchema = z
+  .object({
+    signal: runtimeSignalChannelSchema.default({
+      enabled: false,
+      httpUrl: "http://127.0.0.1:8080",
+      account: null,
+      dmPolicy: "pairing",
+      allowFrom: [],
+      groupPolicy: "allowlist",
+      groupAllowFrom: [],
+      groups: {},
+      mentionPatterns: [],
+      groupActivationDefault: "mention",
+      textChunkLimit: 4_000,
+      chunkMode: "length",
+      pairing: {
+        ttlMs: 3_600_000,
+        maxPending: 3,
+      },
+    }),
+  })
+  .strict()
+  .default({
+    signal: {
+      enabled: false,
+      httpUrl: "http://127.0.0.1:8080",
+      account: null,
+      dmPolicy: "pairing",
+      allowFrom: [],
+      groupPolicy: "allowlist",
+      groupAllowFrom: [],
+      groups: {},
+      mentionPatterns: [],
+      groupActivationDefault: "mention",
+      textChunkLimit: 4_000,
+      chunkMode: "length",
+      pairing: {
+        ttlMs: 3_600_000,
+        maxPending: 3,
+      },
+    },
+  });
+
 export const runtimeConfigPolicySchema = z
   .object({
     mode: z.enum(["builder", "strict"]).default("builder"),
@@ -173,6 +263,7 @@ export const runtimeConfigPolicySchema = z
       "runtime.runStream",
       "runtime.memory",
       "runtime.cron",
+      "runtime.channels",
       "ui.skills",
       "ui.mcps",
       "ui.mcpServers",
@@ -214,6 +305,7 @@ export const wafflebotConfigSchema = z
           defaultRetryBackoffMs: 30_000,
           retryBackoffCapMs: 3_600_000,
         }),
+        channels: runtimeChannelsSchema,
         configPolicy: runtimeConfigPolicySchema.default({
           mode: "builder",
           denyPaths: ["version", "runtime.configPolicy", "runtime.smokeTest"],
@@ -224,6 +316,7 @@ export const wafflebotConfigSchema = z
             "runtime.runStream",
             "runtime.memory",
             "runtime.cron",
+            "runtime.channels",
             "ui.skills",
             "ui.mcps",
             "ui.mcpServers",

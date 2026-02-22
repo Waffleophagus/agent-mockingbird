@@ -1,12 +1,27 @@
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { resolvedDbPath, sqlite } from "./client";
 import * as schema from "./schema";
 import { getBinaryDir } from "../paths";
 
-const migrationsFolder = path.resolve(getBinaryDir(), "drizzle");
+function resolveMigrationsFolder() {
+  const candidates = [
+    path.resolve(process.cwd(), "drizzle"),
+    path.resolve(import.meta.dir, "../../../drizzle"),
+    path.resolve(getBinaryDir(), "drizzle"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, "meta", "_journal.json"))) {
+      return candidate;
+    }
+  }
+  return candidates[0] ?? path.resolve(process.cwd(), "drizzle");
+}
+
+const migrationsFolder = resolveMigrationsFolder();
 const migrationDb = drizzle({ client: sqlite, schema });
 
 console.log(`Running SQLite migrations from ${migrationsFolder}`);
