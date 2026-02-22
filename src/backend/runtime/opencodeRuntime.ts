@@ -2002,7 +2002,10 @@ export class OpencodeRuntime implements RuntimeEngine {
   private isPlaceholderSessionTitle(title: string) {
     const normalized = title.trim();
     if (!normalized) return true;
-    return /^session \d+$/i.test(normalized) || normalized === "New Session";
+    return (
+      /^session \d+$/i.test(normalized) ||
+      /^new session(?:\s*-\s*.+)?$/i.test(normalized)
+    );
   }
 
   private startSessionTitlePolling(localSessionId: string, opencodeSessionId: string) {
@@ -2047,6 +2050,9 @@ export class OpencodeRuntime implements RuntimeEngine {
         }),
       );
       const remoteTitle = opencodeSession.title.trim();
+      // Ignore OpenCode placeholder titles (for example "New session - <timestamp>").
+      // Keep local placeholder until a prompt-derived title is available.
+      if (this.isPlaceholderSessionTitle(remoteTitle)) return false;
       if (!remoteTitle || remoteTitle === localTitle) return false;
       const updated = setSessionTitle(localSessionId, remoteTitle);
       if (emitUpdateEvent && updated) {
@@ -2366,7 +2372,8 @@ export class OpencodeRuntime implements RuntimeEngine {
       }
 
       this.runtimeConfigSyncKey = targetKey;
-    } catch {
+    } catch (error) {
+      console.error("[opencode] Config sync failed:", error instanceof Error ? error.message : error);
       return;
     }
   }

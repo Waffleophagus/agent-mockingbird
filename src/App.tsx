@@ -1153,6 +1153,7 @@ export function App() {
         session?: SessionSummary;
         configHash?: string;
         configError?: string;
+        configStage?: string;
         runtimeDefaultModel?: string;
         sessionMatchesRuntimeDefault?: boolean;
         error?: string;
@@ -1170,8 +1171,12 @@ export function App() {
         setRuntimeDefaultModel(payload.runtimeDefaultModel);
       }
       if (typeof payload.configError === "string" && payload.configError.trim()) {
+        const stagePrefix =
+          typeof payload.configStage === "string" && payload.configStage.trim()
+            ? `[${payload.configStage}] `
+            : "";
         setModelError(
-          `Session model updated, but runtime default did not change (${payload.runtimeDefaultModel || "unknown"}): ${payload.configError}`,
+          `Session model updated, but runtime default did not change (${payload.runtimeDefaultModel || "unknown"}): ${stagePrefix}${payload.configError}`,
         );
       }
     } catch (error) {
@@ -1194,10 +1199,13 @@ export function App() {
       const payload = (await response.json()) as {
         runtimeDefaultModel?: string;
         configHash?: string;
+        stage?: string;
         error?: string;
       };
       if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to sync runtime default model");
+        const stagePrefix =
+          typeof payload.stage === "string" && payload.stage.trim() ? `[${payload.stage}] ` : "";
+        throw new Error(`${stagePrefix}${payload.error ?? "Failed to sync runtime default model"}`);
       }
       if (typeof payload.runtimeDefaultModel === "string") {
         setRuntimeDefaultModel(payload.runtimeDefaultModel);

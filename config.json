@@ -110,8 +110,8 @@
   "plugin": [
     "file:///var/home/matt/.config/opencode/plugin/tokenscope.ts"
   ],
-  "model": "opencode/kimi-k2.5-free",
-  "small_model": "opencode/kimi-k2.5-free",
+  "model": "anthropic/claude-opus-4-5",
+  "small_model": "chutes/openai/gpt-oss-120b-TEE",
   "username": "matt",
   "mode": {},
   "agent": {
