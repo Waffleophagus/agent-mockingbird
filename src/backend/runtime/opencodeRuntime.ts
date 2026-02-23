@@ -79,6 +79,7 @@ import {
   getOpencodeErrorStatus,
   unwrapSdkData,
 } from "../opencode/client";
+import { getLaneQueue } from "../queue/service";
 import {
   buildManagedSkillPaths,
   buildSkillPermissionAllowlist,
@@ -348,6 +349,24 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
 
     if (this.busySessions.has(session.id)) {
+      try {
+        const queue = getLaneQueue();
+        const result = queue.enqueue(
+          session.id,
+          input.content,
+          input.agent,
+          input.metadata,
+        );
+
+        if (result.queued) {
+          return {
+            sessionId: session.id,
+            messages: [],
+          };
+        }
+      } catch {
+        // Queue not initialized, fall through to throw error
+      }
       throw new RuntimeSessionBusyError(session.id);
     }
     this.busySessions.add(session.id);
@@ -469,6 +488,17 @@ export class OpencodeRuntime implements RuntimeEngine {
       };
     } finally {
       this.busySessions.delete(session.id);
+
+      try {
+        const queue = getLaneQueue();
+        if (queue.depth(session.id) > 0) {
+          queue.drainAndExecute(session.id).catch((err) => {
+            console.error("Queue drain error:", err);
+          });
+        }
+      } catch {
+        // Queue not initialized, ignore
+      }
     }
   }
 

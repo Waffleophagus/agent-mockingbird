@@ -24,6 +24,26 @@ const openCodePermissionRuleMapSchema = z.record(z.string(), openCodePermissionS
 const openCodePermissionValueSchema = z.union([openCodePermissionScalarSchema, openCodePermissionRuleMapSchema]);
 const openCodePermissionSchema = z.record(z.string(), openCodePermissionValueSchema);
 
+const heartbeatActiveHoursSchema = z
+  .object({
+    start: z.string().regex(/^[0-2][0-9]:[0-5][0-9]$/).default("08:00"),
+    end: z.string().regex(/^[0-2][0-9]:[0-5][0-9]$/).default("22:00"),
+    timezone: z.string().default("America/New_York"),
+  })
+  .strict();
+
+const heartbeatConfigSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    interval: z.string().regex(/^\d+[mhd]$/).default("30m"),
+    activeHours: heartbeatActiveHoursSchema.optional(),
+    prompt: z.string().optional(),
+    ackMaxChars: z.number().int().min(0).max(1000).default(300),
+  })
+  .strict();
+
+const queueModeSchema = z.enum(["collect", "followup", "replace"]);
+
 export const agentTypeDefinitionSchema = z
   .object({
     id: z.string().min(1),
@@ -40,6 +60,8 @@ export const agentTypeDefinitionSchema = z
     steps: z.number().int().positive().optional(),
     permission: openCodePermissionSchema.optional(),
     options: z.record(z.string(), z.unknown()).default({}),
+    heartbeat: heartbeatConfigSchema.optional(),
+    queueMode: queueModeSchema.optional(),
   })
   .strict();
 
@@ -162,6 +184,15 @@ export const runtimeCronSchema = z
   })
   .strict();
 
+export const runtimeQueueSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    defaultMode: queueModeSchema.default("collect"),
+    maxDepth: z.number().int().min(1).max(100).default(10),
+    coalesceDebounceMs: z.number().int().min(0).max(60_000).default(500),
+  })
+  .strict();
+
 const signalDmPolicySchema = z.enum(["pairing", "allowlist", "open", "disabled"]);
 const signalGroupPolicySchema = z.enum(["open", "allowlist", "disabled"]);
 const signalGroupActivationSchema = z.enum(["mention", "always"]);
@@ -263,6 +294,7 @@ export const runtimeConfigPolicySchema = z
       "runtime.runStream",
       "runtime.memory",
       "runtime.cron",
+      "runtime.queue",
       "runtime.channels",
       "ui.skills",
       "ui.mcps",
@@ -305,6 +337,12 @@ export const wafflebotConfigSchema = z
           defaultRetryBackoffMs: 30_000,
           retryBackoffCapMs: 3_600_000,
         }),
+        queue: runtimeQueueSchema.default({
+          enabled: true,
+          defaultMode: "collect",
+          maxDepth: 10,
+          coalesceDebounceMs: 500,
+        }),
         channels: runtimeChannelsSchema,
         configPolicy: runtimeConfigPolicySchema.default({
           mode: "builder",
@@ -316,6 +354,7 @@ export const wafflebotConfigSchema = z
             "runtime.runStream",
             "runtime.memory",
             "runtime.cron",
+            "runtime.queue",
             "runtime.channels",
             "ui.skills",
             "ui.mcps",

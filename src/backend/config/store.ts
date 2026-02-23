@@ -245,6 +245,12 @@ function buildLegacyBootstrappedConfig() {
         defaultRetryBackoffMs: 30_000,
         retryBackoffCapMs: 3_600_000,
       },
+      queue: {
+        enabled: true,
+        defaultMode: "collect",
+        maxDepth: 10,
+        coalesceDebounceMs: 500,
+      },
       channels: {
         signal: {
           enabled: false,
@@ -275,6 +281,7 @@ function buildLegacyBootstrappedConfig() {
           "runtime.runStream",
           "runtime.memory",
           "runtime.cron",
+          "runtime.queue",
           "runtime.channels",
           "ui.skills",
           "ui.mcps",

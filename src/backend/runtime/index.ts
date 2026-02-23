@@ -3,6 +3,8 @@ import { getConfigSnapshot } from "../config/service";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { getOpencodeConnectionInfo } from "../opencode/client";
 
+let runtimeInstance: RuntimeEngine | null = null;
+
 export interface RuntimeStartupInfo {
   opencode: {
     baseUrl: string;
@@ -19,7 +21,7 @@ export interface RuntimeStartupInfo {
 
 export function createRuntime(): RuntimeEngine {
   const config = getConfigSnapshot().config;
-  return new OpencodeRuntime({
+  const runtime = new OpencodeRuntime({
     defaultProviderId: config.runtime.opencode.providerId,
     defaultModelId: config.runtime.opencode.modelId,
     fallbackModelRefs: config.runtime.opencode.fallbackModels,
@@ -28,6 +30,12 @@ export function createRuntime(): RuntimeEngine {
     getEnabledMcps: () => getConfigSnapshot().config.ui.mcps,
     getConfiguredMcpServers: () => getConfigSnapshot().config.ui.mcpServers,
   });
+  runtimeInstance = runtime;
+  return runtime;
+}
+
+export function getRuntime(): RuntimeEngine | null {
+  return runtimeInstance;
 }
 
 export function getRuntimeStartupInfo(): RuntimeStartupInfo {

@@ -14,6 +14,7 @@ import { env } from "./backend/env";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
+import { initLaneQueue, getLaneQueue } from "./backend/queue/service";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
 import { SignalChannelService } from "./backend/channels/signal/service";
@@ -23,7 +24,32 @@ ensureSeedData();
 ensureConfigFile();
 const configSnapshot = getConfigSnapshot();
 
+const queueConfig = configSnapshot.config.runtime.queue;
+const laneQueue = initLaneQueue({
+  enabled: queueConfig.enabled,
+  defaultMode: queueConfig.defaultMode,
+  maxDepth: queueConfig.maxDepth,
+  coalesceDebounceMs: queueConfig.coalesceDebounceMs,
+});
+
 const runtime = createRuntime();
+
+laneQueue.setDrainHandler(async (sessionId, messages, _mode) => {
+  if (messages.length === 0) return;
+  const msg = messages[0];
+  if (!msg) return;
+  try {
+    await runtime.sendUserMessage({
+      sessionId,
+      content: msg.content,
+      agent: msg.agent,
+      metadata: msg.metadata,
+    });
+  } catch (err) {
+    console.error("Queue drain handler error:", err);
+  }
+});
+
 const cronService = new CronService(runtime);
 const runService = new RunService(runtime);
 const signalService = new SignalChannelService(runtime);
@@ -82,6 +108,11 @@ const shutdown = () => {
   cronService.stop();
   runService.stop();
   signalService.stop();
+  try {
+    getLaneQueue().clearAll();
+  } catch {
+    // Queue not initialized
+  }
 };
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
