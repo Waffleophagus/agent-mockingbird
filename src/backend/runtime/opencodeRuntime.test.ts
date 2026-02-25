@@ -168,6 +168,7 @@ let OpencodeRuntime: RuntimeCtor;
 let RuntimeProviderQuotaError: new (message?: string) => Error;
 let RuntimeProviderAuthError: new (message?: string) => Error;
 let RuntimeProviderRateLimitError: new (message?: string) => Error;
+let RuntimeSessionBusyError: new (sessionId: string) => Error;
 
 beforeAll(async () => {
   await import("../db/migrate");
@@ -179,10 +180,12 @@ beforeAll(async () => {
     RuntimeProviderQuotaError,
     RuntimeProviderAuthError,
     RuntimeProviderRateLimitError,
+    RuntimeSessionBusyError,
   } = (await import("./errors")) as unknown as {
     RuntimeProviderQuotaError: new (message?: string) => Error;
     RuntimeProviderAuthError: new (message?: string) => Error;
     RuntimeProviderRateLimitError: new (message?: string) => Error;
+    RuntimeSessionBusyError: new (sessionId: string) => Error;
   });
   repository.ensureSeedData();
 });
@@ -588,7 +591,7 @@ describe("opencode runtime failover contract", () => {
         }
       | undefined;
     expect(updated).toBeTruthy();
-    expect(updated?.skills?.paths).toContain(path.resolve(process.cwd(), "data", "skills"));
+    expect(updated?.skills?.paths).toContain(path.resolve(process.cwd(), ".agents", "skills"));
     expect(updated?.permission?.skill?.["*"]).toBe("deny");
     expect(updated?.permission?.skill?.["btca-cli"]).toBe("allow");
     expect(updated?.mcp?.github?.enabled).toBe(true);
@@ -990,5 +993,32 @@ describe("opencode runtime failover contract", () => {
     await expect(runtime.sendUserMessage({ sessionId: "main", content: "hello" })).rejects.toMatchObject({
       name: "AbortError",
     });
+  });
+
+  test("throws RuntimeSessionBusyError when session is busy", async () => {
+    let promptResolve: () => void;
+    const promptPromise = new Promise<void>((resolve) => {
+      promptResolve = resolve;
+    });
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async () => {
+          await promptPromise;
+          return assistantResponse("ses-1", "OK");
+        },
+      }),
+    );
+
+    const firstCall = runtime.sendUserMessage({ sessionId: "main", content: "first" });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await expect(runtime.sendUserMessage({ sessionId: "main", content: "second" })).rejects.toBeInstanceOf(
+      RuntimeSessionBusyError,
+    );
+
+    promptResolve!();
+    await firstCall;
   });
 });

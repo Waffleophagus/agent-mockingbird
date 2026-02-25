@@ -14,6 +14,7 @@ import { env } from "./backend/env";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
+import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
 import { initLaneQueue, getLaneQueue } from "./backend/queue/service";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
@@ -36,17 +37,18 @@ const runtime = createRuntime();
 
 laneQueue.setDrainHandler(async (sessionId, messages, _mode) => {
   if (messages.length === 0) return;
-  const msg = messages[0];
-  if (!msg) return;
-  try {
-    await runtime.sendUserMessage({
-      sessionId,
-      content: msg.content,
-      agent: msg.agent,
-      metadata: msg.metadata,
-    });
-  } catch (err) {
-    console.error("Queue drain handler error:", err);
+  for (const msg of messages) {
+    try {
+      await runtime.sendUserMessage({
+        sessionId,
+        content: msg.content,
+        agent: msg.agent,
+        metadata: msg.metadata,
+      });
+    } catch (err) {
+      console.error("Queue drain handler error:", err);
+      break;
+    }
   }
 });
 
@@ -78,6 +80,10 @@ signalService.subscribe(event => {
 cronService.start();
 runService.start();
 signalService.start();
+
+void syncHeartbeatJobsForAgents(cronService, configSnapshot.config.ui.agentTypes).catch(err => {
+  console.error("[startup] Failed to sync heartbeat jobs:", err);
+});
 
 const heartbeatTimer = setInterval(() => {
   const heartbeat = recordHeartbeat("scheduler");

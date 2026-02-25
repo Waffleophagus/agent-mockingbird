@@ -351,21 +351,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (this.busySessions.has(session.id)) {
       try {
         const queue = getLaneQueue();
-        const result = queue.enqueue(
-          session.id,
-          input.content,
-          input.agent,
-          input.metadata,
-        );
-
-        if (result.queued) {
-          return {
-            sessionId: session.id,
-            messages: [],
-          };
-        }
+        queue.enqueue(session.id, input.content, input.agent, input.metadata);
       } catch {
-        // Queue not initialized, fall through to throw error
+        // Queue not initialized, fall through
       }
       throw new RuntimeSessionBusyError(session.id);
     }

@@ -131,4 +131,59 @@ describe("LaneQueue", () => {
       expect(queue.getMode("session-1")).toBe("replace");
     });
   });
+
+  describe("drainAndExecute", () => {
+    test("coalesces multiple messages in collect mode", async () => {
+      queue.enqueue("session-1", "Message 1");
+      queue.enqueue("session-1", "Message 2");
+      queue.enqueue("session-1", "Message 3");
+
+      let receivedContent = "";
+      queue.setDrainHandler(async (_sessionId, messages) => {
+        receivedContent = messages[0]?.content ?? "";
+      });
+
+      const result = await queue.drainAndExecute("session-1");
+      expect(result?.coalesced).toBe(true);
+      expect(result?.messagesProcessed).toBe(1);
+      expect(receivedContent).toContain("Message 1");
+      expect(receivedContent).toContain("Message 2");
+      expect(receivedContent).toContain("Message 3");
+    });
+
+    test("processes all messages in replace mode", async () => {
+      queue.setMode("session-1", "replace");
+      queue.enqueue("session-1", "Message 1");
+      queue.enqueue("session-1", "Message 2");
+
+      const received: string[] = [];
+      queue.setDrainHandler(async (_sessionId, messages) => {
+        for (const msg of messages) {
+          received.push(msg.content);
+        }
+      });
+
+      await queue.drainAndExecute("session-1");
+      expect(received).toEqual(["Message 2"]);
+    });
+
+    test("processes first message only in followup mode", async () => {
+      queue.setMode("session-1", "followup");
+      queue.enqueue("session-1", "Message 1");
+      queue.enqueue("session-1", "Message 2");
+      queue.enqueue("session-1", "Message 3");
+
+      const received: string[] = [];
+      queue.setDrainHandler(async (_sessionId, messages) => {
+        for (const msg of messages) {
+          received.push(msg.content);
+        }
+      });
+
+      const result = await queue.drainAndExecute("session-1");
+      expect(result?.messagesProcessed).toBe(1);
+      expect(received).toEqual(["Message 1"]);
+      expect(queue.depth("session-1")).toBe(2);
+    });
+  });
 });

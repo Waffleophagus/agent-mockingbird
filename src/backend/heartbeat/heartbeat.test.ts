@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { isHeartbeatAck, parseInterval } from "./service";
 import { isActiveHours } from "./activeHours";
+import { getHeartbeatJobId } from "./jobSync";
 import type { HeartbeatConfig } from "./types";
 
 describe("parseInterval", () => {
@@ -88,5 +89,15 @@ describe("isActiveHours", () => {
       },
     };
     expect(isActiveHours(config)).toBe(true);
+  });
+});
+
+describe("getHeartbeatJobId", () => {
+  test("generates consistent job ID for agent", () => {
+    expect(getHeartbeatJobId("my-agent")).toBe("heartbeat-my-agent");
+  });
+
+  test("handles agent IDs with special characters", () => {
+    expect(getHeartbeatJobId("my_agent-123")).toBe("heartbeat-my_agent-123");
   });
 });

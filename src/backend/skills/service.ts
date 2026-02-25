@@ -5,10 +5,9 @@ import { fileURLToPath } from "node:url";
 
 import type { WafflebotConfig } from "../config/schema";
 import { createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";
-import { resolveDataPath } from "../paths";
 
 const SKILL_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
-const MANAGED_SKILLS_ROOT = resolveDataPath("skills");
+const MANAGED_SKILLS_ROOT = path.resolve(process.cwd(), ".agents", "skills");
 
 type PermissionAction = "allow" | "deny" | "ask";
 
