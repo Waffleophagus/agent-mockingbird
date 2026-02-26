@@ -8,6 +8,7 @@ export interface OpencodeModelOption {
   providerId: string;
   modelId: string;
   label: string;
+  supportsImageInput?: boolean;
 }
 
 export async function listOpencodeModelOptions(): Promise<OpencodeModelOption[]> {
@@ -31,6 +32,7 @@ export async function listOpencodeModelOptions(): Promise<OpencodeModelOption[]>
         providerId: provider.id,
         modelId,
         label: `${provider.name} / ${model.name}`,
+        supportsImageInput: model.capabilities?.input?.image === true,
       });
     }
   }

@@ -1,10 +1,34 @@
 import type { RuntimeEngine } from "../../contracts/runtime";
+import type { RuntimeInputPart } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
 
 function parseBoolean(value: string | null) {
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function normalizeRuntimeInputParts(value: unknown): RuntimeInputPart[] {
+  if (!Array.isArray(value)) return [];
+  const parts: RuntimeInputPart[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const record = raw as Record<string, unknown>;
+    if (record.type === "text") {
+      const text = typeof record.text === "string" ? record.text : "";
+      if (!text.trim()) continue;
+      parts.push({ type: "text", text });
+      continue;
+    }
+    if (record.type === "file") {
+      const mime = typeof record.mime === "string" ? record.mime.trim() : "";
+      const url = typeof record.url === "string" ? record.url.trim() : "";
+      const filename = typeof record.filename === "string" ? record.filename.trim() || undefined : undefined;
+      if (!mime || !url) continue;
+      parts.push({ type: "file", mime, url, filename });
+    }
+  }
+  return parts;
 }
 
 export function createBackgroundRoutes(runtime: RuntimeEngine) {
@@ -41,6 +65,7 @@ export function createBackgroundRoutes(runtime: RuntimeEngine) {
           title?: string;
           requestedBy?: string;
           prompt?: string;
+          parts?: RuntimeInputPart[];
           model?: string;
           system?: string;
           agent?: string;
@@ -54,6 +79,7 @@ export function createBackgroundRoutes(runtime: RuntimeEngine) {
           return Response.json({ error: "Unknown session" }, { status: 404 });
         }
 
+        const parts = normalizeRuntimeInputParts(body.parts);
         try {
           const run = await runtime.spawnBackgroundSession({
             parentSessionId: sessionId,
@@ -61,13 +87,14 @@ export function createBackgroundRoutes(runtime: RuntimeEngine) {
             requestedBy: body.requestedBy,
             prompt: body.prompt,
           });
-          if (body.prompt?.trim()) {
+          if (body.prompt?.trim() || parts.length > 0) {
             if (!runtime.promptBackgroundAsync) {
               return Response.json({ error: "Runtime does not support background prompting" }, { status: 501 });
             }
             const updated = await runtime.promptBackgroundAsync({
               runId: run.runId,
-              content: body.prompt.trim(),
+              content: body.prompt?.trim() ?? "",
+              parts,
               model: body.model,
               system: body.system,
               agent: body.agent,
@@ -123,19 +150,22 @@ export function createBackgroundRoutes(runtime: RuntimeEngine) {
         }
         const body = (await req.json()) as {
           content?: string;
+          parts?: RuntimeInputPart[];
           model?: string;
           system?: string;
           agent?: string;
           noReply?: boolean;
         };
         const content = body.content?.trim();
-        if (!content) {
-          return Response.json({ error: "content is required" }, { status: 400 });
+        const parts = normalizeRuntimeInputParts(body.parts);
+        if (!content && parts.length === 0) {
+          return Response.json({ error: "content or parts is required" }, { status: 400 });
         }
         try {
           const run = await runtime.promptBackgroundAsync({
             runId: req.params.id,
-            content,
+            content: content ?? "",
+            parts,
             model: body.model,
             system: body.system,
             agent: body.agent,

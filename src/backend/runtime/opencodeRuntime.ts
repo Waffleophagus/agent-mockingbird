@@ -39,6 +39,7 @@ import type {
   RuntimeEngine,
   RuntimeHealthCheckInput,
   RuntimeHealthCheckResult,
+  RuntimeInputPart,
   RuntimeMessageAck,
   SendUserMessageInput,
   SpawnBackgroundSessionInput,
@@ -207,6 +208,8 @@ export class OpencodeRuntime implements RuntimeEngine {
   private backgroundLastEmitByRunId = new Map<string, string>();
   private backgroundMessageSyncAtByChildSessionId = new Map<string, number>();
   private drainingSessions = new Set<string>();
+  private imageCapabilityByModelRef = new Map<string, boolean>();
+  private imageCapabilityFetchedAtMs = 0;
 
   constructor(private options: OpencodeRuntimeOptions) {
     if (options.client) {
@@ -366,7 +369,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       if (shouldQueueWhenBusy(input)) {
         try {
           const queue = getLaneQueue();
-          queue.enqueue(session.id, input.content, input.agent, input.metadata);
+          queue.enqueue(session.id, input.content, input.parts, input.agent, input.metadata);
         } catch {
           // Queue not initialized, fall through
         }
@@ -378,19 +381,45 @@ export class OpencodeRuntime implements RuntimeEngine {
     try {
       await this.ensureRuntimeConfigSynced();
       const model = this.resolveModel(session.model);
+      let selectedModel = model;
       let opencodeSessionId = await this.resolveOrCreateOpencodeSession(session.id, session.title);
+      const inputParts = this.normalizePromptInputParts(input.content, input.parts);
+      const imageInputPresent = inputParts.some(part => part.type === "file" && part.mime.toLowerCase().startsWith("image/"));
 
-      const promptInput = await this.buildPromptInputWithMemory(input.content);
+      if (imageInputPresent) {
+        const supportsImage = await this.modelSupportsImageInput(model);
+        if (!supportsImage) {
+          const imageModelRef = this.currentImageModel();
+          if (imageModelRef) {
+            selectedModel = this.resolveModel(imageModelRef);
+            this.emit(
+              createSessionRunStatusUpdatedEvent(
+                {
+                  sessionId: session.id,
+                  status: "retry",
+                  attempt: 1,
+                  message: `Routing image input to ${this.formatModelRef(selectedModel)} in this session.`,
+                },
+                "runtime",
+              ),
+            );
+          }
+        }
+      }
+
+      const primaryText = this.extractPrimaryTextInput(inputParts);
+      const promptInput = await this.buildPromptInputWithMemory(primaryText);
       const memorySystemPrompt = this.buildWafflebotSystemPrompt({
         agentId: input.agent?.trim() || undefined,
       });
+      const promptParts = this.applyMemoryPromptToParts(inputParts, promptInput.content);
 
       const promptResult = await this.sendPromptWithModelFallback({
         localSessionId: session.id,
         localSessionTitle: session.title,
         opencodeSessionId,
-        primaryModel: model,
-        content: promptInput.content,
+        primaryModel: selectedModel,
+        parts: promptParts,
         system: memorySystemPrompt,
         agent: input.agent?.trim() || undefined,
       });
@@ -429,7 +458,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         assistantMessage.info.time?.completed ?? assistantMessage.info.time?.created ?? Date.now();
       const result = appendChatExchange({
         sessionId: session.id,
-        userContent: input.content,
+        userContent: this.summarizeUserInputForStorage(input.content, inputParts),
         assistantContent: assistantText,
         assistantParts,
         source: "runtime",
@@ -438,9 +467,9 @@ export class OpencodeRuntime implements RuntimeEngine {
         usage: {
           requestCountDelta: 1,
           inputTokensDelta:
-            assistantMessage.info.tokens?.input ?? Math.max(8, input.content.length * 2),
+            assistantMessage.info.tokens?.input ?? Math.max(8, promptInput.content.length * 2),
           outputTokensDelta:
-            assistantMessage.info.tokens?.output ?? Math.max(24, Math.floor(input.content.length * 2.5)),
+            assistantMessage.info.tokens?.output ?? Math.max(24, Math.floor(promptInput.content.length * 2.5)),
           estimatedCostUsdDelta: assistantMessage.info.cost ?? 0,
         },
       });
@@ -557,11 +586,12 @@ export class OpencodeRuntime implements RuntimeEngine {
   async promptBackgroundAsync(input: PromptBackgroundAsyncInput): Promise<BackgroundRunHandle> {
     const runId = input.runId.trim();
     const content = input.content.trim();
+    const inputParts = this.normalizePromptInputParts(content, input.parts);
     if (!runId) {
       throw new Error("runId is required.");
     }
-    if (!content) {
-      throw new Error("content is required.");
+    if (!content && inputParts.length === 0) {
+      throw new Error("content or parts is required.");
     }
 
     const run = getBackgroundRunById(runId);
@@ -601,7 +631,7 @@ export class OpencodeRuntime implements RuntimeEngine {
           system: input.system,
           agent: input.agent?.trim() || undefined,
           noReply: input.noReply,
-          parts: [{ type: "text", text: content }],
+          parts: inputParts,
         },
         responseStyle: "data",
         throwOnError: true,
@@ -811,6 +841,134 @@ export class OpencodeRuntime implements RuntimeEngine {
     } catch {
       return { content: userContent, injectedContextResults: 0 };
     }
+  }
+
+  private normalizePromptInputParts(content: string, parts?: RuntimeInputPart[]): RuntimeInputPart[] {
+    const normalized: RuntimeInputPart[] = [];
+    if (Array.isArray(parts)) {
+      for (const part of parts) {
+        if (part.type === "text") {
+          if (!part.text?.trim()) continue;
+          normalized.push({
+            type: "text",
+            text: part.text,
+          });
+          continue;
+        }
+        if (part.type === "file") {
+          const mime = part.mime?.trim();
+          const url = part.url?.trim();
+          if (!mime || !url) continue;
+          normalized.push({
+            type: "file",
+            mime,
+            filename: part.filename?.trim() || undefined,
+            url,
+          });
+        }
+      }
+    }
+    if (normalized.length > 0) return normalized;
+    if (!content.trim()) return [];
+    return [{ type: "text", text: content }];
+  }
+
+  private extractPrimaryTextInput(parts: RuntimeInputPart[]) {
+    const firstText = parts.find(part => part.type === "text");
+    return firstText?.text ?? "";
+  }
+
+  private applyMemoryPromptToParts(parts: RuntimeInputPart[], memoryWrappedText: string): RuntimeInputPart[] {
+    if (!memoryWrappedText.trim()) return parts;
+    const next = [...parts];
+    const index = next.findIndex(part => part.type === "text");
+    if (index === -1) {
+      next.unshift({
+        type: "text",
+        text: memoryWrappedText,
+      });
+      return next;
+    }
+    const existing = next[index];
+    if (!existing || existing.type !== "text") return next;
+    next[index] = {
+      ...existing,
+      text: memoryWrappedText,
+    };
+    return next;
+  }
+
+  private summarizeUserInputForStorage(content: string, parts: RuntimeInputPart[]) {
+    const text = content.trim();
+    const attachments = parts.filter(part => part.type === "file");
+    if (attachments.length === 0) return text;
+    const imageCount = attachments.filter(part => part.mime.toLowerCase().startsWith("image/")).length;
+    const fileCount = attachments.length - imageCount;
+    const summaryBits: string[] = [];
+    if (imageCount > 0) summaryBits.push(`${imageCount} image${imageCount === 1 ? "" : "s"}`);
+    if (fileCount > 0) summaryBits.push(`${fileCount} file${fileCount === 1 ? "" : "s"}`);
+    const attachmentSummary = `[Attachments: ${summaryBits.join(", ")}]`;
+    return text ? `${text}\n\n${attachmentSummary}` : attachmentSummary;
+  }
+
+  private async modelSupportsImageInput(model: ResolvedModel) {
+    const now = Date.now();
+    if (now - this.imageCapabilityFetchedAtMs > 60_000) {
+      this.imageCapabilityByModelRef.clear();
+    }
+    if (this.imageCapabilityByModelRef.size > 0 && this.imageCapabilityByModelRef.has(this.formatModelRef(model))) {
+      return this.imageCapabilityByModelRef.get(this.formatModelRef(model)) === true;
+    }
+
+    try {
+      const payload = unwrapSdkData<Record<string, unknown>>(
+        await this.getClient().config.providers({
+          responseStyle: "data",
+          throwOnError: true,
+          signal: this.defaultRequestSignal(),
+        }),
+      );
+      const map = new Map<string, boolean>();
+      const providers = Array.isArray(payload.providers) ? payload.providers : [];
+      for (const provider of providers) {
+        if (!provider || typeof provider !== "object" || Array.isArray(provider)) continue;
+        const providerRecord = provider as Record<string, unknown>;
+        const providerId = typeof providerRecord.id === "string" ? providerRecord.id.trim() : "";
+        if (!providerId) continue;
+        const models =
+          providerRecord.models && typeof providerRecord.models === "object" && !Array.isArray(providerRecord.models)
+            ? (providerRecord.models as Record<string, Record<string, unknown>>)
+            : {};
+        for (const [modelKey, modelInfo] of Object.entries(models)) {
+          const modelIdRaw = typeof modelInfo.id === "string" ? modelInfo.id : modelKey;
+          const modelId = modelIdRaw.trim();
+          if (!modelId) continue;
+          const capabilities =
+            modelInfo.capabilities && typeof modelInfo.capabilities === "object" && !Array.isArray(modelInfo.capabilities)
+              ? (modelInfo.capabilities as Record<string, unknown>)
+              : {};
+          const input =
+            capabilities.input && typeof capabilities.input === "object" && !Array.isArray(capabilities.input)
+              ? (capabilities.input as Record<string, unknown>)
+              : {};
+          const supportsImage = input.image === true;
+          map.set(`${providerId}/${modelId}`, supportsImage);
+        }
+      }
+      this.imageCapabilityByModelRef = map;
+      this.imageCapabilityFetchedAtMs = now;
+    } catch {
+      return false;
+    }
+
+    return this.imageCapabilityByModelRef.get(this.formatModelRef(model)) === true;
+  }
+
+  private currentImageModel() {
+    const runtimeConfig = this.currentRuntimeConfig();
+    const explicit = runtimeConfig?.imageModel?.trim();
+    if (explicit) return explicit;
+    return runtimeConfig?.fallbackModels.find(model => model.trim())?.trim() || this.currentSmallModel();
   }
 
   private buildWafflebotSystemPrompt(input?: { agentId?: string }): string | undefined {
@@ -1449,12 +1607,21 @@ export class OpencodeRuntime implements RuntimeEngine {
         }),
       );
       await this.syncBackgroundSessionMessages(latest, true, messages);
-      const assistantParts = [...messages]
+      const latestAssistant = [...messages]
         .reverse()
-        .find((entry) => entry.info.role === "assistant")?.parts;
-      const assistantText = assistantParts ? this.extractText(assistantParts) : null;
+        .find((entry) => entry.info.role === "assistant");
+      const assistantText = latestAssistant
+        ? this.mapOpencodeMessageContent(latestAssistant.info, latestAssistant.parts).trim()
+        : "";
       const resultSummary = this.summarizeBackgroundResult(assistantText);
-      const announcementText = `[Background ${latest.id}] run completed. Open the child session for full output.`;
+      const childSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, latest.childExternalSessionId);
+      const summaryLine =
+        resultSummary && resultSummary !== "Background run completed."
+          ? resultSummary
+          : "run completed.";
+      const announcementText =
+        `[Background ${latest.id}] ${summaryLine}\n` +
+        `Child session: ${childSessionId ?? latest.childExternalSessionId}`;
 
       const appended = appendAssistantMessage({
         sessionId: latest.parentSessionId,
@@ -1832,7 +1999,7 @@ export class OpencodeRuntime implements RuntimeEngine {
   private async sendPrompt(
     sessionId: string,
     model: ResolvedModel,
-    content: string,
+    promptParts: Array<RuntimeInputPart>,
     system?: string,
     agent?: string,
   ): Promise<{ info: AssistantInfo; parts: Array<Part> }> {
@@ -1846,7 +2013,7 @@ export class OpencodeRuntime implements RuntimeEngine {
           },
           system,
           agent,
-          parts: [{ type: "text", text: content }],
+          parts: promptParts,
         },
         responseStyle: "data",
         throwOnError: true,
@@ -1885,8 +2052,8 @@ export class OpencodeRuntime implements RuntimeEngine {
       throw new Error(`OpenCode returned unexpected message role: ${info.role}`);
     }
 
-    const parts = Array.isArray(response.parts) ? response.parts : [];
-    return { info: info as AssistantInfo, parts };
+    const responseParts = Array.isArray(response.parts) ? response.parts : [];
+    return { info: info as AssistantInfo, parts: responseParts };
   }
 
   private async sendPromptWithModelFallback(input: {
@@ -1894,7 +2061,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     localSessionTitle: string;
     opencodeSessionId: string;
     primaryModel: ResolvedModel;
-    content: string;
+    parts: Array<RuntimeInputPart>;
     system?: string;
     agent?: string;
   }): Promise<{ message: { info: AssistantInfo; parts: Array<Part> }; opencodeSessionId: string }> {
@@ -1911,7 +2078,7 @@ export class OpencodeRuntime implements RuntimeEngine {
 
       let attemptError: unknown = null;
       try {
-        const message = await this.sendPrompt(sessionId, model, input.content, input.system, input.agent);
+        const message = await this.sendPrompt(sessionId, model, input.parts, input.system, input.agent);
         return { message, opencodeSessionId: sessionId };
       } catch (error) {
         if (getOpencodeErrorStatus(error) === 404) {
@@ -1921,7 +2088,7 @@ export class OpencodeRuntime implements RuntimeEngine {
             throw this.normalizeRuntimeError(createError);
           }
           try {
-            const message = await this.sendPrompt(sessionId, model, input.content, input.system, input.agent);
+            const message = await this.sendPrompt(sessionId, model, input.parts, input.system, input.agent);
             return { message, opencodeSessionId: sessionId };
           } catch (retryError) {
             attemptError = retryError;

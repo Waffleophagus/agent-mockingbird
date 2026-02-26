@@ -6,6 +6,7 @@
       "providerId": "opencode",
       "modelId": "kimi-k2.5-free",
       "fallbackModels": [],
+      "imageModel": null,
       "smallModel": "opencode/kimi-k2.5-free",
       "timeoutMs": 120000,
       "promptTimeoutMs": 300000,

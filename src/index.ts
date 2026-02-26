@@ -42,6 +42,7 @@ laneQueue.setDrainHandler(async (sessionId, messages, _mode) => {
       await runtime.sendUserMessage({
         sessionId,
         content: msg.content,
+        parts: msg.parts,
         agent: msg.agent,
         metadata: {
           ...(msg.metadata ?? {}),

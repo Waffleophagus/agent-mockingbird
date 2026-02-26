@@ -1,9 +1,12 @@
+import type { RuntimeInputPart } from "../contracts/runtime";
+
 export type QueueMode = "collect" | "followup" | "replace";
 
 export interface QueuedMessage {
   id: string;
   sessionId: string;
   content: string;
+  parts?: RuntimeInputPart[];
   agent?: string;
   metadata?: Record<string, unknown>;
   arrivedAt: number;

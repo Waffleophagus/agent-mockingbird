@@ -1,8 +1,16 @@
 import { useState } from "react";
-import type { Dispatch, FormEvent, KeyboardEvent as ReactKeyboardEvent, MutableRefObject, RefObject, SetStateAction } from "react";
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  Dispatch,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MutableRefObject,
+  RefObject,
+  SetStateAction,
+} from "react";
 
 import { mergeMessages, normalizeRequestError } from "@/frontend/app/chatHelpers";
-import type { ActiveSend, LocalChatMessage } from "@/frontend/app/chatHelpers";
+import type { ActiveSend, LocalChatMessage, LocalInputPart } from "@/frontend/app/chatHelpers";
 import { extractRunErrorMessage, RUN_POLL_INTERVAL_MS, upsertSessionList } from "@/frontend/app/dashboardUtils";
 import type {
   ChatMessage,
@@ -17,9 +25,18 @@ interface AgentRunSnapshot {
   error?: unknown;
 }
 
+export interface ComposerAttachment {
+  id: string;
+  mime: string;
+  filename?: string;
+  url: string;
+  size: number;
+}
+
 interface UseChatSessionInput {
   activeSession: SessionSummary | undefined;
   draftMessage: string;
+  draftAttachments: ComposerAttachment[];
   runWaitTimeoutMs: number;
   composerFormRef: RefObject<HTMLFormElement | null>;
   messagesBySession: Record<string, LocalChatMessage[]>;
@@ -28,6 +45,7 @@ interface UseChatSessionInput {
   activeAbortControllerRef: MutableRefObject<AbortController | null>;
   abortedRequestIdsRef: MutableRefObject<Set<string>>;
   setDraftMessage: Dispatch<SetStateAction<string>>;
+  setDraftAttachments: Dispatch<SetStateAction<ComposerAttachment[]>>;
   setMessagesBySession: Dispatch<SetStateAction<Record<string, LocalChatMessage[]>>>;
   setRunErrorsBySession: Dispatch<SetStateAction<Record<string, string>>>;
   setRunStatusBySession: Dispatch<SetStateAction<Record<string, SessionRunStatusSnapshot>>>;
@@ -41,7 +59,7 @@ export function useChatSession(input: UseChatSessionInput) {
   const [isCompacting, setIsCompacting] = useState(false);
   const [chatControlError, setChatControlError] = useState("");
 
-  function appendOptimisticRequest(sessionId: string, content: string, requestId: string) {
+  function appendOptimisticRequest(sessionId: string, content: string, requestId: string, parts?: LocalInputPart[]) {
     const createdAt = new Date().toISOString();
     const optimisticUserMessage: LocalChatMessage = {
       id: `local-user-${requestId}`,
@@ -64,6 +82,7 @@ export function useChatSession(input: UseChatSessionInput) {
         requestId,
         status: "pending",
         retryContent: content,
+        retryParts: parts,
       },
     };
 
@@ -250,6 +269,7 @@ export function useChatSession(input: UseChatSessionInput) {
   async function submitChatRequest(payloadInput: {
     sessionId: string;
     content: string;
+    parts?: LocalInputPart[];
     requestId?: string;
     retry?: boolean;
   }) {
@@ -267,13 +287,14 @@ export function useChatSession(input: UseChatSessionInput) {
     if (payloadInput.retry) {
       markRequestPending(payloadInput.sessionId, requestId);
     } else {
-      appendOptimisticRequest(payloadInput.sessionId, payloadInput.content, requestId);
+      appendOptimisticRequest(payloadInput.sessionId, payloadInput.content, requestId, payloadInput.parts);
     }
 
     const nextActiveSend: ActiveSend = {
       requestId,
       sessionId: payloadInput.sessionId,
       content: payloadInput.content,
+      parts: payloadInput.parts,
     };
     const abortController = new AbortController();
     input.activeSendRef.current = nextActiveSend;
@@ -295,6 +316,7 @@ export function useChatSession(input: UseChatSessionInput) {
         body: JSON.stringify({
           sessionId: payloadInput.sessionId,
           content: payloadInput.content,
+          parts: payloadInput.parts,
           idempotencyKey: requestId,
         }),
       });
@@ -387,6 +409,7 @@ export function useChatSession(input: UseChatSessionInput) {
       void submitChatRequest({
         sessionId,
         content: failedMessage.uiMeta.retryContent,
+        parts: failedMessage.uiMeta.retryParts,
         requestId,
         retry: true,
       });
@@ -456,13 +479,76 @@ export function useChatSession(input: UseChatSessionInput) {
     if (input.activeSendRef.current) return;
 
     const content = input.draftMessage.trim();
-    if (!content || !input.activeSession) return;
+    const attachments = input.draftAttachments;
+    if ((!content && attachments.length === 0) || !input.activeSession) return;
+
+    const parts: LocalInputPart[] = [];
+    if (content) {
+      parts.push({
+        type: "text",
+        text: content,
+      });
+    }
+    for (const attachment of attachments) {
+      parts.push({
+        type: "file",
+        mime: attachment.mime,
+        filename: attachment.filename,
+        url: attachment.url,
+      });
+    }
+
+    const optimisticContent =
+      content ||
+      `[Sent ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}]`;
 
     input.setDraftMessage("");
+    input.setDraftAttachments([]);
     await submitChatRequest({
       sessionId: input.activeSession.id,
-      content,
+      content: optimisticContent,
+      parts,
     });
+  }
+
+  async function handleComposerPaste(event: ReactClipboardEvent<HTMLTextAreaElement>) {
+    const clipboardItems = Array.from(event.clipboardData?.items ?? []);
+    const imageItems = clipboardItems.filter(item => item.kind === "file" && item.type.startsWith("image/"));
+    if (imageItems.length === 0) return;
+
+    event.preventDefault();
+    const nextAttachments: ComposerAttachment[] = [];
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      if (file.size > 5 * 1024 * 1024) {
+        setChatControlError(`Skipped ${file.name || "pasted image"}: file is larger than 5MB.`);
+        continue;
+      }
+      const url = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Failed to read pasted image"));
+        reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+        reader.readAsDataURL(file);
+      }).catch(() => "");
+      if (!url) continue;
+      nextAttachments.push({
+        id: crypto.randomUUID(),
+        mime: file.type || "image/png",
+        filename: file.name || undefined,
+        size: file.size,
+        url,
+      });
+    }
+
+    if (nextAttachments.length > 0) {
+      setChatControlError("");
+      input.setDraftAttachments(current => [...current, ...nextAttachments]);
+    }
+  }
+
+  function removeComposerAttachment(id: string) {
+    input.setDraftAttachments(current => current.filter(attachment => attachment.id !== id));
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -478,9 +564,11 @@ export function useChatSession(input: UseChatSessionInput) {
     abortActiveRun,
     chatControlError,
     compactSession,
+    handleComposerPaste,
     handleComposerKeyDown,
     isAborting,
     isCompacting,
+    removeComposerAttachment,
     retryFailedRequest,
     sendMessage,
   };

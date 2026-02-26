@@ -1,5 +1,6 @@
 import { ensureRunTables } from "./storage";
 import type { AgentRun, AgentRunEvent, AgentRunEventType, CreateAgentRunInput } from "./types";
+import type { RuntimeInputPart } from "../contracts/runtime";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
 import { getSessionById } from "../db/repository";
@@ -31,6 +32,7 @@ interface AgentRunEventRow {
 const nowMs = () => Date.now();
 const toIso = (ms: number) => new Date(ms).toISOString();
 const RUN_ID_PREFIX = "run";
+const RUN_PARTS_METADATA_KEY = "__inputParts";
 type RunEventListener = (event: AgentRunEvent) => void;
 
 function parseJson(value: string | null): unknown {
@@ -47,13 +49,48 @@ function normalizeMetadata(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function normalizeRuntimeInputParts(value: unknown): RuntimeInputPart[] {
+  if (!Array.isArray(value)) return [];
+  const parts: RuntimeInputPart[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const record = raw as Record<string, unknown>;
+    if (record.type === "text") {
+      const text = typeof record.text === "string" ? record.text : "";
+      if (!text.trim()) continue;
+      parts.push({
+        type: "text",
+        text,
+      });
+      continue;
+    }
+    if (record.type === "file") {
+      const mime = typeof record.mime === "string" ? record.mime.trim() : "";
+      const url = typeof record.url === "string" ? record.url.trim() : "";
+      const filename = typeof record.filename === "string" ? record.filename.trim() || undefined : undefined;
+      if (!mime || !url) continue;
+      parts.push({
+        type: "file",
+        mime,
+        filename,
+        url,
+      });
+    }
+  }
+  return parts;
+}
+
 function rowToRun(row: AgentRunRow): AgentRun {
+  const metadata = normalizeMetadata(parseJson(row.metadata_json));
+  const parts = normalizeRuntimeInputParts(metadata[RUN_PARTS_METADATA_KEY]);
+  delete metadata[RUN_PARTS_METADATA_KEY];
   return {
     id: row.id,
     sessionId: row.session_id,
     state: row.state,
     content: row.content,
-    metadata: normalizeMetadata(parseJson(row.metadata_json)),
+    parts: parts.length > 0 ? parts : undefined,
+    metadata,
     idempotencyKey: row.idempotency_key,
     result: parseJson(row.result_json),
     error: parseJson(row.error_json),
@@ -127,12 +164,13 @@ export class RunService {
 
     const sessionId = input.sessionId.trim();
     const content = input.content.trim();
+    const parts = normalizeRuntimeInputParts(input.parts);
     const session = getSessionById(sessionId);
     if (!session) {
       throw new Error(`Unknown session: ${sessionId}`);
     }
-    if (!content) {
-      throw new Error("content is required");
+    if (!content && parts.length === 0) {
+      throw new Error("content or parts is required");
     }
 
     const idempotencyKey = input.idempotencyKey?.trim() || null;
@@ -158,6 +196,9 @@ export class RunService {
     const runId = createRunId();
     const createdAt = nowMs();
     const metadata = normalizeMetadata(input.metadata);
+    if (parts.length > 0) {
+      metadata[RUN_PARTS_METADATA_KEY] = parts;
+    }
     const agent = input.agent?.trim();
     if (agent) {
       metadata.agent = agent;
@@ -175,7 +216,12 @@ export class RunService {
         )
         .run(runId, sessionId, content, safeJson(metadata), idempotencyKey, createdAt);
 
-      this.insertRunEvent(runId, "run.accepted", { sessionId, idempotencyKey, agent: agent ?? null }, createdAt);
+      this.insertRunEvent(
+        runId,
+        "run.accepted",
+        { sessionId, idempotencyKey, agent: agent ?? null, hasParts: parts.length > 0 },
+        createdAt,
+      );
     });
     tx();
 
@@ -338,6 +384,8 @@ export class RunService {
 
   private async executeRun(run: AgentRunRow) {
     const metadata = normalizeMetadata(parseJson(run.metadata_json));
+    const parts = normalizeRuntimeInputParts(metadata[RUN_PARTS_METADATA_KEY]);
+    delete metadata[RUN_PARTS_METADATA_KEY];
     const agent = typeof metadata.agent === "string" ? metadata.agent.trim() : "";
     const startedAt = nowMs();
     this.insertRunEvent(run.id, "run.started", { sessionId: run.session_id, agent: agent || null }, startedAt);
@@ -346,6 +394,7 @@ export class RunService {
       const ack = await this.runtime.sendUserMessage({
         sessionId: run.session_id,
         content: run.content,
+        parts,
         agent: agent || undefined,
         metadata,
       });

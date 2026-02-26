@@ -1,9 +1,24 @@
 import type { RuntimeEvent } from "./events";
 import type { ChatMessage } from "../../types/dashboard";
 
+export interface RuntimeTextInputPart {
+  type: "text";
+  text: string;
+}
+
+export interface RuntimeFileInputPart {
+  type: "file";
+  mime: string;
+  filename?: string;
+  url: string;
+}
+
+export type RuntimeInputPart = RuntimeTextInputPart | RuntimeFileInputPart;
+
 export interface SendUserMessageInput {
   sessionId: string;
   content: string;
+  parts?: RuntimeInputPart[];
   agent?: string;
   metadata?: Record<string, unknown>;
 }
@@ -65,6 +80,7 @@ export interface BackgroundRunHandle {
 export interface PromptBackgroundAsyncInput {
   runId: string;
   content: string;
+  parts?: RuntimeInputPart[];
   model?: string;
   system?: string;
   agent?: string;

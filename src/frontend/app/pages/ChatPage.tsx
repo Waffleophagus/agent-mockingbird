@@ -14,9 +14,17 @@ import {
   RefreshCcw,
   Scissors,
   Send,
+  X,
   Wrench,
 } from "lucide-react";
-import type { Dispatch, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject, SetStateAction } from "react";
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  Dispatch,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  RefObject,
+  SetStateAction,
+} from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +40,7 @@ import {
 } from "@/frontend/app/chatHelpers";
 import { cn, isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
 import { Skeleton } from "@/frontend/app/Skeleton";
+import type { ComposerAttachment } from "@/frontend/app/useChatSession";
 import type {
   BackgroundRunSnapshot,
   ChatMessagePart,
@@ -109,11 +118,13 @@ export interface ChatPageModel {
   composerFormRef: RefObject<HTMLFormElement | null>;
   createNewSession: () => Promise<void>;
   draftMessage: string;
+  draftAttachments: ComposerAttachment[];
   expandedSessionGroupsById: Record<string, boolean>;
   filteredModelOptions: ModelOption[];
   focusedBackgroundRunId: string;
   focusedModelIndex: number;
   handleComposerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  handleComposerPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => Promise<void>;
   handleModelSearchKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
   hasNewMessages: boolean;
   inFlightBackgroundRunsBySession: Record<string, BackgroundRunSnapshot[]>;
@@ -144,6 +155,7 @@ export interface ChatPageModel {
   requestAbortBackgroundRun: (runId: string) => void;
   requestAbortRun: () => void;
   retryFailedRequest: (requestId: string) => void;
+  removeComposerAttachment: (id: string) => void;
   rootSessions: SessionSummary[];
   scrollToBottom: () => void;
   selectModelFromPicker: (model: string) => Promise<void>;
@@ -210,11 +222,13 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     composerFormRef,
     createNewSession,
     draftMessage,
+    draftAttachments,
     expandedSessionGroupsById,
     filteredModelOptions,
     focusedBackgroundRunId,
     focusedModelIndex,
     handleComposerKeyDown,
+    handleComposerPaste,
     handleModelSearchKeyDown,
     hasNewMessages,
     inFlightBackgroundRunsBySession,
@@ -245,6 +259,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     requestAbortBackgroundRun,
     requestAbortRun,
     retryFailedRequest,
+    removeComposerAttachment,
     rootSessions,
     scrollToBottom,
     selectModelFromPicker,
@@ -900,19 +915,41 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     </div>
 
     <form className="space-y-2" onSubmit={sendMessage} ref={composerFormRef} aria-busy={isSending}>
+      {draftAttachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 rounded-md border border-border/70 bg-muted/40 p-2">
+          {draftAttachments.map(attachment => (
+            <div key={attachment.id} className="flex items-center gap-2 rounded-md bg-background px-2 py-1 text-xs">
+              <span className="max-w-44 truncate">{attachment.filename ?? attachment.mime}</span>
+              <span className="text-muted-foreground">{Math.ceil(attachment.size / 1024)}KB</span>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => removeComposerAttachment(attachment.id)}
+                disabled={isSending}
+                aria-label="Remove attachment"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <Textarea
         value={draftMessage}
         onChange={event => setDraftMessage(event.target.value)}
         onKeyDown={handleComposerKeyDown}
+        onPaste={event => {
+          void handleComposerPaste(event);
+        }}
         placeholder={isSending ? "Waiting for response..." : "Send a message to the active session..."}
         disabled={isSending}
         className="min-h-24 resize-y"
       />
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          {isSending ? "Working on your request..." : "Enter to send, Shift+Enter for newline."}
+          {isSending ? "Working on your request..." : "Enter to send, Shift+Enter for newline. Paste images to attach."}
         </p>
-        <Button type="submit" disabled={isSending || !draftMessage.trim()}>
+        <Button type="submit" disabled={isSending || (!draftMessage.trim() && draftAttachments.length === 0)}>
           <Send className="size-4" />
           {isSending ? "Sending..." : "Send"}
         </Button>

@@ -7,6 +7,7 @@ import {
   type RuntimeEvent,
 } from "../../contracts/events";
 import type { RuntimeEngine } from "../../contracts/runtime";
+import type { RuntimeInputPart } from "../../contracts/runtime";
 import {
   approveChannelPairingRequest,
   ensureSessionForChannelConversation,
@@ -21,6 +22,7 @@ import {
 import { getConfigSnapshot } from "../../config/service";
 import { normalizeSignalId, normalizeSignalMentionRegexes, parseSignalTarget, splitSignalText } from "./format";
 import { signalCheck, signalRpcRequest, streamSignalEvents } from "./client";
+import { RuntimeSessionBusyError } from "../../runtime";
 
 const CHANNEL_ID = "signal";
 const LOOP_IDLE_MS = 5_000;
@@ -34,6 +36,17 @@ interface SignalEnvelope {
   timestamp?: number;
   dataMessage?: {
     message?: string;
+    attachments?: Array<{
+      contentType?: string;
+      mimeType?: string;
+      filename?: string;
+      fileName?: string;
+      size?: number;
+      id?: string;
+      url?: string;
+      remoteUrl?: string;
+      uri?: string;
+    }>;
     mentions?: Array<{ uuid?: string; number?: string; start?: number; length?: number }>;
     groupInfo?: {
       groupId?: string;
@@ -96,6 +109,36 @@ function messageIncludesMention(content: string, mentionRegexes: Array<RegExp>) 
   if (!content.trim()) return false;
   if (mentionRegexes.length === 0) return false;
   return mentionRegexes.some(pattern => pattern.test(content));
+}
+
+function toSignalAttachmentParts(attachments: Array<unknown> | undefined): RuntimeInputPart[] {
+  if (!attachments?.length) return [];
+  const parts: RuntimeInputPart[] = [];
+  for (const attachment of attachments) {
+    if (!attachment || typeof attachment !== "object") continue;
+    const record = attachment as Record<string, unknown>;
+    const mime = String(record.contentType ?? record.mimeType ?? "").trim();
+    const url = String(record.url ?? record.remoteUrl ?? record.uri ?? "").trim();
+    const filename = String(record.filename ?? record.fileName ?? "").trim();
+    if (!mime) continue;
+    if (url) {
+      parts.push({
+        type: "file",
+        mime,
+        url,
+        filename: filename || undefined,
+      });
+      continue;
+    }
+    const label = filename || `${mime} attachment`;
+    const size = typeof record.size === "number" && Number.isFinite(record.size) ? record.size : null;
+    const sizeSuffix = size !== null ? ` (${size} bytes)` : "";
+    parts.push({
+      type: "text",
+      text: `[Signal attachment: ${label}${sizeSuffix}]`,
+    });
+  }
+  return parts;
 }
 
 export class SignalChannelService {
@@ -268,9 +311,10 @@ export class SignalChannelService {
     const isGroup = Boolean(groupId);
     const rawContent = envelope.dataMessage.message ?? "";
     const content = renderSignalMentions(rawContent, envelope.dataMessage.mentions).trim();
-    if (!content) return;
+    const attachmentParts = toSignalAttachmentParts(envelope.dataMessage.attachments);
+    if (!content && attachmentParts.length === 0) return;
 
-    const dedupeKey = `${senderId}|${groupId ?? "dm"}|${envelope.timestamp ?? 0}|${content}`;
+    const dedupeKey = `${senderId}|${groupId ?? "dm"}|${envelope.timestamp ?? 0}|${content}|${attachmentParts.length}`;
     if (!recordChannelInboundEventIfFirstSeen({ channel: CHANNEL_ID, eventId: dedupeKey })) {
       return;
     }
@@ -356,12 +400,21 @@ export class SignalChannelService {
       isGroup && activation === "always"
         ? `${content}\n\nOnly reply if useful in this group context. If not useful, output exactly NO_REPLY.`
         : content;
+    const promptParts: RuntimeInputPart[] = [];
+    if (promptContent.trim()) {
+      promptParts.push({
+        type: "text",
+        text: promptContent,
+      });
+    }
+    promptParts.push(...attachmentParts);
 
     let ack;
     try {
       ack = await this.runtime.sendUserMessage({
         sessionId: session.id,
         content: promptContent,
+        parts: promptParts,
         metadata: {
           channel: CHANNEL_ID,
           senderId,
@@ -371,6 +424,9 @@ export class SignalChannelService {
         },
       });
     } catch (error) {
+      if (error instanceof RuntimeSessionBusyError) {
+        return;
+      }
       this.reportError("Signal inbound runtime call failed", error instanceof Error ? error.message : String(error));
       return;
     }

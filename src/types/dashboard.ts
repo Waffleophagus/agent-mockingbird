@@ -64,6 +64,7 @@ export interface ModelOption {
   label: string;
   providerId: string;
   modelId: string;
+  supportsImageInput?: boolean;
 }
 
 export interface SpecialistAgent {

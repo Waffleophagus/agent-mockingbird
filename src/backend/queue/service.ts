@@ -1,4 +1,5 @@
 import type { DrainHandler, LaneStats, QueueConfig, QueueDrainResult, QueuedMessage, QueueMode } from "./types";
+import type { RuntimeInputPart } from "../contracts/runtime";
 
 export class LaneQueue {
   private pending = new Map<string, QueuedMessage[]>();
@@ -17,6 +18,7 @@ export class LaneQueue {
   enqueue(
     sessionId: string,
     content: string,
+    parts?: RuntimeInputPart[],
     agent?: string,
     metadata?: Record<string, unknown>,
     modeOverride?: QueueMode,
@@ -32,6 +34,7 @@ export class LaneQueue {
       id: `qmsg-${crypto.randomUUID().slice(0, 12)}`,
       sessionId,
       content,
+      parts,
       agent,
       metadata,
       arrivedAt: Date.now(),
@@ -75,7 +78,8 @@ export class LaneQueue {
     let messagesToProcess: QueuedMessage[];
     let coalesced = false;
 
-    if (mode === "collect" && queue.length > 1) {
+    const hasAttachments = queue.some(message => Array.isArray(message.parts) && message.parts.length > 0);
+    if (mode === "collect" && queue.length > 1 && !hasAttachments) {
       const coalescedContent = this.coalesceMessages(queue);
       messagesToProcess = [
         {

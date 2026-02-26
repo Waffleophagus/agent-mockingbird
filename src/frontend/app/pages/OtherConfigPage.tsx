@@ -27,6 +27,8 @@ interface OtherConfigPageProps {
   selectFallbackModelFromPicker: (index: number, model: string) => void;
   filteredFallbackModelOptions: () => ModelOption[];
   fallbackFocusedModelIndex: number;
+  runtimeImageModel: string;
+  setRuntimeImageModel: (value: string) => void;
 }
 
 export function OtherConfigPage(props: OtherConfigPageProps) {
@@ -50,6 +52,8 @@ export function OtherConfigPage(props: OtherConfigPageProps) {
     selectFallbackModelFromPicker,
     filteredFallbackModelOptions,
     fallbackFocusedModelIndex,
+    runtimeImageModel,
+    setRuntimeImageModel,
   } = props;
 
   return (
@@ -94,6 +98,27 @@ export function OtherConfigPage(props: OtherConfigPageProps) {
             <Button type="button" variant="outline" size="sm" onClick={addFallbackModel}>
               Add fallback
             </Button>
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-border bg-muted/60 p-3">
+            <p className="text-xs font-medium text-muted-foreground">Image Model</p>
+            <p className="text-xs text-muted-foreground">
+              Used when an incoming request has images and the active session model does not support image input.
+            </p>
+            <div className="relative">
+              <select
+                value={runtimeImageModel}
+                onChange={event => setRuntimeImageModel(event.target.value)}
+                className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/70"
+              >
+                <option value="">(Auto) first fallback or small model</option>
+                {availableFallbackModels.map(option => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {runtimeFallbackModels.length === 0 && (

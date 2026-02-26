@@ -128,6 +128,20 @@ export async function runSemanticValidation(config: WafflebotConfig): Promise<Co
     );
   }
 
+  if (config.runtime.opencode.imageModel?.trim()) {
+    const imageModelRef = resolveModelRefForValidation(
+      config.runtime.opencode.imageModel,
+      config.runtime.opencode.providerId,
+      providerMap.modelsByProvider,
+    );
+    assertModelAvailable(
+      providerMap.modelsByProvider,
+      imageModelRef.providerId,
+      imageModelRef.modelId,
+      "runtime.opencode.imageModel",
+    );
+  }
+
   return {
     providerCount: providerMap.providerCount,
     modelCount: providerMap.modelCount,

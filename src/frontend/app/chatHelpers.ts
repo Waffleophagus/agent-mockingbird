@@ -1,5 +1,19 @@
 import type { ChatMessage, ChatMessagePart } from "@/types/dashboard";
 
+export interface LocalTextInputPart {
+  type: "text";
+  text: string;
+}
+
+export interface LocalFileInputPart {
+  type: "file";
+  mime: string;
+  filename?: string;
+  url: string;
+}
+
+export type LocalInputPart = LocalTextInputPart | LocalFileInputPart;
+
 export interface OptimisticUserMeta {
   type: "optimistic-user";
   requestId: string;
@@ -10,6 +24,7 @@ export interface PendingAssistantMeta {
   requestId: string;
   status: "pending" | "failed";
   retryContent: string;
+  retryParts?: LocalInputPart[];
   errorMessage?: string;
   runtimeMessageId?: string;
 }
@@ -24,6 +39,7 @@ export interface ActiveSend {
   requestId: string;
   sessionId: string;
   content: string;
+  parts?: LocalInputPart[];
 }
 
 export function relativeFromIso(iso: string): string {

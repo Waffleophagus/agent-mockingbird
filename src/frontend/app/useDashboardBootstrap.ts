@@ -71,6 +71,7 @@ interface UseDashboardBootstrapInput {
   setChildSessionHideAfterDays: Dispatch<SetStateAction<number>>;
   setRuntimeDefaultModel: Dispatch<SetStateAction<string>>;
   setRuntimeFallbackModels: Dispatch<SetStateAction<string[]>>;
+  setRuntimeImageModel: Dispatch<SetStateAction<string>>;
   setConfigHash: Dispatch<SetStateAction<string>>;
   setSkillCatalogError: Dispatch<SetStateAction<string>>;
   setMcpCatalogError: Dispatch<SetStateAction<string>>;
@@ -235,6 +236,11 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
           Array.isArray(configPayload.config?.runtime?.opencode?.fallbackModels)
             ? configPayload.config.runtime.opencode.fallbackModels
             : [],
+        );
+        input.setRuntimeImageModel(
+          typeof configPayload.config?.runtime?.opencode?.imageModel === "string"
+            ? configPayload.config.runtime.opencode.imageModel
+            : "",
         );
         input.setConfigHash(typeof configPayload.hash === "string" ? configPayload.hash : "");
         input.setSkillCatalogError(skillsCatalogResponse.ok ? "" : (skillsCatalogPayload.error ?? "Failed to load runtime skills"));
@@ -498,6 +504,11 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
             Array.isArray(payload.config?.runtime?.opencode?.fallbackModels)
               ? payload.config.runtime.opencode.fallbackModels
               : [],
+          );
+          input.setRuntimeImageModel(
+            typeof payload.config?.runtime?.opencode?.imageModel === "string"
+              ? payload.config.runtime.opencode.imageModel
+              : "",
           );
           input.setConfigHash(typeof payload.hash === "string" ? payload.hash : "");
         } catch {
