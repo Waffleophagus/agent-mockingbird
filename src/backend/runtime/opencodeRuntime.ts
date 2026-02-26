@@ -83,9 +83,7 @@ import {
 import { getLaneQueue } from "../queue/service";
 import {
   buildManagedSkillPaths,
-  buildSkillPermissionAllowlist,
   getManagedSkillsRootPath,
-  isConfigPermissionObject,
   normalizeSkillIds,
 } from "../skills/service";
 
@@ -143,30 +141,6 @@ function shallowEqualStringArrays(left: Array<string>, right: Array<string>) {
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {
     if (left[index] !== right[index]) return false;
-  }
-  return true;
-}
-
-function normalizePermissionRule(rule: unknown) {
-  if (!isPlainObject(rule)) return null;
-  const entries = Object.entries(rule)
-    .filter((entry): entry is [string, "allow" | "deny" | "ask"] => {
-      return entry[0].trim().length > 0 && (entry[1] === "allow" || entry[1] === "deny" || entry[1] === "ask");
-    })
-    .sort(([a], [b]) => a.localeCompare(b));
-  return entries;
-}
-
-function shallowEqualPermissionRules(left: unknown, right: unknown) {
-  const normalizedLeft = normalizePermissionRule(left);
-  const normalizedRight = normalizePermissionRule(right);
-  if (!normalizedLeft || !normalizedRight) return false;
-  if (normalizedLeft.length !== normalizedRight.length) return false;
-  for (let index = 0; index < normalizedLeft.length; index += 1) {
-    const leftEntry = normalizedLeft[index];
-    const rightEntry = normalizedRight[index];
-    if (!leftEntry || !rightEntry) return false;
-    if (leftEntry[0] !== rightEntry[0] || leftEntry[1] !== rightEntry[1]) return false;
   }
   return true;
 }
@@ -2545,20 +2519,6 @@ export class OpencodeRuntime implements RuntimeEngine {
           paths: desiredSkillPaths,
         };
         changed = true;
-      }
-
-      if (typeof current.permission !== "string") {
-        const desiredSkillPermission = buildSkillPermissionAllowlist(this.currentEnabledSkills());
-        const currentPermission: Record<string, unknown> = isConfigPermissionObject(current.permission)
-          ? current.permission
-          : {};
-        if (!shallowEqualPermissionRules(currentPermission.skill, desiredSkillPermission)) {
-          nextConfig.permission = {
-            ...currentPermission,
-            skill: desiredSkillPermission,
-          } as Config["permission"];
-          changed = true;
-        }
       }
 
       const currentMcpConfig = normalizeRuntimeMcpConfigMap(currentRecord.mcp);

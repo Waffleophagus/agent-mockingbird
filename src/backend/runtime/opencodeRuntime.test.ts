@@ -527,7 +527,7 @@ describe("opencode runtime failover contract", () => {
     expect(retryEvent?.payload?.message).toContain("Retrying with backup-provider/backup-model.");
   });
 
-  test("syncs runtime skill and MCP allow-lists into OpenCode config", async () => {
+  test("syncs runtime skill paths and MCP config into OpenCode config without permission skill writes", async () => {
     const updates: Array<Record<string, unknown>> = [];
     const client = createMockClient({
       prompt: async (request) => assistantResponse(request.path.id, "OK"),
@@ -592,13 +592,12 @@ describe("opencode runtime failover contract", () => {
               options?: Record<string, unknown>;
             }
           >;
-          permission?: { skill?: Record<string, string> };
+          permission?: Record<string, unknown>;
         }
       | undefined;
     expect(updated).toBeTruthy();
     expect(updated?.skills?.paths).toContain(path.resolve(process.cwd(), ".agents", "skills"));
-    expect(updated?.permission?.skill?.["*"]).toBe("deny");
-    expect(updated?.permission?.skill?.["btca-cli"]).toBe("allow");
+    expect(updated?.permission).toEqual({});
     expect(updated?.mcp?.github?.enabled).toBe(true);
     expect(updated?.mcp?.github?.url).toBe("https://api.github.com/mcp");
     expect(updated?.mcp?.linear?.enabled).toBe(false);
