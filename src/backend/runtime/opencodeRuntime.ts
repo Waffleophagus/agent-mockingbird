@@ -117,10 +117,15 @@ const OPENCODE_RUNTIME_ID = "opencode";
 const BACKGROUND_SYNC_INTERVAL_MS = 8_000;
 const BACKGROUND_SYNC_BATCH_LIMIT = 200;
 const BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS = 3_000;
+const QUEUE_DRAIN_METADATA_KEY = "__queueDrain";
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
 
 function shouldQueueWhenBusy(input: SendUserMessageInput): boolean {
   return input.metadata?.heartbeat !== true;
+}
+
+function isQueueDrainRequest(input: SendUserMessageInput): boolean {
+  return input.metadata?.[QUEUE_DRAIN_METADATA_KEY] === true;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -201,6 +206,7 @@ export class OpencodeRuntime implements RuntimeEngine {
   private backgroundAnnouncementInFlight = new Set<string>();
   private backgroundLastEmitByRunId = new Map<string, string>();
   private backgroundMessageSyncAtByChildSessionId = new Map<string, number>();
+  private drainingSessions = new Set<string>();
 
   constructor(private options: OpencodeRuntimeOptions) {
     if (options.client) {
@@ -352,7 +358,11 @@ export class OpencodeRuntime implements RuntimeEngine {
       throw new RuntimeSessionNotFoundError(input.sessionId);
     }
 
-    if (this.busySessions.has(session.id)) {
+    const sessionBusy =
+      this.busySessions.has(session.id) ||
+      (this.drainingSessions.has(session.id) && !isQueueDrainRequest(input));
+
+    if (sessionBusy) {
       if (shouldQueueWhenBusy(input)) {
         try {
           const queue = getLaneQueue();
@@ -481,17 +491,26 @@ export class OpencodeRuntime implements RuntimeEngine {
         messages: result.messages,
       };
     } finally {
-      this.busySessions.delete(session.id);
-
       try {
         const queue = getLaneQueue();
         if (queue.depth(session.id) > 0) {
-          queue.drainAndExecute(session.id).catch((err) => {
-            console.error("Queue drain error:", err);
-          });
+          this.drainingSessions.add(session.id);
+          this.busySessions.delete(session.id);
+
+          while (queue.depth(session.id) > 0) {
+            try {
+              await queue.drainAndExecute(session.id);
+            } catch (err) {
+              console.error("Queue drain error:", err);
+              break;
+            }
+          }
         }
       } catch {
         // Queue not initialized, ignore
+      } finally {
+        this.drainingSessions.delete(session.id);
+        this.busySessions.delete(session.id);
       }
     }
   }

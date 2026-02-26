@@ -1120,4 +1120,25 @@ describe("opencode runtime failover contract", () => {
     await firstCall;
     getLaneQueue().clearAll();
   });
+
+  test("treats session as busy while queue drain is active unless marked as internal drain", async () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async () => assistantResponse("ses-1", "OK"),
+      }),
+    );
+
+    (runtime as unknown as { drainingSessions: Set<string> }).drainingSessions.add("main");
+
+    await expect(runtime.sendUserMessage({ sessionId: "main", content: "external" })).rejects.toBeInstanceOf(
+      RuntimeSessionBusyError,
+    );
+
+    const ack = await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "drained",
+      metadata: { __queueDrain: true },
+    });
+    expect(ack.messages.some((message) => message.role === "assistant")).toBe(true);
+  });
 });

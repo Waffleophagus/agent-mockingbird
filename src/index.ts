@@ -43,7 +43,10 @@ laneQueue.setDrainHandler(async (sessionId, messages, _mode) => {
         sessionId,
         content: msg.content,
         agent: msg.agent,
-        metadata: msg.metadata,
+        metadata: {
+          ...(msg.metadata ?? {}),
+          __queueDrain: true,
+        },
       });
     } catch (err) {
       console.error("Queue drain handler error:", err);

@@ -28,7 +28,17 @@ const heartbeatActiveHoursSchema = z
   .object({
     start: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).default("08:00"),
     end: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).default("22:00"),
-    timezone: z.string().default("America/New_York"),
+    timezone: z
+      .string()
+      .default("America/New_York")
+      .refine(value => {
+        try {
+          new Intl.DateTimeFormat("en-US", { timeZone: value });
+          return true;
+        } catch {
+          return false;
+        }
+      }, "Invalid timezone"),
   })
   .strict();
 

@@ -36,4 +36,21 @@ describe("heartbeat active hours time validation", () => {
     });
     expect(parsed.success).toBe(true);
   });
+
+  test("rejects invalid IANA timezone values", () => {
+    const parsed = agentTypeDefinitionSchema.safeParse({
+      id: "agent-1",
+      heartbeat: {
+        enabled: true,
+        interval: "30m",
+        ackMaxChars: 300,
+        activeHours: {
+          start: "08:00",
+          end: "22:00",
+          timezone: "Mars/Olympus",
+        },
+      },
+    });
+    expect(parsed.success).toBe(false);
+  });
 });
