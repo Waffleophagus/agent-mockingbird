@@ -134,12 +134,12 @@ export function useChatSession(input: UseChatSessionInput) {
   }
 
   async function waitForRunTerminalStateByPolling(runId: string, abortSignal: AbortSignal) {
-    const startedAt = Date.now();
+    let lastActivityAt = Date.now();
     while (true) {
       if (abortSignal.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
-      if (Date.now() - startedAt > input.runWaitTimeoutMs) {
+      if (Date.now() - lastActivityAt > input.runWaitTimeoutMs) {
         throw new Error("Run timed out waiting for completion.");
       }
 
@@ -157,6 +157,9 @@ export function useChatSession(input: UseChatSessionInput) {
       }
       if (run.state === "failed") {
         throw new Error(extractRunErrorMessage(run.error));
+      }
+      if (run.state === "running") {
+        lastActivityAt = Date.now();
       }
 
       await new Promise<void>(resolve => {
@@ -199,16 +202,24 @@ export function useChatSession(input: UseChatSessionInput) {
         reject(error);
       };
 
+      const resetTimeout = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        timeout = setTimeout(() => {
+          fail(new Error("Run timed out waiting for completion."));
+        }, input.runWaitTimeoutMs);
+      };
+
       const onAbort = () => {
         fail(new DOMException("Aborted", "AbortError"));
       };
 
-      timeout = setTimeout(() => {
-        fail(new Error("Run timed out waiting for completion."));
-      }, input.runWaitTimeoutMs);
+      resetTimeout();
 
       abortSignal.addEventListener("abort", onAbort, { once: true });
       stream.addEventListener("run-event", event => {
+        resetTimeout();
         try {
           const payload = JSON.parse((event as MessageEvent<string>).data) as {
             type?: string;
@@ -224,6 +235,9 @@ export function useChatSession(input: UseChatSessionInput) {
         } catch {
           // Ignore malformed stream event payloads and continue listening.
         }
+      });
+      stream.addEventListener("run-heartbeat", () => {
+        resetTimeout();
       });
       stream.onerror = () => {
         if (abortSignal.aborted) {

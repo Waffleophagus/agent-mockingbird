@@ -111,7 +111,12 @@ type RuntimeCtor = new (input: {
     latencyMs: number | null;
   }>;
   syncSessionMessages: (sessionId: string) => Promise<void>;
-  sendUserMessage: (input: { sessionId: string; content: string }) => Promise<{
+  sendUserMessage: (input: {
+    sessionId: string;
+    content: string;
+    agent?: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<{
     sessionId: string;
     messages: Array<{ id: string; role: "user" | "assistant"; content: string }>;
   }>;
