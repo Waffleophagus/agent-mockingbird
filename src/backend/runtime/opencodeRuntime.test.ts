@@ -1021,4 +1021,98 @@ describe("opencode runtime failover contract", () => {
     promptResolve!();
     await firstCall;
   });
+
+  test("does not enqueue heartbeat messages when session is busy", async () => {
+    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
+      initLaneQueue: (config: {
+        enabled: boolean;
+        defaultMode: "collect" | "followup" | "replace";
+        maxDepth: number;
+        coalesceDebounceMs: number;
+      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+      getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
+    };
+    initLaneQueue({
+      enabled: true,
+      defaultMode: "collect",
+      maxDepth: 10,
+      coalesceDebounceMs: 500,
+    });
+
+    let promptResolve: () => void;
+    const promptPromise = new Promise<void>((resolve) => {
+      promptResolve = resolve;
+    });
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async () => {
+          await promptPromise;
+          return assistantResponse("ses-1", "OK");
+        },
+      }),
+    );
+
+    const firstCall = runtime.sendUserMessage({ sessionId: "main", content: "first" });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await expect(
+      runtime.sendUserMessage({
+        sessionId: "main",
+        content: "heartbeat",
+        metadata: { heartbeat: true },
+      }),
+    ).rejects.toBeInstanceOf(RuntimeSessionBusyError);
+    expect(getLaneQueue().depth("main")).toBe(0);
+
+    promptResolve!();
+    await firstCall;
+    getLaneQueue().clearAll();
+  });
+
+  test("enqueues non-heartbeat messages when session is busy", async () => {
+    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
+      initLaneQueue: (config: {
+        enabled: boolean;
+        defaultMode: "collect" | "followup" | "replace";
+        maxDepth: number;
+        coalesceDebounceMs: number;
+      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+      getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
+    };
+    initLaneQueue({
+      enabled: true,
+      defaultMode: "collect",
+      maxDepth: 10,
+      coalesceDebounceMs: 500,
+    });
+
+    let promptResolve: () => void;
+    const promptPromise = new Promise<void>((resolve) => {
+      promptResolve = resolve;
+    });
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async () => {
+          await promptPromise;
+          return assistantResponse("ses-1", "OK");
+        },
+      }),
+    );
+
+    const firstCall = runtime.sendUserMessage({ sessionId: "main", content: "first" });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await expect(runtime.sendUserMessage({ sessionId: "main", content: "second" })).rejects.toBeInstanceOf(
+      RuntimeSessionBusyError,
+    );
+    expect(getLaneQueue().depth("main")).toBe(1);
+
+    promptResolve!();
+    await firstCall;
+    getLaneQueue().clearAll();
+  });
 });

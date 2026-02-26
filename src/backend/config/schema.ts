@@ -26,8 +26,8 @@ const openCodePermissionSchema = z.record(z.string(), openCodePermissionValueSch
 
 const heartbeatActiveHoursSchema = z
   .object({
-    start: z.string().regex(/^[0-2][0-9]:[0-5][0-9]$/).default("08:00"),
-    end: z.string().regex(/^[0-2][0-9]:[0-5][0-9]$/).default("22:00"),
+    start: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).default("08:00"),
+    end: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).default("22:00"),
     timezone: z.string().default("America/New_York"),
   })
   .strict();

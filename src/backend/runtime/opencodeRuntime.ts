@@ -119,6 +119,10 @@ const BACKGROUND_SYNC_BATCH_LIMIT = 200;
 const BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS = 3_000;
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
 
+function shouldQueueWhenBusy(input: SendUserMessageInput): boolean {
+  return input.metadata?.heartbeat !== true;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -349,11 +353,13 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
 
     if (this.busySessions.has(session.id)) {
-      try {
-        const queue = getLaneQueue();
-        queue.enqueue(session.id, input.content, input.agent, input.metadata);
-      } catch {
-        // Queue not initialized, fall through
+      if (shouldQueueWhenBusy(input)) {
+        try {
+          const queue = getLaneQueue();
+          queue.enqueue(session.id, input.content, input.agent, input.metadata);
+        } catch {
+          // Queue not initialized, fall through
+        }
       }
       throw new RuntimeSessionBusyError(session.id);
     }

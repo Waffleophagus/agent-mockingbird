@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { isHeartbeatAck, parseInterval } from "./service";
 import { isActiveHours } from "./activeHours";
-import { getHeartbeatJobId } from "./jobSync";
+import { getHeartbeatJobId, syncHeartbeatJob } from "./jobSync";
 import type { HeartbeatConfig } from "./types";
 
 describe("parseInterval", () => {
@@ -99,5 +99,63 @@ describe("getHeartbeatJobId", () => {
 
   test("handles agent IDs with special characters", () => {
     expect(getHeartbeatJobId("my_agent-123")).toBe("heartbeat-my_agent-123");
+  });
+});
+
+describe("syncHeartbeatJob", () => {
+  test("deletes existing heartbeat job for zero-length hour interval", async () => {
+    const calls: string[] = [];
+    const cronService = {
+      getJob: async () => ({ id: "heartbeat-agent-1" }),
+      deleteJob: async () => {
+        calls.push("delete");
+      },
+      updateJob: async () => {
+        calls.push("update");
+      },
+      createJob: async () => {
+        calls.push("create");
+      },
+    };
+
+    await syncHeartbeatJob(
+      cronService as unknown as Parameters<typeof syncHeartbeatJob>[0],
+      "agent-1",
+      {
+        enabled: true,
+        interval: "0h",
+        ackMaxChars: 300,
+      },
+    );
+
+    expect(calls).toEqual(["delete"]);
+  });
+
+  test("deletes existing heartbeat job for zero-length day interval", async () => {
+    const calls: string[] = [];
+    const cronService = {
+      getJob: async () => ({ id: "heartbeat-agent-1" }),
+      deleteJob: async () => {
+        calls.push("delete");
+      },
+      updateJob: async () => {
+        calls.push("update");
+      },
+      createJob: async () => {
+        calls.push("create");
+      },
+    };
+
+    await syncHeartbeatJob(
+      cronService as unknown as Parameters<typeof syncHeartbeatJob>[0],
+      "agent-1",
+      {
+        enabled: true,
+        interval: "0d",
+        ackMaxChars: 300,
+      },
+    );
+
+    expect(calls).toEqual(["delete"]);
   });
 });

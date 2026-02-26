@@ -106,12 +106,12 @@ export async function executeHeartbeat(
     const lastMessage = [...ack.messages].reverse().find(m => m.role === "assistant");
 
     const response = lastMessage?.content ?? "";
-    const suppressed = isHeartbeatAck(response, config.ackMaxChars);
+    const acknowledged = isHeartbeatAck(response, config.ackMaxChars);
 
     return {
-      acknowledged: true,
-      suppressed,
-      response: suppressed ? undefined : response,
+      acknowledged,
+      suppressed: acknowledged,
+      response: acknowledged ? undefined : response,
     };
   } catch (error) {
     return {

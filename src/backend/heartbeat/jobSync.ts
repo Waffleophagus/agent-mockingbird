@@ -16,7 +16,7 @@ export async function syncHeartbeatJob(
   const jobId = getHeartbeatJobId(agentId);
   const existingJob = await cronService.getJob(jobId);
 
-  if (!config || !config.enabled || config.interval === "0m") {
+  if (!config || !config.enabled) {
     if (existingJob) {
       await cronService.deleteJob(jobId);
     }
@@ -24,6 +24,12 @@ export async function syncHeartbeatJob(
   }
 
   const everyMs = parseInterval(config.interval);
+  if (everyMs <= 0) {
+    if (existingJob) {
+      await cronService.deleteJob(jobId);
+    }
+    return;
+  }
 
   if (existingJob) {
     await cronService.updateJob(jobId, {
