@@ -1,7 +1,7 @@
 import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -107,32 +107,12 @@ function canonicalOpencodeConfigPath(baseDir: string) {
   return path.join(baseDir, ".opencode", "opencode.jsonc");
 }
 
-function isOpencodeConfigFile(pathname: string) {
-  try {
-    const parsed = parseJsonc(readFileSync(pathname, "utf8"));
-    if (!isPlainObject(parsed)) return false;
-    return typeof parsed.$schema === "string" && parsed.$schema.trim() === OPENCODE_SCHEMA_URL;
-  } catch {
-    return false;
-  }
-}
-
-function migrateLegacyWorkspaceConfigToCanonical(baseDir: string, canonicalPath: string) {
-  if (existsSync(canonicalPath)) return;
-  const legacyWorkspaceConfig = path.join(baseDir, "config.json");
-  if (!existsSync(legacyWorkspaceConfig)) return;
-  if (!isOpencodeConfigFile(legacyWorkspaceConfig)) return;
-  mkdirSync(path.dirname(canonicalPath), { recursive: true });
-  copyFileSync(legacyWorkspaceConfig, canonicalPath);
-}
-
 function resolveOpencodeConfigFile(config: WafflebotConfig, createIfMissing = true) {
   const baseDir = config.runtime.opencode.directory?.trim() || process.cwd();
   const fallback = canonicalOpencodeConfigPath(baseDir);
   if (!createIfMissing) {
     return fallback;
   }
-  migrateLegacyWorkspaceConfigToCanonical(baseDir, fallback);
   mkdirSync(path.dirname(fallback), { recursive: true });
   if (!existsSync(fallback)) {
     writeFileSync(fallback, `{\n  "$schema": "${OPENCODE_SCHEMA_URL}"\n}\n`, "utf8");

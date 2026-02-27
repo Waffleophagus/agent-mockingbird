@@ -134,6 +134,7 @@ const BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS = 3_000;
 const QUEUE_DRAIN_METADATA_KEY = "__queueDrain";
 const DEFAULT_RUNTIME_TIMEOUT_MS = 120_000;
 const DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS = 300_000;
+const STREAMED_METADATA_CACHE_LIMIT = 10_000;
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
 
 function shouldQueueWhenBusy(input: SendUserMessageInput): boolean {
@@ -1467,11 +1468,27 @@ export class OpencodeRuntime implements RuntimeEngine {
     );
   }
 
+  private setBoundedMapEntry<Key, Value>(map: Map<Key, Value>, key: Key, value: Value) {
+    if (map.has(key)) {
+      map.delete(key);
+    }
+    map.set(key, value);
+    if (map.size <= STREAMED_METADATA_CACHE_LIMIT) return;
+    const oldest = map.keys().next().value as Key | undefined;
+    if (oldest !== undefined) {
+      map.delete(oldest);
+    }
+  }
+
   private rememberMessageRole(sessionId: string, messageId: string, role: Message["role"]) {
     const normalizedSessionId = sessionId.trim();
     const normalizedMessageId = messageId.trim();
     if (!normalizedSessionId || !normalizedMessageId) return;
-    this.messageRoleByScopedMessageId.set(this.scopedMessageId(normalizedSessionId, normalizedMessageId), role);
+    this.setBoundedMapEntry(
+      this.messageRoleByScopedMessageId,
+      this.scopedMessageId(normalizedSessionId, normalizedMessageId),
+      role,
+    );
   }
 
   private rememberPartMetadata(part: Part) {
@@ -1487,7 +1504,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     const partType = typeof maybePart.type === "string" ? (maybePart.type as Part["type"]) : null;
     if (!sessionId || !messageId || !partId || !partType) return;
 
-    this.partTypeByScopedPartId.set(this.scopedPartId(sessionId, messageId, partId), partType);
+    this.setBoundedMapEntry(this.partTypeByScopedPartId, this.scopedPartId(sessionId, messageId, partId), partType);
     if (this.isAssistantOnlyPartType(partType)) {
       this.rememberMessageRole(sessionId, messageId, "assistant");
     }

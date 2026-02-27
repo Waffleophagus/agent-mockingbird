@@ -1502,6 +1502,43 @@ describe("opencode runtime failover contract", () => {
     expect(deltaEvent).toBeTruthy();
   });
 
+  test("streamed message metadata caches evict oldest entries when over limit", () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+      }),
+    );
+    const internal = runtime as unknown as {
+      rememberMessageRole: (sessionId: string, messageId: string, role: "assistant" | "user") => void;
+      rememberPartMetadata: (part: unknown) => void;
+      messageRoleByScopedMessageId: Map<string, "assistant" | "user">;
+      partTypeByScopedPartId: Map<string, string>;
+    };
+
+    const limit = 10_000;
+    const totalEntries = limit + 250;
+    for (let index = 0; index < totalEntries; index += 1) {
+      const messageId = `msg-cache-${index}`;
+      const partId = `part-cache-${index}`;
+      internal.rememberMessageRole("ses-1", messageId, "assistant");
+      internal.rememberPartMetadata({
+        id: partId,
+        sessionID: "ses-1",
+        messageID: messageId,
+        type: "text",
+      });
+    }
+
+    expect(internal.messageRoleByScopedMessageId.size).toBe(limit);
+    expect(internal.partTypeByScopedPartId.size).toBe(limit);
+    expect(internal.messageRoleByScopedMessageId.has("ses-1:msg-cache-0")).toBe(false);
+    expect(internal.partTypeByScopedPartId.has("ses-1:msg-cache-0:part-cache-0")).toBe(false);
+    expect(internal.messageRoleByScopedMessageId.has(`ses-1:msg-cache-${totalEntries - 1}`)).toBe(true);
+    expect(internal.partTypeByScopedPartId.has(`ses-1:msg-cache-${totalEntries - 1}:part-cache-${totalEntries - 1}`)).toBe(
+      true,
+    );
+  });
+
   test("session.idle triggers best-effort parent transcript sync", async () => {
     const runtime = createRuntimeWithClient(
       createMockClient({
