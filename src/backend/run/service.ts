@@ -4,6 +4,7 @@ import type { RuntimeInputPart } from "../contracts/runtime";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
 import { getSessionById } from "../db/repository";
+import { RuntimeContinuationDetachedError, RuntimeSessionQueuedError } from "../runtime/errors";
 
 interface AgentRunRow {
   id: string;
@@ -425,6 +426,62 @@ export class RunService {
       });
       tx();
     } catch (error) {
+      if (error instanceof RuntimeContinuationDetachedError) {
+        const completedAt = nowMs();
+        const result = {
+          sessionId: run.session_id,
+          detached: true,
+          childRunCount: error.childRunCount,
+        };
+        const tx = sqlite.transaction(() => {
+          sqlite
+            .query(
+              `
+              UPDATE agent_runs
+              SET
+                state = 'completed',
+                updated_at = ?2,
+                completed_at = ?2,
+                result_json = ?3,
+                error_json = NULL
+              WHERE id = ?1
+            `,
+            )
+            .run(run.id, completedAt, safeJson(result));
+          this.insertRunEvent(run.id, "run.completed", result, completedAt);
+        });
+        tx();
+        return;
+      }
+
+      if (error instanceof RuntimeSessionQueuedError) {
+        const completedAt = nowMs();
+        const result = {
+          sessionId: run.session_id,
+          queued: true,
+          queueDepth: error.depth,
+        };
+        const tx = sqlite.transaction(() => {
+          sqlite
+            .query(
+              `
+              UPDATE agent_runs
+              SET
+                state = 'completed',
+                updated_at = ?2,
+                completed_at = ?2,
+                result_json = ?3,
+                error_json = NULL
+              WHERE id = ?1
+            `,
+            )
+            .run(run.id, completedAt, safeJson(result));
+          this.insertRunEvent(run.id, "run.completed", result, completedAt);
+        });
+        tx();
+        return;
+      }
+
       const failedAt = nowMs();
       const details = {
         name: error instanceof Error ? error.name : "Error",

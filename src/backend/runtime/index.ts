@@ -61,10 +61,12 @@ export function getRuntimeStartupInfo(): RuntimeStartupInfo {
 }
 
 export {
+  RuntimeContinuationDetachedError,
   RuntimeProviderAuthError,
   RuntimeProviderQuotaError,
   RuntimeProviderRateLimitError,
   RuntimeSessionBusyError,
+  RuntimeSessionQueuedError,
   RuntimeSessionNotFoundError,
   RuntimeTurnTimeoutError,
 } from "./errors";

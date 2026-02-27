@@ -9,10 +9,12 @@ import type {
 } from "@opencode-ai/sdk/client";
 
 import {
+  RuntimeContinuationDetachedError,
   RuntimeProviderAuthError,
   RuntimeProviderQuotaError,
   RuntimeProviderRateLimitError,
   RuntimeSessionBusyError,
+  RuntimeSessionQueuedError,
   RuntimeSessionNotFoundError,
 } from "./errors";
 import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
@@ -337,17 +339,26 @@ export class OpencodeRuntime implements RuntimeEngine {
       throw new RuntimeSessionNotFoundError(input.sessionId);
     }
 
+    const childRunsInFlight = this.inFlightBackgroundChildRunCount(session.id);
     const sessionBusy =
       this.busySessions.has(session.id) ||
+      childRunsInFlight > 0 ||
       (this.drainingSessions.has(session.id) && !isQueueDrainRequest(input));
 
     if (sessionBusy) {
       if (shouldQueueWhenBusy(input)) {
+        let enqueuedDepth = 0;
+        let queued = false;
         try {
           const queue = getLaneQueue();
-          queue.enqueue(session.id, input.content, input.parts, input.agent, input.metadata);
+          const enqueued = queue.enqueue(session.id, input.content, input.parts, input.agent, input.metadata);
+          enqueuedDepth = enqueued.depth;
+          queued = enqueued.queued;
         } catch {
           // Queue not initialized, fall through
+        }
+        if (queued) {
+          throw new RuntimeSessionQueuedError(session.id, enqueuedDepth);
         }
       }
       throw new RuntimeSessionBusyError(session.id);
@@ -390,15 +401,24 @@ export class OpencodeRuntime implements RuntimeEngine {
       });
       const promptParts = this.applyMemoryPromptToParts(inputParts, promptInput.content);
 
-      const promptResult = await this.sendPromptWithModelFallback({
-        localSessionId: session.id,
-        localSessionTitle: session.title,
-        opencodeSessionId,
-        primaryModel: selectedModel,
-        parts: promptParts,
-        system: memorySystemPrompt,
-        agent: input.agent?.trim() || undefined,
-      });
+      let promptResult: { message: { info: AssistantInfo; parts: Array<Part> }; opencodeSessionId: string };
+      try {
+        promptResult = await this.sendPromptWithModelFallback({
+          localSessionId: session.id,
+          localSessionTitle: session.title,
+          opencodeSessionId,
+          primaryModel: selectedModel,
+          parts: promptParts,
+          system: memorySystemPrompt,
+          agent: input.agent?.trim() || undefined,
+        });
+      } catch (error) {
+        const childRunCount = this.inFlightBackgroundChildRunCount(session.id);
+        if (this.isTimeoutLikeError(error) && childRunCount > 0) {
+          throw new RuntimeContinuationDetachedError(session.id, childRunCount);
+        }
+        throw error;
+      }
       opencodeSessionId = promptResult.opencodeSessionId;
       const assistantMessage = promptResult.message;
 
@@ -495,7 +515,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     } finally {
       try {
         const queue = getLaneQueue();
-        if (queue.depth(session.id) > 0) {
+        if (queue.depth(session.id) > 0 && this.inFlightBackgroundChildRunCount(session.id) === 0) {
           this.drainingSessions.add(session.id);
           this.busySessions.delete(session.id);
 
@@ -1251,6 +1271,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       externalSessionId: opencodeSessionId,
       force: true,
     });
+    void this.maybeDrainSessionQueue(localSessionId);
   }
 
   private handleSessionCompactedEvent(event: Extract<OpencodeEvent, { type: "session.compacted" }>) {
@@ -1272,15 +1293,26 @@ export class OpencodeRuntime implements RuntimeEngine {
     const error = event.properties.error;
     if (!error) return;
 
+    const normalized = this.normalizeRuntimeError(error);
     if (event.properties.sessionID) {
-      this.markBackgroundRunFailed(event.properties.sessionID, this.normalizeRuntimeError(error).message);
+      this.markBackgroundRunFailed(event.properties.sessionID, normalized.message);
     }
-
     const localSessionId = event.properties.sessionID
       ? getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, event.properties.sessionID)
       : null;
 
-    const normalized = this.normalizeRuntimeError(error);
+    if (localSessionId && this.isTimeoutLikeError(error) && this.inFlightBackgroundChildRunCount(localSessionId) > 0) {
+      this.emit(
+        createSessionRunStatusUpdatedEvent(
+          {
+            sessionId: localSessionId,
+            status: "busy",
+          },
+          "runtime",
+        ),
+      );
+      return;
+    }
 
     this.emit(
       createSessionRunErrorEvent(
@@ -1765,8 +1797,33 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (updated.status === "completed") {
       void this.announceBackgroundRunIfNeeded(updated.id);
     }
+    void this.maybeDrainSessionQueue(updated.parentSessionId);
 
     return updated;
+  }
+
+  private inFlightBackgroundChildRunCount(parentSessionId: string): number {
+    const runs = listBackgroundRunsForParentSession(parentSessionId, 200);
+    return runs.filter(run => run.status === "created" || run.status === "running" || run.status === "retrying" || run.status === "idle").length;
+  }
+
+  private async maybeDrainSessionQueue(sessionId: string) {
+    if (this.busySessions.has(sessionId)) return;
+    if (this.drainingSessions.has(sessionId)) return;
+    if (this.inFlightBackgroundChildRunCount(sessionId) > 0) return;
+
+    try {
+      const queue = getLaneQueue();
+      if (queue.depth(sessionId) === 0) return;
+      this.drainingSessions.add(sessionId);
+      while (queue.depth(sessionId) > 0) {
+        await queue.drainAndExecute(sessionId);
+      }
+    } catch {
+      // Queue drain is best-effort.
+    } finally {
+      this.drainingSessions.delete(sessionId);
+    }
   }
 
   private markBackgroundRunFailed(opencodeSessionId: string, message: string) {
@@ -2384,27 +2441,23 @@ export class OpencodeRuntime implements RuntimeEngine {
 
     const normalized = message.toLowerCase();
     const hasAny = (values: Array<string>) => values.some((value) => normalized.includes(value));
-    if (
-      hasAny([
-        "timed out",
-        "timeout",
-        "temporarily unavailable",
-        "provider is overloaded",
-        "upstream",
-        "network error",
-        "socket hang up",
-        "connection reset",
-        "econnreset",
-      ])
-    ) {
+    if (this.isTimeoutLikeError(error)) {
       return true;
     }
-
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (hasAny(["temporarily unavailable", "provider is overloaded", "upstream", "network error", "socket hang up", "connection reset", "econnreset"])) {
       return true;
     }
 
     return false;
+  }
+
+  private isTimeoutLikeError(error: unknown): boolean {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return true;
+    }
+    const message = this.describeUnknownError(error)?.toLowerCase() ?? "";
+    if (!message) return false;
+    return message.includes("timed out") || message.includes("timeout") || message.includes("operation timed out");
   }
 
   private defaultRequestSignal() {

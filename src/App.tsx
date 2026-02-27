@@ -188,6 +188,7 @@ export function App() {
   const composerFormRef = useRef<HTMLFormElement>(null);
   const loadedSessionsRef = useRef(new Set<string>());
   const loadedBackgroundSessionsRef = useRef(new Set<string>());
+  const backgroundRunsBySessionRef = useRef<Record<string, BackgroundRunSnapshot[]>>({});
   const activeSendRef = useRef<ActiveSend | null>(null);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
   const abortedRequestIdsRef = useRef(new Set<string>());
@@ -229,8 +230,10 @@ export function App() {
     setActiveSessionId,
     setActiveConfigPanelTab,
   });
+  backgroundRunsBySessionRef.current = backgroundRunsBySession;
 
   useDashboardBootstrap({
+    backgroundRunsBySessionRef,
     loadedSessionsRef,
     loadedBackgroundSessionsRef,
     activeSendRef,

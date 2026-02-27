@@ -22,7 +22,14 @@ interface AgentRunSnapshot {
   id: string;
   sessionId: string;
   state: "queued" | "running" | "completed" | "failed";
+  result?: unknown;
   error?: unknown;
+}
+
+interface AgentRunCompletedPayload {
+  queued?: boolean;
+  detached?: boolean;
+  queueDepth?: number;
 }
 
 export interface ComposerAttachment {
@@ -185,11 +192,54 @@ export function useChatSession(input: UseChatSessionInput) {
     }));
   }
 
+  function markRequestQueued(sessionId: string, requestId: string, message: string) {
+    input.setMessagesBySession(current => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map(entry => {
+        if (entry.uiMeta?.type !== "assistant-pending" || entry.uiMeta.requestId !== requestId) {
+          return entry;
+        }
+        return {
+          ...entry,
+          uiMeta: {
+            ...entry.uiMeta,
+            status: "queued",
+            errorMessage: message,
+          },
+        };
+      }),
+    }));
+    input.setRunErrorsBySession(current => {
+      if (!current[sessionId]) return current;
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    input.setRunStatusBySession(current => ({
+      ...current,
+      [sessionId]: {
+        sessionId,
+        status: "busy",
+      },
+    }));
+  }
+
   function isRunWaitTimeoutError(error: unknown) {
     return error instanceof Error && error.message === RUN_WAIT_TIMEOUT_MESSAGE;
   }
 
-  async function waitForRunTerminalStateByPolling(runId: string, abortSignal: AbortSignal) {
+  function resolveRunCompletedOutcome(value: unknown): "completed" | "queued" | "detached" {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return "completed";
+    const payload = value as AgentRunCompletedPayload;
+    if (payload.detached === true) return "detached";
+    if (payload.queued === true) return "queued";
+    return "completed";
+  }
+
+  async function waitForRunTerminalStateByPolling(
+    runId: string,
+    abortSignal: AbortSignal,
+  ): Promise<"completed" | "queued" | "detached"> {
     let lastActivityAt = Date.now();
     while (true) {
       if (abortSignal.aborted) {
@@ -209,7 +259,7 @@ export function useChatSession(input: UseChatSessionInput) {
 
       const run = runPayload.run;
       if (run.state === "completed") {
-        return;
+        return resolveRunCompletedOutcome(run.result);
       }
       if (run.state === "failed") {
         throw new Error(extractRunErrorMessage(run.error));
@@ -224,13 +274,15 @@ export function useChatSession(input: UseChatSessionInput) {
     }
   }
 
-  async function waitForRunTerminalState(runId: string, abortSignal: AbortSignal) {
+  async function waitForRunTerminalState(
+    runId: string,
+    abortSignal: AbortSignal,
+  ): Promise<"completed" | "queued" | "detached"> {
     if (typeof EventSource !== "function") {
-      await waitForRunTerminalStateByPolling(runId, abortSignal);
-      return;
+      return waitForRunTerminalStateByPolling(runId, abortSignal);
     }
 
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<"completed" | "queued" | "detached">((resolve, reject) => {
       let settled = false;
       const stream = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream?afterSeq=0`);
       let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -244,11 +296,11 @@ export function useChatSession(input: UseChatSessionInput) {
         abortSignal.removeEventListener("abort", onAbort);
       };
 
-      const succeed = () => {
+      const succeed = (outcome: "completed" | "queued" | "detached") => {
         if (settled) return;
         settled = true;
         cleanup();
-        resolve();
+        resolve(outcome);
       };
 
       const fail = (error: Error) => {
@@ -282,7 +334,7 @@ export function useChatSession(input: UseChatSessionInput) {
             payload?: unknown;
           };
           if (payload.type === "run.completed") {
-            succeed();
+            succeed(resolveRunCompletedOutcome(payload.payload));
             return;
           }
           if (payload.type === "run.failed") {
@@ -369,7 +421,23 @@ export function useChatSession(input: UseChatSessionInput) {
       runAccepted = true;
 
       const runId = runPayload.runId ?? runPayload.run.id;
-      await waitForRunTerminalState(runId, abortController.signal);
+      const outcome = await waitForRunTerminalState(runId, abortController.signal);
+      if (outcome === "queued") {
+        markRequestQueued(
+          payloadInput.sessionId,
+          requestId,
+          "Queued behind the current run. It will be sent automatically when the session is ready.",
+        );
+        return;
+      }
+      if (outcome === "detached") {
+        markRequestDetached(
+          payloadInput.sessionId,
+          requestId,
+          "Still running in background. Results will appear here when the run finishes.",
+        );
+        return;
+      }
 
       const [messagesResponse, sessionsResponse] = await Promise.all([
         fetch(`/api/sessions/${encodeURIComponent(payloadInput.sessionId)}/messages`, {

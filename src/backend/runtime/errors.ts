@@ -12,6 +12,26 @@ export class RuntimeSessionBusyError extends Error {
   }
 }
 
+export class RuntimeSessionQueuedError extends Error {
+  constructor(
+    public sessionId: string,
+    public depth: number,
+  ) {
+    super(`Session is busy; message queued (${depth} pending): ${sessionId}`);
+    this.name = "RuntimeSessionQueuedError";
+  }
+}
+
+export class RuntimeContinuationDetachedError extends Error {
+  constructor(
+    public sessionId: string,
+    public childRunCount: number,
+  ) {
+    super(`Session is still running via ${childRunCount} child run(s): ${sessionId}`);
+    this.name = "RuntimeContinuationDetachedError";
+  }
+}
+
 export class RuntimeProviderQuotaError extends Error {
   constructor(message = "Provider quota exceeded. Add credits or switch provider/model.") {
     super(message);

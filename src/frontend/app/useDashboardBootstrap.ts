@@ -41,8 +41,15 @@ import type {
 } from "@/types/dashboard";
 
 type StreamStatus = "connecting" | "connected" | "reconnecting";
+const IN_FLIGHT_BACKGROUND_STATUSES = new Set<BackgroundRunSnapshot["status"]>([
+  "created",
+  "running",
+  "retrying",
+  "idle",
+]);
 
 interface UseDashboardBootstrapInput {
+  backgroundRunsBySessionRef: MutableRefObject<Record<string, BackgroundRunSnapshot[]>>;
   loadedSessionsRef: MutableRefObject<Set<string>>;
   loadedBackgroundSessionsRef: MutableRefObject<Set<string>>;
   activeSendRef: MutableRefObject<ActiveSend | null>;
@@ -104,7 +111,7 @@ function shouldClearActiveOptimisticRequest(input: {
   return Array.isArray(input.message.parts) && input.message.parts.length > 0;
 }
 
-function detachedOptimisticRequestIdToClear(input: {
+function stalledOptimisticRequestIdToClear(input: {
   messages: LocalChatMessage[];
   message: ChatMessage;
 }): string | null {
@@ -112,12 +119,18 @@ function detachedOptimisticRequestIdToClear(input: {
   const hasVisiblePayload = Boolean(input.message.content.trim()) || Boolean(input.message.parts?.length);
   if (!hasVisiblePayload) return null;
 
-  const detached = input.messages.find(message => {
+  const stalled = input.messages.find(message => {
     if (message.uiMeta?.type !== "assistant-pending") return false;
-    return message.uiMeta.status === "detached";
+    return message.uiMeta.status === "detached" || message.uiMeta.status === "queued";
   });
-  if (!detached || detached.uiMeta?.type !== "assistant-pending") return null;
-  return detached.uiMeta.requestId;
+  if (!stalled || stalled.uiMeta?.type !== "assistant-pending") return null;
+  return stalled.uiMeta.requestId;
+}
+
+function isTimeoutLikeMessage(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("timed out") || normalized.includes("timeout") || normalized.includes("operation timed out");
 }
 
 export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
@@ -337,7 +350,7 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
         }
 
         if (!requestIdToClear) {
-          requestIdToClear = detachedOptimisticRequestIdToClear({
+          requestIdToClear = stalledOptimisticRequestIdToClear({
             messages: merged,
             message: payload.message,
           });
@@ -460,6 +473,51 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
       const payload = JSON.parse((event as MessageEvent<string>).data) as SessionRunErrorSnapshot;
       if (!payload.sessionId) return;
       const sessionId = payload.sessionId;
+      const activeSend = input.activeSendRef.current;
+      const hasInFlightChildRun =
+        (input.backgroundRunsBySessionRef.current[sessionId] ?? []).filter(run =>
+          IN_FLIGHT_BACKGROUND_STATUSES.has(run.status),
+        ).length > 0;
+      const shouldSuppressFailure =
+        activeSend?.sessionId === sessionId &&
+        hasInFlightChildRun &&
+        isTimeoutLikeMessage(payload.message);
+      if (shouldSuppressFailure) {
+        input.setRunErrorsBySession(current => {
+          if (!current[sessionId]) return current;
+          const next = { ...current };
+          delete next[sessionId];
+          return next;
+        });
+        input.setRunStatusBySession(current => ({
+          ...current,
+          [sessionId]: {
+            sessionId,
+            status: "busy",
+          },
+        }));
+        const requestId = activeSend.requestId;
+        input.setMessagesBySession(current => ({
+          ...current,
+          [sessionId]: (current[sessionId] ?? []).map(message => {
+            if (message.uiMeta?.type !== "assistant-pending" || message.uiMeta.requestId !== requestId) {
+              return message;
+            }
+            if (message.uiMeta.status !== "pending") {
+              return message;
+            }
+            return {
+              ...message,
+              uiMeta: {
+                ...message.uiMeta,
+                status: "detached",
+                errorMessage: "Still running in background. Results will appear here when the run finishes.",
+              },
+            };
+          }),
+        }));
+        return;
+      }
       input.setRunErrorsBySession(current => ({
         ...current,
         [sessionId]: payload.message,
@@ -477,6 +535,9 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
           ...current,
           [sessionId]: (current[sessionId] ?? []).map(message => {
             if (message.uiMeta?.type !== "assistant-pending" || message.uiMeta.requestId !== requestId) {
+              return message;
+            }
+            if (message.uiMeta.status !== "pending") {
               return message;
             }
             return {

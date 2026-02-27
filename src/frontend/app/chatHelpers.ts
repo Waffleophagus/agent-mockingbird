@@ -22,7 +22,7 @@ export interface OptimisticUserMeta {
 export interface PendingAssistantMeta {
   type: "assistant-pending";
   requestId: string;
-  status: "pending" | "detached" | "failed";
+  status: "pending" | "queued" | "detached" | "failed";
   retryContent: string;
   retryParts?: LocalInputPart[];
   errorMessage?: string;

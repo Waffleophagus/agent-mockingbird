@@ -175,6 +175,8 @@ let RuntimeProviderQuotaError: new (message?: string) => Error;
 let RuntimeProviderAuthError: new (message?: string) => Error;
 let RuntimeProviderRateLimitError: new (message?: string) => Error;
 let RuntimeSessionBusyError: new (sessionId: string) => Error;
+let RuntimeSessionQueuedError: new (sessionId: string, depth: number) => Error;
+let RuntimeContinuationDetachedError: new (sessionId: string, childRunCount: number) => Error;
 
 beforeAll(async () => {
   await import("../db/migrate");
@@ -187,11 +189,15 @@ beforeAll(async () => {
     RuntimeProviderAuthError,
     RuntimeProviderRateLimitError,
     RuntimeSessionBusyError,
+    RuntimeSessionQueuedError,
+    RuntimeContinuationDetachedError,
   } = (await import("./errors")) as unknown as {
     RuntimeProviderQuotaError: new (message?: string) => Error;
     RuntimeProviderAuthError: new (message?: string) => Error;
     RuntimeProviderRateLimitError: new (message?: string) => Error;
     RuntimeSessionBusyError: new (sessionId: string) => Error;
+    RuntimeSessionQueuedError: new (sessionId: string, depth: number) => Error;
+    RuntimeContinuationDetachedError: new (sessionId: string, childRunCount: number) => Error;
   });
   repository.ensureSeedData();
 });
@@ -1134,7 +1140,213 @@ describe("opencode runtime failover contract", () => {
     });
   });
 
-  test("throws RuntimeSessionBusyError when session is busy", async () => {
+  test("throws RuntimeContinuationDetachedError when prompt times out and children are still in-flight", async () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          return await new Promise((_resolve, reject) => {
+            const timer = setTimeout(() => {
+              reject(new Error("prompt should have been aborted"));
+            }, 300);
+            const signal = request.signal;
+            if (!signal) {
+              clearTimeout(timer);
+              reject(new Error("missing prompt timeout signal"));
+              return;
+            }
+            signal.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+              },
+              { once: true },
+            );
+          });
+        },
+      }),
+    );
+
+    let childCheckCalls = 0;
+    (runtime as unknown as { inFlightBackgroundChildRunCount: (_sessionId: string) => number }).inFlightBackgroundChildRunCount =
+      () => {
+        childCheckCalls += 1;
+        return childCheckCalls === 1 ? 0 : 1;
+      };
+
+    await expect(runtime.sendUserMessage({ sessionId: "main", content: "hello" })).rejects.toBeInstanceOf(
+      RuntimeContinuationDetachedError,
+    );
+  });
+
+  test("throws RuntimeContinuationDetachedError for timeout-like errors when children are still in-flight", async () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async () => {
+          throw new Error("The operation timed out.");
+        },
+      }),
+    );
+
+    let childCheckCalls = 0;
+    (runtime as unknown as { inFlightBackgroundChildRunCount: (_sessionId: string) => number }).inFlightBackgroundChildRunCount =
+      () => {
+        childCheckCalls += 1;
+        return childCheckCalls === 1 ? 0 : 1;
+      };
+
+    await expect(runtime.sendUserMessage({ sessionId: "main", content: "hello" })).rejects.toBeInstanceOf(
+      RuntimeContinuationDetachedError,
+    );
+  });
+
+  test("suppresses session.run.error timeout events while child runs are in-flight", async () => {
+    const events: Array<unknown> = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "ok"),
+      }),
+    );
+    runtime.subscribe(event => {
+      events.push(event);
+    });
+
+    await runtime.sendUserMessage({ sessionId: "main", content: "bootstrap" });
+    events.length = 0;
+
+    const internal = runtime as unknown as {
+      inFlightBackgroundChildRunCount: (_sessionId: string) => number;
+      markBackgroundRunFailed: (_sessionId: string, _message: string) => void;
+      handleSessionErrorEvent: (event: unknown) => void;
+    };
+    internal.inFlightBackgroundChildRunCount = () => 2;
+    internal.markBackgroundRunFailed = () => {};
+    internal.handleSessionErrorEvent({
+      type: "session.error",
+      properties: {
+        sessionID: "ses-1",
+        error: new Error("The operation timed out."),
+      },
+    });
+
+    const runErrorEvent = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      return (event as { type?: string }).type === "session.run.error";
+    });
+    expect(runErrorEvent).toBeUndefined();
+
+    const busyStatusEvent = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as { type?: string; payload?: { sessionId?: string; status?: string } };
+      return (
+        record.type === "session.run.status.updated" &&
+        record.payload?.sessionId === "main" &&
+        record.payload?.status === "busy"
+      );
+    });
+    expect(busyStatusEvent).toBeTruthy();
+  });
+
+  test("emits session.run.error for non-timeout session errors", async () => {
+    const events: Array<unknown> = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "ok"),
+      }),
+    );
+    runtime.subscribe(event => {
+      events.push(event);
+    });
+
+    await runtime.sendUserMessage({ sessionId: "main", content: "bootstrap" });
+    events.length = 0;
+
+    const internal = runtime as unknown as {
+      inFlightBackgroundChildRunCount: (_sessionId: string) => number;
+      markBackgroundRunFailed: (_sessionId: string, _message: string) => void;
+      handleSessionErrorEvent: (event: unknown) => void;
+    };
+    internal.inFlightBackgroundChildRunCount = () => 2;
+    internal.markBackgroundRunFailed = () => {};
+    internal.handleSessionErrorEvent({
+      type: "session.error",
+      properties: {
+        sessionID: "ses-1",
+        error: new Error("upstream disconnect"),
+      },
+    });
+
+    const runErrorEvent = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as { type?: string; payload?: { sessionId?: string } };
+      return record.type === "session.run.error" && record.payload?.sessionId === "main";
+    });
+    expect(runErrorEvent).toBeTruthy();
+  });
+
+  test("queues parent message when child runs are in flight", async () => {
+    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
+      initLaneQueue: (config: {
+        enabled: boolean;
+        defaultMode: "collect" | "followup" | "replace";
+        maxDepth: number;
+        coalesceDebounceMs: number;
+      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+      getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
+    };
+    initLaneQueue({
+      enabled: true,
+      defaultMode: "collect",
+      maxDepth: 10,
+      coalesceDebounceMs: 500,
+    });
+
+    let createCount = 0;
+    let statusType: "busy" | "idle" = "busy";
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        create: async () => {
+          createCount += 1;
+          return {
+            data: {
+              id: `ses-${createCount}`,
+              title: createCount === 1 ? "main" : "background",
+            },
+          };
+        },
+        prompt: async (request) => assistantResponse(request.path.id, "OK"),
+        promptAsync: async () => ({ data: undefined }),
+        status: async () => ({
+          data: {
+            "ses-2": {
+              type: statusType,
+            },
+          },
+        }),
+      }),
+    );
+
+    const spawned = await runtime.spawnBackgroundSession({
+      parentSessionId: "main",
+      title: "child run",
+    });
+    await runtime.promptBackgroundAsync({
+      runId: spawned.runId,
+      content: "Investigate",
+    });
+    await runtime.getBackgroundStatus(spawned.runId);
+
+    await expect(runtime.sendUserMessage({ sessionId: "main", content: "follow up" })).rejects.toBeInstanceOf(
+      RuntimeSessionQueuedError,
+    );
+    expect(getLaneQueue().depth("main")).toBe(1);
+
+    statusType = "idle";
+    await runtime.getBackgroundStatus(spawned.runId);
+    getLaneQueue().clearAll();
+  });
+
+  test("queues non-heartbeat messages when session is busy", async () => {
     let promptResolve: () => void;
     const promptPromise = new Promise<void>((resolve) => {
       promptResolve = resolve;
@@ -1154,7 +1366,7 @@ describe("opencode runtime failover contract", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     await expect(runtime.sendUserMessage({ sessionId: "main", content: "second" })).rejects.toBeInstanceOf(
-      RuntimeSessionBusyError,
+      RuntimeSessionQueuedError,
     );
 
     promptResolve!();
@@ -1210,7 +1422,7 @@ describe("opencode runtime failover contract", () => {
     getLaneQueue().clearAll();
   });
 
-  test("enqueues non-heartbeat messages when session is busy", async () => {
+  test("reports queued non-heartbeat messages while session is busy", async () => {
     const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
       initLaneQueue: (config: {
         enabled: boolean;
@@ -1246,7 +1458,7 @@ describe("opencode runtime failover contract", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     await expect(runtime.sendUserMessage({ sessionId: "main", content: "second" })).rejects.toBeInstanceOf(
-      RuntimeSessionBusyError,
+      RuntimeSessionQueuedError,
     );
     expect(getLaneQueue().depth("main")).toBe(1);
 
@@ -1255,7 +1467,7 @@ describe("opencode runtime failover contract", () => {
     getLaneQueue().clearAll();
   });
 
-  test("treats session as busy while queue drain is active unless marked as internal drain", async () => {
+  test("queues externally submitted messages while queue drain is active unless marked as internal drain", async () => {
     const runtime = createRuntimeWithClient(
       createMockClient({
         prompt: async () => assistantResponse("ses-1", "OK"),
@@ -1265,7 +1477,7 @@ describe("opencode runtime failover contract", () => {
     (runtime as unknown as { drainingSessions: Set<string> }).drainingSessions.add("main");
 
     await expect(runtime.sendUserMessage({ sessionId: "main", content: "external" })).rejects.toBeInstanceOf(
-      RuntimeSessionBusyError,
+      RuntimeSessionQueuedError,
     );
 
     const ack = await runtime.sendUserMessage({
