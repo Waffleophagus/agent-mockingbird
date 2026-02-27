@@ -104,6 +104,22 @@ function shouldClearActiveOptimisticRequest(input: {
   return Array.isArray(input.message.parts) && input.message.parts.length > 0;
 }
 
+function detachedOptimisticRequestIdToClear(input: {
+  messages: LocalChatMessage[];
+  message: ChatMessage;
+}): string | null {
+  if (input.message.role !== "assistant") return null;
+  const hasVisiblePayload = Boolean(input.message.content.trim()) || Boolean(input.message.parts?.length);
+  if (!hasVisiblePayload) return null;
+
+  const detached = input.messages.find(message => {
+    if (message.uiMeta?.type !== "assistant-pending") return false;
+    return message.uiMeta.status === "detached";
+  });
+  if (!detached || detached.uiMeta?.type !== "assistant-pending") return null;
+  return detached.uiMeta.requestId;
+}
+
 export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
   const inputRef = useRef(input);
   inputRef.current = input;
@@ -311,12 +327,23 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
       input.setMessagesBySession(current => {
         const merged = mergeMessages(current[payload.sessionId] ?? [], [payload.message]);
         let nextMessages = merged;
+        let requestIdToClear: string | null = null;
 
         if (payload.message.role === "assistant" && input.activeSendRef.current?.sessionId === payload.sessionId) {
           const requestId = input.activeSendRef.current.requestId;
           if (shouldClearActiveOptimisticRequest({ messages: merged, requestId, message: payload.message })) {
-            nextMessages = merged.filter(message => message.uiMeta?.requestId !== requestId);
+            requestIdToClear = requestId;
           }
+        }
+
+        if (!requestIdToClear) {
+          requestIdToClear = detachedOptimisticRequestIdToClear({
+            messages: merged,
+            message: payload.message,
+          });
+        }
+        if (requestIdToClear) {
+          nextMessages = merged.filter(message => message.uiMeta?.requestId !== requestIdToClear);
         }
 
         return {

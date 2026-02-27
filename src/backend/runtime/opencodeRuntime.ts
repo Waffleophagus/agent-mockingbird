@@ -90,6 +90,7 @@ import {
 type Listener = (event: RuntimeEvent) => void;
 type AssistantInfo = Extract<Message, { role: "assistant" }>;
 type OpencodeMessagePartUpdatedEvent = Extract<OpencodeEvent, { type: "message.part.updated" }>;
+type OpencodeMessageUpdatedEvent = Extract<OpencodeEvent, { type: "message.updated" }>;
 type ResolvedModel = { providerId: string; modelId: string };
 type RuntimeOpencodeConfig = WafflebotConfig["runtime"]["opencode"];
 
@@ -217,8 +218,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     const externalSessionId = getRuntimeSessionBinding(OPENCODE_RUNTIME_ID, localSessionId);
     if (!externalSessionId) return;
     const run = getBackgroundRunByChildExternalSessionId(OPENCODE_RUNTIME_ID, externalSessionId);
-    if (!run) return;
-    this.ensureLocalSessionForBackgroundRun(run);
+    if (run) {
+      this.ensureLocalSessionForBackgroundRun(run);
+    }
     await this.syncLocalSessionFromOpencode({
       localSessionId,
       externalSessionId,
@@ -420,13 +422,10 @@ export class OpencodeRuntime implements RuntimeEngine {
         throw new Error(`OpenCode run failed: ${normalizedAssistantError}`);
       }
 
-      const assistantText = this.extractText(assistantMessage.parts);
-      if (!assistantText) {
-        const finish = assistantMessage.info.finish ?? "unknown";
-        const toolPartCount = assistantMessage.parts.filter((part) => part.type === "tool").length;
-        const detail = `finish=${finish}, tool_parts=${toolPartCount}`;
-        throw new Error(`OpenCode returned no assistant text (${detail}).`);
-      }
+      const assistantText =
+        this.extractText(assistantMessage.parts) ||
+        this.mapOpencodeMessageContent(assistantMessage.info, assistantMessage.parts) ||
+        "[assistant response pending; check streamed parts or wait for session sync]";
 
       const createdAt =
         assistantMessage.info.time?.completed ?? assistantMessage.info.time?.created ?? Date.now();
@@ -1114,6 +1113,9 @@ export class OpencodeRuntime implements RuntimeEngine {
       case "message.part.updated":
         this.handleMessagePartUpdatedEvent(event);
         return;
+      case "message.updated":
+        this.handleMessageUpdatedEvent(event);
+        return;
       case "session.status":
         this.handleSessionStatusEvent(event);
         return;
@@ -1162,6 +1164,20 @@ export class OpencodeRuntime implements RuntimeEngine {
         "runtime",
       ),
     );
+  }
+
+  private handleMessageUpdatedEvent(event: OpencodeMessageUpdatedEvent) {
+    if (event.properties.info.role !== "assistant") return;
+    const opencodeSessionId = event.properties.info.sessionID.trim();
+    if (!opencodeSessionId) return;
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
+    if (!localSessionId) return;
+
+    void this.syncMessageById({
+      localSessionId,
+      externalSessionId: opencodeSessionId,
+      messageId: event.properties.info.id,
+    });
   }
 
   private handleSessionCreatedEvent(event: Extract<OpencodeEvent, { type: "session.created" }>) {
@@ -1229,6 +1245,12 @@ export class OpencodeRuntime implements RuntimeEngine {
         "runtime",
       ),
     );
+
+    void this.syncLocalSessionFromOpencode({
+      localSessionId,
+      externalSessionId: opencodeSessionId,
+      force: true,
+    });
   }
 
   private handleSessionCompactedEvent(event: Extract<OpencodeEvent, { type: "session.compacted" }>) {
@@ -1476,6 +1498,33 @@ export class OpencodeRuntime implements RuntimeEngine {
       );
     }
     this.emit(createSessionStateUpdatedEvent(synced.session, "runtime"));
+  }
+
+  private async syncMessageById(input: {
+    localSessionId: string;
+    externalSessionId: string;
+    messageId: string;
+    titleHint?: string;
+  }) {
+    try {
+      const entry = unwrapSdkData<{ info: Message; parts: Array<Part> }>(
+        await this.getClient().session.message({
+          path: { id: input.externalSessionId, messageID: input.messageId },
+          responseStyle: "data",
+          throwOnError: true,
+          signal: this.defaultRequestSignal(),
+        }),
+      );
+      await this.syncLocalSessionFromOpencode({
+        localSessionId: input.localSessionId,
+        externalSessionId: input.externalSessionId,
+        force: true,
+        titleHint: input.titleHint,
+        messages: [entry],
+      });
+    } catch {
+      // best-effort message reconciliation
+    }
   }
 
   private async syncBackgroundSessionMessages(

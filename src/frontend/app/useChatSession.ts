@@ -58,6 +58,7 @@ export function useChatSession(input: UseChatSessionInput) {
   const [isAborting, setIsAborting] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
   const [chatControlError, setChatControlError] = useState("");
+  const RUN_WAIT_TIMEOUT_MESSAGE = "Run timed out waiting for completion.";
 
   function appendOptimisticRequest(sessionId: string, content: string, requestId: string, parts?: LocalInputPart[]) {
     const createdAt = new Date().toISOString();
@@ -152,6 +153,42 @@ export function useChatSession(input: UseChatSessionInput) {
     }));
   }
 
+  function markRequestDetached(sessionId: string, requestId: string, message: string) {
+    input.setMessagesBySession(current => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map(entry => {
+        if (entry.uiMeta?.type !== "assistant-pending" || entry.uiMeta.requestId !== requestId) {
+          return entry;
+        }
+        return {
+          ...entry,
+          uiMeta: {
+            ...entry.uiMeta,
+            status: "detached",
+            errorMessage: message,
+          },
+        };
+      }),
+    }));
+    input.setRunErrorsBySession(current => {
+      if (!current[sessionId]) return current;
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    input.setRunStatusBySession(current => ({
+      ...current,
+      [sessionId]: {
+        sessionId,
+        status: "busy",
+      },
+    }));
+  }
+
+  function isRunWaitTimeoutError(error: unknown) {
+    return error instanceof Error && error.message === RUN_WAIT_TIMEOUT_MESSAGE;
+  }
+
   async function waitForRunTerminalStateByPolling(runId: string, abortSignal: AbortSignal) {
     let lastActivityAt = Date.now();
     while (true) {
@@ -226,7 +263,7 @@ export function useChatSession(input: UseChatSessionInput) {
           clearTimeout(timeout);
         }
         timeout = setTimeout(() => {
-          fail(new Error("Run timed out waiting for completion."));
+          fail(new Error(RUN_WAIT_TIMEOUT_MESSAGE));
         }, input.runWaitTimeoutMs);
       };
 
@@ -308,6 +345,7 @@ export function useChatSession(input: UseChatSessionInput) {
       },
     }));
 
+    let runAccepted = false;
     try {
       const response = await fetch("/api/runs", {
         method: "POST",
@@ -328,6 +366,7 @@ export function useChatSession(input: UseChatSessionInput) {
       if (!response.ok || !runPayload.run) {
         throw new Error(runPayload.error ?? `Request failed (${response.status})`);
       }
+      runAccepted = true;
 
       const runId = runPayload.runId ?? runPayload.run.id;
       await waitForRunTerminalState(runId, abortController.signal);
@@ -382,6 +421,12 @@ export function useChatSession(input: UseChatSessionInput) {
       if (input.abortedRequestIdsRef.current.has(requestId)) {
         input.abortedRequestIdsRef.current.delete(requestId);
         markRequestFailed(payloadInput.sessionId, requestId, "Request aborted.");
+      } else if (runAccepted && isRunWaitTimeoutError(error)) {
+        markRequestDetached(
+          payloadInput.sessionId,
+          requestId,
+          "Still running in background. Results will appear here when the run finishes.",
+        );
       } else {
         markRequestFailed(payloadInput.sessionId, requestId, normalizeRequestError(error));
       }

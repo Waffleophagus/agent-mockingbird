@@ -58,6 +58,7 @@ interface MockClient {
     promptAsync: (input: PromptAsyncInput) => Promise<unknown>;
     status: (input: unknown) => Promise<unknown>;
     messages: (input: unknown) => Promise<unknown>;
+    message: (input: unknown) => Promise<unknown>;
     get: (input: unknown) => Promise<unknown>;
     abort: (input: unknown) => Promise<unknown>;
     summarize: (input: unknown) => Promise<unknown>;
@@ -273,6 +274,7 @@ function createMockClient(input: {
   status?: () => Promise<unknown>;
   get?: (request: unknown) => Promise<unknown>;
   messages?: (request: unknown) => Promise<unknown>;
+  message?: (request: unknown) => Promise<unknown>;
   children?: (request: unknown) => Promise<unknown>;
 }): MockClient {
   let createCount = 0;
@@ -307,6 +309,13 @@ function createMockClient(input: {
         if (input.messages) return input.messages(request);
         return {
           data: [assistantResponse((request as { path: { id: string } }).path.id, "Background result").data],
+        };
+      },
+      message: async (request) => {
+        if (input.message) return input.message(request);
+        const path = (request as { path: { id: string; messageID: string } }).path;
+        return {
+          data: assistantResponse(path.id, "Background result").data,
         };
       },
       get: async (request) => {
@@ -871,6 +880,131 @@ describe("opencode runtime failover contract", () => {
     expect(
       messages.some(message => message.role === "assistant" && message.content.includes("Subagent completed work item A")),
     ).toBe(true);
+  });
+
+  test("syncSessionMessages reconciles parent session transcripts", async () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Initial parent reply"),
+        messages: async () => ({
+          data: [assistantResponse("ses-1", "Final consolidated plan from OpenCode").data],
+        }),
+      }),
+    );
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Kick off planning",
+    });
+
+    await runtime.syncSessionMessages("main");
+    const messages = repository.listMessagesForSession("main");
+    expect(messages.some(message => message.content.includes("Final consolidated plan from OpenCode"))).toBe(true);
+  });
+
+  test("message.updated event reconciles parent final assistant message", async () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+        message: async () => ({
+          data: assistantResponse("ses-1", "Final plan from message.updated reconciliation").data,
+        }),
+      }),
+    );
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Start run",
+    });
+
+    const handleOpencodeEvent = (runtime as unknown as { handleOpencodeEvent: (event: unknown) => void }).handleOpencodeEvent;
+    handleOpencodeEvent.call(runtime, {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "msg-final-1",
+          sessionID: "ses-1",
+          role: "assistant",
+        },
+      },
+    });
+
+    await sleep(20);
+    const messages = repository.listMessagesForSession("main");
+    expect(messages.some(message => message.content.includes("Final plan from message.updated reconciliation"))).toBe(true);
+  });
+
+  test("session.idle triggers best-effort parent transcript sync", async () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+        messages: async () => ({
+          data: [assistantResponse("ses-1", "Final parent plan synced on idle").data],
+        }),
+      }),
+    );
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Start run",
+    });
+
+    const handleOpencodeEvent = (runtime as unknown as { handleOpencodeEvent: (event: unknown) => void }).handleOpencodeEvent;
+    handleOpencodeEvent.call(runtime, {
+      type: "session.idle",
+      properties: {
+        sessionID: "ses-1",
+      },
+    });
+
+    await sleep(20);
+    const messages = repository.listMessagesForSession("main");
+    expect(messages.some(message => message.content.includes("Final parent plan synced on idle"))).toBe(true);
+  });
+
+  test("no-text assistant prompt response persists partial assistant content", async () => {
+    const now = Date.now();
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => ({
+          data: {
+            info: {
+              id: "msg-partial-1",
+              sessionID: request.path.id,
+              role: "assistant",
+              summary: false,
+              mode: "build",
+              finish: "tool_calls",
+              time: {
+                created: now,
+                completed: now,
+              },
+              tokens: {
+                input: 8,
+                output: 12,
+              },
+              cost: 0,
+            },
+            parts: [
+              {
+                id: "reasoning-1",
+                type: "reasoning",
+                text: "Working through subtasks before finalizing.",
+                time: { start: now, end: now },
+              },
+            ],
+          },
+        }),
+      }),
+    );
+
+    const ack = await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Do work in parallel",
+    });
+
+    expect(ack.messages.at(-1)?.role).toBe("assistant");
+    expect(ack.messages.at(-1)?.content).toContain("Working through subtasks before finalizing.");
   });
 
   test("health check runs prompt probe and serves cached result", async () => {

@@ -735,6 +735,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
         const isOptimisticUser = message.uiMeta?.type === "optimistic-user";
         const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
         const isPending = pendingMeta?.status === "pending";
+        const isDetached = pendingMeta?.status === "detached";
         const isFailed = pendingMeta?.status === "failed";
         const visibleTimelineParts =
           message.role === "assistant"
@@ -750,6 +751,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
         const shouldRenderMessageRow =
           message.role !== "assistant" ||
           isPending ||
+          isDetached ||
           isFailed ||
           Boolean(message.content.trim()) ||
           Boolean(message.memoryTrace);
@@ -845,6 +847,11 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                         working
                       </span>
                     )}
+                    {isDetached && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                        background
+                      </span>
+                    )}
                     <span className="text-[10px] text-muted-foreground" title={message.at}>
                       {messageTimestamp}
                     </span>
@@ -885,8 +892,22 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                     </Button>
                   </div>
                 )}
-                {!isPending && !isFailed && <p className="mt-1 whitespace-pre-wrap leading-relaxed">{message.content}</p>}
-                {!isPending && !isFailed && message.role === "assistant" && message.memoryTrace && (
+                {isDetached && pendingMeta && (
+                  <div className="mt-1 space-y-2">
+                    <p className="inline-flex items-center gap-2 leading-relaxed text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      Run still active in background.
+                    </p>
+                    {pendingMeta.errorMessage && (
+                      <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
+                    )}
+                    {message.content && (
+                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
+                    )}
+                  </div>
+                )}
+                {!isPending && !isDetached && !isFailed && <p className="mt-1 whitespace-pre-wrap leading-relaxed">{message.content}</p>}
+                {!isPending && !isDetached && !isFailed && message.role === "assistant" && message.memoryTrace && (
                   <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
                     <p className="font-medium uppercase tracking-wide text-muted-foreground">
                       memory trace · {message.memoryTrace.mode}
