@@ -176,6 +176,8 @@ interface CronServiceInstance {
 
 type CronServiceCtor = new (runtime: RuntimeStub) => CronServiceInstance;
 type RuntimeSessionNotFoundErrorCtor = new (sessionId: string) => Error;
+type RuntimeSessionQueuedErrorCtor = new (sessionId: string, depth: number) => Error;
+type RuntimeContinuationDetachedErrorCtor = new (sessionId: string, childRunCount: number) => Error;
 
 type RouteHandler = (req: Request) => Response | Promise<Response>;
 type RouteMethods = {
@@ -256,6 +258,8 @@ let toSseFrame: ToSseFrameFn;
 let CronService: CronServiceCtor;
 let RunService: RunServiceCtor;
 let RuntimeSessionNotFoundError: RuntimeSessionNotFoundErrorCtor;
+let RuntimeSessionQueuedError: RuntimeSessionQueuedErrorCtor;
+let RuntimeContinuationDetachedError: RuntimeContinuationDetachedErrorCtor;
 let sqlite: SqliteDb;
 
 beforeAll(async () => {
@@ -275,8 +279,14 @@ beforeAll(async () => {
   ({ RunService } = (await import("../run/service")) as unknown as {
     RunService: RunServiceCtor;
   });
-  ({ RuntimeSessionNotFoundError } = (await import("../runtime/errors")) as unknown as {
+  ({
+    RuntimeSessionNotFoundError,
+    RuntimeSessionQueuedError,
+    RuntimeContinuationDetachedError,
+  } = (await import("../runtime/errors")) as unknown as {
     RuntimeSessionNotFoundError: RuntimeSessionNotFoundErrorCtor;
+    RuntimeSessionQueuedError: RuntimeSessionQueuedErrorCtor;
+    RuntimeContinuationDetachedError: RuntimeContinuationDetachedErrorCtor;
   });
   ({ sqlite } = (await import("../db/client")) as unknown as {
     sqlite: SqliteDb;
@@ -911,6 +921,90 @@ describe("run routes", () => {
     const secondPayload = (await second.json()) as { runId: string; deduplicated: boolean };
     expect(secondPayload.deduplicated).toBe(true);
     expect(secondPayload.runId).toBe(firstPayload.runId);
+  });
+
+  test("POST /api/runs treats queued runtime result as run.completed (not failure)", async () => {
+    const session = repository.createSession({ title: "Queued Run Session" });
+    const { routes } = createRouteHarness(async input => {
+      throw new RuntimeSessionQueuedError(input.sessionId, 2);
+    });
+
+    const createRoute = routes["/api/runs"] as { POST: (req: Request) => Promise<Response> };
+    const createResponse = await createRoute.POST(
+      new Request("http://localhost/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session.id, content: "queue me" }),
+      }),
+    );
+
+    expect(createResponse.status).toBe(202);
+    const createPayload = (await createResponse.json()) as { runId: string };
+    const runRoute = routes["/api/runs/:id"] as {
+      GET: (req: Request & { params: { id: string } }) => Promise<Response>;
+    };
+
+    let latestState = "queued";
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const response = await runRoute.GET(
+        Object.assign(new Request(`http://localhost/api/runs/${createPayload.runId}`), {
+          params: { id: createPayload.runId },
+        }),
+      );
+      const payload = (await response.json()) as {
+        run: { state: string; result?: { queued?: boolean; queueDepth?: number } };
+      };
+      latestState = payload.run.state;
+      if (latestState === "completed") {
+        expect(payload.run.result?.queued).toBe(true);
+        expect(payload.run.result?.queueDepth).toBe(2);
+        break;
+      }
+      await sleep(20);
+    }
+    expect(latestState).toBe("completed");
+  });
+
+  test("POST /api/runs treats detached runtime continuation as run.completed (not failure)", async () => {
+    const session = repository.createSession({ title: "Detached Run Session" });
+    const { routes } = createRouteHarness(async input => {
+      throw new RuntimeContinuationDetachedError(input.sessionId, 3);
+    });
+
+    const createRoute = routes["/api/runs"] as { POST: (req: Request) => Promise<Response> };
+    const createResponse = await createRoute.POST(
+      new Request("http://localhost/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session.id, content: "detach me" }),
+      }),
+    );
+
+    expect(createResponse.status).toBe(202);
+    const createPayload = (await createResponse.json()) as { runId: string };
+    const runRoute = routes["/api/runs/:id"] as {
+      GET: (req: Request & { params: { id: string } }) => Promise<Response>;
+    };
+
+    let latestState = "queued";
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const response = await runRoute.GET(
+        Object.assign(new Request(`http://localhost/api/runs/${createPayload.runId}`), {
+          params: { id: createPayload.runId },
+        }),
+      );
+      const payload = (await response.json()) as {
+        run: { state: string; result?: { detached?: boolean; childRunCount?: number } };
+      };
+      latestState = payload.run.state;
+      if (latestState === "completed") {
+        expect(payload.run.result?.detached).toBe(true);
+        expect(payload.run.result?.childRunCount).toBe(3);
+        break;
+      }
+      await sleep(20);
+    }
+    expect(latestState).toBe("completed");
   });
 
   test("GET /api/runs/:id/events/stream replays and streams run events", async () => {

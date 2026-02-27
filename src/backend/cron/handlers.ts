@@ -1,4 +1,6 @@
 import type { CronHandler, CronHandlerResult } from "./types";
+import { getConfigSnapshot } from "../config/service";
+import { executeHeartbeat } from "../heartbeat/service";
 import { rememberMemory, syncMemoryIndex } from "../memory/service";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -125,10 +127,51 @@ const marketPriceWatchHandler: CronHandler = async ctx => {
   };
 };
 
+const heartbeatCheckHandler: CronHandler = async ctx => {
+  const agentId = asString(ctx.payload.agentId);
+  const sessionId = asString(ctx.payload.sessionId);
+
+  if (!agentId || !sessionId) {
+    return {
+      status: "error",
+      summary: "heartbeat.check requires agentId and sessionId in payload",
+    };
+  }
+
+  const config = getConfigSnapshot();
+  const agentType = config.config.ui.agentTypes.find(a => a.id === agentId);
+  const heartbeatConfig = agentType?.heartbeat;
+
+  if (!heartbeatConfig || !heartbeatConfig.enabled) {
+    return {
+      status: "ok",
+      summary: `Heartbeat disabled for agent ${agentId}`,
+      data: { agentId, sessionId, disabled: true },
+    };
+  }
+
+  const result = await executeHeartbeat(agentId, sessionId, heartbeatConfig);
+
+  return {
+    status: result.acknowledged ? "ok" : "error",
+    summary: result.suppressed
+      ? "Heartbeat acknowledged (suppressed)"
+      : result.error ?? "Heartbeat executed",
+    data: {
+      agentId,
+      sessionId,
+      acknowledged: result.acknowledged,
+      suppressed: result.suppressed,
+      response: result.response,
+    },
+  };
+};
+
 const handlers: Record<string, CronHandler> = {
   "home_assistant.location_sync": locationSyncHandler,
   "memory.maintenance": memoryMaintenanceHandler,
   "market.price_watch": marketPriceWatchHandler,
+  "heartbeat.check": heartbeatCheckHandler,
 };
 
 export function getCronHandler(key: string): CronHandler | null {

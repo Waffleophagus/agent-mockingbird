@@ -1,4 +1,5 @@
 import { getConfigSnapshot } from "../../config/service";
+import type { RuntimeInputPart } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
 import type { RunService } from "../../run/service";
 import type { AgentRunEvent } from "../../run/types";
@@ -26,6 +27,37 @@ function toRunHeartbeatFrame(runId: string) {
   return `event: run-heartbeat\ndata: ${JSON.stringify({ runId, at: new Date().toISOString() })}\n\n`;
 }
 
+function normalizeRuntimeInputParts(value: unknown): RuntimeInputPart[] {
+  if (!Array.isArray(value)) return [];
+  const parts: RuntimeInputPart[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const record = raw as Record<string, unknown>;
+    if (record.type === "text") {
+      const text = typeof record.text === "string" ? record.text : "";
+      if (!text.trim()) continue;
+      parts.push({
+        type: "text",
+        text,
+      });
+      continue;
+    }
+    if (record.type === "file") {
+      const mime = typeof record.mime === "string" ? record.mime.trim() : "";
+      const url = typeof record.url === "string" ? record.url.trim() : "";
+      const filename = typeof record.filename === "string" ? record.filename.trim() || undefined : undefined;
+      if (!mime || !url) continue;
+      parts.push({
+        type: "file",
+        mime,
+        url,
+        filename,
+      });
+    }
+  }
+  return parts;
+}
+
 export function createRunRoutes(runService: RunService) {
   return {
     "/api/runs": {
@@ -33,6 +65,7 @@ export function createRunRoutes(runService: RunService) {
         const body = (await req.json()) as {
           sessionId?: string;
           content?: string;
+          parts?: RuntimeInputPart[];
           agent?: string;
           metadata?: Record<string, unknown>;
           idempotencyKey?: string;
@@ -40,8 +73,9 @@ export function createRunRoutes(runService: RunService) {
 
         const sessionId = body.sessionId?.trim();
         const content = body.content?.trim();
-        if (!sessionId || !content) {
-          return Response.json({ error: "sessionId and content are required" }, { status: 400 });
+        const parts = normalizeRuntimeInputParts(body.parts);
+        if (!sessionId || (!content && parts.length === 0)) {
+          return Response.json({ error: "sessionId and content or parts are required" }, { status: 400 });
         }
         if (!getSessionById(sessionId)) {
           return Response.json({ error: "Unknown session" }, { status: 404 });
@@ -57,7 +91,8 @@ export function createRunRoutes(runService: RunService) {
         try {
           const result = runService.createRun({
             sessionId,
-            content,
+            content: content ?? "",
+            parts,
             agent,
             metadata,
             idempotencyKey,

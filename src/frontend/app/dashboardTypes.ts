@@ -29,6 +29,7 @@ export interface ConfigSnapshotResponse {
         providerId?: string;
         modelId?: string;
         fallbackModels?: string[];
+        imageModel?: string | null;
         runWaitTimeoutMs?: number;
         childSessionHideAfterDays?: number;
       };

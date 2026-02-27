@@ -1,3 +1,5 @@
+import type { RuntimeInputPart } from "../contracts/runtime";
+
 export type AgentRunState = "queued" | "running" | "completed" | "failed";
 
 export type AgentRunEventType =
@@ -12,6 +14,7 @@ export interface AgentRun {
   sessionId: string;
   state: AgentRunState;
   content: string;
+  parts?: RuntimeInputPart[];
   metadata: Record<string, unknown>;
   idempotencyKey: string | null;
   result: unknown;
@@ -34,6 +37,7 @@ export interface AgentRunEvent {
 export interface CreateAgentRunInput {
   sessionId: string;
   content: string;
+  parts?: RuntimeInputPart[];
   agent?: string;
   metadata?: Record<string, unknown>;
   idempotencyKey?: string;

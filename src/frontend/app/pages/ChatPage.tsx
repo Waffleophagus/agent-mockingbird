@@ -14,9 +14,17 @@ import {
   RefreshCcw,
   Scissors,
   Send,
+  X,
   Wrench,
 } from "lucide-react";
-import type { Dispatch, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject, SetStateAction } from "react";
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  Dispatch,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  RefObject,
+  SetStateAction,
+} from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +40,7 @@ import {
 } from "@/frontend/app/chatHelpers";
 import { cn, isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
 import { Skeleton } from "@/frontend/app/Skeleton";
+import type { ComposerAttachment } from "@/frontend/app/useChatSession";
 import type {
   BackgroundRunSnapshot,
   ChatMessagePart,
@@ -109,11 +118,13 @@ export interface ChatPageModel {
   composerFormRef: RefObject<HTMLFormElement | null>;
   createNewSession: () => Promise<void>;
   draftMessage: string;
+  draftAttachments: ComposerAttachment[];
   expandedSessionGroupsById: Record<string, boolean>;
   filteredModelOptions: ModelOption[];
   focusedBackgroundRunId: string;
   focusedModelIndex: number;
   handleComposerKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  handleComposerPaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => Promise<void>;
   handleModelSearchKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
   hasNewMessages: boolean;
   inFlightBackgroundRunsBySession: Record<string, BackgroundRunSnapshot[]>;
@@ -144,6 +155,7 @@ export interface ChatPageModel {
   requestAbortBackgroundRun: (runId: string) => void;
   requestAbortRun: () => void;
   retryFailedRequest: (requestId: string) => void;
+  removeComposerAttachment: (id: string) => void;
   rootSessions: SessionSummary[];
   scrollToBottom: () => void;
   selectModelFromPicker: (model: string) => Promise<void>;
@@ -210,11 +222,13 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     composerFormRef,
     createNewSession,
     draftMessage,
+    draftAttachments,
     expandedSessionGroupsById,
     filteredModelOptions,
     focusedBackgroundRunId,
     focusedModelIndex,
     handleComposerKeyDown,
+    handleComposerPaste,
     handleModelSearchKeyDown,
     hasNewMessages,
     inFlightBackgroundRunsBySession,
@@ -245,6 +259,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     requestAbortBackgroundRun,
     requestAbortRun,
     retryFailedRequest,
+    removeComposerAttachment,
     rootSessions,
     scrollToBottom,
     selectModelFromPicker,
@@ -720,6 +735,8 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
         const isOptimisticUser = message.uiMeta?.type === "optimistic-user";
         const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
         const isPending = pendingMeta?.status === "pending";
+        const isQueued = pendingMeta?.status === "queued";
+        const isDetached = pendingMeta?.status === "detached";
         const isFailed = pendingMeta?.status === "failed";
         const visibleTimelineParts =
           message.role === "assistant"
@@ -735,6 +752,8 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
         const shouldRenderMessageRow =
           message.role !== "assistant" ||
           isPending ||
+          isQueued ||
+          isDetached ||
           isFailed ||
           Boolean(message.content.trim()) ||
           Boolean(message.memoryTrace);
@@ -830,6 +849,16 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                         working
                       </span>
                     )}
+                    {isQueued && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                        queued
+                      </span>
+                    )}
+                    {isDetached && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                        background
+                      </span>
+                    )}
                     <span className="text-[10px] text-muted-foreground" title={message.at}>
                       {messageTimestamp}
                     </span>
@@ -870,8 +899,36 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                     </Button>
                   </div>
                 )}
-                {!isPending && !isFailed && <p className="mt-1 whitespace-pre-wrap leading-relaxed">{message.content}</p>}
-                {!isPending && !isFailed && message.role === "assistant" && message.memoryTrace && (
+                {isDetached && pendingMeta && (
+                  <div className="mt-1 space-y-2">
+                    <p className="inline-flex items-center gap-2 leading-relaxed text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      Run still active in background.
+                    </p>
+                    {pendingMeta.errorMessage && (
+                      <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
+                    )}
+                    {message.content && (
+                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
+                    )}
+                  </div>
+                )}
+                {isQueued && pendingMeta && (
+                  <div className="mt-1 space-y-2">
+                    <p className="inline-flex items-center gap-2 leading-relaxed text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      Queued behind the current run.
+                    </p>
+                    {pendingMeta.errorMessage && (
+                      <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
+                    )}
+                    {message.content && (
+                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{message.content}</p>
+                    )}
+                  </div>
+                )}
+                {!isPending && !isQueued && !isDetached && !isFailed && <p className="mt-1 whitespace-pre-wrap leading-relaxed">{message.content}</p>}
+                {!isPending && !isQueued && !isDetached && !isFailed && message.role === "assistant" && message.memoryTrace && (
                   <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
                     <p className="font-medium uppercase tracking-wide text-muted-foreground">
                       memory trace · {message.memoryTrace.mode}
@@ -900,19 +957,41 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
     </div>
 
     <form className="space-y-2" onSubmit={sendMessage} ref={composerFormRef} aria-busy={isSending}>
+      {draftAttachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 rounded-md border border-border/70 bg-muted/40 p-2">
+          {draftAttachments.map(attachment => (
+            <div key={attachment.id} className="flex items-center gap-2 rounded-md bg-background px-2 py-1 text-xs">
+              <span className="max-w-44 truncate">{attachment.filename ?? attachment.mime}</span>
+              <span className="text-muted-foreground">{Math.ceil(attachment.size / 1024)}KB</span>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => removeComposerAttachment(attachment.id)}
+                disabled={isSending}
+                aria-label="Remove attachment"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <Textarea
         value={draftMessage}
         onChange={event => setDraftMessage(event.target.value)}
         onKeyDown={handleComposerKeyDown}
+        onPaste={event => {
+          void handleComposerPaste(event);
+        }}
         placeholder={isSending ? "Waiting for response..." : "Send a message to the active session..."}
         disabled={isSending}
         className="min-h-24 resize-y"
       />
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          {isSending ? "Working on your request..." : "Enter to send, Shift+Enter for newline."}
+          {isSending ? "Working on your request..." : "Enter to send, Shift+Enter for newline. Paste images to attach."}
         </p>
-        <Button type="submit" disabled={isSending || !draftMessage.trim()}>
+        <Button type="submit" disabled={isSending || (!draftMessage.trim() && draftAttachments.length === 0)}>
           <Send className="size-4" />
           {isSending ? "Sending..." : "Send"}
         </Button>

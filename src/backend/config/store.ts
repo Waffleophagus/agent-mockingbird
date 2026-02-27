@@ -205,6 +205,7 @@ function buildLegacyBootstrappedConfig() {
         providerId: env.WAFFLEBOT_OPENCODE_PROVIDER_ID.trim(),
         modelId: env.WAFFLEBOT_OPENCODE_MODEL_ID.trim(),
         fallbackModels: parseFallbackModels(env.WAFFLEBOT_OPENCODE_MODEL_FALLBACKS),
+        imageModel: null,
         smallModel: env.WAFFLEBOT_OPENCODE_SMALL_MODEL.trim(),
         timeoutMs: env.WAFFLEBOT_OPENCODE_TIMEOUT_MS,
         promptTimeoutMs: env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS,
@@ -245,6 +246,12 @@ function buildLegacyBootstrappedConfig() {
         defaultRetryBackoffMs: 30_000,
         retryBackoffCapMs: 3_600_000,
       },
+      queue: {
+        enabled: true,
+        defaultMode: "collect",
+        maxDepth: 10,
+        coalesceDebounceMs: 500,
+      },
       channels: {
         signal: {
           enabled: false,
@@ -275,6 +282,7 @@ function buildLegacyBootstrappedConfig() {
           "runtime.runStream",
           "runtime.memory",
           "runtime.cron",
+          "runtime.queue",
           "runtime.channels",
           "ui.skills",
           "ui.mcps",

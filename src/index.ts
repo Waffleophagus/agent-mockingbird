@@ -1,5 +1,6 @@
 import { serve } from "bun";
 
+import { SignalChannelService } from "./backend/channels/signal/service";
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { createHeartbeatUpdatedEvent, createUsageUpdatedEvent } from "./backend/contracts/events";
 import { CronService } from "./backend/cron/service";
@@ -11,19 +12,50 @@ import {
   recordHeartbeat,
 } from "./backend/db/repository";
 import { env } from "./backend/env";
+import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
+import { initLaneQueue, getLaneQueue } from "./backend/queue/service";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
-import { SignalChannelService } from "./backend/channels/signal/service";
 import index from "./index.html";
 
 ensureSeedData();
 ensureConfigFile();
 const configSnapshot = getConfigSnapshot();
 
+const queueConfig = configSnapshot.config.runtime.queue;
+const laneQueue = initLaneQueue({
+  enabled: queueConfig.enabled,
+  defaultMode: queueConfig.defaultMode,
+  maxDepth: queueConfig.maxDepth,
+  coalesceDebounceMs: queueConfig.coalesceDebounceMs,
+});
+
 const runtime = createRuntime();
+
+laneQueue.setDrainHandler(async (sessionId, messages, _mode) => {
+  if (messages.length === 0) return;
+  for (const msg of messages) {
+    try {
+      await runtime.sendUserMessage({
+        sessionId,
+        content: msg.content,
+        parts: msg.parts,
+        agent: msg.agent,
+        metadata: {
+          ...(msg.metadata ?? {}),
+          __queueDrain: true,
+        },
+      });
+    } catch (err) {
+      console.error("Queue drain handler error:", err);
+      break;
+    }
+  }
+});
+
 const cronService = new CronService(runtime);
 const runService = new RunService(runtime);
 const signalService = new SignalChannelService(runtime);
@@ -52,6 +84,10 @@ signalService.subscribe(event => {
 cronService.start();
 runService.start();
 signalService.start();
+
+void syncHeartbeatJobsForAgents(cronService, configSnapshot.config.ui.agentTypes).catch(err => {
+  console.error("[startup] Failed to sync heartbeat jobs:", err);
+});
 
 const heartbeatTimer = setInterval(() => {
   const heartbeat = recordHeartbeat("scheduler");
@@ -82,6 +118,11 @@ const shutdown = () => {
   cronService.stop();
   runService.stop();
   signalService.stop();
+  try {
+    getLaneQueue().clearAll();
+  } catch {
+    // Queue not initialized
+  }
 };
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

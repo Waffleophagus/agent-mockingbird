@@ -47,7 +47,7 @@ import { McpPage } from "@/frontend/app/pages/McpPage";
 import { OtherConfigPage } from "@/frontend/app/pages/OtherConfigPage";
 import { SkillsPage } from "@/frontend/app/pages/SkillsPage";
 import { useBackgroundRuns } from "@/frontend/app/useBackgroundRuns";
-import { useChatSession } from "@/frontend/app/useChatSession";
+import { type ComposerAttachment, useChatSession } from "@/frontend/app/useChatSession";
 import { useDashboardBootstrap } from "@/frontend/app/useDashboardBootstrap";
 import { useSessionHierarchy } from "@/frontend/app/useSessionHierarchy";
 import type {
@@ -157,10 +157,12 @@ export function App() {
   const [heartbeatAt, setHeartbeatAt] = useState<string>("");
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [draftMessage, setDraftMessage] = useState("");
+  const [draftAttachments, setDraftAttachments] = useState<ComposerAttachment[]>([]);
   const [activeSend, setActiveSend] = useState<ActiveSend | null>(null);
   const [runWaitTimeoutMs, setRunWaitTimeoutMs] = useState(DEFAULT_RUN_WAIT_TIMEOUT_MS);
   const [runtimeDefaultModel, setRuntimeDefaultModel] = useState("");
   const [runtimeFallbackModels, setRuntimeFallbackModels] = useState<string[]>([]);
+  const [runtimeImageModel, setRuntimeImageModel] = useState("");
   const [isSyncingRuntimeDefaultModel, setIsSyncingRuntimeDefaultModel] = useState(false);
   const [isSavingOtherConfig, setIsSavingOtherConfig] = useState(false);
   const [loadingOtherConfig, setLoadingOtherConfig] = useState(false);
@@ -186,6 +188,7 @@ export function App() {
   const composerFormRef = useRef<HTMLFormElement>(null);
   const loadedSessionsRef = useRef(new Set<string>());
   const loadedBackgroundSessionsRef = useRef(new Set<string>());
+  const backgroundRunsBySessionRef = useRef<Record<string, BackgroundRunSnapshot[]>>({});
   const activeSendRef = useRef<ActiveSend | null>(null);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
   const abortedRequestIdsRef = useRef(new Set<string>());
@@ -227,8 +230,10 @@ export function App() {
     setActiveSessionId,
     setActiveConfigPanelTab,
   });
+  backgroundRunsBySessionRef.current = backgroundRunsBySession;
 
   useDashboardBootstrap({
+    backgroundRunsBySessionRef,
     loadedSessionsRef,
     loadedBackgroundSessionsRef,
     activeSendRef,
@@ -257,6 +262,7 @@ export function App() {
     setChildSessionHideAfterDays,
     setRuntimeDefaultModel,
     setRuntimeFallbackModels,
+    setRuntimeImageModel,
     setConfigHash,
     setSkillCatalogError,
     setMcpCatalogError,
@@ -387,14 +393,17 @@ export function App() {
     abortActiveRun,
     chatControlError,
     compactSession,
+    handleComposerPaste,
     handleComposerKeyDown,
     isAborting,
     isCompacting,
+    removeComposerAttachment,
     retryFailedRequest,
     sendMessage,
   } = useChatSession({
     activeSession,
     draftMessage,
+    draftAttachments,
     runWaitTimeoutMs,
     composerFormRef,
     messagesBySession,
@@ -403,6 +412,7 @@ export function App() {
     activeAbortControllerRef,
     abortedRequestIdsRef,
     setDraftMessage,
+    setDraftAttachments,
     setMessagesBySession,
     setRunErrorsBySession,
     setRunStatusBySession,
@@ -1062,6 +1072,7 @@ export function App() {
     try {
       const payload = await fetchOtherConfig();
       setRuntimeFallbackModels([...new Set(payload.fallbackModels.map(model => model.trim()).filter(Boolean))]);
+      setRuntimeImageModel(payload.imageModel.trim());
       if (payload.hash) setConfigHash(payload.hash);
     } catch (error) {
       setOtherConfigError(error instanceof Error ? error.message : "Failed to load runtime config");
@@ -1077,9 +1088,11 @@ export function App() {
       const normalizedFallbackModels = [...new Set(runtimeFallbackModels.map(model => model.trim()).filter(Boolean))];
       const payload = await saveOtherConfigPatch({
         fallbackModels: normalizedFallbackModels,
+        imageModel: runtimeImageModel,
         expectedHash: configHash || undefined,
       });
       setRuntimeFallbackModels(payload.fallbackModels);
+      setRuntimeImageModel(payload.imageModel.trim());
       setConfigHash(payload.hash || configHash);
       setOpenFallbackModelPickerIndex(null);
       setFallbackModelQuery("");
@@ -1348,11 +1361,13 @@ export function App() {
     composerFormRef,
     createNewSession,
     draftMessage,
+    draftAttachments,
     expandedSessionGroupsById,
     filteredModelOptions,
     focusedBackgroundRunId,
     focusedModelIndex,
     handleComposerKeyDown,
+    handleComposerPaste,
     handleModelSearchKeyDown,
     hasNewMessages,
     inFlightBackgroundRunsBySession,
@@ -1383,6 +1398,7 @@ export function App() {
     requestAbortBackgroundRun,
     requestAbortRun,
     retryFailedRequest,
+    removeComposerAttachment,
     rootSessions,
     scrollToBottom,
     selectModelFromPicker,
@@ -1597,6 +1613,8 @@ export function App() {
             selectFallbackModelFromPicker={selectFallbackModelFromPicker}
             filteredFallbackModelOptions={() => filteredFallbackModelOptions}
             fallbackFocusedModelIndex={fallbackFocusedModelIndex}
+            runtimeImageModel={runtimeImageModel}
+            setRuntimeImageModel={setRuntimeImageModel}
           />
         )}
       </div>

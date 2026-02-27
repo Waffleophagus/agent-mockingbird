@@ -41,8 +41,15 @@ import type {
 } from "@/types/dashboard";
 
 type StreamStatus = "connecting" | "connected" | "reconnecting";
+const IN_FLIGHT_BACKGROUND_STATUSES = new Set<BackgroundRunSnapshot["status"]>([
+  "created",
+  "running",
+  "retrying",
+  "idle",
+]);
 
 interface UseDashboardBootstrapInput {
+  backgroundRunsBySessionRef: MutableRefObject<Record<string, BackgroundRunSnapshot[]>>;
   loadedSessionsRef: MutableRefObject<Set<string>>;
   loadedBackgroundSessionsRef: MutableRefObject<Set<string>>;
   activeSendRef: MutableRefObject<ActiveSend | null>;
@@ -71,6 +78,7 @@ interface UseDashboardBootstrapInput {
   setChildSessionHideAfterDays: Dispatch<SetStateAction<number>>;
   setRuntimeDefaultModel: Dispatch<SetStateAction<string>>;
   setRuntimeFallbackModels: Dispatch<SetStateAction<string[]>>;
+  setRuntimeImageModel: Dispatch<SetStateAction<string>>;
   setConfigHash: Dispatch<SetStateAction<string>>;
   setSkillCatalogError: Dispatch<SetStateAction<string>>;
   setMcpCatalogError: Dispatch<SetStateAction<string>>;
@@ -101,6 +109,54 @@ function shouldClearActiveOptimisticRequest(input: {
   const runtimeMessageId = pending.uiMeta.runtimeMessageId?.trim();
   if (runtimeMessageId && runtimeMessageId === input.message.id) return true;
   return Array.isArray(input.message.parts) && input.message.parts.length > 0;
+}
+
+function stalledOptimisticRequestIdToClear(input: {
+  messages: LocalChatMessage[];
+  message: ChatMessage;
+}): string | null {
+  if (input.message.role !== "assistant") return null;
+  const hasVisiblePayload = Boolean(input.message.content.trim()) || Boolean(input.message.parts?.length);
+  if (!hasVisiblePayload) return null;
+
+  const byRuntimeMessageId = input.messages.find(message => {
+    if (message.uiMeta?.type !== "assistant-pending") return false;
+    if (!(message.uiMeta.status === "detached" || message.uiMeta.status === "queued")) return false;
+    return message.uiMeta.runtimeMessageId === input.message.id;
+  });
+  if (byRuntimeMessageId?.uiMeta?.type === "assistant-pending") {
+    return byRuntimeMessageId.uiMeta.requestId;
+  }
+
+  const assistantIndex = input.messages.findIndex(message => message.id === input.message.id);
+  if (assistantIndex <= 0) return null;
+
+  let precedingPersistedUser: LocalChatMessage | null = null;
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const candidate = input.messages[index];
+    if (!candidate || candidate.role !== "user") continue;
+    if (candidate.uiMeta?.type === "optimistic-user") continue;
+    precedingPersistedUser = candidate;
+    break;
+  }
+  if (!precedingPersistedUser) return null;
+
+  const normalizedUserContent = precedingPersistedUser.content.trim();
+  if (!normalizedUserContent) return null;
+
+  const stalled = input.messages.find(message => {
+    if (message.uiMeta?.type !== "assistant-pending") return false;
+    if (!(message.uiMeta.status === "detached" || message.uiMeta.status === "queued")) return false;
+    return message.uiMeta.retryContent.trim() === normalizedUserContent;
+  });
+  if (!stalled || stalled.uiMeta?.type !== "assistant-pending") return null;
+  return stalled.uiMeta.requestId;
+}
+
+function isTimeoutLikeMessage(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("timed out") || normalized.includes("timeout") || normalized.includes("operation timed out");
 }
 
 export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
@@ -236,6 +292,11 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
             ? configPayload.config.runtime.opencode.fallbackModels
             : [],
         );
+        input.setRuntimeImageModel(
+          typeof configPayload.config?.runtime?.opencode?.imageModel === "string"
+            ? configPayload.config.runtime.opencode.imageModel
+            : "",
+        );
         input.setConfigHash(typeof configPayload.hash === "string" ? configPayload.hash : "");
         input.setSkillCatalogError(skillsCatalogResponse.ok ? "" : (skillsCatalogPayload.error ?? "Failed to load runtime skills"));
         input.setMcpCatalogError(mcpsCatalogResponse.ok ? "" : (mcpsCatalogPayload.error ?? "Failed to load runtime MCP servers"));
@@ -305,12 +366,23 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
       input.setMessagesBySession(current => {
         const merged = mergeMessages(current[payload.sessionId] ?? [], [payload.message]);
         let nextMessages = merged;
+        let requestIdToClear: string | null = null;
 
         if (payload.message.role === "assistant" && input.activeSendRef.current?.sessionId === payload.sessionId) {
           const requestId = input.activeSendRef.current.requestId;
           if (shouldClearActiveOptimisticRequest({ messages: merged, requestId, message: payload.message })) {
-            nextMessages = merged.filter(message => message.uiMeta?.requestId !== requestId);
+            requestIdToClear = requestId;
           }
+        }
+
+        if (!requestIdToClear) {
+          requestIdToClear = stalledOptimisticRequestIdToClear({
+            messages: merged,
+            message: payload.message,
+          });
+        }
+        if (requestIdToClear) {
+          nextMessages = merged.filter(message => message.uiMeta?.requestId !== requestIdToClear);
         }
 
         return {
@@ -391,6 +463,35 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
           updated = pendingUpdated;
         }
 
+        if (!updated) {
+          const stalledCandidates = nextMessages.filter(message => {
+            if (message.uiMeta?.type !== "assistant-pending") return false;
+            if (!(message.uiMeta.status === "queued" || message.uiMeta.status === "detached")) return false;
+            return !message.uiMeta.runtimeMessageId;
+          });
+
+          if (stalledCandidates.length === 1) {
+            const requestId = stalledCandidates[0]?.uiMeta?.requestId;
+            if (requestId) {
+              let stalledUpdated = false;
+              nextMessages = nextMessages.map(message => {
+                if (message.uiMeta?.type !== "assistant-pending") return message;
+                if (message.uiMeta.requestId !== requestId) return message;
+                stalledUpdated = true;
+                return {
+                  ...message,
+                  parts: upsertChatMessagePart(message.parts, partWithObservedAt),
+                  uiMeta: {
+                    ...message.uiMeta,
+                    runtimeMessageId: messageId,
+                  },
+                };
+              });
+              updated = stalledUpdated;
+            }
+          }
+        }
+
         if (!updated) return current;
         return {
           ...current,
@@ -427,6 +528,51 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
       const payload = JSON.parse((event as MessageEvent<string>).data) as SessionRunErrorSnapshot;
       if (!payload.sessionId) return;
       const sessionId = payload.sessionId;
+      const activeSend = input.activeSendRef.current;
+      const hasInFlightChildRun =
+        (input.backgroundRunsBySessionRef.current[sessionId] ?? []).filter(run =>
+          IN_FLIGHT_BACKGROUND_STATUSES.has(run.status),
+        ).length > 0;
+      const shouldSuppressFailure =
+        activeSend?.sessionId === sessionId &&
+        hasInFlightChildRun &&
+        isTimeoutLikeMessage(payload.message);
+      if (shouldSuppressFailure) {
+        input.setRunErrorsBySession(current => {
+          if (!current[sessionId]) return current;
+          const next = { ...current };
+          delete next[sessionId];
+          return next;
+        });
+        input.setRunStatusBySession(current => ({
+          ...current,
+          [sessionId]: {
+            sessionId,
+            status: "busy",
+          },
+        }));
+        const requestId = activeSend.requestId;
+        input.setMessagesBySession(current => ({
+          ...current,
+          [sessionId]: (current[sessionId] ?? []).map(message => {
+            if (message.uiMeta?.type !== "assistant-pending" || message.uiMeta.requestId !== requestId) {
+              return message;
+            }
+            if (message.uiMeta.status !== "pending") {
+              return message;
+            }
+            return {
+              ...message,
+              uiMeta: {
+                ...message.uiMeta,
+                status: "detached",
+                errorMessage: "Still running in background. Results will appear here when the run finishes.",
+              },
+            };
+          }),
+        }));
+        return;
+      }
       input.setRunErrorsBySession(current => ({
         ...current,
         [sessionId]: payload.message,
@@ -444,6 +590,9 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
           ...current,
           [sessionId]: (current[sessionId] ?? []).map(message => {
             if (message.uiMeta?.type !== "assistant-pending" || message.uiMeta.requestId !== requestId) {
+              return message;
+            }
+            if (message.uiMeta.status !== "pending") {
               return message;
             }
             return {
@@ -498,6 +647,11 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
             Array.isArray(payload.config?.runtime?.opencode?.fallbackModels)
               ? payload.config.runtime.opencode.fallbackModels
               : [],
+          );
+          input.setRuntimeImageModel(
+            typeof payload.config?.runtime?.opencode?.imageModel === "string"
+              ? payload.config.runtime.opencode.imageModel
+              : "",
           );
           input.setConfigHash(typeof payload.hash === "string" ? payload.hash : "");
         } catch {

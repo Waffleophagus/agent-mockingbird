@@ -1,8 +1,16 @@
 import { useState } from "react";
-import type { Dispatch, FormEvent, KeyboardEvent as ReactKeyboardEvent, MutableRefObject, RefObject, SetStateAction } from "react";
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  Dispatch,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MutableRefObject,
+  RefObject,
+  SetStateAction,
+} from "react";
 
 import { mergeMessages, normalizeRequestError } from "@/frontend/app/chatHelpers";
-import type { ActiveSend, LocalChatMessage } from "@/frontend/app/chatHelpers";
+import type { ActiveSend, LocalChatMessage, LocalInputPart } from "@/frontend/app/chatHelpers";
 import { extractRunErrorMessage, RUN_POLL_INTERVAL_MS, upsertSessionList } from "@/frontend/app/dashboardUtils";
 import type {
   ChatMessage,
@@ -14,12 +22,28 @@ interface AgentRunSnapshot {
   id: string;
   sessionId: string;
   state: "queued" | "running" | "completed" | "failed";
+  result?: unknown;
   error?: unknown;
+}
+
+interface AgentRunCompletedPayload {
+  queued?: boolean;
+  detached?: boolean;
+  queueDepth?: number;
+}
+
+export interface ComposerAttachment {
+  id: string;
+  mime: string;
+  filename?: string;
+  url: string;
+  size: number;
 }
 
 interface UseChatSessionInput {
   activeSession: SessionSummary | undefined;
   draftMessage: string;
+  draftAttachments: ComposerAttachment[];
   runWaitTimeoutMs: number;
   composerFormRef: RefObject<HTMLFormElement | null>;
   messagesBySession: Record<string, LocalChatMessage[]>;
@@ -28,6 +52,7 @@ interface UseChatSessionInput {
   activeAbortControllerRef: MutableRefObject<AbortController | null>;
   abortedRequestIdsRef: MutableRefObject<Set<string>>;
   setDraftMessage: Dispatch<SetStateAction<string>>;
+  setDraftAttachments: Dispatch<SetStateAction<ComposerAttachment[]>>;
   setMessagesBySession: Dispatch<SetStateAction<Record<string, LocalChatMessage[]>>>;
   setRunErrorsBySession: Dispatch<SetStateAction<Record<string, string>>>;
   setRunStatusBySession: Dispatch<SetStateAction<Record<string, SessionRunStatusSnapshot>>>;
@@ -40,8 +65,9 @@ export function useChatSession(input: UseChatSessionInput) {
   const [isAborting, setIsAborting] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
   const [chatControlError, setChatControlError] = useState("");
+  const RUN_WAIT_TIMEOUT_MESSAGE = "Run timed out waiting for completion.";
 
-  function appendOptimisticRequest(sessionId: string, content: string, requestId: string) {
+  function appendOptimisticRequest(sessionId: string, content: string, requestId: string, parts?: LocalInputPart[]) {
     const createdAt = new Date().toISOString();
     const optimisticUserMessage: LocalChatMessage = {
       id: `local-user-${requestId}`,
@@ -64,6 +90,7 @@ export function useChatSession(input: UseChatSessionInput) {
         requestId,
         status: "pending",
         retryContent: content,
+        retryParts: parts,
       },
     };
 
@@ -133,13 +160,92 @@ export function useChatSession(input: UseChatSessionInput) {
     }));
   }
 
-  async function waitForRunTerminalStateByPolling(runId: string, abortSignal: AbortSignal) {
-    const startedAt = Date.now();
+  function markRequestDetached(sessionId: string, requestId: string, message: string) {
+    input.setMessagesBySession(current => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map(entry => {
+        if (entry.uiMeta?.type !== "assistant-pending" || entry.uiMeta.requestId !== requestId) {
+          return entry;
+        }
+        return {
+          ...entry,
+          uiMeta: {
+            ...entry.uiMeta,
+            status: "detached",
+            errorMessage: message,
+          },
+        };
+      }),
+    }));
+    input.setRunErrorsBySession(current => {
+      if (!current[sessionId]) return current;
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    input.setRunStatusBySession(current => ({
+      ...current,
+      [sessionId]: {
+        sessionId,
+        status: "busy",
+      },
+    }));
+  }
+
+  function markRequestQueued(sessionId: string, requestId: string, message: string) {
+    input.setMessagesBySession(current => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map(entry => {
+        if (entry.uiMeta?.type !== "assistant-pending" || entry.uiMeta.requestId !== requestId) {
+          return entry;
+        }
+        return {
+          ...entry,
+          uiMeta: {
+            ...entry.uiMeta,
+            status: "queued",
+            errorMessage: message,
+          },
+        };
+      }),
+    }));
+    input.setRunErrorsBySession(current => {
+      if (!current[sessionId]) return current;
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+    input.setRunStatusBySession(current => ({
+      ...current,
+      [sessionId]: {
+        sessionId,
+        status: "busy",
+      },
+    }));
+  }
+
+  function isRunWaitTimeoutError(error: unknown) {
+    return error instanceof Error && error.message === RUN_WAIT_TIMEOUT_MESSAGE;
+  }
+
+  function resolveRunCompletedOutcome(value: unknown): "completed" | "queued" | "detached" {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return "completed";
+    const payload = value as AgentRunCompletedPayload;
+    if (payload.detached === true) return "detached";
+    if (payload.queued === true) return "queued";
+    return "completed";
+  }
+
+  async function waitForRunTerminalStateByPolling(
+    runId: string,
+    abortSignal: AbortSignal,
+  ): Promise<"completed" | "queued" | "detached"> {
+    let lastActivityAt = Date.now();
     while (true) {
       if (abortSignal.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
-      if (Date.now() - startedAt > input.runWaitTimeoutMs) {
+      if (Date.now() - lastActivityAt > input.runWaitTimeoutMs) {
         throw new Error("Run timed out waiting for completion.");
       }
 
@@ -153,10 +259,13 @@ export function useChatSession(input: UseChatSessionInput) {
 
       const run = runPayload.run;
       if (run.state === "completed") {
-        return;
+        return resolveRunCompletedOutcome(run.result);
       }
       if (run.state === "failed") {
         throw new Error(extractRunErrorMessage(run.error));
+      }
+      if (run.state === "running") {
+        lastActivityAt = Date.now();
       }
 
       await new Promise<void>(resolve => {
@@ -165,13 +274,15 @@ export function useChatSession(input: UseChatSessionInput) {
     }
   }
 
-  async function waitForRunTerminalState(runId: string, abortSignal: AbortSignal) {
+  async function waitForRunTerminalState(
+    runId: string,
+    abortSignal: AbortSignal,
+  ): Promise<"completed" | "queued" | "detached"> {
     if (typeof EventSource !== "function") {
-      await waitForRunTerminalStateByPolling(runId, abortSignal);
-      return;
+      return waitForRunTerminalStateByPolling(runId, abortSignal);
     }
 
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<"completed" | "queued" | "detached">((resolve, reject) => {
       let settled = false;
       const stream = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream?afterSeq=0`);
       let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -185,11 +296,11 @@ export function useChatSession(input: UseChatSessionInput) {
         abortSignal.removeEventListener("abort", onAbort);
       };
 
-      const succeed = () => {
+      const succeed = (outcome: "completed" | "queued" | "detached") => {
         if (settled) return;
         settled = true;
         cleanup();
-        resolve();
+        resolve(outcome);
       };
 
       const fail = (error: Error) => {
@@ -199,23 +310,31 @@ export function useChatSession(input: UseChatSessionInput) {
         reject(error);
       };
 
+      const resetTimeout = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        timeout = setTimeout(() => {
+          fail(new Error(RUN_WAIT_TIMEOUT_MESSAGE));
+        }, input.runWaitTimeoutMs);
+      };
+
       const onAbort = () => {
         fail(new DOMException("Aborted", "AbortError"));
       };
 
-      timeout = setTimeout(() => {
-        fail(new Error("Run timed out waiting for completion."));
-      }, input.runWaitTimeoutMs);
+      resetTimeout();
 
       abortSignal.addEventListener("abort", onAbort, { once: true });
       stream.addEventListener("run-event", event => {
+        resetTimeout();
         try {
           const payload = JSON.parse((event as MessageEvent<string>).data) as {
             type?: string;
             payload?: unknown;
           };
           if (payload.type === "run.completed") {
-            succeed();
+            succeed(resolveRunCompletedOutcome(payload.payload));
             return;
           }
           if (payload.type === "run.failed") {
@@ -224,6 +343,9 @@ export function useChatSession(input: UseChatSessionInput) {
         } catch {
           // Ignore malformed stream event payloads and continue listening.
         }
+      });
+      stream.addEventListener("run-heartbeat", () => {
+        resetTimeout();
       });
       stream.onerror = () => {
         if (abortSignal.aborted) {
@@ -236,6 +358,7 @@ export function useChatSession(input: UseChatSessionInput) {
   async function submitChatRequest(payloadInput: {
     sessionId: string;
     content: string;
+    parts?: LocalInputPart[];
     requestId?: string;
     retry?: boolean;
   }) {
@@ -253,13 +376,14 @@ export function useChatSession(input: UseChatSessionInput) {
     if (payloadInput.retry) {
       markRequestPending(payloadInput.sessionId, requestId);
     } else {
-      appendOptimisticRequest(payloadInput.sessionId, payloadInput.content, requestId);
+      appendOptimisticRequest(payloadInput.sessionId, payloadInput.content, requestId, payloadInput.parts);
     }
 
     const nextActiveSend: ActiveSend = {
       requestId,
       sessionId: payloadInput.sessionId,
       content: payloadInput.content,
+      parts: payloadInput.parts,
     };
     const abortController = new AbortController();
     input.activeSendRef.current = nextActiveSend;
@@ -273,6 +397,7 @@ export function useChatSession(input: UseChatSessionInput) {
       },
     }));
 
+    let runAccepted = false;
     try {
       const response = await fetch("/api/runs", {
         method: "POST",
@@ -281,6 +406,7 @@ export function useChatSession(input: UseChatSessionInput) {
         body: JSON.stringify({
           sessionId: payloadInput.sessionId,
           content: payloadInput.content,
+          parts: payloadInput.parts,
           idempotencyKey: requestId,
         }),
       });
@@ -292,9 +418,26 @@ export function useChatSession(input: UseChatSessionInput) {
       if (!response.ok || !runPayload.run) {
         throw new Error(runPayload.error ?? `Request failed (${response.status})`);
       }
+      runAccepted = true;
 
       const runId = runPayload.runId ?? runPayload.run.id;
-      await waitForRunTerminalState(runId, abortController.signal);
+      const outcome = await waitForRunTerminalState(runId, abortController.signal);
+      if (outcome === "queued") {
+        markRequestQueued(
+          payloadInput.sessionId,
+          requestId,
+          "Queued behind the current run. It will be sent automatically when the session is ready.",
+        );
+        return;
+      }
+      if (outcome === "detached") {
+        markRequestDetached(
+          payloadInput.sessionId,
+          requestId,
+          "Still running in background. Results will appear here when the run finishes.",
+        );
+        return;
+      }
 
       const [messagesResponse, sessionsResponse] = await Promise.all([
         fetch(`/api/sessions/${encodeURIComponent(payloadInput.sessionId)}/messages`, {
@@ -346,6 +489,12 @@ export function useChatSession(input: UseChatSessionInput) {
       if (input.abortedRequestIdsRef.current.has(requestId)) {
         input.abortedRequestIdsRef.current.delete(requestId);
         markRequestFailed(payloadInput.sessionId, requestId, "Request aborted.");
+      } else if (runAccepted && isRunWaitTimeoutError(error)) {
+        markRequestDetached(
+          payloadInput.sessionId,
+          requestId,
+          "Still running in background. Results will appear here when the run finishes.",
+        );
       } else {
         markRequestFailed(payloadInput.sessionId, requestId, normalizeRequestError(error));
       }
@@ -373,6 +522,7 @@ export function useChatSession(input: UseChatSessionInput) {
       void submitChatRequest({
         sessionId,
         content: failedMessage.uiMeta.retryContent,
+        parts: failedMessage.uiMeta.retryParts,
         requestId,
         retry: true,
       });
@@ -442,13 +592,76 @@ export function useChatSession(input: UseChatSessionInput) {
     if (input.activeSendRef.current) return;
 
     const content = input.draftMessage.trim();
-    if (!content || !input.activeSession) return;
+    const attachments = input.draftAttachments;
+    if ((!content && attachments.length === 0) || !input.activeSession) return;
+
+    const parts: LocalInputPart[] = [];
+    if (content) {
+      parts.push({
+        type: "text",
+        text: content,
+      });
+    }
+    for (const attachment of attachments) {
+      parts.push({
+        type: "file",
+        mime: attachment.mime,
+        filename: attachment.filename,
+        url: attachment.url,
+      });
+    }
+
+    const optimisticContent =
+      content ||
+      `[Sent ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}]`;
 
     input.setDraftMessage("");
+    input.setDraftAttachments([]);
     await submitChatRequest({
       sessionId: input.activeSession.id,
-      content,
+      content: optimisticContent,
+      parts,
     });
+  }
+
+  async function handleComposerPaste(event: ReactClipboardEvent<HTMLTextAreaElement>) {
+    const clipboardItems = Array.from(event.clipboardData?.items ?? []);
+    const imageItems = clipboardItems.filter(item => item.kind === "file" && item.type.startsWith("image/"));
+    if (imageItems.length === 0) return;
+
+    event.preventDefault();
+    const nextAttachments: ComposerAttachment[] = [];
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      if (file.size > 5 * 1024 * 1024) {
+        setChatControlError(`Skipped ${file.name || "pasted image"}: file is larger than 5MB.`);
+        continue;
+      }
+      const url = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Failed to read pasted image"));
+        reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+        reader.readAsDataURL(file);
+      }).catch(() => "");
+      if (!url) continue;
+      nextAttachments.push({
+        id: crypto.randomUUID(),
+        mime: file.type || "image/png",
+        filename: file.name || undefined,
+        size: file.size,
+        url,
+      });
+    }
+
+    if (nextAttachments.length > 0) {
+      setChatControlError("");
+      input.setDraftAttachments(current => [...current, ...nextAttachments]);
+    }
+  }
+
+  function removeComposerAttachment(id: string) {
+    input.setDraftAttachments(current => current.filter(attachment => attachment.id !== id));
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -464,9 +677,11 @@ export function useChatSession(input: UseChatSessionInput) {
     abortActiveRun,
     chatControlError,
     compactSession,
+    handleComposerPaste,
     handleComposerKeyDown,
     isAborting,
     isCompacting,
+    removeComposerAttachment,
     retryFailedRequest,
     sendMessage,
   };

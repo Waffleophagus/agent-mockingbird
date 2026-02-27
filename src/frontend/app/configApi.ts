@@ -32,6 +32,7 @@ export interface AgentCatalogResult {
 
 export interface OtherConfigResult {
   fallbackModels: string[];
+  imageModel: string;
   hash: string;
 }
 
@@ -112,6 +113,7 @@ export async function fetchOtherConfig() {
       runtime?: {
         opencode?: {
           fallbackModels?: string[];
+          imageModel?: string | null;
         };
       };
     };
@@ -124,6 +126,10 @@ export async function fetchOtherConfig() {
     fallbackModels: Array.isArray(payload.config?.runtime?.opencode?.fallbackModels)
       ? payload.config.runtime.opencode.fallbackModels
       : [],
+    imageModel:
+      typeof payload.config?.runtime?.opencode?.imageModel === "string"
+        ? payload.config.runtime.opencode.imageModel
+        : "",
     hash: typeof payload.hash === "string" ? payload.hash : "",
   } satisfies OtherConfigResult;
 }
@@ -241,7 +247,7 @@ export async function saveAgentTypeChanges(input: {
   };
 }
 
-export async function saveOtherConfig(input: { fallbackModels: string[]; expectedHash?: string }) {
+export async function saveOtherConfig(input: { fallbackModels: string[]; imageModel: string; expectedHash?: string }) {
   const response = await fetch("/api/config/patch-safe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -250,6 +256,7 @@ export async function saveOtherConfig(input: { fallbackModels: string[]; expecte
         runtime: {
           opencode: {
             fallbackModels: input.fallbackModels,
+            imageModel: input.imageModel.trim() || null,
           },
         },
       },
@@ -264,6 +271,7 @@ export async function saveOtherConfig(input: { fallbackModels: string[]; expecte
         runtime?: {
           opencode?: {
             fallbackModels?: string[];
+            imageModel?: string | null;
           };
         };
       };
@@ -276,6 +284,10 @@ export async function saveOtherConfig(input: { fallbackModels: string[]; expecte
   }
   return {
     fallbackModels: nextFallbacks,
+    imageModel:
+      typeof payload.snapshot?.config?.runtime?.opencode?.imageModel === "string"
+        ? payload.snapshot.config.runtime.opencode.imageModel
+        : "",
     hash: typeof payload.snapshot?.hash === "string" ? payload.snapshot.hash : "",
   } satisfies OtherConfigResult;
 }
