@@ -105,15 +105,25 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
 
     "/api/runtime/info": {
       GET: () => {
+        const snapshot = getConfigSnapshot();
         const runtimeInfo = getRuntimeStartupInfo();
         const storage = getOpencodeAgentStorageInfo();
         const bootstrap = buildWorkspaceBootstrapPromptContext();
         return Response.json({
+          configAuthority: {
+            source: "wafflebot-config-json",
+            path: snapshot.path,
+            hash: snapshot.hash,
+          },
           opencode: {
             ...runtimeInfo.opencode,
             directory: storage.directory,
             effectiveConfigPath: storage.configFilePath,
             persistenceMode: storage.persistenceMode,
+            projection: {
+              source: "wafflebot-config-json",
+              syncs: ["small_model", "skills.paths", "mcp", "agent"],
+            },
             identity: bootstrap.identity,
             bootstrap: {
               mode: bootstrap.mode,

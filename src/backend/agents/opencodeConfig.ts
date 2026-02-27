@@ -1,7 +1,7 @@
 import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -25,6 +25,7 @@ export interface OpencodeAgentStorageInfo {
 }
 
 const NON_DELETABLE_BUILTIN_AGENT_IDS = new Set(["explore", "general"]);
+const OPENCODE_SCHEMA_URL = "https://opencode.ai/config.json";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -102,24 +103,39 @@ function toOpenCodeAgentConfig(
   };
 }
 
+function canonicalOpencodeConfigPath(baseDir: string) {
+  return path.join(baseDir, ".opencode", "opencode.jsonc");
+}
+
+function isOpencodeConfigFile(pathname: string) {
+  try {
+    const parsed = parseJsonc(readFileSync(pathname, "utf8"));
+    if (!isPlainObject(parsed)) return false;
+    return typeof parsed.$schema === "string" && parsed.$schema.trim() === OPENCODE_SCHEMA_URL;
+  } catch {
+    return false;
+  }
+}
+
+function migrateLegacyWorkspaceConfigToCanonical(baseDir: string, canonicalPath: string) {
+  if (existsSync(canonicalPath)) return;
+  const legacyWorkspaceConfig = path.join(baseDir, "config.json");
+  if (!existsSync(legacyWorkspaceConfig)) return;
+  if (!isOpencodeConfigFile(legacyWorkspaceConfig)) return;
+  mkdirSync(path.dirname(canonicalPath), { recursive: true });
+  copyFileSync(legacyWorkspaceConfig, canonicalPath);
+}
+
 function resolveOpencodeConfigFile(config: WafflebotConfig, createIfMissing = true) {
   const baseDir = config.runtime.opencode.directory?.trim() || process.cwd();
-  const candidates = [
-    path.join(baseDir, ".opencode", "opencode.jsonc"),
-    path.join(baseDir, ".opencode", "opencode.json"),
-    path.join(baseDir, "opencode.jsonc"),
-    path.join(baseDir, "opencode.json"),
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-  const fallback = path.join(baseDir, ".opencode", "opencode.jsonc");
+  const fallback = canonicalOpencodeConfigPath(baseDir);
   if (!createIfMissing) {
     return fallback;
   }
+  migrateLegacyWorkspaceConfigToCanonical(baseDir, fallback);
   mkdirSync(path.dirname(fallback), { recursive: true });
   if (!existsSync(fallback)) {
-    writeFileSync(fallback, '{\n  "$schema": "https://opencode.ai/config.json"\n}\n', "utf8");
+    writeFileSync(fallback, `{\n  "$schema": "${OPENCODE_SCHEMA_URL}"\n}\n`, "utf8");
   }
   return fallback;
 }

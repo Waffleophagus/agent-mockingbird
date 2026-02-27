@@ -32,6 +32,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     ".opencode/tools/**/*.ts",
+    "scripts/**/*.ts",
     "build.ts",
     "build-bin.ts",
     "bun-env.d.ts",

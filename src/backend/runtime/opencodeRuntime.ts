@@ -120,6 +120,8 @@ const BACKGROUND_SYNC_INTERVAL_MS = 8_000;
 const BACKGROUND_SYNC_BATCH_LIMIT = 200;
 const BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS = 3_000;
 const QUEUE_DRAIN_METADATA_KEY = "__queueDrain";
+const DEFAULT_RUNTIME_TIMEOUT_MS = 120_000;
+const DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS = 300_000;
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
 
 function shouldQueueWhenBusy(input: SendUserMessageInput): boolean {
@@ -283,17 +285,17 @@ export class OpencodeRuntime implements RuntimeEngine {
   private currentSmallModel() {
     const runtimeConfig = this.currentRuntimeConfig();
     const smallModel = runtimeConfig?.smallModel?.trim();
-    return smallModel || env.WAFFLEBOT_OPENCODE_SMALL_MODEL;
+    return smallModel || `${this.currentProviderId()}/${this.currentModelId()}`;
   }
 
   private currentTimeoutMs() {
     const runtimeConfig = this.currentRuntimeConfig();
-    return runtimeConfig?.timeoutMs ?? env.WAFFLEBOT_OPENCODE_TIMEOUT_MS;
+    return runtimeConfig?.timeoutMs ?? DEFAULT_RUNTIME_TIMEOUT_MS;
   }
 
   private currentPromptTimeoutMs() {
     const runtimeConfig = this.currentRuntimeConfig();
-    return runtimeConfig?.promptTimeoutMs ?? env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS;
+    return runtimeConfig?.promptTimeoutMs ?? DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS;
   }
 
   private currentEnabledSkills() {

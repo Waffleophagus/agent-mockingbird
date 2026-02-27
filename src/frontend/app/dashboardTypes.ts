@@ -47,10 +47,19 @@ export interface OpencodeAgentStorageResponse {
 }
 
 export interface RuntimeInfoResponse {
+  configAuthority?: {
+    source?: string;
+    path?: string;
+    hash?: string;
+  };
   opencode?: {
     directory?: string;
     effectiveConfigPath?: string;
     persistenceMode?: string;
+    projection?: {
+      source?: string;
+      syncs?: string[];
+    };
   };
 }
 

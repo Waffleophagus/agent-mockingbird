@@ -15,15 +15,11 @@ process.env.WAFFLEBOT_MEMORY_WORKSPACE_DIR = testWorkspacePath;
 process.env.WAFFLEBOT_MEMORY_ENABLED = "false";
 process.env.WAFFLEBOT_MEMORY_TOOL_MODE = "tool_only";
 process.env.WAFFLEBOT_CRON_ENABLED = "false";
-process.env.WAFFLEBOT_OPENCODE_PROVIDER_ID = "test-provider";
-process.env.WAFFLEBOT_OPENCODE_MODEL_ID = "test-model";
-process.env.WAFFLEBOT_OPENCODE_SMALL_MODEL = "test-provider/test-small";
-process.env.WAFFLEBOT_OPENCODE_TIMEOUT_MS = "120000";
-process.env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS = "20";
 
 interface RepositoryApi {
   ensureSeedData: () => void;
   resetDatabaseToDefaults: () => unknown;
+  setSessionModel: (sessionId: string, model: string) => { id: string; model: string } | null;
   listMessagesForSession: (sessionId: string) => Array<{ role: string; content: string }>;
 }
 
@@ -96,6 +92,26 @@ type RuntimeCtor = new (input: {
   defaultModelId: string;
   fallbackModelRefs?: Array<string>;
   client?: unknown;
+  getRuntimeConfig?: () => {
+    baseUrl: string;
+    providerId: string;
+    modelId: string;
+    fallbackModels: string[];
+    imageModel: string | null;
+    smallModel: string;
+    timeoutMs: number;
+    promptTimeoutMs: number;
+    runWaitTimeoutMs: number;
+    childSessionHideAfterDays: number;
+    directory: string | null;
+    bootstrap: {
+      enabled: boolean;
+      maxCharsPerFile: number;
+      maxCharsTotal: number;
+      subagentMinimal: boolean;
+      includeAgentPrompt: boolean;
+    };
+  };
   getEnabledSkills?: () => Array<string>;
   getEnabledMcps?: () => Array<string>;
   getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
@@ -204,6 +220,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   repository.resetDatabaseToDefaults();
+  repository.setSessionModel("main", "test-provider/test-model");
 });
 
 afterAll(() => {
@@ -365,6 +382,26 @@ function createRuntimeWithClient(
     defaultProviderId: "test-provider",
     defaultModelId: "test-model",
     fallbackModelRefs: options?.fallbackModelRefs,
+    getRuntimeConfig: () => ({
+      baseUrl: "http://127.0.0.1:4096",
+      providerId: "test-provider",
+      modelId: "test-model",
+      fallbackModels: options?.fallbackModelRefs ?? [],
+      imageModel: null,
+      smallModel: "test-provider/test-small",
+      timeoutMs: 120_000,
+      promptTimeoutMs: 20,
+      runWaitTimeoutMs: 180_000,
+      childSessionHideAfterDays: 3,
+      directory: null,
+      bootstrap: {
+        enabled: true,
+        maxCharsPerFile: 20_000,
+        maxCharsTotal: 150_000,
+        subagentMinimal: true,
+        includeAgentPrompt: true,
+      },
+    }),
     getEnabledSkills: options?.getEnabledSkills,
     getEnabledMcps: options?.getEnabledMcps,
     getConfiguredMcpServers: options?.getConfiguredMcpServers,

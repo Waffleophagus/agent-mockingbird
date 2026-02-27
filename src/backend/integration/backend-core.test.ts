@@ -15,8 +15,6 @@ process.env.WAFFLEBOT_MEMORY_WORKSPACE_DIR = testWorkspacePath;
 process.env.WAFFLEBOT_MEMORY_EMBED_PROVIDER = "none";
 process.env.WAFFLEBOT_MEMORY_ENABLED = "true";
 process.env.WAFFLEBOT_CRON_ENABLED = "true";
-process.env.WAFFLEBOT_OPENCODE_PROVIDER_ID = "test-provider";
-process.env.WAFFLEBOT_OPENCODE_MODEL_ID = "test-model";
 
 interface SessionSummaryLite {
   id: string;
@@ -643,8 +641,12 @@ describe("runtime health route", () => {
 
     expect(response.status).toBe(200);
     const payload = (await response.json()) as {
+      configAuthority?: { source?: string; path?: string; hash?: string };
       opencode?: { baseUrl?: string; directory?: string; effectiveConfigPath?: string };
     };
+    expect(payload.configAuthority?.source).toBe("wafflebot-config-json");
+    expect(typeof payload.configAuthority?.path).toBe("string");
+    expect(typeof payload.configAuthority?.hash).toBe("string");
     expect(typeof payload.opencode?.baseUrl).toBe("string");
     expect(typeof payload.opencode?.directory).toBe("string");
     expect(typeof payload.opencode?.effectiveConfigPath).toBe("string");

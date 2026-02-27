@@ -76,7 +76,8 @@ Wafflebot runs with an OpenCode-backed runtime that forwards prompts to OpenCode
 Runtime configuration is stored in JSON (`./data/wafflebot.config.json` by default). On first boot, wafflebot migrates legacy env/DB runtime settings into this file.
 Example config template: `wafflebot.config.example.json`.
 `./config.json` at repo root is OpenCode config, not wafflebot runtime config.
-If runtime config fields are missing, explicitly-set `WAFFLEBOT_*` env vars are used as fallback defaults during config parse.
+Runtime behavior is sourced from wafflebot config JSON. OpenCode runtime env vars are no longer accepted for model/provider/timeouts/directory.
+If you still have legacy `WAFFLEBOT_OPENCODE_*` runtime vars, run `bun run config:migrate-opencode-env` once, then unset them.
 
 Config API:
 
@@ -195,7 +196,7 @@ Environment variables are parsed and validated at startup via `@t3-oss/env-core`
 
 Wafflebot now manages OpenCode agents directly in project-scoped OpenCode config.
 
-- Save target is typically `<workspace>/.opencode/opencode.jsonc` under `WAFFLEBOT_OPENCODE_DIRECTORY`.
+- Save target is `<workspace>/.opencode/opencode.jsonc`.
 - OpenCode also loads `.opencode/agent/*.md` and `.opencode/agents/*.md`; deleting an agent in Wafflebot removes matching files as well.
 - Agents UI shows `Saving to` and `Bound directory` so you can verify which workspace is authoritative.
 
@@ -236,7 +237,7 @@ Recommended production topology is **single VM + systemd sidecar**:
 
 - `opencode.service` running on `127.0.0.1:4096`
 - `wafflebot.service` running on `127.0.0.1:3001`
-- both pinned to one workspace path via `WAFFLEBOT_OPENCODE_DIRECTORY`
+- both pinned to one workspace path via `runtime.opencode.directory` in wafflebot config
 
 Deployment artifacts:
 

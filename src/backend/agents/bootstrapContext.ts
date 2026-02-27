@@ -196,15 +196,6 @@ function trimBootstrapContent(content: string, fileName: string, maxChars: numbe
 
 function resolveOpencodeConfigFilePath(config: WafflebotConfig): string {
   const workspaceDir = resolveWorkspaceDir(config);
-  const candidates = [
-    path.join(workspaceDir, ".opencode", "opencode.jsonc"),
-    path.join(workspaceDir, ".opencode", "opencode.json"),
-    path.join(workspaceDir, "opencode.jsonc"),
-    path.join(workspaceDir, "opencode.json"),
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
   return path.join(workspaceDir, ".opencode", "opencode.jsonc");
 }
 

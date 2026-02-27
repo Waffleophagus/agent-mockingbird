@@ -19,6 +19,7 @@
     "db:migrate": "bun run src/backend/db/migrate.ts",
     "db:check": "drizzle-kit check",
     "db:wipe": "bun run src/backend/db/wipe.ts",
+    "config:migrate-opencode-env": "bun run scripts/migrate-opencode-env.ts",
     "memory:status": "bun run src/backend/memory/cli.ts status",
     "memory:sync": "bun run src/backend/memory/cli.ts sync",
     "memory:reindex": "bun run src/backend/memory/cli.ts reindex",

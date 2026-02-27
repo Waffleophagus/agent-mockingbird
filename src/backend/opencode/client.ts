@@ -6,6 +6,9 @@ import {
 
 import { env } from "../env";
 
+const DEFAULT_OPENCODE_BASE_URL = "http://127.0.0.1:4096";
+const DEFAULT_OPENCODE_TIMEOUT_MS = 120_000;
+
 export interface OpencodeConnectionConfig {
   baseUrl: string;
   directory?: string | null;
@@ -32,9 +35,9 @@ function resolveAuthHeader() {
 export function getOpencodeConnectionInfo(connection?: OpencodeConnectionConfig): OpencodeConnectionInfo {
   const authHeader = resolveAuthHeader();
   const resolved = connection ?? {
-    baseUrl: env.WAFFLEBOT_OPENCODE_BASE_URL,
-    timeoutMs: env.WAFFLEBOT_OPENCODE_TIMEOUT_MS,
-    directory: env.WAFFLEBOT_OPENCODE_DIRECTORY,
+    baseUrl: DEFAULT_OPENCODE_BASE_URL,
+    timeoutMs: DEFAULT_OPENCODE_TIMEOUT_MS,
+    directory: undefined,
   };
   return {
     baseUrl: resolved.baseUrl,
@@ -46,8 +49,7 @@ export function getOpencodeConnectionInfo(connection?: OpencodeConnectionConfig)
 
 export function createOpencodeClient(): OpencodeClient {
   return createOpencodeClientFromConnection({
-    baseUrl: env.WAFFLEBOT_OPENCODE_BASE_URL,
-    directory: env.WAFFLEBOT_OPENCODE_DIRECTORY,
+    baseUrl: DEFAULT_OPENCODE_BASE_URL,
   });
 }
 
