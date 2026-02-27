@@ -22,7 +22,7 @@ import {
 import { getConfigSnapshot } from "../../config/service";
 import { normalizeSignalId, normalizeSignalMentionRegexes, parseSignalTarget, splitSignalText } from "./format";
 import { signalCheck, signalRpcRequest, streamSignalEvents } from "./client";
-import { RuntimeSessionBusyError } from "../../runtime";
+import { RuntimeSessionBusyError, RuntimeSessionQueuedError } from "../../runtime";
 
 const CHANNEL_ID = "signal";
 const LOOP_IDLE_MS = 5_000;
@@ -424,7 +424,7 @@ export class SignalChannelService {
         },
       });
     } catch (error) {
-      if (error instanceof RuntimeSessionBusyError) {
+      if (error instanceof RuntimeSessionBusyError || error instanceof RuntimeSessionQueuedError) {
         return;
       }
       this.reportError("Signal inbound runtime call failed", error instanceof Error ? error.message : String(error));

@@ -119,9 +119,35 @@ function stalledOptimisticRequestIdToClear(input: {
   const hasVisiblePayload = Boolean(input.message.content.trim()) || Boolean(input.message.parts?.length);
   if (!hasVisiblePayload) return null;
 
+  const byRuntimeMessageId = input.messages.find(message => {
+    if (message.uiMeta?.type !== "assistant-pending") return false;
+    if (!(message.uiMeta.status === "detached" || message.uiMeta.status === "queued")) return false;
+    return message.uiMeta.runtimeMessageId === input.message.id;
+  });
+  if (byRuntimeMessageId?.uiMeta?.type === "assistant-pending") {
+    return byRuntimeMessageId.uiMeta.requestId;
+  }
+
+  const assistantIndex = input.messages.findIndex(message => message.id === input.message.id);
+  if (assistantIndex <= 0) return null;
+
+  let precedingPersistedUser: LocalChatMessage | null = null;
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const candidate = input.messages[index];
+    if (!candidate || candidate.role !== "user") continue;
+    if (candidate.uiMeta?.type === "optimistic-user") continue;
+    precedingPersistedUser = candidate;
+    break;
+  }
+  if (!precedingPersistedUser) return null;
+
+  const normalizedUserContent = precedingPersistedUser.content.trim();
+  if (!normalizedUserContent) return null;
+
   const stalled = input.messages.find(message => {
     if (message.uiMeta?.type !== "assistant-pending") return false;
-    return message.uiMeta.status === "detached" || message.uiMeta.status === "queued";
+    if (!(message.uiMeta.status === "detached" || message.uiMeta.status === "queued")) return false;
+    return message.uiMeta.retryContent.trim() === normalizedUserContent;
   });
   if (!stalled || stalled.uiMeta?.type !== "assistant-pending") return null;
   return stalled.uiMeta.requestId;
@@ -435,6 +461,35 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
             };
           });
           updated = pendingUpdated;
+        }
+
+        if (!updated) {
+          const stalledCandidates = nextMessages.filter(message => {
+            if (message.uiMeta?.type !== "assistant-pending") return false;
+            if (!(message.uiMeta.status === "queued" || message.uiMeta.status === "detached")) return false;
+            return !message.uiMeta.runtimeMessageId;
+          });
+
+          if (stalledCandidates.length === 1) {
+            const requestId = stalledCandidates[0]?.uiMeta?.requestId;
+            if (requestId) {
+              let stalledUpdated = false;
+              nextMessages = nextMessages.map(message => {
+                if (message.uiMeta?.type !== "assistant-pending") return message;
+                if (message.uiMeta.requestId !== requestId) return message;
+                stalledUpdated = true;
+                return {
+                  ...message,
+                  parts: upsertChatMessagePart(message.parts, partWithObservedAt),
+                  uiMeta: {
+                    ...message.uiMeta,
+                    runtimeMessageId: messageId,
+                  },
+                };
+              });
+              updated = stalledUpdated;
+            }
+          }
         }
 
         if (!updated) return current;
