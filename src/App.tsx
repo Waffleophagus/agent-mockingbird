@@ -64,6 +64,7 @@ import type {
   RuntimeSkill,
   UsageSnapshot,
 } from "@/types/dashboard";
+import "streamdown/styles.css";
 import "@/index.css";
 
 const CHAT_SHOW_THINKING_KEY = "wafflebot.chat.showThinking";

@@ -41,6 +41,7 @@ import {
   shouldHideMirroredAssistantContent,
 } from "@/frontend/app/chatHelpers";
 import { cn, isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
+import { MarkdownMessage } from "@/frontend/app/components/MarkdownMessage";
 import { Skeleton } from "@/frontend/app/Skeleton";
 import type { ComposerAttachment } from "@/frontend/app/useChatSession";
 import type {
@@ -784,7 +785,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                         {partTimestamp}
                       </p>
                     </div>
-                    <p className="mt-1 whitespace-pre-wrap leading-relaxed text-muted-foreground">{part.text}</p>
+                    <MarkdownMessage className="mt-1" content={part.text} isStreaming={isPending} variant="thinking" />
                   </article>
                 );
               }
@@ -876,7 +877,11 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                       OpenCode is responding...
                     </p>
                     {renderedMessageContent && (
-                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{renderedMessageContent}</p>
+                      <MarkdownMessage
+                        className="mt-1 text-foreground"
+                        content={renderedMessageContent}
+                        isStreaming={message.role === "assistant" && isPending}
+                      />
                     )}
                   </div>
                 )}
@@ -887,7 +892,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                       Failed to send request.
                     </p>
                     {renderedMessageContent && (
-                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{renderedMessageContent}</p>
+                      <MarkdownMessage className="mt-1 text-foreground" content={renderedMessageContent} isStreaming={false} />
                     )}
                     {pendingMeta.errorMessage && (
                       <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
@@ -914,7 +919,7 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                       <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
                     )}
                     {renderedMessageContent && (
-                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{renderedMessageContent}</p>
+                      <MarkdownMessage className="mt-1 text-foreground" content={renderedMessageContent} isStreaming={false} />
                     )}
                   </div>
                 )}
@@ -928,12 +933,17 @@ export function ChatPage({ model }: { model: ChatPageModel }) {
                       <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
                     )}
                     {renderedMessageContent && (
-                      <p className="whitespace-pre-wrap leading-relaxed text-foreground">{renderedMessageContent}</p>
+                      <MarkdownMessage className="mt-1 text-foreground" content={renderedMessageContent} isStreaming={false} />
                     )}
                   </div>
                 )}
                 {!isPending && !isQueued && !isDetached && !isFailed && (
-                  <p className="mt-1 whitespace-pre-wrap leading-relaxed">{renderedMessageContent}</p>
+                  <MarkdownMessage
+                    className="mt-1"
+                    content={renderedMessageContent}
+                    isStreaming={false}
+                    variant="message"
+                  />
                 )}
                 {!isPending && !isQueued && !isDetached && !isFailed && message.role === "assistant" && message.memoryTrace && (
                   <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/60 p-2 text-[11px]">
