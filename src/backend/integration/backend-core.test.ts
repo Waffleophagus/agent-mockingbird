@@ -1397,6 +1397,24 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
+  test("toSseFrame maps session.message.delta to session-message-delta event", () => {
+    const frame = toSseFrame({
+      id: "evt-delta-1",
+      type: "session.message.delta",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        sessionId: "main",
+        messageId: "msg-1",
+        text: "Hello",
+        mode: "append",
+        observedAt: new Date().toISOString(),
+      },
+    });
+    expect(frame).toContain("event: session-message-delta");
+    expect(frame).toContain("data:");
+  });
+
   test("toSseFrame maps background.run.updated to background-run event", () => {
     const frame = toSseFrame({
       id: "evt-bg-1",

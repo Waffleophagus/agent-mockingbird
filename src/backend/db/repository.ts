@@ -568,7 +568,13 @@ export function listMessagesForSession(sessionId: string): ChatMessage[] {
       SELECT id, session_id, role, content, created_at
       FROM messages
       WHERE session_id = ?1
-      ORDER BY created_at ASC
+      ORDER BY
+        created_at ASC,
+        CASE role
+          WHEN 'user' THEN 0
+          ELSE 1
+        END ASC,
+        rowid ASC
     `,
     sessionId,
   );
@@ -1627,47 +1633,148 @@ export function appendChatExchange(input: {
     const session = scalar<{ id: string } | null>("SELECT id FROM sessions WHERE id = ?1", input.sessionId);
     if (!session) return null;
 
-    const createdAt = input.createdAt ?? nowMs();
+    const eventAt = input.createdAt ?? nowMs();
     const assistantParts = normalizeChatMessageParts(input.assistantParts);
     const userMessage: ChatMessage = {
       id: input.userMessageId ?? crypto.randomUUID(),
       role: "user",
       content: input.userContent,
-      at: toIso(createdAt),
+      at: toIso(eventAt),
     };
     const assistantMessage: ChatMessage = {
       id: input.assistantMessageId ?? crypto.randomUUID(),
       role: "assistant",
       content: input.assistantContent,
-      at: toIso(createdAt),
+      at: toIso(eventAt),
       parts: assistantParts.length > 0 ? assistantParts : undefined,
     };
 
-    sqlite
-      .query(
-        `
-        INSERT INTO messages (id, session_id, role, content, created_at)
-        VALUES (?1, ?2, ?3, ?4, ?5)
-      `,
-      )
-      .run(userMessage.id, input.sessionId, userMessage.role, userMessage.content, createdAt);
+    let existingUser = scalar<MessageRow | null>(
+      `
+      SELECT id, session_id, role, content, created_at
+      FROM messages
+      WHERE id = ?1
+    `,
+      userMessage.id,
+    );
 
-    sqlite
-      .query(
-        `
-        INSERT INTO messages (id, session_id, role, content, created_at)
-        VALUES (?1, ?2, ?3, ?4, ?5)
-      `,
-      )
-      .run(assistantMessage.id, input.sessionId, assistantMessage.role, assistantMessage.content, createdAt);
+    let existingAssistant = scalar<MessageRow | null>(
+      `
+      SELECT id, session_id, role, content, created_at
+      FROM messages
+      WHERE id = ?1
+    `,
+      assistantMessage.id,
+    );
+
+    if (existingUser && (existingUser.session_id !== input.sessionId || existingUser.role !== "user")) {
+      throw new Error(`User message id collision for ${userMessage.id}`);
+    }
+    if (existingAssistant && (existingAssistant.session_id !== input.sessionId || existingAssistant.role !== "assistant")) {
+      throw new Error(`Assistant message id collision for ${assistantMessage.id}`);
+    }
+
+    let userCreatedAt = eventAt;
+    let assistantCreatedAt = eventAt;
+
+    if (!existingUser && existingAssistant) {
+      // If assistant was synced first, align user timestamp so conversation order stays stable.
+      userCreatedAt = existingAssistant.created_at;
+    }
+    if (existingUser && !existingAssistant) {
+      // Never backfill assistant before an existing user turn.
+      assistantCreatedAt = Math.max(existingUser.created_at, eventAt);
+    }
+
+    if (!existingUser) {
+      sqlite
+        .query(
+          `
+          INSERT INTO messages (id, session_id, role, content, created_at)
+          VALUES (?1, ?2, ?3, ?4, ?5)
+        `,
+        )
+        .run(userMessage.id, input.sessionId, userMessage.role, userMessage.content, userCreatedAt);
+    } else if (!existingUser.content.trim() && userMessage.content.trim()) {
+      sqlite
+        .query(
+          `
+          UPDATE messages
+          SET content = ?2
+          WHERE id = ?1
+        `,
+        )
+        .run(userMessage.id, userMessage.content);
+    }
+
+    if (!existingAssistant) {
+      sqlite
+        .query(
+          `
+          INSERT INTO messages (id, session_id, role, content, created_at)
+          VALUES (?1, ?2, ?3, ?4, ?5)
+        `,
+        )
+        .run(assistantMessage.id, input.sessionId, assistantMessage.role, assistantMessage.content, assistantCreatedAt);
+    } else if (!existingAssistant.content.trim() && assistantMessage.content.trim()) {
+      sqlite
+        .query(
+          `
+          UPDATE messages
+          SET content = ?2
+          WHERE id = ?1
+        `,
+        )
+        .run(assistantMessage.id, assistantMessage.content);
+    }
+
+    let persistedUser = scalar<MessageRow | null>(
+      `
+      SELECT id, session_id, role, content, created_at
+      FROM messages
+      WHERE id = ?1
+    `,
+      userMessage.id,
+    );
+    if (!persistedUser || persistedUser.role !== "user") {
+      throw new Error(`Failed to persist user message ${userMessage.id}`);
+    }
+
+    const persistedAssistant = scalar<MessageRow | null>(
+      `
+      SELECT id, session_id, role, content, created_at
+      FROM messages
+      WHERE id = ?1
+    `,
+      assistantMessage.id,
+    );
+    if (!persistedAssistant || persistedAssistant.role !== "assistant") {
+      throw new Error(`Failed to persist assistant message ${assistantMessage.id}`);
+    }
+
+    if (persistedUser.created_at > persistedAssistant.created_at) {
+      sqlite
+        .query(
+          `
+          UPDATE messages
+          SET created_at = ?2
+          WHERE id = ?1
+        `,
+        )
+        .run(persistedUser.id, persistedAssistant.created_at);
+      persistedUser = {
+        ...persistedUser,
+        created_at: persistedAssistant.created_at,
+      };
+    }
 
     if (assistantMessage.parts && assistantMessage.parts.length > 0) {
       setMessageParts({
         sessionId: input.sessionId,
-        messageId: assistantMessage.id,
+        messageId: persistedAssistant.id,
         parts: assistantMessage.parts,
-        createdAt,
-        updatedAt: createdAt,
+        createdAt: persistedAssistant.created_at,
+        updatedAt: eventAt,
       });
     }
 
@@ -1677,13 +1784,17 @@ export function appendChatExchange(input: {
         UPDATE sessions
         SET
           status = 'active',
-          message_count = message_count + 2,
+          message_count = (
+            SELECT COUNT(*)
+            FROM messages
+            WHERE session_id = ?1
+          ),
           updated_at = ?2,
           last_active_at = ?2
         WHERE id = ?1
       `,
       )
-      .run(input.sessionId, createdAt);
+      .run(input.sessionId, eventAt);
 
     recordUsageDelta({
       sessionId: input.sessionId,
@@ -1692,16 +1803,22 @@ export function appendChatExchange(input: {
       outputTokensDelta: input.usage.outputTokensDelta,
       estimatedCostUsdDelta: input.usage.estimatedCostUsdDelta,
       source: input.source,
-      createdAt,
+      createdAt: eventAt,
     });
 
-    const heartbeat = recordHeartbeat(input.source, true, createdAt);
+    const heartbeat = recordHeartbeat(input.source, true, eventAt);
     const sessionSummary = getSessionById(input.sessionId);
     if (!sessionSummary) return null;
 
     return {
       session: sessionSummary,
-      messages: [userMessage, assistantMessage],
+      messages: [
+        messageRowToMessage(persistedUser),
+        {
+          ...messageRowToMessage(persistedAssistant),
+          parts: assistantMessage.parts,
+        },
+      ],
       usage: getUsageSnapshot(),
       heartbeat,
     };

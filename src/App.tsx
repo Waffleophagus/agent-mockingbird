@@ -645,12 +645,12 @@ export function App() {
       setIsUserScrolledUp(false);
       setHasNewMessages(false);
     } else if (!isUserScrolledUp) {
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      container.scrollTo({ top: container.scrollHeight, behavior: isSending ? "auto" : "smooth" });
     } else if (activeMessages.length > 0) {
       setHasNewMessages(true);
     }
     previousActiveSessionIdRef.current = activeSessionId;
-  }, [activeSessionId, activeMessages.length, loadingMessages, isSending, isUserScrolledUp]);
+  }, [activeSessionId, activeMessages, loadingMessages, isSending, isUserScrolledUp]);
 
   function scrollToBottom() {
     const container = chatScrollRef.current;

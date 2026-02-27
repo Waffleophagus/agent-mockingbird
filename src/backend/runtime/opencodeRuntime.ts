@@ -26,6 +26,7 @@ import {
   createHeartbeatUpdatedEvent,
   createSessionCompactedEvent,
   createSessionMessageCreatedEvent,
+  createSessionMessageDeltaEvent,
   createSessionMessagePartUpdatedEvent,
   createSessionRunErrorEvent,
   createSessionRunStatusUpdatedEvent,
@@ -93,6 +94,17 @@ type Listener = (event: RuntimeEvent) => void;
 type AssistantInfo = Extract<Message, { role: "assistant" }>;
 type OpencodeMessagePartUpdatedEvent = Extract<OpencodeEvent, { type: "message.part.updated" }>;
 type OpencodeMessageUpdatedEvent = Extract<OpencodeEvent, { type: "message.updated" }>;
+type OpencodeMessagePartDeltaEvent = {
+  type: "message.part.delta";
+  properties: {
+    sessionID: string;
+    messageID: string;
+    partID: string;
+    field: string;
+    delta: string;
+  };
+};
+type OpencodeRuntimeEvent = OpencodeEvent | OpencodeMessagePartDeltaEvent;
 type ResolvedModel = { providerId: string; modelId: string };
 type RuntimeOpencodeConfig = WafflebotConfig["runtime"]["opencode"];
 
@@ -189,6 +201,8 @@ export class OpencodeRuntime implements RuntimeEngine {
   private drainingSessions = new Set<string>();
   private imageCapabilityByModelRef = new Map<string, boolean>();
   private imageCapabilityFetchedAtMs = 0;
+  private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
+  private partTypeByScopedPartId = new Map<string, Part["type"]>();
 
   constructor(private options: OpencodeRuntimeOptions) {
     if (options.client) {
@@ -423,6 +437,10 @@ export class OpencodeRuntime implements RuntimeEngine {
       }
       opencodeSessionId = promptResult.opencodeSessionId;
       const assistantMessage = promptResult.message;
+      this.rememberMessageRole(opencodeSessionId, assistantMessage.info.id, "assistant");
+      for (const part of assistantMessage.parts) {
+        this.rememberPartMetadata(part);
+      }
 
       await this.syncSessionTitleFromOpencode(session.id, opencodeSessionId, session.title);
       this.startSessionTitlePolling(session.id, opencodeSessionId);
@@ -458,6 +476,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         assistantParts,
         source: "runtime",
         createdAt,
+        userMessageId: assistantMessage.info.parentID,
         assistantMessageId: assistantMessage.info.id,
         usage: {
           requestCountDelta: 1,
@@ -1135,6 +1154,9 @@ export class OpencodeRuntime implements RuntimeEngine {
       case "message.part.updated":
         this.handleMessagePartUpdatedEvent(event);
         return;
+      case "message.part.delta":
+        this.handleMessagePartDeltaEvent(event);
+        return;
       case "message.updated":
         this.handleMessageUpdatedEvent(event);
         return;
@@ -1158,29 +1180,112 @@ export class OpencodeRuntime implements RuntimeEngine {
   private handleMessagePartUpdatedEvent(event: OpencodeMessagePartUpdatedEvent) {
     const sessionId = event.properties.part.sessionID.trim();
     if (!sessionId) return;
+    this.rememberPartMetadata(event.properties.part);
+
+    const messageRole = this.messageRoleByScopedMessageId.get(
+      this.scopedMessageId(sessionId, event.properties.part.messageID),
+    );
+    const canTreatAsAssistant =
+      messageRole === "assistant" ||
+      (messageRole !== "user" && event.properties.part.type === "reasoning");
+
     const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, sessionId);
     if (!localSessionId) return;
 
     const mappedPart = this.mapChatMessagePart(event.properties.part);
-    if (!mappedPart) return;
+    if (mappedPart) {
+      const phase = (() => {
+        if (event.properties.part.type !== "tool") {
+          return "update" as const;
+        }
+        const status = event.properties.part.state.status;
+        if (status === "pending") return "start" as const;
+        if (status === "running") return "update" as const;
+        return "final" as const;
+      })();
 
-    const phase = (() => {
-      if (event.properties.part.type !== "tool") {
-        return "update" as const;
-      }
-      const status = event.properties.part.state.status;
-      if (status === "pending") return "start" as const;
-      if (status === "running") return "update" as const;
-      return "final" as const;
-    })();
+      this.emit(
+        createSessionMessagePartUpdatedEvent(
+          {
+            sessionId: localSessionId,
+            messageId: event.properties.part.messageID,
+            part: mappedPart,
+            phase,
+            observedAt: new Date().toISOString(),
+          },
+          "runtime",
+        ),
+      );
+    }
+
+    const maybeDelta = (event.properties as { delta?: unknown }).delta;
+    const deltaFromPartUpdate = typeof maybeDelta === "string" ? maybeDelta : "";
+    if (!canTreatAsAssistant) return;
+    if (event.properties.part.type !== "text" && event.properties.part.type !== "reasoning") return;
+
+    if (deltaFromPartUpdate.length > 0) {
+      this.emit(
+        createSessionMessageDeltaEvent(
+          {
+            sessionId: localSessionId,
+            messageId: event.properties.part.messageID,
+            text: deltaFromPartUpdate,
+            mode: "append",
+            observedAt: new Date().toISOString(),
+          },
+          "runtime",
+        ),
+      );
+      return;
+    }
+
+    if (event.properties.part.text.length > 0) {
+      this.emit(
+        createSessionMessageDeltaEvent(
+          {
+            sessionId: localSessionId,
+            messageId: event.properties.part.messageID,
+            text: event.properties.part.text,
+            mode: "replace",
+            observedAt: new Date().toISOString(),
+          },
+          "runtime",
+        ),
+      );
+    }
+  }
+
+  private handleMessagePartDeltaEvent(event: OpencodeMessagePartDeltaEvent) {
+    const sessionId = event.properties.sessionID.trim();
+    if (!sessionId) return;
+
+    const field = event.properties.field.trim();
+    if (field !== "text") return;
+    const delta = event.properties.delta;
+    if (typeof delta !== "string" || delta.length === 0) return;
+
+    const messageId = event.properties.messageID.trim();
+    const partId = event.properties.partID.trim();
+    if (!messageId || !partId) return;
+
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, sessionId);
+    if (!localSessionId) return;
+
+    const partType = this.partTypeByScopedPartId.get(this.scopedPartId(sessionId, messageId, partId));
+    if (partType && partType !== "text" && partType !== "reasoning") return;
+
+    const messageRole = this.messageRoleByScopedMessageId.get(this.scopedMessageId(sessionId, messageId));
+    const canTreatAsAssistant =
+      messageRole === "assistant" || (messageRole !== "user" && partType === "reasoning");
+    if (!canTreatAsAssistant) return;
 
     this.emit(
-      createSessionMessagePartUpdatedEvent(
+      createSessionMessageDeltaEvent(
         {
           sessionId: localSessionId,
-          messageId: event.properties.part.messageID,
-          part: mappedPart,
-          phase,
+          messageId,
+          text: delta,
+          mode: "append",
           observedAt: new Date().toISOString(),
         },
         "runtime",
@@ -1189,11 +1294,17 @@ export class OpencodeRuntime implements RuntimeEngine {
   }
 
   private handleMessageUpdatedEvent(event: OpencodeMessageUpdatedEvent) {
+    this.rememberMessageRole(
+      event.properties.info.sessionID,
+      event.properties.info.id,
+      event.properties.info.role,
+    );
     if (event.properties.info.role !== "assistant") return;
     const opencodeSessionId = event.properties.info.sessionID.trim();
     if (!opencodeSessionId) return;
     const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId) return;
+    if (this.busySessions.has(localSessionId)) return;
 
     void this.syncMessageById({
       localSessionId,
@@ -1328,10 +1439,58 @@ export class OpencodeRuntime implements RuntimeEngine {
     );
   }
 
-  private isOpencodeEvent(event: unknown): event is OpencodeEvent {
+  private isOpencodeEvent(event: unknown): event is OpencodeRuntimeEvent {
     if (!event || typeof event !== "object") return false;
     const maybeEvent = event as { type?: unknown };
     return typeof maybeEvent.type === "string";
+  }
+
+  private scopedMessageId(sessionId: string, messageId: string): string {
+    return `${sessionId}:${messageId}`;
+  }
+
+  private scopedPartId(sessionId: string, messageId: string, partId: string): string {
+    return `${sessionId}:${messageId}:${partId}`;
+  }
+
+  private isAssistantOnlyPartType(partType: Part["type"]): boolean {
+    return (
+      partType === "reasoning" ||
+      partType === "tool" ||
+      partType === "step-start" ||
+      partType === "step-finish" ||
+      partType === "snapshot" ||
+      partType === "patch" ||
+      partType === "agent" ||
+      partType === "retry" ||
+      partType === "compaction"
+    );
+  }
+
+  private rememberMessageRole(sessionId: string, messageId: string, role: Message["role"]) {
+    const normalizedSessionId = sessionId.trim();
+    const normalizedMessageId = messageId.trim();
+    if (!normalizedSessionId || !normalizedMessageId) return;
+    this.messageRoleByScopedMessageId.set(this.scopedMessageId(normalizedSessionId, normalizedMessageId), role);
+  }
+
+  private rememberPartMetadata(part: Part) {
+    const maybePart = part as {
+      sessionID?: unknown;
+      messageID?: unknown;
+      id?: unknown;
+      type?: unknown;
+    };
+    const sessionId = typeof maybePart.sessionID === "string" ? maybePart.sessionID.trim() : "";
+    const messageId = typeof maybePart.messageID === "string" ? maybePart.messageID.trim() : "";
+    const partId = typeof maybePart.id === "string" ? maybePart.id.trim() : "";
+    const partType = typeof maybePart.type === "string" ? (maybePart.type as Part["type"]) : null;
+    if (!sessionId || !messageId || !partId || !partType) return;
+
+    this.partTypeByScopedPartId.set(this.scopedPartId(sessionId, messageId, partId), partType);
+    if (this.isAssistantOnlyPartType(partType)) {
+      this.rememberMessageRole(sessionId, messageId, "assistant");
+    }
   }
 
   private backgroundRecordToHandle(run: BackgroundRunRecord): BackgroundRunHandle {
@@ -1496,6 +1655,13 @@ export class OpencodeRuntime implements RuntimeEngine {
           signal: this.defaultRequestSignal(),
         }),
       );
+    }
+
+    for (const entry of messages) {
+      this.rememberMessageRole(externalSessionId, entry.info.id, entry.info.role);
+      for (const part of entry.parts) {
+        this.rememberPartMetadata(part);
+      }
     }
 
     const imported = messages.flatMap(entry => {

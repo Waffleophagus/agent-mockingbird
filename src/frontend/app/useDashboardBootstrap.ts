@@ -141,16 +141,29 @@ function stalledOptimisticRequestIdToClear(input: {
   }
   if (!precedingPersistedUser) return null;
 
-  const normalizedUserContent = precedingPersistedUser.content.trim();
+  const normalizedUserContent = normalizeComparableMessageText(precedingPersistedUser.content);
   if (!normalizedUserContent) return null;
 
-  const stalled = input.messages.find(message => {
+  const stalledCandidates = input.messages.filter(message => {
     if (message.uiMeta?.type !== "assistant-pending") return false;
     if (!(message.uiMeta.status === "detached" || message.uiMeta.status === "queued")) return false;
-    return message.uiMeta.retryContent.trim() === normalizedUserContent;
+    return normalizeComparableMessageText(message.uiMeta.retryContent) === normalizedUserContent;
   });
+  if (stalledCandidates.length !== 1) return null;
+  const stalled = stalledCandidates[0];
   if (!stalled || stalled.uiMeta?.type !== "assistant-pending") return null;
   return stalled.uiMeta.requestId;
+}
+
+function normalizeComparableMessageText(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function applyTextDelta(input: { currentContent: string; text: string; mode: "append" | "replace" }): string {
+  return input.mode === "replace" ? input.text : `${input.currentContent}${input.text}`;
 }
 
 function isTimeoutLikeMessage(message: string): boolean {
@@ -390,18 +403,131 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
           [payload.sessionId]: nextMessages,
         };
       });
-      input.setRunStatusBySession(current => ({
-        ...current,
-        [payload.sessionId]: {
-          sessionId: payload.sessionId,
-          status: "idle",
-        },
-      }));
-      input.setRunErrorsBySession(current => {
-        if (!current[payload.sessionId]) return current;
-        const next = { ...current };
-        delete next[payload.sessionId];
-        return next;
+      if (payload.message.role === "assistant") {
+        input.setRunStatusBySession(current => ({
+          ...current,
+          [payload.sessionId]: {
+            sessionId: payload.sessionId,
+            status: "idle",
+          },
+        }));
+        input.setRunErrorsBySession(current => {
+          if (!current[payload.sessionId]) return current;
+          const next = { ...current };
+          delete next[payload.sessionId];
+          return next;
+        });
+      }
+    });
+
+    events.addEventListener("session-message-delta", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as {
+        sessionId?: string;
+        messageId?: string;
+        text?: string;
+        mode?: "append" | "replace";
+      };
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+      const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
+      const text = typeof payload.text === "string" ? payload.text : "";
+      const mode = payload.mode === "replace" ? "replace" : "append";
+      if (!sessionId || !messageId || !text) return;
+
+      input.loadedSessionsRef.current.add(sessionId);
+      input.setMessagesBySession(current => {
+        const existing = current[sessionId] ?? [];
+        if (!existing.length) return current;
+
+        let updated = false;
+        let nextMessages = existing.map(message => {
+          if (message.id === messageId) {
+            updated = true;
+            return {
+              ...message,
+              content: applyTextDelta({
+                currentContent: message.content,
+                text,
+                mode,
+              }),
+            };
+          }
+          if (message.uiMeta?.type === "assistant-pending" && message.uiMeta.runtimeMessageId === messageId) {
+            updated = true;
+            return {
+              ...message,
+              content: applyTextDelta({
+                currentContent: message.content,
+                text,
+                mode,
+              }),
+            };
+          }
+          return message;
+        });
+
+        if (!updated && input.activeSendRef.current?.sessionId === sessionId) {
+          const requestId = input.activeSendRef.current.requestId;
+          let pendingUpdated = false;
+          nextMessages = nextMessages.map(message => {
+            if (message.uiMeta?.type !== "assistant-pending") return message;
+            if (message.uiMeta.requestId !== requestId || message.uiMeta.status !== "pending") {
+              return message;
+            }
+            pendingUpdated = true;
+            return {
+              ...message,
+              content: applyTextDelta({
+                currentContent: message.content,
+                text,
+                mode,
+              }),
+              uiMeta: {
+                ...message.uiMeta,
+                runtimeMessageId: messageId,
+              },
+            };
+          });
+          updated = pendingUpdated;
+        }
+
+        if (!updated) {
+          const stalledCandidates = nextMessages.filter(message => {
+            if (message.uiMeta?.type !== "assistant-pending") return false;
+            if (!(message.uiMeta.status === "queued" || message.uiMeta.status === "detached")) return false;
+            return !message.uiMeta.runtimeMessageId;
+          });
+
+          if (stalledCandidates.length === 1) {
+            const requestId = stalledCandidates[0]?.uiMeta?.requestId;
+            if (requestId) {
+              let stalledUpdated = false;
+              nextMessages = nextMessages.map(message => {
+                if (message.uiMeta?.type !== "assistant-pending") return message;
+                if (message.uiMeta.requestId !== requestId) return message;
+                stalledUpdated = true;
+                return {
+                  ...message,
+                  content: applyTextDelta({
+                    currentContent: message.content,
+                    text,
+                    mode,
+                  }),
+                  uiMeta: {
+                    ...message.uiMeta,
+                    runtimeMessageId: messageId,
+                  },
+                };
+              });
+              updated = stalledUpdated;
+            }
+          }
+        }
+
+        if (!updated) return current;
+        return {
+          ...current,
+          [sessionId]: nextMessages,
+        };
       });
     });
 
