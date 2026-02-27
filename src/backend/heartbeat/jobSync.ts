@@ -1,5 +1,5 @@
-import type { HeartbeatConfig } from "./types";
 import { parseInterval } from "./service";
+import type { HeartbeatConfig } from "./types";
 import type { CronService } from "../cron/service";
 
 const MAIN_SESSION_ID = "main";

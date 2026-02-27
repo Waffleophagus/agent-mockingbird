@@ -1,6 +1,6 @@
 import type { CronHandler, CronHandlerResult } from "./types";
-import { executeHeartbeat } from "../heartbeat/service";
 import { getConfigSnapshot } from "../config/service";
+import { executeHeartbeat } from "../heartbeat/service";
 import { rememberMemory, syncMemoryIndex } from "../memory/service";
 
 function asRecord(value: unknown): Record<string, unknown> {

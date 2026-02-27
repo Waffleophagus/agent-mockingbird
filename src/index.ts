@@ -1,5 +1,6 @@
 import { serve } from "bun";
 
+import { SignalChannelService } from "./backend/channels/signal/service";
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { createHeartbeatUpdatedEvent, createUsageUpdatedEvent } from "./backend/contracts/events";
 import { CronService } from "./backend/cron/service";
@@ -11,14 +12,13 @@ import {
   recordHeartbeat,
 } from "./backend/db/repository";
 import { env } from "./backend/env";
+import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
-import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
 import { initLaneQueue, getLaneQueue } from "./backend/queue/service";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
-import { SignalChannelService } from "./backend/channels/signal/service";
 import index from "./index.html";
 
 ensureSeedData();

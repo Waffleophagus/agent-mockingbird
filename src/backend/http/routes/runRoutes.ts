@@ -1,8 +1,8 @@
 import { getConfigSnapshot } from "../../config/service";
+import type { RuntimeInputPart } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
 import type { RunService } from "../../run/service";
 import type { AgentRunEvent } from "../../run/types";
-import type { RuntimeInputPart } from "../../contracts/runtime";
 
 function runStreamConfig() {
   return getConfigSnapshot().config.runtime.runStream;

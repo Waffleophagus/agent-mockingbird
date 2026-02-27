@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import type { HeartbeatConfig, HeartbeatContext, HeartbeatResult } from "./types";
 import { isActiveHours } from "./activeHours";
+import type { HeartbeatConfig, HeartbeatContext, HeartbeatResult } from "./types";
 import { getConfigSnapshot } from "../config/service";
 import { getRuntime } from "../runtime";
 

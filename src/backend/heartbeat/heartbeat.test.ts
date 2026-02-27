@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { isHeartbeatAck, parseInterval } from "./service";
 import { isActiveHours } from "./activeHours";
 import { getHeartbeatJobId, syncHeartbeatJob } from "./jobSync";
+import { isHeartbeatAck, parseInterval } from "./service";
 import type { HeartbeatConfig } from "./types";
 
 describe("parseInterval", () => {

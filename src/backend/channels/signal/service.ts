@@ -1,3 +1,6 @@
+import { signalCheck, signalRpcRequest, streamSignalEvents } from "./client";
+import { normalizeSignalId, normalizeSignalMentionRegexes, parseSignalTarget, splitSignalText } from "./format";
+import { getConfigSnapshot } from "../../config/service";
 import {
   createSignalChannelStatusUpdatedEvent,
   createSignalErrorEvent,
@@ -6,8 +9,7 @@ import {
   createSignalPairingRequestedEvent,
   type RuntimeEvent,
 } from "../../contracts/events";
-import type { RuntimeEngine } from "../../contracts/runtime";
-import type { RuntimeInputPart } from "../../contracts/runtime";
+import type { RuntimeEngine , RuntimeInputPart } from "../../contracts/runtime";
 import {
   approveChannelPairingRequest,
   ensureSessionForChannelConversation,
@@ -19,9 +21,6 @@ import {
   type ChannelAllowlistEntryRecord,
   type ChannelPairingRequestRecord,
 } from "../../db/repository";
-import { getConfigSnapshot } from "../../config/service";
-import { normalizeSignalId, normalizeSignalMentionRegexes, parseSignalTarget, splitSignalText } from "./format";
-import { signalCheck, signalRpcRequest, streamSignalEvents } from "./client";
 import { RuntimeSessionBusyError, RuntimeSessionQueuedError } from "../../runtime";
 
 const CHANNEL_ID = "signal";
@@ -98,11 +97,6 @@ function renderSignalMentions(message: string, mentions?: Array<{ uuid?: string;
 
 function buildPairingMessage(code: string) {
   return `Pairing required. Reply is blocked until approved.\nCode: ${code}\nApprove in Wafflebot API or dashboard.`;
-}
-
-function toIsoOrNull(value?: number) {
-  if (!value || !Number.isFinite(value)) return null;
-  return new Date(value).toISOString();
 }
 
 function messageIncludesMention(content: string, mentionRegexes: Array<RegExp>) {

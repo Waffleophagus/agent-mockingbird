@@ -8,11 +8,11 @@ import { createMemoryRoutes } from "./memoryRoutes";
 import { createQueueRoutes } from "./queueRoutes";
 import { createRunRoutes } from "./runRoutes";
 import { createSignalRoutes } from "./signalRoutes";
+import type { SignalChannelService } from "../../channels/signal/service";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import type { CronService } from "../../cron/service";
 import type { RunService } from "../../run/service";
 import type { RuntimeEventStream } from "../sse";
-import type { SignalChannelService } from "../../channels/signal/service";
 
 export function createApiRoutes(input: {
   runtime: RuntimeEngine;
