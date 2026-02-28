@@ -1649,7 +1649,7 @@ export function appendChatExchange(input: {
       parts: assistantParts.length > 0 ? assistantParts : undefined,
     };
 
-    let existingUser = scalar<MessageRow | null>(
+    const existingUser = scalar<MessageRow | null>(
       `
       SELECT id, session_id, role, content, created_at
       FROM messages
@@ -1658,7 +1658,7 @@ export function appendChatExchange(input: {
       userMessage.id,
     );
 
-    let existingAssistant = scalar<MessageRow | null>(
+    const existingAssistant = scalar<MessageRow | null>(
       `
       SELECT id, session_id, role, content, created_at
       FROM messages

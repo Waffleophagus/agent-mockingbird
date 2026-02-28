@@ -40,8 +40,8 @@ import {
   sanitizeMessageContentForDisplay,
   shouldHideMirroredAssistantContent,
 } from "@/frontend/app/chatHelpers";
-import { cn, isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
 import { MarkdownMessage } from "@/frontend/app/components/MarkdownMessage";
+import { cn, isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
 import { Skeleton } from "@/frontend/app/Skeleton";
 import type { ComposerAttachment } from "@/frontend/app/useChatSession";
 import type {
