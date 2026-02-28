@@ -1,5 +1,6 @@
 import {
   Activity,
+  Clock,
   Cpu,
   Settings2,
   Users,
@@ -30,6 +31,7 @@ import {
   saveSkills,
   validateAgentTypeChanges,
 } from "@/frontend/app/configApi";
+import { deleteCronJob } from "@/frontend/app/cronApi";
 import {
   type ConfirmAction,
   getConfirmDialogProps,
@@ -43,6 +45,7 @@ import {
 } from "@/frontend/app/dashboardUtils";
 import { AgentsPage } from "@/frontend/app/pages/AgentsPage";
 import { type ChatPageModel, ChatPage } from "@/frontend/app/pages/ChatPage";
+import { CronPage } from "@/frontend/app/pages/CronPage";
 import { McpPage } from "@/frontend/app/pages/McpPage";
 import { OtherConfigPage } from "@/frontend/app/pages/OtherConfigPage";
 import { SkillsPage } from "@/frontend/app/pages/SkillsPage";
@@ -90,7 +93,7 @@ function formatTimestampSummary(iso: string): string {
 
 export function App() {
   type StreamStatus = "connecting" | "connected" | "reconnecting";
-  type DashboardPage = "chat" | "skills" | "mcp" | "agents" | "other";
+  type DashboardPage = "chat" | "skills" | "mcp" | "agents" | "other" | "cron";
   type ConfigPanelTab = "usage" | "memory" | "background";
 
   const [loading, setLoading] = useState(true);
@@ -168,6 +171,7 @@ export function App() {
   const [isSavingOtherConfig, setIsSavingOtherConfig] = useState(false);
   const [loadingOtherConfig, setLoadingOtherConfig] = useState(false);
   const [otherConfigError, setOtherConfigError] = useState("");
+  const [cronRefreshKey, setCronRefreshKey] = useState(0);
   const [openFallbackModelPickerIndex, setOpenFallbackModelPickerIndex] = useState<number | null>(null);
   const [fallbackModelQuery, setFallbackModelQuery] = useState("");
   const [fallbackFocusedModelIndex, setFallbackFocusedModelIndex] = useState(0);
@@ -685,6 +689,19 @@ export function App() {
     setConfirmAction({ type: "remove-agent", agentId });
   }
 
+  function requestRemoveCronJob(jobId: string) {
+    setConfirmAction({ type: "remove-cron", jobId });
+  }
+
+  async function removeCronJobById(jobId: string) {
+    try {
+      await deleteCronJob(jobId);
+      setCronRefreshKey(current => current + 1);
+    } catch (error) {
+      console.error("Failed to delete cron job:", error);
+    }
+  }
+
   function handleConfirmAction() {
     const action = confirmAction;
     setConfirmAction(null);
@@ -709,6 +726,9 @@ export function App() {
         break;
       case "remove-agent":
         removeAgentType(action.agentId);
+        break;
+      case "remove-cron":
+        void removeCronJobById(action.jobId);
         break;
     }
   }
@@ -1499,6 +1519,15 @@ export function App() {
               <Settings2 className="size-4" />
               Other Config
             </Button>
+            <Button
+              type="button"
+              variant={dashboardPage === "cron" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDashboardPage("cron")}
+            >
+              <Clock className="size-4" />
+              Cron
+            </Button>
           </div>
         </header>
 
@@ -1616,6 +1645,13 @@ export function App() {
             fallbackFocusedModelIndex={fallbackFocusedModelIndex}
             runtimeImageModel={runtimeImageModel}
             setRuntimeImageModel={setRuntimeImageModel}
+          />
+        )}
+
+        {dashboardPage === "cron" && (
+          <CronPage
+            requestRemoveCronJob={requestRemoveCronJob}
+            refreshKey={cronRefreshKey}
           />
         )}
       </div>

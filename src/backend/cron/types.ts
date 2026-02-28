@@ -1,10 +1,9 @@
 export type CronScheduleKind = "at" | "every" | "cron";
-export type CronRunMode = "system" | "agent" | "script";
-export type CronInvokePolicy = "never" | "always" | "on_condition";
+export type CronRunMode = "background" | "conditional_agent" | "agent";
 
 export type CronJobState = "queued" | "leased" | "running" | "completed" | "failed" | "dead";
 export type CronStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
-export type CronStepKind = "system" | "script" | "agent";
+export type CronStepKind = "background" | "conditional_agent" | "agent";
 
 export interface CronJobDefinition {
   id: string;
@@ -16,7 +15,6 @@ export interface CronJobDefinition {
   atIso: string | null;
   timezone: string | null;
   runMode: CronRunMode;
-  invokePolicy: CronInvokePolicy;
   handlerKey: string | null;
   agentPromptTemplate: string | null;
   agentModelOverride: string | null;
@@ -85,7 +83,6 @@ export interface CronJobCreateInput {
   atIso?: string | null;
   timezone?: string | null;
   runMode: CronRunMode;
-  invokePolicy: CronInvokePolicy;
   handlerKey?: string | null;
   agentPromptTemplate?: string | null;
   agentModelOverride?: string | null;
@@ -103,7 +100,6 @@ export interface CronJobPatchInput {
   atIso?: string | null;
   timezone?: string | null;
   runMode?: CronRunMode;
-  invokePolicy?: CronInvokePolicy;
   handlerKey?: string | null;
   agentPromptTemplate?: string | null;
   agentModelOverride?: string | null;

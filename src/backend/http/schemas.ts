@@ -1,8 +1,7 @@
 import { z } from "zod";
 
 const cronScheduleKindSchema = z.enum(["at", "every", "cron"]);
-const cronRunModeSchema = z.enum(["system", "agent", "script"]);
-const cronInvokePolicySchema = z.enum(["never", "always", "on_condition"]);
+const cronRunModeSchema = z.enum(["background", "conditional_agent", "agent"]);
 const cronPayloadSchema = z.record(z.string(), z.unknown());
 
 const cronJobCreateSchema = z.object({
@@ -14,7 +13,6 @@ const cronJobCreateSchema = z.object({
   atIso: z.string().min(1).nullable().optional(),
   timezone: z.string().min(1).nullable().optional(),
   runMode: cronRunModeSchema,
-  invokePolicy: cronInvokePolicySchema,
   handlerKey: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
   agentModelOverride: z.string().min(1).nullable().optional(),
@@ -32,7 +30,6 @@ const cronJobPatchSchema = z.object({
   atIso: z.string().min(1).nullable().optional(),
   timezone: z.string().min(1).nullable().optional(),
   runMode: cronRunModeSchema.optional(),
-  invokePolicy: cronInvokePolicySchema.optional(),
   handlerKey: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
   agentModelOverride: z.string().min(1).nullable().optional(),

@@ -160,8 +160,7 @@ interface CronServiceInstance {
     everyMs?: number | null;
     atIso?: string | null;
     timezone?: string | null;
-    runMode: "system" | "agent" | "script";
-    invokePolicy: "never" | "always" | "on_condition";
+    runMode: "background" | "agent" | "conditional_agent";
     handlerKey?: string | null;
     agentPromptTemplate?: string | null;
     maxAttempts?: number;
@@ -1263,20 +1262,18 @@ describe("memory validation and logging", () => {
 });
 
 describe("cron validation and retries", () => {
-  test("invalid runMode/invokePolicy combinations are rejected", async () => {
+  test("invalid runMode requirements are rejected", async () => {
     const runtime = createRuntimeStub(async () => ({ sessionId: "main", messages: [] }));
     const cronService = new CronService(runtime);
 
     await expect(
       cronService.createJob({
-        name: "invalid-system",
+        name: "invalid-background",
         scheduleKind: "every",
         everyMs: 5_000,
-        runMode: "system",
-        invokePolicy: "always",
-        handlerKey: "memory.maintenance",
+        runMode: "background",
       }),
-    ).rejects.toThrow("runMode=system requires invokePolicy=never");
+    ).rejects.toThrow("runMode=background requires handlerKey");
 
     await expect(
       cronService.createJob({
@@ -1284,20 +1281,27 @@ describe("cron validation and retries", () => {
         scheduleKind: "every",
         everyMs: 5_000,
         runMode: "agent",
-        invokePolicy: "never",
-        agentPromptTemplate: "Daily summary",
       }),
-    ).rejects.toThrow("runMode=agent requires invokePolicy=always");
+    ).rejects.toThrow("runMode=agent requires agentPromptTemplate");
 
     await expect(
       cronService.createJob({
-        name: "invalid-script",
+        name: "invalid-conditional",
         scheduleKind: "every",
         everyMs: 5_000,
-        runMode: "script",
-        invokePolicy: "on_condition",
+        runMode: "conditional_agent",
       }),
-    ).rejects.toThrow("runMode=script requires handlerKey");
+    ).rejects.toThrow("runMode=conditional_agent requires handlerKey");
+
+    await expect(
+      cronService.createJob({
+        name: "invalid-conditional-prompt",
+        scheduleKind: "every",
+        everyMs: 5_000,
+        runMode: "conditional_agent",
+        handlerKey: "memory.maintenance",
+      }),
+    ).rejects.toThrow("runMode=conditional_agent requires agentPromptTemplate");
   });
 
   test("failed agent jobs transition from failed to dead after maxAttempts", async () => {
@@ -1311,7 +1315,6 @@ describe("cron validation and retries", () => {
       scheduleKind: "every",
       everyMs: 10_000,
       runMode: "agent",
-      invokePolicy: "always",
       agentPromptTemplate: "Run check",
       maxAttempts: 2,
       retryBackoffMs: 1_000,

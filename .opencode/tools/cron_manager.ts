@@ -25,8 +25,7 @@ async function postJson(pathname: string, body: unknown) {
 }
 
 const scheduleKindSchema = z.enum(["at", "every", "cron"]);
-const runModeSchema = z.enum(["system", "agent", "script"]);
-const invokePolicySchema = z.enum(["never", "always", "on_condition"]);
+const runModeSchema = z.enum(["background", "conditional_agent", "agent"]);
 const payloadSchema = z.record(z.string(), z.unknown());
 
 const jobCreateSchema = z.object({
@@ -38,7 +37,6 @@ const jobCreateSchema = z.object({
   atIso: z.string().min(1).nullable().optional(),
   timezone: z.string().min(1).nullable().optional(),
   runMode: runModeSchema,
-  invokePolicy: invokePolicySchema,
   handlerKey: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
   agentModelOverride: z.string().min(1).nullable().optional(),
@@ -56,7 +54,6 @@ const jobPatchSchema = z.object({
   atIso: z.string().min(1).nullable().optional(),
   timezone: z.string().min(1).nullable().optional(),
   runMode: runModeSchema.optional(),
-  invokePolicy: invokePolicySchema.optional(),
   handlerKey: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
   agentModelOverride: z.string().min(1).nullable().optional(),
@@ -83,7 +80,7 @@ const argsSchema = z.discriminatedUnion("action", [
 ]);
 
 export default tool({
-  description: "Manage Wafflebot cron jobs (list/create/update/run/delete/inspect) with tiered invoke policies.",
+  description: "Manage Wafflebot cron jobs (list/create/update/run/delete/inspect).",
   args: {
     action: tool.schema.enum([
       "list_jobs",

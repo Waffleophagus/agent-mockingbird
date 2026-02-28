@@ -8,7 +8,6 @@ import { ensureCronTables } from "./storage";
 import type {
   CronHandlerResult,
   CronHealthSnapshot,
-  CronInvokePolicy,
   CronJobCreateInput,
   CronJobDefinition,
   CronJobInstance,
@@ -33,7 +32,6 @@ interface CronDefinitionRow {
   at_iso: string | null;
   timezone: string | null;
   run_mode: CronRunMode;
-  invoke_policy: CronInvokePolicy;
   handler_key: string | null;
   agent_prompt_template: string | null;
   agent_model_override: string | null;
@@ -107,7 +105,6 @@ function definitionRowToModel(row: CronDefinitionRow): CronJobDefinition {
     atIso: row.at_iso,
     timezone: row.timezone,
     runMode: row.run_mode,
-    invokePolicy: row.invoke_policy,
     handlerKey: row.handler_key,
     agentPromptTemplate: row.agent_prompt_template,
     agentModelOverride: row.agent_model_override,
@@ -179,17 +176,13 @@ function validateSchedule(input: {
 
 function validateMode(input: {
   runMode: CronRunMode;
-  invokePolicy: CronInvokePolicy;
   handlerKey: string | null;
   agentPromptTemplate: string | null;
 }) {
-  if (input.runMode === "system") {
-    if (!input.handlerKey) throw new Error("runMode=system requires handlerKey");
+  if (input.runMode === "background") {
+    if (!input.handlerKey) throw new Error("runMode=background requires handlerKey");
     if (!listCronHandlerKeys().includes(input.handlerKey)) {
       throw new Error(`unknown handlerKey: ${input.handlerKey}`);
-    }
-    if (input.invokePolicy !== "never") {
-      throw new Error("runMode=system requires invokePolicy=never");
     }
     return;
   }
@@ -198,15 +191,15 @@ function validateMode(input: {
     if (!input.agentPromptTemplate?.trim()) {
       throw new Error("runMode=agent requires agentPromptTemplate");
     }
-    if (input.invokePolicy !== "always") {
-      throw new Error("runMode=agent requires invokePolicy=always");
-    }
     return;
   }
 
-  if (!input.handlerKey) throw new Error("runMode=script requires handlerKey");
+  if (!input.handlerKey) throw new Error("runMode=conditional_agent requires handlerKey");
   if (!listCronHandlerKeys().includes(input.handlerKey)) {
     throw new Error(`unknown handlerKey: ${input.handlerKey}`);
+  }
+  if (!input.agentPromptTemplate?.trim()) {
+    throw new Error("runMode=conditional_agent requires agentPromptTemplate");
   }
 }
 
@@ -400,7 +393,6 @@ export class CronService {
       atIso: input.atIso?.trim() ?? null,
       timezone: input.timezone?.trim() ?? null,
       runMode: input.runMode,
-      invokePolicy: input.invokePolicy,
       handlerKey: input.handlerKey?.trim() ?? null,
       agentPromptTemplate: input.agentPromptTemplate?.trim() ?? null,
       agentModelOverride: input.agentModelOverride?.trim() ?? null,
@@ -417,10 +409,10 @@ export class CronService {
         `
         INSERT INTO cron_job_definitions (
           id, name, enabled, schedule_kind, schedule_expr, every_ms, at_iso, timezone,
-          run_mode, invoke_policy, handler_key, agent_prompt_template, agent_model_override,
+          run_mode, handler_key, agent_prompt_template, agent_model_override,
           max_attempts, retry_backoff_ms, payload_json, created_at, updated_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
       `,
       )
       .run(
@@ -433,7 +425,6 @@ export class CronService {
         normalized.atIso,
         normalized.timezone,
         normalized.runMode,
-        normalized.invokePolicy,
         normalized.handlerKey,
         normalized.agentPromptTemplate,
         normalized.agentModelOverride,
@@ -463,7 +454,6 @@ export class CronService {
       atIso: patch.atIso !== undefined ? patch.atIso?.trim() ?? null : existing.atIso,
       timezone: patch.timezone !== undefined ? patch.timezone?.trim() ?? null : existing.timezone,
       runMode: patch.runMode ?? existing.runMode,
-      invokePolicy: patch.invokePolicy ?? existing.invokePolicy,
       handlerKey: patch.handlerKey !== undefined ? patch.handlerKey?.trim() ?? null : existing.handlerKey,
       agentPromptTemplate:
         patch.agentPromptTemplate !== undefined
@@ -495,14 +485,13 @@ export class CronService {
           at_iso = ?7,
           timezone = ?8,
           run_mode = ?9,
-          invoke_policy = ?10,
-          handler_key = ?11,
-          agent_prompt_template = ?12,
-          agent_model_override = ?13,
-          max_attempts = ?14,
-          retry_backoff_ms = ?15,
-          payload_json = ?16,
-          updated_at = ?17
+          handler_key = ?10,
+          agent_prompt_template = ?11,
+          agent_model_override = ?12,
+          max_attempts = ?13,
+          retry_backoff_ms = ?14,
+          payload_json = ?15,
+          updated_at = ?16
         WHERE id = ?1
       `,
       )
@@ -516,7 +505,6 @@ export class CronService {
         merged.atIso,
         merged.timezone,
         merged.runMode,
-        merged.invokePolicy,
         merged.handlerKey,
         merged.agentPromptTemplate,
         merged.agentModelOverride,
@@ -885,7 +873,7 @@ export class CronService {
     }
   }
 
-  private async runSystemOrScriptStep(
+  private async runDeterministicStep(
     definition: CronJobDefinition,
     instance: CronJobInstance,
   ): Promise<CronHandlerResult> {
@@ -985,7 +973,8 @@ export class CronService {
           finishedAt: nowMs(),
         });
       } else {
-        const stepKind: CronStepKind = definition.runMode === "system" ? "system" : "script";
+        const stepKind: CronStepKind =
+          definition.runMode === "background" ? "background" : "conditional_agent";
         insertStep({
           instanceId: claimed.id,
           stepKind,
@@ -993,7 +982,7 @@ export class CronService {
           input: { payload: definition.payload, handlerKey: definition.handlerKey },
           startedAt,
         });
-        const deterministicResult = await this.runSystemOrScriptStep(definition, instance);
+        const deterministicResult = await this.runDeterministicStep(definition, instance);
         if (deterministicResult.status !== "ok") {
           insertStep({
             instanceId: claimed.id,
@@ -1019,9 +1008,8 @@ export class CronService {
         });
 
         const shouldInvokeAgent =
-          definition.runMode === "script" &&
-          (definition.invokePolicy === "always" ||
-            (definition.invokePolicy === "on_condition" && deterministicResult.invokeAgent?.shouldInvoke === true));
+          definition.runMode === "conditional_agent" &&
+          deterministicResult.invokeAgent?.shouldInvoke === true;
 
         if (shouldInvokeAgent) {
           const template = deterministicResult.invokeAgent?.prompt ?? definition.agentPromptTemplate ?? "";
@@ -1036,7 +1024,6 @@ export class CronService {
             status: "running",
             input: {
               promptTemplate: template,
-              invokePolicy: definition.invokePolicy,
               invokeAgent: deterministicResult.invokeAgent ?? null,
             },
             startedAt: agentStartedAt,
@@ -1054,7 +1041,6 @@ export class CronService {
               status: "failed",
               input: {
                 promptTemplate: template,
-                invokePolicy: definition.invokePolicy,
               },
               error: { message: agentResult.error },
               startedAt: agentStartedAt,
@@ -1069,7 +1055,6 @@ export class CronService {
             status: "completed",
             input: {
               promptTemplate: template,
-              invokePolicy: definition.invokePolicy,
             },
             output: { summary: agentResult.summary },
             startedAt: agentStartedAt,

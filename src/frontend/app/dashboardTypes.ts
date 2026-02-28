@@ -70,6 +70,7 @@ export type ConfirmAction =
   | { type: "remove-mcp"; mcpId: string }
   | { type: "disconnect-mcp"; mcpId: string }
   | { type: "remove-agent"; agentId: string }
+  | { type: "remove-cron"; jobId: string }
   | null;
 
 export function fromLegacyAgent(agent: DashboardBootstrap["agents"][number]): AgentTypeDefinition {
@@ -133,6 +134,14 @@ export function getConfirmDialogProps(confirmAction: ConfirmAction): {
         open: true,
         title: "Remove agent type?",
         description: "This will delete the agent type configuration.",
+        confirmLabel: "Remove",
+        variant: "danger",
+      };
+    case "remove-cron":
+      return {
+        open: true,
+        title: "Remove cron job?",
+        description: `This will delete the cron job "${confirmAction.jobId}" and stop any future scheduled runs.`,
         confirmLabel: "Remove",
         variant: "danger",
       };
