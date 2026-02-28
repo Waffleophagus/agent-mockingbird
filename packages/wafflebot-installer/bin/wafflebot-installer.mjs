@@ -181,7 +181,10 @@ function resolveBunBinary(paths) {
 
 function writeScopedNpmrc(paths, scope, registryUrl) {
   const normalizedScope = scope.replace(/^@/, "");
-  writeFile(paths.npmrcPath, `@${normalizedScope}:registry=${registryUrl}\n`);
+  writeFile(
+    paths.npmrcPath,
+    `registry=${PUBLIC_NPM_REGISTRY}\n@${normalizedScope}:registry=${registryUrl}\n`,
+  );
 }
 
 function npmInstall(prefix, packages, extraArgs = [], env = process.env) {
@@ -307,9 +310,10 @@ async function installOrUpdate(args, mode) {
   const env = {
     ...process.env,
     npm_config_userconfig: paths.npmrcPath,
+    npm_config_registry: PUBLIC_NPM_REGISTRY,
   };
 
-  npmInstall(paths.npmPrefix, [packageSpec(args.scope, args.version, args.tag)], ["--registry", args.registryUrl], env);
+  npmInstall(paths.npmPrefix, [packageSpec(args.scope, args.version, args.tag)], [], env);
 
   const bunBin = resolveBunBinary(paths);
   if (!bunBin) {
