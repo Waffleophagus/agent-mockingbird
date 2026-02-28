@@ -125,14 +125,45 @@ jobs:
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           '
 
-      - name: Pack built artifact
+      - name: Build installer package metadata for publish
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          PKG_VERSION="${{ steps.meta.outputs.package_version }}" bun -e '
+            const fs = require("fs");
+            const path = require("path");
+            const scope = (process.env.REGISTRY_SCOPE || "").toLowerCase();
+            const version = process.env.PKG_VERSION;
+            const pkgPath = path.join("packages", "wafflebot-installer", "package.json");
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+            pkg.name = `@${scope}/wafflebot-installer`;
+            pkg.private = false;
+            pkg.version = version;
+            pkg.publishConfig = { registry: process.env.REGISTRY_URL };
+            fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+          '
+
+      - name: Pack wafflebot artifact
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
           tarball="wafflebot-${{ steps.meta.outputs.package_version }}.tgz"
           bun pm pack --filename "${tarball}" --quiet >/dev/null
           test -f "${tarball}"
-          echo "PACKAGE_TARBALL=${tarball}" >> "${GITHUB_ENV}"
+          echo "WAFFLEBOT_TARBALL=${tarball}" >> "${GITHUB_ENV}"
+          ls -lh -- "${tarball}"
+
+      - name: Pack wafflebot-installer artifact
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          tarball="wafflebot-installer-${{ steps.meta.outputs.package_version }}.tgz"
+          (
+            cd packages/wafflebot-installer
+            bun pm pack --filename "../../${tarball}" --quiet >/dev/null
+          )
+          test -f "${tarball}"
+          echo "WAFFLEBOT_INSTALLER_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
       - name: Configure registry auth
@@ -179,4 +210,16 @@ jobs:
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          bunx npm publish "${PACKAGE_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
+          bunx npm publish "${WAFFLEBOT_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
+
+      - name: Publish installer package tarball
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          package_name="@${REGISTRY_SCOPE}/wafflebot-installer"
+          package_version="${{ steps.meta.outputs.package_version }}"
+          if bunx npm view "${package_name}@${package_version}" version --registry "${REGISTRY_URL%/}/" >/dev/null 2>&1; then
+            echo "Version ${package_name}@${package_version} already exists; skipping publish."
+            exit 0
+          fi
+          bunx npm publish "${WAFFLEBOT_INSTALLER_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"

@@ -1,0 +1,14 @@
+{
+  "name": "@waffleophagus/wafflebot-installer",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Private installer for Wafflebot + OpenCode Linux user services",
+  "bin": {
+    "wafflebot-installer": "bin/wafflebot-installer.mjs"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ]
+}
