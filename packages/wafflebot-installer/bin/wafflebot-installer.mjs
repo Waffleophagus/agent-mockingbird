@@ -10,6 +10,7 @@ const { console, fetch } = globalThis;
 
 const DEFAULT_SCOPE = "waffleophagus";
 const DEFAULT_REGISTRY_URL = "https://git.waffleophagus.com/api/packages/waffleophagus/npm/";
+const PUBLIC_NPM_REGISTRY = "https://registry.npmjs.org/";
 const DEFAULT_TAG = "main";
 const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".wafflebot");
 const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
@@ -298,10 +299,10 @@ async function installOrUpdate(args, mode) {
   writeScopedNpmrc(paths, args.scope, args.registryUrl);
 
   if (!resolveBunBinary(paths)) {
-    npmInstall(paths.npmPrefix, ["bun@latest"]);
+    npmInstall(paths.npmPrefix, ["bun@latest"], ["--registry", PUBLIC_NPM_REGISTRY]);
   }
 
-  npmInstall(paths.npmPrefix, ["opencode-ai@latest"]);
+  npmInstall(paths.npmPrefix, ["opencode-ai@latest"], ["--registry", PUBLIC_NPM_REGISTRY]);
 
   const env = {
     ...process.env,
