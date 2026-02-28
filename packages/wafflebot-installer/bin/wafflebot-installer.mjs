@@ -6,6 +6,8 @@ import process from "node:process";
 import readline from "node:readline/promises";
 import { spawnSync } from "node:child_process";
 
+const { console, fetch } = globalThis;
+
 const DEFAULT_SCOPE = "waffleophagus";
 const DEFAULT_REGISTRY_URL = "https://git.waffleophagus.com/api/packages/waffleophagus/npm/";
 const DEFAULT_TAG = "main";
