@@ -252,8 +252,9 @@ This repo uses one CI/CD workflow:
 
 - `.github/workflows/ci.yml` runs lint/typecheck/build, then publishes the same packed artifact to your npm-compatible package registry.
 - Pull requests run checks only (no publish).
-- Publish version is read from `package.json`.
-- Pushes to `main`, pushes to matching `v*` tags, and manual dispatch publish with npm tag `latest`.
+- `main` pushes auto-increment patch version from the currently published stable version (`0.0.1` -> `0.0.2` -> `0.0.3`) and publish with npm tag `latest`.
+- Pushes to matching `v*` tags publish the exact `package.json` version with npm tag `latest`.
+- Manual dispatch publishes `package.json` version with npm tag `latest`.
 - Tag pushes must match `v<package.json version>` or CI fails.
 
 Published package artifact:
@@ -280,12 +281,12 @@ Direct package execution from private registry:
 
 ```bash
 npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/wafflebot-installer@main" install
+  "@waffleophagus/wafflebot-installer@latest" install
 ```
 
 ```bash
 bunx --bun npm exec --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/wafflebot-installer@main" -- install
+  "@waffleophagus/wafflebot-installer@latest" -- install
 ```
 
 Installer commands:
