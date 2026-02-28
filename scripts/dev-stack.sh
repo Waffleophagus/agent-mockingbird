@@ -81,11 +81,15 @@ if ! wait_for_http "${OPENCODE_URL}/session" "opencode"; then
 fi
 
 echo "[stack] opencode is reachable"
+echo "[stack] syncing runtime.opencode.baseUrl into wafflebot config"
+(
+  cd "${ROOT_DIR}"
+  WAFFLEBOT_OPENCODE_BASE_URL="${OPENCODE_URL}" bun run config:migrate-opencode-env >/dev/null || true
+)
 echo "[stack] starting wafflebot at ${WAFFLEBOT_URL}"
 (
   cd "${ROOT_DIR}"
   export PORT="${WAFFLEBOT_PORT}"
-  export WAFFLEBOT_OPENCODE_BASE_URL="${OPENCODE_URL}"
   exec bun --hot src/index.ts
 ) &
 WAFFLEBOT_PID=$!

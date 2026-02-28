@@ -36,6 +36,15 @@ export interface SessionMessagePartUpdatedPayload {
 }
 export type SessionMessagePartUpdatedEvent = RuntimeEventBase<"session.message.part.updated", SessionMessagePartUpdatedPayload>;
 
+export interface SessionMessageDeltaPayload {
+  sessionId: string;
+  messageId: string;
+  text: string;
+  mode: "append" | "replace";
+  observedAt: string;
+}
+export type SessionMessageDeltaEvent = RuntimeEventBase<"session.message.delta", SessionMessageDeltaPayload>;
+
 export interface SessionRunStatusPayload {
   sessionId: string;
   status: "idle" | "busy" | "retry";
@@ -148,6 +157,7 @@ export type RuntimeEvent =
   | SessionStateUpdatedEvent
   | SessionMessageCreatedEvent
   | SessionMessagePartUpdatedEvent
+  | SessionMessageDeltaEvent
   | SessionRunStatusUpdatedEvent
   | SessionCompactedEvent
   | SessionRunErrorEvent
@@ -199,6 +209,13 @@ export function createSessionMessagePartUpdatedEvent(
   source: RuntimeEventSource,
 ): SessionMessagePartUpdatedEvent {
   return baseRuntimeEvent("session.message.part.updated", payload, source);
+}
+
+export function createSessionMessageDeltaEvent(
+  payload: SessionMessageDeltaPayload,
+  source: RuntimeEventSource,
+): SessionMessageDeltaEvent {
+  return baseRuntimeEvent("session.message.delta", payload, source);
 }
 
 export function createSessionRunStatusUpdatedEvent(

@@ -26,6 +26,7 @@ import {
   createHeartbeatUpdatedEvent,
   createSessionCompactedEvent,
   createSessionMessageCreatedEvent,
+  createSessionMessageDeltaEvent,
   createSessionMessagePartUpdatedEvent,
   createSessionRunErrorEvent,
   createSessionRunStatusUpdatedEvent,
@@ -93,6 +94,17 @@ type Listener = (event: RuntimeEvent) => void;
 type AssistantInfo = Extract<Message, { role: "assistant" }>;
 type OpencodeMessagePartUpdatedEvent = Extract<OpencodeEvent, { type: "message.part.updated" }>;
 type OpencodeMessageUpdatedEvent = Extract<OpencodeEvent, { type: "message.updated" }>;
+type OpencodeMessagePartDeltaEvent = {
+  type: "message.part.delta";
+  properties: {
+    sessionID: string;
+    messageID: string;
+    partID: string;
+    field: string;
+    delta: string;
+  };
+};
+type OpencodeRuntimeEvent = OpencodeEvent | OpencodeMessagePartDeltaEvent;
 type ResolvedModel = { providerId: string; modelId: string };
 type RuntimeOpencodeConfig = WafflebotConfig["runtime"]["opencode"];
 
@@ -120,7 +132,11 @@ const BACKGROUND_SYNC_INTERVAL_MS = 8_000;
 const BACKGROUND_SYNC_BATCH_LIMIT = 200;
 const BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS = 3_000;
 const QUEUE_DRAIN_METADATA_KEY = "__queueDrain";
+const DEFAULT_RUNTIME_TIMEOUT_MS = 120_000;
+const DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS = 300_000;
+const STREAMED_METADATA_CACHE_LIMIT = 10_000;
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
+type MemoryInjectionState = { fingerprint: string; forceReinject: boolean };
 
 function shouldQueueWhenBusy(input: SendUserMessageInput): boolean {
   return input.metadata?.heartbeat !== true;
@@ -187,6 +203,9 @@ export class OpencodeRuntime implements RuntimeEngine {
   private drainingSessions = new Set<string>();
   private imageCapabilityByModelRef = new Map<string, boolean>();
   private imageCapabilityFetchedAtMs = 0;
+  private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
+  private partTypeByScopedPartId = new Map<string, Part["type"]>();
+  private memoryInjectionStateBySessionId = new Map<string, MemoryInjectionState>();
 
   constructor(private options: OpencodeRuntimeOptions) {
     if (options.client) {
@@ -283,17 +302,17 @@ export class OpencodeRuntime implements RuntimeEngine {
   private currentSmallModel() {
     const runtimeConfig = this.currentRuntimeConfig();
     const smallModel = runtimeConfig?.smallModel?.trim();
-    return smallModel || env.WAFFLEBOT_OPENCODE_SMALL_MODEL;
+    return smallModel || `${this.currentProviderId()}/${this.currentModelId()}`;
   }
 
   private currentTimeoutMs() {
     const runtimeConfig = this.currentRuntimeConfig();
-    return runtimeConfig?.timeoutMs ?? env.WAFFLEBOT_OPENCODE_TIMEOUT_MS;
+    return runtimeConfig?.timeoutMs ?? DEFAULT_RUNTIME_TIMEOUT_MS;
   }
 
   private currentPromptTimeoutMs() {
     const runtimeConfig = this.currentRuntimeConfig();
-    return runtimeConfig?.promptTimeoutMs ?? env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS;
+    return runtimeConfig?.promptTimeoutMs ?? DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS;
   }
 
   private currentEnabledSkills() {
@@ -395,11 +414,12 @@ export class OpencodeRuntime implements RuntimeEngine {
       }
 
       const primaryText = this.extractPrimaryTextInput(inputParts);
-      const promptInput = await this.buildPromptInputWithMemory(primaryText);
+      const promptInput = await this.buildPromptInputWithMemory(opencodeSessionId, primaryText);
       const memorySystemPrompt = this.buildWafflebotSystemPrompt({
         agentId: input.agent?.trim() || undefined,
       });
       const promptParts = this.applyMemoryPromptToParts(inputParts, promptInput.content);
+      const recreatedSessionPromptParts = this.applyMemoryPromptToParts(inputParts, promptInput.freshSessionContent);
 
       let promptResult: { message: { info: AssistantInfo; parts: Array<Part> }; opencodeSessionId: string };
       try {
@@ -409,6 +429,8 @@ export class OpencodeRuntime implements RuntimeEngine {
           opencodeSessionId,
           primaryModel: selectedModel,
           parts: promptParts,
+          retryPartsOnSessionRecreate: recreatedSessionPromptParts,
+          memoryContextFingerprint: promptInput.memoryContextFingerprint,
           system: memorySystemPrompt,
           agent: input.agent?.trim() || undefined,
         });
@@ -421,6 +443,10 @@ export class OpencodeRuntime implements RuntimeEngine {
       }
       opencodeSessionId = promptResult.opencodeSessionId;
       const assistantMessage = promptResult.message;
+      this.rememberMessageRole(opencodeSessionId, assistantMessage.info.id, "assistant");
+      for (const part of assistantMessage.parts) {
+        this.rememberPartMetadata(part);
+      }
 
       await this.syncSessionTitleFromOpencode(session.id, opencodeSessionId, session.title);
       this.startSessionTitlePolling(session.id, opencodeSessionId);
@@ -456,6 +482,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         assistantParts,
         source: "runtime",
         createdAt,
+        userMessageId: assistantMessage.info.parentID,
         assistantMessageId: assistantMessage.info.id,
         usage: {
           requestCountDelta: 1,
@@ -776,6 +803,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         throwOnError: true,
         signal: this.defaultRequestSignal(),
       });
+      this.markMemoryInjectionStateForReinject(opencodeSessionId);
       return Boolean(unwrapSdkData<boolean>(result));
     } catch (error) {
       if (getOpencodeErrorStatus(error) === 404) {
@@ -790,50 +818,128 @@ export class OpencodeRuntime implements RuntimeEngine {
           throwOnError: true,
           signal: this.defaultRequestSignal(),
         });
+        this.markMemoryInjectionStateForReinject(opencodeSessionId);
         return Boolean(unwrapSdkData<boolean>(retry));
       }
       throw this.normalizeRuntimeError(error);
     }
   }
 
-  private async buildPromptInputWithMemory(userContent: string): Promise<{
+  private async buildPromptInputWithMemory(opencodeSessionId: string, userContent: string): Promise<{
     content: string;
+    freshSessionContent: string;
     injectedContextResults: number;
+    memoryContextFingerprint: string | null;
   }> {
     if (currentMemoryConfig().toolMode === "tool_only") {
-      return { content: userContent, injectedContextResults: 0 };
+      return {
+        content: userContent,
+        freshSessionContent: userContent,
+        injectedContextResults: 0,
+        memoryContextFingerprint: null,
+      };
     }
 
     const query = userContent.trim();
-    if (!query) return { content: userContent, injectedContextResults: 0 };
+    if (!query) {
+      this.clearMemoryInjectionState(opencodeSessionId);
+      return {
+        content: userContent,
+        freshSessionContent: userContent,
+        injectedContextResults: 0,
+        memoryContextFingerprint: null,
+      };
+    }
 
     try {
       const results = await searchMemory(query);
       if (!results.length) {
-        return { content: userContent, injectedContextResults: 0 };
+        this.clearMemoryInjectionState(opencodeSessionId);
+        return {
+          content: userContent,
+          freshSessionContent: userContent,
+          injectedContextResults: 0,
+          memoryContextFingerprint: null,
+        };
       }
       const contextLines = results.map(
         (result, index) =>
           `${index + 1}. (${result.score.toFixed(3)}) ${result.citation}\n${result.snippet}`,
       );
       const contextBlock = contextLines.join("\n\n");
+      const wrappedText = [
+        "Use the memory context below only if relevant and non-contradictory to current user intent.",
+        "",
+        "[Memory Context]",
+        contextBlock,
+        "[/Memory Context]",
+        "",
+        "[User Message]",
+        userContent,
+        "[/User Message]",
+      ].join("\n");
+      const fingerprint = stableSerialize(
+        results.map(result => ({
+          id: result.id,
+          path: result.path,
+          startLine: result.startLine,
+          endLine: result.endLine,
+          score: result.score,
+          citation: result.citation,
+          snippet: result.snippet,
+        })),
+      );
+      const existing = this.memoryInjectionStateBySessionId.get(opencodeSessionId);
+      const shouldInject = !existing || existing.forceReinject || existing.fingerprint !== fingerprint;
+      if (shouldInject) {
+        this.setMemoryInjectionState(opencodeSessionId, {
+          fingerprint,
+          forceReinject: false,
+        });
+      }
       return {
-        content: [
-          "Use the memory context below only if relevant and non-contradictory to current user intent.",
-          "",
-          "[Memory Context]",
-          contextBlock,
-          "[/Memory Context]",
-          "",
-          "[User Message]",
-          userContent,
-          "[/User Message]",
-        ].join("\n"),
-        injectedContextResults: results.length,
+        content: shouldInject ? wrappedText : userContent,
+        freshSessionContent: wrappedText,
+        injectedContextResults: shouldInject ? results.length : 0,
+        memoryContextFingerprint: fingerprint,
       };
     } catch {
-      return { content: userContent, injectedContextResults: 0 };
+      return {
+        content: userContent,
+        freshSessionContent: userContent,
+        injectedContextResults: 0,
+        memoryContextFingerprint: null,
+      };
     }
+  }
+
+  private setMemoryInjectionState(sessionId: string, state: MemoryInjectionState) {
+    const normalized = sessionId.trim();
+    if (!normalized) return;
+    this.memoryInjectionStateBySessionId.set(normalized, state);
+  }
+
+  private clearMemoryInjectionState(sessionId: string) {
+    const normalized = sessionId.trim();
+    if (!normalized) return;
+    this.memoryInjectionStateBySessionId.delete(normalized);
+  }
+
+  private markMemoryInjectionStateForReinject(sessionId: string) {
+    const normalized = sessionId.trim();
+    if (!normalized) return;
+    const existing = this.memoryInjectionStateBySessionId.get(normalized);
+    if (existing) {
+      this.memoryInjectionStateBySessionId.set(normalized, {
+        ...existing,
+        forceReinject: true,
+      });
+      return;
+    }
+    this.memoryInjectionStateBySessionId.set(normalized, {
+      fingerprint: "",
+      forceReinject: true,
+    });
   }
 
   private normalizePromptInputParts(content: string, parts?: RuntimeInputPart[]): RuntimeInputPart[] {
@@ -1133,6 +1239,9 @@ export class OpencodeRuntime implements RuntimeEngine {
       case "message.part.updated":
         this.handleMessagePartUpdatedEvent(event);
         return;
+      case "message.part.delta":
+        this.handleMessagePartDeltaEvent(event);
+        return;
       case "message.updated":
         this.handleMessageUpdatedEvent(event);
         return;
@@ -1156,29 +1265,112 @@ export class OpencodeRuntime implements RuntimeEngine {
   private handleMessagePartUpdatedEvent(event: OpencodeMessagePartUpdatedEvent) {
     const sessionId = event.properties.part.sessionID.trim();
     if (!sessionId) return;
+    this.rememberPartMetadata(event.properties.part);
+
+    const messageRole = this.messageRoleByScopedMessageId.get(
+      this.scopedMessageId(sessionId, event.properties.part.messageID),
+    );
+    const canTreatAsAssistant =
+      messageRole === "assistant" ||
+      (messageRole !== "user" && event.properties.part.type === "reasoning");
+
     const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, sessionId);
     if (!localSessionId) return;
 
     const mappedPart = this.mapChatMessagePart(event.properties.part);
-    if (!mappedPart) return;
+    if (mappedPart) {
+      const phase = (() => {
+        if (event.properties.part.type !== "tool") {
+          return "update" as const;
+        }
+        const status = event.properties.part.state.status;
+        if (status === "pending") return "start" as const;
+        if (status === "running") return "update" as const;
+        return "final" as const;
+      })();
 
-    const phase = (() => {
-      if (event.properties.part.type !== "tool") {
-        return "update" as const;
-      }
-      const status = event.properties.part.state.status;
-      if (status === "pending") return "start" as const;
-      if (status === "running") return "update" as const;
-      return "final" as const;
-    })();
+      this.emit(
+        createSessionMessagePartUpdatedEvent(
+          {
+            sessionId: localSessionId,
+            messageId: event.properties.part.messageID,
+            part: mappedPart,
+            phase,
+            observedAt: new Date().toISOString(),
+          },
+          "runtime",
+        ),
+      );
+    }
+
+    const maybeDelta = (event.properties as { delta?: unknown }).delta;
+    const deltaFromPartUpdate = typeof maybeDelta === "string" ? maybeDelta : "";
+    if (!canTreatAsAssistant) return;
+    if (event.properties.part.type !== "text" && event.properties.part.type !== "reasoning") return;
+
+    if (deltaFromPartUpdate.length > 0) {
+      this.emit(
+        createSessionMessageDeltaEvent(
+          {
+            sessionId: localSessionId,
+            messageId: event.properties.part.messageID,
+            text: deltaFromPartUpdate,
+            mode: "append",
+            observedAt: new Date().toISOString(),
+          },
+          "runtime",
+        ),
+      );
+      return;
+    }
+
+    if (event.properties.part.text.length > 0) {
+      this.emit(
+        createSessionMessageDeltaEvent(
+          {
+            sessionId: localSessionId,
+            messageId: event.properties.part.messageID,
+            text: event.properties.part.text,
+            mode: "replace",
+            observedAt: new Date().toISOString(),
+          },
+          "runtime",
+        ),
+      );
+    }
+  }
+
+  private handleMessagePartDeltaEvent(event: OpencodeMessagePartDeltaEvent) {
+    const sessionId = event.properties.sessionID.trim();
+    if (!sessionId) return;
+
+    const field = event.properties.field.trim();
+    if (field !== "text") return;
+    const delta = event.properties.delta;
+    if (typeof delta !== "string" || delta.length === 0) return;
+
+    const messageId = event.properties.messageID.trim();
+    const partId = event.properties.partID.trim();
+    if (!messageId || !partId) return;
+
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, sessionId);
+    if (!localSessionId) return;
+
+    const partType = this.partTypeByScopedPartId.get(this.scopedPartId(sessionId, messageId, partId));
+    if (partType && partType !== "text" && partType !== "reasoning") return;
+
+    const messageRole = this.messageRoleByScopedMessageId.get(this.scopedMessageId(sessionId, messageId));
+    const canTreatAsAssistant =
+      messageRole === "assistant" || (messageRole !== "user" && partType === "reasoning");
+    if (!canTreatAsAssistant) return;
 
     this.emit(
-      createSessionMessagePartUpdatedEvent(
+      createSessionMessageDeltaEvent(
         {
           sessionId: localSessionId,
-          messageId: event.properties.part.messageID,
-          part: mappedPart,
-          phase,
+          messageId,
+          text: delta,
+          mode: "append",
           observedAt: new Date().toISOString(),
         },
         "runtime",
@@ -1187,11 +1379,17 @@ export class OpencodeRuntime implements RuntimeEngine {
   }
 
   private handleMessageUpdatedEvent(event: OpencodeMessageUpdatedEvent) {
+    this.rememberMessageRole(
+      event.properties.info.sessionID,
+      event.properties.info.id,
+      event.properties.info.role,
+    );
     if (event.properties.info.role !== "assistant") return;
     const opencodeSessionId = event.properties.info.sessionID.trim();
     if (!opencodeSessionId) return;
     const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId) return;
+    if (this.busySessions.has(localSessionId)) return;
 
     void this.syncMessageById({
       localSessionId,
@@ -1276,6 +1474,7 @@ export class OpencodeRuntime implements RuntimeEngine {
 
   private handleSessionCompactedEvent(event: Extract<OpencodeEvent, { type: "session.compacted" }>) {
     const opencodeSessionId = event.properties.sessionID;
+    this.markMemoryInjectionStateForReinject(opencodeSessionId);
     const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId) return;
 
@@ -1326,10 +1525,74 @@ export class OpencodeRuntime implements RuntimeEngine {
     );
   }
 
-  private isOpencodeEvent(event: unknown): event is OpencodeEvent {
+  private isOpencodeEvent(event: unknown): event is OpencodeRuntimeEvent {
     if (!event || typeof event !== "object") return false;
     const maybeEvent = event as { type?: unknown };
     return typeof maybeEvent.type === "string";
+  }
+
+  private scopedMessageId(sessionId: string, messageId: string): string {
+    return `${sessionId}:${messageId}`;
+  }
+
+  private scopedPartId(sessionId: string, messageId: string, partId: string): string {
+    return `${sessionId}:${messageId}:${partId}`;
+  }
+
+  private isAssistantOnlyPartType(partType: Part["type"]): boolean {
+    return (
+      partType === "reasoning" ||
+      partType === "tool" ||
+      partType === "step-start" ||
+      partType === "step-finish" ||
+      partType === "snapshot" ||
+      partType === "patch" ||
+      partType === "agent" ||
+      partType === "retry" ||
+      partType === "compaction"
+    );
+  }
+
+  private setBoundedMapEntry<Key, Value>(map: Map<Key, Value>, key: Key, value: Value) {
+    if (map.has(key)) {
+      map.delete(key);
+    }
+    map.set(key, value);
+    if (map.size <= STREAMED_METADATA_CACHE_LIMIT) return;
+    const oldest = map.keys().next().value as Key | undefined;
+    if (oldest !== undefined) {
+      map.delete(oldest);
+    }
+  }
+
+  private rememberMessageRole(sessionId: string, messageId: string, role: Message["role"]) {
+    const normalizedSessionId = sessionId.trim();
+    const normalizedMessageId = messageId.trim();
+    if (!normalizedSessionId || !normalizedMessageId) return;
+    this.setBoundedMapEntry(
+      this.messageRoleByScopedMessageId,
+      this.scopedMessageId(normalizedSessionId, normalizedMessageId),
+      role,
+    );
+  }
+
+  private rememberPartMetadata(part: Part) {
+    const maybePart = part as {
+      sessionID?: unknown;
+      messageID?: unknown;
+      id?: unknown;
+      type?: unknown;
+    };
+    const sessionId = typeof maybePart.sessionID === "string" ? maybePart.sessionID.trim() : "";
+    const messageId = typeof maybePart.messageID === "string" ? maybePart.messageID.trim() : "";
+    const partId = typeof maybePart.id === "string" ? maybePart.id.trim() : "";
+    const partType = typeof maybePart.type === "string" ? (maybePart.type as Part["type"]) : null;
+    if (!sessionId || !messageId || !partId || !partType) return;
+
+    this.setBoundedMapEntry(this.partTypeByScopedPartId, this.scopedPartId(sessionId, messageId, partId), partType);
+    if (this.isAssistantOnlyPartType(partType)) {
+      this.rememberMessageRole(sessionId, messageId, "assistant");
+    }
   }
 
   private backgroundRecordToHandle(run: BackgroundRunRecord): BackgroundRunHandle {
@@ -1494,6 +1757,13 @@ export class OpencodeRuntime implements RuntimeEngine {
           signal: this.defaultRequestSignal(),
         }),
       );
+    }
+
+    for (const entry of messages) {
+      this.rememberMessageRole(externalSessionId, entry.info.id, entry.info.role);
+      for (const part of entry.parts) {
+        this.rememberPartMetadata(part);
+      }
     }
 
     const imported = messages.flatMap(entry => {
@@ -2142,6 +2412,8 @@ export class OpencodeRuntime implements RuntimeEngine {
     opencodeSessionId: string;
     primaryModel: ResolvedModel;
     parts: Array<RuntimeInputPart>;
+    retryPartsOnSessionRecreate?: Array<RuntimeInputPart>;
+    memoryContextFingerprint?: string | null;
     system?: string;
     agent?: string;
   }): Promise<{ message: { info: AssistantInfo; parts: Array<Part> }; opencodeSessionId: string }> {
@@ -2168,7 +2440,14 @@ export class OpencodeRuntime implements RuntimeEngine {
             throw this.normalizeRuntimeError(createError);
           }
           try {
-            const message = await this.sendPrompt(sessionId, model, input.parts, input.system, input.agent);
+            if (input.memoryContextFingerprint) {
+              this.setMemoryInjectionState(sessionId, {
+                fingerprint: input.memoryContextFingerprint,
+                forceReinject: false,
+              });
+            }
+            const retryParts = input.retryPartsOnSessionRecreate ?? input.parts;
+            const message = await this.sendPrompt(sessionId, model, retryParts, input.system, input.agent);
             return { message, opencodeSessionId: sessionId };
           } catch (retryError) {
             attemptError = retryError;

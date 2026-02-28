@@ -12,8 +12,6 @@ Environment=NODE_ENV=production
 Environment=PORT=3001
 Environment=WAFFLEBOT_CONFIG_PATH=/var/lib/wafflebot/wafflebot.config.json
 Environment=WAFFLEBOT_DB_PATH=/var/lib/wafflebot/wafflebot.db
-Environment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096
-Environment=WAFFLEBOT_OPENCODE_DIRECTORY=/srv/wafflebot/app
 ExecStart=/usr/bin/env bun src/index.ts
 Restart=always
 RestartSec=2

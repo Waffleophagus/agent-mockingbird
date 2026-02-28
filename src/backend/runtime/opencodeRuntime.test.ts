@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -15,16 +15,47 @@ process.env.WAFFLEBOT_MEMORY_WORKSPACE_DIR = testWorkspacePath;
 process.env.WAFFLEBOT_MEMORY_ENABLED = "false";
 process.env.WAFFLEBOT_MEMORY_TOOL_MODE = "tool_only";
 process.env.WAFFLEBOT_CRON_ENABLED = "false";
-process.env.WAFFLEBOT_OPENCODE_PROVIDER_ID = "test-provider";
-process.env.WAFFLEBOT_OPENCODE_MODEL_ID = "test-model";
-process.env.WAFFLEBOT_OPENCODE_SMALL_MODEL = "test-provider/test-small";
-process.env.WAFFLEBOT_OPENCODE_TIMEOUT_MS = "120000";
-process.env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS = "20";
 
 interface RepositoryApi {
   ensureSeedData: () => void;
   resetDatabaseToDefaults: () => unknown;
-  listMessagesForSession: (sessionId: string) => Array<{ role: string; content: string }>;
+  setSessionModel: (sessionId: string, model: string) => { id: string; model: string } | null;
+  listMessagesForSession: (sessionId: string) => Array<{ id: string; role: string; content: string; at: string }>;
+  upsertSessionMessages: (input: {
+    sessionId: string;
+    messages: Array<{
+      id: string;
+      role: "user" | "assistant";
+      content: string;
+      createdAt: number;
+    }>;
+  }) => unknown;
+  appendChatExchange: (input: {
+    sessionId: string;
+    userContent: string;
+    assistantContent: string;
+    source: "api" | "runtime" | "scheduler" | "system";
+    createdAt?: number;
+    userMessageId?: string;
+    assistantMessageId?: string;
+    usage: {
+      requestCountDelta: number;
+      inputTokensDelta: number;
+      outputTokensDelta: number;
+      estimatedCostUsdDelta: number;
+    };
+  }) =>
+    | {
+        messages: Array<{ id: string; role: "user" | "assistant"; content: string; at: string }>;
+      }
+    | null;
+  appendAssistantMessage: (input: {
+    sessionId: string;
+    content: string;
+    source: "api" | "runtime" | "scheduler" | "system";
+    createdAt?: number;
+    messageId?: string;
+  }) => { message: { id: string; role: "assistant"; content: string } } | null;
 }
 
 type PromptInput = {
@@ -34,6 +65,8 @@ type PromptInput = {
       providerID?: string;
       modelID?: string;
     };
+    system?: string;
+    parts?: Array<{ type: string; text?: string }>;
   };
   signal?: AbortSignal;
 };
@@ -96,6 +129,26 @@ type RuntimeCtor = new (input: {
   defaultModelId: string;
   fallbackModelRefs?: Array<string>;
   client?: unknown;
+  getRuntimeConfig?: () => {
+    baseUrl: string;
+    providerId: string;
+    modelId: string;
+    fallbackModels: string[];
+    imageModel: string | null;
+    smallModel: string;
+    timeoutMs: number;
+    promptTimeoutMs: number;
+    runWaitTimeoutMs: number;
+    childSessionHideAfterDays: number;
+    directory: string | null;
+    bootstrap: {
+      enabled: boolean;
+      maxCharsPerFile: number;
+      maxCharsTotal: number;
+      subagentMinimal: boolean;
+      includeAgentPrompt: boolean;
+    };
+  };
   getEnabledSkills?: () => Array<string>;
   getEnabledMcps?: () => Array<string>;
   getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
@@ -180,6 +233,10 @@ let RuntimeContinuationDetachedError: new (sessionId: string, childRunCount: num
 
 beforeAll(async () => {
   await import("../db/migrate");
+  const configService = (await import("../config/service")) as unknown as {
+    getConfigSnapshot: () => unknown;
+  };
+  configService.getConfigSnapshot();
   repository = (await import("../db/repository")) as unknown as RepositoryApi;
   ({ OpencodeRuntime } = (await import("./opencodeRuntime")) as unknown as {
     OpencodeRuntime: RuntimeCtor;
@@ -204,6 +261,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   repository.resetDatabaseToDefaults();
+  repository.setSessionModel("main", "test-provider/test-model");
 });
 
 afterAll(() => {
@@ -212,11 +270,13 @@ afterAll(() => {
 
 function assistantResponse(sessionID: string, text: string) {
   const now = Date.now();
+  const parentID = `msg-user-${crypto.randomUUID().slice(0, 8)}`;
   return {
     data: {
       info: {
         id: `msg-${crypto.randomUUID().slice(0, 8)}`,
         sessionID,
+        parentID,
         role: "assistant",
         summary: false,
         mode: "build",
@@ -235,6 +295,71 @@ function assistantResponse(sessionID: string, text: string) {
         {
           type: "text",
           text,
+        },
+      ],
+    },
+  };
+}
+
+function assistantResponseWithId(sessionID: string, id: string, text: string) {
+  const now = Date.now();
+  const parentID = `msg-user-${crypto.randomUUID().slice(0, 8)}`;
+  return {
+    data: {
+      info: {
+        id,
+        sessionID,
+        parentID,
+        role: "assistant",
+        summary: false,
+        mode: "build",
+        finish: "stop",
+        time: {
+          created: now,
+          completed: now,
+        },
+        tokens: {
+          input: 12,
+          output: 24,
+        },
+        cost: 0,
+      },
+      parts: [
+        {
+          type: "text",
+          text,
+        },
+      ],
+    },
+  };
+}
+
+function assistantResponseWithIds(sessionID: string, input: { id: string; parentID: string; text: string }) {
+  const now = Date.now();
+  return {
+    data: {
+      info: {
+        id: input.id,
+        parentID: input.parentID,
+        sessionID,
+        role: "assistant",
+        summary: false,
+        mode: "build",
+        finish: "stop",
+        time: {
+          created: now,
+          completed: now,
+        },
+        tokens: {
+          input: 12,
+          output: 24,
+        },
+        cost: 0,
+      },
+      parts: [
+        {
+          type: "text",
+          text: input.text,
         },
       ],
     },
@@ -365,6 +490,26 @@ function createRuntimeWithClient(
     defaultProviderId: "test-provider",
     defaultModelId: "test-model",
     fallbackModelRefs: options?.fallbackModelRefs,
+    getRuntimeConfig: () => ({
+      baseUrl: "http://127.0.0.1:4096",
+      providerId: "test-provider",
+      modelId: "test-model",
+      fallbackModels: options?.fallbackModelRefs ?? [],
+      imageModel: null,
+      smallModel: "test-provider/test-small",
+      timeoutMs: 120_000,
+      promptTimeoutMs: 20,
+      runWaitTimeoutMs: 180_000,
+      childSessionHideAfterDays: 3,
+      directory: null,
+      bootstrap: {
+        enabled: true,
+        maxCharsPerFile: 20_000,
+        maxCharsTotal: 150_000,
+        subagentMinimal: true,
+        includeAgentPrompt: true,
+      },
+    }),
     getEnabledSkills: options?.getEnabledSkills,
     getEnabledMcps: options?.getEnabledMcps,
     getConfiguredMcpServers: options?.getConfiguredMcpServers,
@@ -377,6 +522,49 @@ function createRuntimeWithClient(
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function updateRuntimeMemoryConfig(
+  patch: Partial<{
+    enabled: boolean;
+    workspaceDir: string;
+    embedProvider: "ollama" | "none";
+    toolMode: "hybrid" | "inject_only" | "tool_only";
+    minScore: number;
+  }>,
+) {
+  if (!existsSync(testConfigPath)) {
+    throw new Error(`Missing runtime test config: ${testConfigPath}`);
+  }
+  const raw = JSON.parse(readFileSync(testConfigPath, "utf8")) as {
+    runtime?: {
+      memory?: Record<string, unknown>;
+    };
+  };
+  const runtime = raw.runtime ?? {};
+  const memory = runtime.memory ?? {};
+  runtime.memory = {
+    ...memory,
+    ...patch,
+  };
+  raw.runtime = runtime;
+  writeFileSync(testConfigPath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+}
+
+async function seedMemoryFixture(marker: string) {
+  mkdirSync(testWorkspacePath, { recursive: true });
+  writeFileSync(
+    path.join(testWorkspacePath, "MEMORY.md"),
+    `# Durable Memory\n\nMarker ${marker} is important for memory injection tests.\n`,
+    "utf8",
+  );
+  const memoryService = (await import("../memory/service")) as unknown as {
+    syncMemoryIndex: (input?: { force?: boolean }) => Promise<void>;
+    searchMemory: (query: string, options?: { maxResults?: number; minScore?: number }) => Promise<Array<unknown>>;
+  };
+  await memoryService.syncMemoryIndex({ force: true });
+  const warmup = await memoryService.searchMemory("Durable Memory", { minScore: 0, maxResults: 6 });
+  expect(warmup.length).toBeGreaterThan(0);
 }
 
 describe("opencode runtime failover contract", () => {
@@ -417,6 +605,100 @@ describe("opencode runtime failover contract", () => {
     expect(createCount).toBe(2);
     expect(sessionIds.length).toBe(2);
     expect(sessionIds[0]).not.toBe(sessionIds[1]);
+  });
+
+  test("injects memory context once for stable retrieval and re-injects after compaction", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+    });
+    const marker = `marker-${crypto.randomUUID().slice(0, 8)}`;
+    await seedMemoryFixture(marker);
+
+    const promptTexts: string[] = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptTexts.push(text);
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+      const internal = runtime as unknown as { handleOpencodeEvent: (event: unknown) => void };
+      internal.handleOpencodeEvent({
+        type: "session.compacted",
+        properties: { sessionID: "ses-1" },
+      });
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(promptTexts.length).toBe(3);
+    expect(promptTexts[0]?.includes("[Memory Context]")).toBe(true);
+    expect(promptTexts[1]?.includes("[Memory Context]")).toBe(false);
+    expect(promptTexts[2]?.includes("[Memory Context]")).toBe(true);
+  });
+
+  test("reinjects memory context on 404 session recreation even when current turn was deduped", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+    });
+    const marker = `marker-${crypto.randomUUID().slice(0, 8)}`;
+    await seedMemoryFixture(marker);
+
+    const promptCalls: Array<{ sessionId: string; hasMemoryContext: boolean }> = [];
+    let failNextWith404 = false;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptCalls.push({
+            sessionId: request.path.id,
+            hasMemoryContext: text.includes("[Memory Context]"),
+          });
+          if (failNextWith404) {
+            failNextWith404 = false;
+            throw Object.assign(new Error("session missing"), { status: 404 });
+          }
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+      failNextWith404 = true;
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(promptCalls.length).toBe(3);
+    expect(promptCalls[0]?.hasMemoryContext).toBe(true);
+    expect(promptCalls[1]?.hasMemoryContext).toBe(false);
+    expect(promptCalls[2]?.hasMemoryContext).toBe(true);
+    expect(promptCalls[1]?.sessionId).not.toBe(promptCalls[2]?.sessionId);
   });
 
   test("maps quota errors to RuntimeProviderQuotaError", async () => {
@@ -938,6 +1220,466 @@ describe("opencode runtime failover contract", () => {
     await sleep(20);
     const messages = repository.listMessagesForSession("main");
     expect(messages.some(message => message.content.includes("Final plan from message.updated reconciliation"))).toBe(true);
+  });
+
+  test("sendUserMessage is resilient when transcript sync already inserted the same assistant message id", async () => {
+    const duplicateAssistantId = "msg-duplicate-assistant";
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) =>
+          assistantResponseWithId(request.path.id, duplicateAssistantId, "Final assistant content from prompt"),
+      }),
+    );
+
+    const seeded = repository.appendAssistantMessage({
+      sessionId: "main",
+      content: "",
+      source: "runtime",
+      messageId: duplicateAssistantId,
+    });
+    expect(seeded?.message.id).toBe(duplicateAssistantId);
+
+    const ack = await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "persist this user turn",
+    });
+
+    expect(ack.messages.some(message => message.role === "assistant" && message.id === duplicateAssistantId)).toBe(true);
+    expect(ack.messages.some(message => message.role === "user" && message.content.includes("persist this user turn"))).toBe(
+      true,
+    );
+
+    const stored = repository.listMessagesForSession("main");
+    expect(stored.filter(message => message.id === duplicateAssistantId).length).toBe(1);
+    expect(
+      stored.filter(
+        message => message.role === "assistant" && message.content.includes("Final assistant content from prompt"),
+      ).length,
+    ).toBe(1);
+    expect(stored.filter(message => message.role === "user" && message.content.includes("persist this user turn")).length).toBe(
+      1,
+    );
+  });
+
+  test("sendUserMessage reuses assistant parentID to avoid duplicate remote user rows", async () => {
+    const remoteUserId = "msg-user-remote-1";
+    repository.upsertSessionMessages({
+      sessionId: "main",
+      messages: [
+        {
+          id: remoteUserId,
+          role: "user",
+          content: "persist this user turn",
+          createdAt: Date.now() - 10_000,
+        },
+      ],
+    });
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) =>
+          assistantResponseWithIds(request.path.id, {
+            id: "msg-assistant-remote-1",
+            parentID: remoteUserId,
+            text: "Final assistant content from prompt",
+          }),
+      }),
+    );
+
+    const ack = await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "persist this user turn",
+    });
+
+    expect(ack.messages.filter(message => message.role === "user" && message.id === remoteUserId).length).toBe(1);
+    const stored = repository.listMessagesForSession("main");
+    expect(stored.filter(message => message.role === "user" && message.id === remoteUserId).length).toBe(1);
+  });
+
+  test("sendUserMessage keeps user turn before assistant when assistant row was synced first", async () => {
+    const remoteUserId = "msg-user-ordered-1";
+    const remoteAssistantId = "msg-assistant-ordered-1";
+    const seededAssistantCreatedAt = Date.now() - 30_000;
+    repository.appendAssistantMessage({
+      sessionId: "main",
+      content: "",
+      source: "runtime",
+      createdAt: seededAssistantCreatedAt,
+      messageId: remoteAssistantId,
+    });
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) =>
+          assistantResponseWithIds(request.path.id, {
+            id: remoteAssistantId,
+            parentID: remoteUserId,
+            text: "Ordered assistant reply",
+          }),
+      }),
+    );
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "ordered user turn",
+    });
+
+    const stored = repository.listMessagesForSession("main");
+    const userIndex = stored.findIndex(message => message.id === remoteUserId);
+    const assistantIndex = stored.findIndex(message => message.id === remoteAssistantId);
+    expect(userIndex).toBeGreaterThanOrEqual(0);
+    expect(assistantIndex).toBeGreaterThanOrEqual(0);
+    expect(userIndex).toBeLessThan(assistantIndex);
+
+    const user = stored.find(message => message.id === remoteUserId);
+    const assistant = stored.find(message => message.id === remoteAssistantId);
+    expect(user).toBeTruthy();
+    expect(assistant).toBeTruthy();
+    expect(Date.parse(user?.at ?? "")).toBeLessThanOrEqual(Date.parse(assistant?.at ?? ""));
+  });
+
+  test("appendChatExchange aligns newly inserted user timestamp when assistant exists first", () => {
+    const userMessageId = "msg-user-aligned-1";
+    const assistantMessageId = "msg-assistant-aligned-1";
+    const assistantCreatedAt = Date.now() - 20_000;
+    repository.appendAssistantMessage({
+      sessionId: "main",
+      content: "",
+      source: "runtime",
+      createdAt: assistantCreatedAt,
+      messageId: assistantMessageId,
+    });
+
+    const appended = repository.appendChatExchange({
+      sessionId: "main",
+      userContent: "hello",
+      assistantContent: "world",
+      source: "runtime",
+      createdAt: Date.now(),
+      userMessageId,
+      assistantMessageId,
+      usage: {
+        requestCountDelta: 1,
+        inputTokensDelta: 1,
+        outputTokensDelta: 1,
+        estimatedCostUsdDelta: 0,
+      },
+    });
+    expect(appended).toBeTruthy();
+
+    const messages = repository.listMessagesForSession("main");
+    const user = messages.find(message => message.id === userMessageId);
+    const assistant = messages.find(message => message.id === assistantMessageId);
+    expect(user).toBeTruthy();
+    expect(assistant).toBeTruthy();
+    expect(Date.parse(user?.at ?? "")).toBeLessThanOrEqual(Date.parse(assistant?.at ?? ""));
+  });
+
+  test("appendChatExchange backfills assistant timestamp at or after existing user timestamp", () => {
+    const userMessageId = "msg-user-preexisting-1";
+    const assistantMessageId = "msg-assistant-backfill-1";
+    const userCreatedAt = Date.now() - 10_000;
+    repository.upsertSessionMessages({
+      sessionId: "main",
+      messages: [
+        {
+          id: userMessageId,
+          role: "user",
+          content: "preexisting user",
+          createdAt: userCreatedAt,
+        },
+      ],
+    });
+
+    const appended = repository.appendChatExchange({
+      sessionId: "main",
+      userContent: "preexisting user",
+      assistantContent: "assistant backfill",
+      source: "runtime",
+      createdAt: userCreatedAt - 2_000,
+      userMessageId,
+      assistantMessageId,
+      usage: {
+        requestCountDelta: 1,
+        inputTokensDelta: 1,
+        outputTokensDelta: 1,
+        estimatedCostUsdDelta: 0,
+      },
+    });
+    expect(appended).toBeTruthy();
+
+    const messages = repository.listMessagesForSession("main");
+    const user = messages.find(message => message.id === userMessageId);
+    const assistant = messages.find(message => message.id === assistantMessageId);
+    expect(user).toBeTruthy();
+    expect(assistant).toBeTruthy();
+    expect(Date.parse(assistant?.at ?? "")).toBeGreaterThanOrEqual(Date.parse(user?.at ?? ""));
+  });
+
+  test("appendChatExchange repairs reversed preexisting pair ordering", () => {
+    const userMessageId = "msg-user-repair-1";
+    const assistantMessageId = "msg-assistant-repair-1";
+    const assistantCreatedAt = Date.now() - 25_000;
+    const userCreatedAt = Date.now() - 5_000;
+    repository.appendAssistantMessage({
+      sessionId: "main",
+      content: "assistant early",
+      source: "runtime",
+      createdAt: assistantCreatedAt,
+      messageId: assistantMessageId,
+    });
+    repository.upsertSessionMessages({
+      sessionId: "main",
+      messages: [
+        {
+          id: userMessageId,
+          role: "user",
+          content: "user late",
+          createdAt: userCreatedAt,
+        },
+      ],
+    });
+
+    const appended = repository.appendChatExchange({
+      sessionId: "main",
+      userContent: "user late",
+      assistantContent: "assistant early",
+      source: "runtime",
+      createdAt: Date.now(),
+      userMessageId,
+      assistantMessageId,
+      usage: {
+        requestCountDelta: 1,
+        inputTokensDelta: 1,
+        outputTokensDelta: 1,
+        estimatedCostUsdDelta: 0,
+      },
+    });
+    expect(appended).toBeTruthy();
+
+    const messages = repository.listMessagesForSession("main");
+    const user = messages.find(message => message.id === userMessageId);
+    const assistant = messages.find(message => message.id === assistantMessageId);
+    expect(user).toBeTruthy();
+    expect(assistant).toBeTruthy();
+    expect(Date.parse(user?.at ?? "")).toBeLessThanOrEqual(Date.parse(assistant?.at ?? ""));
+  });
+
+  test("message.updated skips transcript sync while local session is busy", async () => {
+    let messageSyncCalls = 0;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+        message: async () => {
+          messageSyncCalls += 1;
+          return {
+            data: assistantResponse("ses-1", "Should not sync while busy").data,
+          };
+        },
+      }),
+    );
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Start run",
+    });
+
+    const internal = runtime as unknown as {
+      busySessions: Set<string>;
+      handleOpencodeEvent: (event: unknown) => void;
+    };
+    internal.busySessions.add("main");
+    internal.handleOpencodeEvent({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "msg-busy-sync-1",
+          sessionID: "ses-1",
+          role: "assistant",
+        },
+      },
+    });
+
+    await sleep(20);
+    expect(messageSyncCalls).toBe(0);
+  });
+
+  test("message.part.updated emits session.message.delta for assistant text updates", async () => {
+    const events: Array<unknown> = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+      }),
+    );
+    runtime.subscribe(event => {
+      events.push(event);
+    });
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Start run",
+    });
+    events.length = 0;
+
+    const handleOpencodeEvent = (runtime as unknown as { handleOpencodeEvent: (event: unknown) => void }).handleOpencodeEvent;
+    handleOpencodeEvent.call(runtime, {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "msg-stream-1",
+          sessionID: "ses-1",
+          role: "assistant",
+        },
+      },
+    });
+    handleOpencodeEvent.call(runtime, {
+      type: "message.part.updated",
+      properties: {
+        delta: "Hel",
+        part: {
+          id: "part-text-1",
+          sessionID: "ses-1",
+          messageID: "msg-stream-1",
+          type: "text",
+          text: "Hello",
+          time: { start: Date.now() },
+        },
+      },
+    });
+
+    const deltaEvent = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as {
+        type?: string;
+        payload?: {
+          sessionId?: string;
+          messageId?: string;
+          mode?: string;
+          text?: string;
+        };
+      };
+      return (
+        record.type === "session.message.delta" &&
+        record.payload?.sessionId === "main" &&
+        record.payload?.messageId === "msg-stream-1" &&
+        record.payload?.mode === "append" &&
+        record.payload?.text === "Hel"
+      );
+    });
+    expect(deltaEvent).toBeTruthy();
+  });
+
+  test("message.part.delta emits session.message.delta when assistant role metadata is known", async () => {
+    const events: Array<unknown> = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+      }),
+    );
+    runtime.subscribe(event => {
+      events.push(event);
+    });
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Start run",
+    });
+    events.length = 0;
+
+    const handleOpencodeEvent = (runtime as unknown as { handleOpencodeEvent: (event: unknown) => void }).handleOpencodeEvent;
+    handleOpencodeEvent.call(runtime, {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "msg-stream-2",
+          sessionID: "ses-1",
+          role: "assistant",
+        },
+      },
+    });
+    handleOpencodeEvent.call(runtime, {
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "part-text-2",
+          sessionID: "ses-1",
+          messageID: "msg-stream-2",
+          type: "text",
+          text: "H",
+          time: { start: Date.now() },
+        },
+      },
+    });
+    events.length = 0;
+
+    handleOpencodeEvent.call(runtime, {
+      type: "message.part.delta",
+      properties: {
+        sessionID: "ses-1",
+        messageID: "msg-stream-2",
+        partID: "part-text-2",
+        field: "text",
+        delta: "ello",
+      },
+    });
+
+    const deltaEvent = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as {
+        type?: string;
+        payload?: {
+          sessionId?: string;
+          messageId?: string;
+          mode?: string;
+          text?: string;
+        };
+      };
+      return (
+        record.type === "session.message.delta" &&
+        record.payload?.sessionId === "main" &&
+        record.payload?.messageId === "msg-stream-2" &&
+        record.payload?.mode === "append" &&
+        record.payload?.text === "ello"
+      );
+    });
+    expect(deltaEvent).toBeTruthy();
+  });
+
+  test("streamed message metadata caches evict oldest entries when over limit", () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+      }),
+    );
+    const internal = runtime as unknown as {
+      rememberMessageRole: (sessionId: string, messageId: string, role: "assistant" | "user") => void;
+      rememberPartMetadata: (part: unknown) => void;
+      messageRoleByScopedMessageId: Map<string, "assistant" | "user">;
+      partTypeByScopedPartId: Map<string, string>;
+    };
+
+    const limit = 10_000;
+    const totalEntries = limit + 250;
+    for (let index = 0; index < totalEntries; index += 1) {
+      const messageId = `msg-cache-${index}`;
+      const partId = `part-cache-${index}`;
+      internal.rememberMessageRole("ses-1", messageId, "assistant");
+      internal.rememberPartMetadata({
+        id: partId,
+        sessionID: "ses-1",
+        messageID: messageId,
+        type: "text",
+      });
+    }
+
+    expect(internal.messageRoleByScopedMessageId.size).toBe(limit);
+    expect(internal.partTypeByScopedPartId.size).toBe(limit);
+    expect(internal.messageRoleByScopedMessageId.has("ses-1:msg-cache-0")).toBe(false);
+    expect(internal.partTypeByScopedPartId.has("ses-1:msg-cache-0:part-cache-0")).toBe(false);
+    expect(internal.messageRoleByScopedMessageId.has(`ses-1:msg-cache-${totalEntries - 1}`)).toBe(true);
+    expect(internal.partTypeByScopedPartId.has(`ses-1:msg-cache-${totalEntries - 1}:part-cache-${totalEntries - 1}`)).toBe(
+      true,
+    );
   });
 
   test("session.idle triggers best-effort parent transcript sync", async () => {

@@ -1,6 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
+@source "../node_modules/streamdown/dist/*.js";
 
 @theme inline {
   --font-sans: "Plus Jakarta Sans", "Segoe UI", sans-serif;
@@ -79,4 +80,91 @@ body {
     220% 220%,
     3px 3px;
   mix-blend-mode: screen;
+}
+
+.chat-markdown {
+  margin-top: 0.25rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown pre,
+.chat-markdown blockquote,
+.chat-markdown table {
+  margin: 0.5rem 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.chat-markdown li + li {
+  margin-top: 0.2rem;
+}
+
+.chat-markdown a {
+  color: var(--accent-foreground);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.chat-markdown code {
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  border-radius: 0.35rem;
+  background: color-mix(in oklch, var(--card) 65%, black 35%);
+  padding: 0.1rem 0.3rem;
+  font-family: "JetBrains Mono", "SFMono-Regular", "Consolas", monospace;
+  font-size: 0.85em;
+}
+
+.chat-markdown pre {
+  overflow-x: auto;
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  border-radius: 0.55rem;
+  background: color-mix(in oklch, var(--card) 70%, black 30%);
+  padding: 0.65rem 0.8rem;
+}
+
+.chat-markdown pre code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.82rem;
+}
+
+.chat-markdown blockquote {
+  border-left: 2px solid var(--accent);
+  color: var(--muted-foreground);
+  padding-left: 0.7rem;
+}
+
+.chat-markdown table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  padding: 0.35rem 0.5rem;
+  white-space: nowrap;
+}
+
+.chat-markdown-thinking {
+  color: var(--muted-foreground);
 }

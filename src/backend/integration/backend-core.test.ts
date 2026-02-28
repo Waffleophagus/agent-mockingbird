@@ -15,8 +15,6 @@ process.env.WAFFLEBOT_MEMORY_WORKSPACE_DIR = testWorkspacePath;
 process.env.WAFFLEBOT_MEMORY_EMBED_PROVIDER = "none";
 process.env.WAFFLEBOT_MEMORY_ENABLED = "true";
 process.env.WAFFLEBOT_CRON_ENABLED = "true";
-process.env.WAFFLEBOT_OPENCODE_PROVIDER_ID = "test-provider";
-process.env.WAFFLEBOT_OPENCODE_MODEL_ID = "test-model";
 
 interface SessionSummaryLite {
   id: string;
@@ -162,8 +160,7 @@ interface CronServiceInstance {
     everyMs?: number | null;
     atIso?: string | null;
     timezone?: string | null;
-    runMode: "system" | "agent" | "script";
-    invokePolicy: "never" | "always" | "on_condition";
+    runMode: "background" | "agent" | "conditional_agent";
     handlerKey?: string | null;
     agentPromptTemplate?: string | null;
     maxAttempts?: number;
@@ -643,8 +640,12 @@ describe("runtime health route", () => {
 
     expect(response.status).toBe(200);
     const payload = (await response.json()) as {
+      configAuthority?: { source?: string; path?: string; hash?: string };
       opencode?: { baseUrl?: string; directory?: string; effectiveConfigPath?: string };
     };
+    expect(payload.configAuthority?.source).toBe("wafflebot-config-json");
+    expect(typeof payload.configAuthority?.path).toBe("string");
+    expect(typeof payload.configAuthority?.hash).toBe("string");
     expect(typeof payload.opencode?.baseUrl).toBe("string");
     expect(typeof payload.opencode?.directory).toBe("string");
     expect(typeof payload.opencode?.effectiveConfigPath).toBe("string");
@@ -1261,20 +1262,18 @@ describe("memory validation and logging", () => {
 });
 
 describe("cron validation and retries", () => {
-  test("invalid runMode/invokePolicy combinations are rejected", async () => {
+  test("invalid runMode requirements are rejected", async () => {
     const runtime = createRuntimeStub(async () => ({ sessionId: "main", messages: [] }));
     const cronService = new CronService(runtime);
 
     await expect(
       cronService.createJob({
-        name: "invalid-system",
+        name: "invalid-background",
         scheduleKind: "every",
         everyMs: 5_000,
-        runMode: "system",
-        invokePolicy: "always",
-        handlerKey: "memory.maintenance",
+        runMode: "background",
       }),
-    ).rejects.toThrow("runMode=system requires invokePolicy=never");
+    ).rejects.toThrow("runMode=background requires handlerKey");
 
     await expect(
       cronService.createJob({
@@ -1282,20 +1281,27 @@ describe("cron validation and retries", () => {
         scheduleKind: "every",
         everyMs: 5_000,
         runMode: "agent",
-        invokePolicy: "never",
-        agentPromptTemplate: "Daily summary",
       }),
-    ).rejects.toThrow("runMode=agent requires invokePolicy=always");
+    ).rejects.toThrow("runMode=agent requires agentPromptTemplate");
 
     await expect(
       cronService.createJob({
-        name: "invalid-script",
+        name: "invalid-conditional",
         scheduleKind: "every",
         everyMs: 5_000,
-        runMode: "script",
-        invokePolicy: "on_condition",
+        runMode: "conditional_agent",
       }),
-    ).rejects.toThrow("runMode=script requires handlerKey");
+    ).rejects.toThrow("runMode=conditional_agent requires handlerKey");
+
+    await expect(
+      cronService.createJob({
+        name: "invalid-conditional-prompt",
+        scheduleKind: "every",
+        everyMs: 5_000,
+        runMode: "conditional_agent",
+        handlerKey: "memory.maintenance",
+      }),
+    ).rejects.toThrow("runMode=conditional_agent requires agentPromptTemplate");
   });
 
   test("failed agent jobs transition from failed to dead after maxAttempts", async () => {
@@ -1309,7 +1315,6 @@ describe("cron validation and retries", () => {
       scheduleKind: "every",
       everyMs: 10_000,
       runMode: "agent",
-      invokePolicy: "always",
       agentPromptTemplate: "Run check",
       maxAttempts: 2,
       retryBackoffMs: 1_000,
@@ -1392,6 +1397,24 @@ describe("sse contract", () => {
       },
     });
     expect(frame).toContain("event: session-message-part");
+    expect(frame).toContain("data:");
+  });
+
+  test("toSseFrame maps session.message.delta to session-message-delta event", () => {
+    const frame = toSseFrame({
+      id: "evt-delta-1",
+      type: "session.message.delta",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        sessionId: "main",
+        messageId: "msg-1",
+        text: "Hello",
+        mode: "append",
+        observedAt: new Date().toISOString(),
+      },
+    });
+    expect(frame).toContain("event: session-message-delta");
     expect(frame).toContain("data:");
   });
 

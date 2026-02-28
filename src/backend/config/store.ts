@@ -26,6 +26,13 @@ const DEFAULT_CONFIG_FILENAME = "wafflebot.config.json";
 const BACKUP_SUFFIX = ".bak";
 const DEFAULT_SMOKE_TEST_PROMPT = 'Just respond "OK" to this to confirm the gateway is working.';
 const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
+const DEFAULT_OPENCODE_BASE_URL = "http://127.0.0.1:4096";
+const DEFAULT_OPENCODE_PROVIDER_ID = "opencode";
+const DEFAULT_OPENCODE_MODEL_ID = "kimi-k2.5-free";
+const DEFAULT_OPENCODE_SMALL_MODEL = "opencode/kimi-k2.5-free";
+const DEFAULT_OPENCODE_TIMEOUT_MS = 120_000;
+const DEFAULT_OPENCODE_PROMPT_TIMEOUT_MS = 300_000;
+const DEFAULT_OPENCODE_RUN_WAIT_TIMEOUT_MS = 180_000;
 const legacyStringListSchema = z.array(z.string().min(1));
 const legacyAgentListSchema = z.array(specialistAgentSchema);
 const legacyAgentTypeListSchema = z.array(agentTypeDefinitionSchema);
@@ -47,6 +54,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function appearsToBeOpencodeConfig(raw: unknown) {
+  if (!isPlainObject(raw)) return false;
+  const schema = raw.$schema;
+  return typeof schema === "string" && schema.trim() === "https://opencode.ai/config.json";
+}
+
 function normalizeStringList(values: string[]) {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))];
 }
@@ -64,11 +77,6 @@ function stableStringify(value: unknown): string {
 
 function computeConfigHash(config: WafflebotConfig) {
   return createHash("sha256").update(stableStringify(config)).digest("hex");
-}
-
-function parseFallbackModels(raw: string | undefined) {
-  if (!raw) return [];
-  return normalizeStringList(raw.split(","));
 }
 
 function hasExplicitEnvValue(key: string) {
@@ -97,27 +105,7 @@ function readExplicitEnvBoolean(key: string) {
 }
 
 function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
-  const opencodePatch: Record<string, unknown> = {};
   const memoryPatch: Record<string, unknown> = {};
-
-  const opencodeBaseUrl = readExplicitEnvString("WAFFLEBOT_OPENCODE_BASE_URL");
-  if (opencodeBaseUrl) opencodePatch.baseUrl = opencodeBaseUrl;
-  const opencodeProviderId = readExplicitEnvString("WAFFLEBOT_OPENCODE_PROVIDER_ID");
-  if (opencodeProviderId) opencodePatch.providerId = opencodeProviderId;
-  const opencodeModelId = readExplicitEnvString("WAFFLEBOT_OPENCODE_MODEL_ID");
-  if (opencodeModelId) opencodePatch.modelId = opencodeModelId;
-  const opencodeFallbacks = readExplicitEnvString("WAFFLEBOT_OPENCODE_MODEL_FALLBACKS");
-  if (opencodeFallbacks) opencodePatch.fallbackModels = parseFallbackModels(opencodeFallbacks);
-  const opencodeSmallModel = readExplicitEnvString("WAFFLEBOT_OPENCODE_SMALL_MODEL");
-  if (opencodeSmallModel) opencodePatch.smallModel = opencodeSmallModel;
-  const opencodeTimeoutMs = readExplicitEnvNumber("WAFFLEBOT_OPENCODE_TIMEOUT_MS");
-  if (typeof opencodeTimeoutMs === "number") opencodePatch.timeoutMs = opencodeTimeoutMs;
-  const opencodePromptTimeoutMs = readExplicitEnvNumber("WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS");
-  if (typeof opencodePromptTimeoutMs === "number") opencodePatch.promptTimeoutMs = opencodePromptTimeoutMs;
-  const opencodeRunWaitTimeoutMs = readExplicitEnvNumber("WAFFLEBOT_OPENCODE_RUN_WAIT_TIMEOUT_MS");
-  if (typeof opencodeRunWaitTimeoutMs === "number") opencodePatch.runWaitTimeoutMs = opencodeRunWaitTimeoutMs;
-  const opencodeDirectory = readExplicitEnvString("WAFFLEBOT_OPENCODE_DIRECTORY");
-  if (opencodeDirectory) opencodePatch.directory = opencodeDirectory;
 
   const memoryEnabled = readExplicitEnvBoolean("WAFFLEBOT_MEMORY_ENABLED");
   if (typeof memoryEnabled === "boolean") memoryPatch.enabled = memoryEnabled;
@@ -142,14 +130,10 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
   const memoryToolMode = readExplicitEnvString("WAFFLEBOT_MEMORY_TOOL_MODE");
   if (memoryToolMode) memoryPatch.toolMode = memoryToolMode;
 
-  const runtimePatch: Record<string, unknown> = {};
-  if (Object.keys(opencodePatch).length) runtimePatch.opencode = opencodePatch;
-  if (Object.keys(memoryPatch).length) runtimePatch.memory = memoryPatch;
-
-  if (!Object.keys(runtimePatch).length) {
+  if (!Object.keys(memoryPatch).length) {
     return {};
   }
-  return { runtime: runtimePatch };
+  return { runtime: { memory: memoryPatch } };
 }
 
 function readLegacyConfigRow(key: LegacyConfigKey) {
@@ -201,17 +185,17 @@ function buildLegacyBootstrappedConfig() {
     version: CONFIG_VERSION,
     runtime: {
       opencode: {
-        baseUrl: env.WAFFLEBOT_OPENCODE_BASE_URL,
-        providerId: env.WAFFLEBOT_OPENCODE_PROVIDER_ID.trim(),
-        modelId: env.WAFFLEBOT_OPENCODE_MODEL_ID.trim(),
-        fallbackModels: parseFallbackModels(env.WAFFLEBOT_OPENCODE_MODEL_FALLBACKS),
+        baseUrl: DEFAULT_OPENCODE_BASE_URL,
+        providerId: DEFAULT_OPENCODE_PROVIDER_ID,
+        modelId: DEFAULT_OPENCODE_MODEL_ID,
+        fallbackModels: [],
         imageModel: null,
-        smallModel: env.WAFFLEBOT_OPENCODE_SMALL_MODEL.trim(),
-        timeoutMs: env.WAFFLEBOT_OPENCODE_TIMEOUT_MS,
-        promptTimeoutMs: env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS,
-        runWaitTimeoutMs: env.WAFFLEBOT_OPENCODE_RUN_WAIT_TIMEOUT_MS,
+        smallModel: DEFAULT_OPENCODE_SMALL_MODEL,
+        timeoutMs: DEFAULT_OPENCODE_TIMEOUT_MS,
+        promptTimeoutMs: DEFAULT_OPENCODE_PROMPT_TIMEOUT_MS,
+        runWaitTimeoutMs: DEFAULT_OPENCODE_RUN_WAIT_TIMEOUT_MS,
         childSessionHideAfterDays: 3,
-        directory: env.WAFFLEBOT_OPENCODE_DIRECTORY?.trim() || null,
+        directory: null,
         bootstrap: {
           enabled: true,
           maxCharsPerFile: 20_000,
@@ -325,6 +309,12 @@ function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
 
 export function parseConfig(raw: unknown) {
   const normalized = stripLegacyMemoryWriteConfig(raw);
+  if (appearsToBeOpencodeConfig(normalized)) {
+    throw new ConfigApplyError(
+      "schema",
+      "Config file appears to be OpenCode config.json, not wafflebot config. Set WAFFLEBOT_CONFIG_PATH to a wafflebot config file (default: ./data/wafflebot.config.json).",
+    );
+  }
   const withExplicitEnvDefaults = deepMerge(buildExplicitEnvConfigDefaultsPatch(), normalized);
   const parsed = wafflebotConfigSchema.safeParse(withExplicitEnvDefaults);
   if (!parsed.success) {

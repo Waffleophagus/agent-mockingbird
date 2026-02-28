@@ -46,8 +46,7 @@ export async function syncHeartbeatJob(
     name: `Heartbeat: ${agentId}`,
     scheduleKind: "every",
     everyMs,
-    runMode: "system",
-    invokePolicy: "never",
+    runMode: "background",
     handlerKey: "heartbeat.check",
     payload: {
       agentId,

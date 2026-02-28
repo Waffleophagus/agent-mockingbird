@@ -171,6 +171,14 @@ export interface SessionRunErrorSnapshot {
   message: string;
 }
 
+export interface SessionMessageDeltaSnapshot {
+  sessionId: string;
+  messageId: string;
+  text: string;
+  mode: "append" | "replace";
+  observedAt: string;
+}
+
 export interface BackgroundRunSnapshot {
   runId: string;
   parentSessionId: string;
@@ -246,6 +254,7 @@ export type DashboardEvent =
         observedAt: string;
       };
     }
+  | { event: "session-message-delta"; payload: SessionMessageDeltaSnapshot }
   | { event: "session-status"; payload: SessionRunStatusSnapshot }
   | { event: "session-compacted"; payload: SessionCompactedSnapshot }
   | { event: "session-error"; payload: SessionRunErrorSnapshot }

@@ -67,7 +67,7 @@ const eventStream = createRuntimeEventStream({
 
 if (env.NODE_ENV === "production" && !runtimeInfo.opencode.directoryConfigured) {
   console.warn(
-    "[startup] WAFFLEBOT_OPENCODE_DIRECTORY is not configured. OpenCode config visibility may differ across workspaces.",
+    "[startup] runtime.opencode.directory is not configured in wafflebot config. OpenCode config visibility may differ across workspaces.",
   );
 }
 

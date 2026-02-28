@@ -17,8 +17,7 @@ CREATE TABLE IF NOT EXISTS `cron_job_definitions` (
 	`every_ms` integer,
 	`at_iso` text,
 	`timezone` text,
-	`run_mode` text NOT NULL CHECK (`run_mode` IN ('system', 'agent', 'script')),
-	`invoke_policy` text NOT NULL CHECK (`invoke_policy` IN ('never', 'always', 'on_condition')),
+	`run_mode` text NOT NULL CHECK (`run_mode` IN ('background', 'conditional_agent', 'agent')),
 	`handler_key` text,
 	`agent_prompt_template` text,
 	`agent_model_override` text,
@@ -59,7 +58,7 @@ CREATE INDEX IF NOT EXISTS `cron_job_instances_job_idx`
 CREATE TABLE IF NOT EXISTS `cron_job_steps` (
 	`id` text PRIMARY KEY NOT NULL,
 	`job_instance_id` text NOT NULL REFERENCES `cron_job_instances`(`id`) ON DELETE CASCADE,
-	`step_kind` text NOT NULL CHECK (`step_kind` IN ('system', 'script', 'agent')),
+	`step_kind` text NOT NULL CHECK (`step_kind` IN ('background', 'conditional_agent', 'agent')),
 	`status` text NOT NULL CHECK (`status` IN ('pending', 'running', 'completed', 'failed', 'skipped')),
 	`input_json` text,
 	`output_json` text,
