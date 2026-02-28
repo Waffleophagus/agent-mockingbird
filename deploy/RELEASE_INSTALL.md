@@ -2,6 +2,22 @@
 
 This project ships as a tarball from GitHub Releases.
 
+## Private onboarding flow (Gitea npm + systemd user services)
+
+Recommended first-run flow on Linux:
+
+```bash
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/wafflebot/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+```
+
+This installs:
+
+- `@waffleophagus/wafflebot` from `https://git.waffleophagus.com/api/packages/waffleophagus/npm/`
+- `opencode-ai` from npmjs
+- user services (`opencode.service`, `wafflebot.service`) in `~/.config/systemd/user`
+
+Install root defaults to `~/.wafflebot`.
+
 ## Maintainer flow (build + publish)
 
 1. Push a tag (for example `v0.1.0`) or run the `Release Bundle` workflow manually.

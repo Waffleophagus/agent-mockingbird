@@ -262,11 +262,51 @@ Published package artifact:
 
 Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
 
+## Linux Onboarding (Private Gitea)
+
+Primary path (interactive by default):
+
+```bash
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/wafflebot/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+```
+
+Run a different lifecycle command:
+
+```bash
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/wafflebot/raw/branch/main/scripts/onboard/bootstrap.sh" | bash -s -- status
+```
+
+Direct package execution from private registry:
+
+```bash
+npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
+  "@waffleophagus/wafflebot-installer@main" install
+```
+
+```bash
+bunx --bun npm exec --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
+  "@waffleophagus/wafflebot-installer@main" -- install
+```
+
+Installer commands:
+
+```bash
+wafflebot-installer install
+wafflebot-installer update
+wafflebot-installer status
+wafflebot-installer uninstall
+```
+
+Default install root is `~/.wafflebot`, with systemd **user** services:
+
+- `opencode.service` (local sidecar on `127.0.0.1:4096`)
+- `wafflebot.service` (dashboard/API on `127.0.0.1:3001`)
+
+On Linux, installer attempts `loginctl enable-linger $USER` so services keep running after logout.
+
 ## Install Directly From GitHub (No npmjs.org)
 
-You can install this project as a global Bun CLI directly from git:
-
-1. Install globally from a tag:
+You can still install the main CLI directly from git:
 
 ```bash
 OWNER="<github-owner>"
