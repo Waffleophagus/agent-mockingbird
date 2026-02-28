@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -65,6 +65,8 @@ type PromptInput = {
       providerID?: string;
       modelID?: string;
     };
+    system?: string;
+    parts?: Array<{ type: string; text?: string }>;
   };
   signal?: AbortSignal;
 };
@@ -231,6 +233,10 @@ let RuntimeContinuationDetachedError: new (sessionId: string, childRunCount: num
 
 beforeAll(async () => {
   await import("../db/migrate");
+  const configService = (await import("../config/service")) as unknown as {
+    getConfigSnapshot: () => unknown;
+  };
+  configService.getConfigSnapshot();
   repository = (await import("../db/repository")) as unknown as RepositoryApi;
   ({ OpencodeRuntime } = (await import("./opencodeRuntime")) as unknown as {
     OpencodeRuntime: RuntimeCtor;
@@ -518,6 +524,49 @@ async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function updateRuntimeMemoryConfig(
+  patch: Partial<{
+    enabled: boolean;
+    workspaceDir: string;
+    embedProvider: "ollama" | "none";
+    toolMode: "hybrid" | "inject_only" | "tool_only";
+    minScore: number;
+  }>,
+) {
+  if (!existsSync(testConfigPath)) {
+    throw new Error(`Missing runtime test config: ${testConfigPath}`);
+  }
+  const raw = JSON.parse(readFileSync(testConfigPath, "utf8")) as {
+    runtime?: {
+      memory?: Record<string, unknown>;
+    };
+  };
+  const runtime = raw.runtime ?? {};
+  const memory = runtime.memory ?? {};
+  runtime.memory = {
+    ...memory,
+    ...patch,
+  };
+  raw.runtime = runtime;
+  writeFileSync(testConfigPath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+}
+
+async function seedMemoryFixture(marker: string) {
+  mkdirSync(testWorkspacePath, { recursive: true });
+  writeFileSync(
+    path.join(testWorkspacePath, "MEMORY.md"),
+    `# Durable Memory\n\nMarker ${marker} is important for memory injection tests.\n`,
+    "utf8",
+  );
+  const memoryService = (await import("../memory/service")) as unknown as {
+    syncMemoryIndex: (input?: { force?: boolean }) => Promise<void>;
+    searchMemory: (query: string, options?: { maxResults?: number; minScore?: number }) => Promise<Array<unknown>>;
+  };
+  await memoryService.syncMemoryIndex({ force: true });
+  const warmup = await memoryService.searchMemory("Durable Memory", { minScore: 0, maxResults: 6 });
+  expect(warmup.length).toBeGreaterThan(0);
+}
+
 describe("opencode runtime failover contract", () => {
   test("recreates session and retries prompt when provider returns 404", async () => {
     const sessionIds: string[] = [];
@@ -556,6 +605,100 @@ describe("opencode runtime failover contract", () => {
     expect(createCount).toBe(2);
     expect(sessionIds.length).toBe(2);
     expect(sessionIds[0]).not.toBe(sessionIds[1]);
+  });
+
+  test("injects memory context once for stable retrieval and re-injects after compaction", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+    });
+    const marker = `marker-${crypto.randomUUID().slice(0, 8)}`;
+    await seedMemoryFixture(marker);
+
+    const promptTexts: string[] = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptTexts.push(text);
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+      const internal = runtime as unknown as { handleOpencodeEvent: (event: unknown) => void };
+      internal.handleOpencodeEvent({
+        type: "session.compacted",
+        properties: { sessionID: "ses-1" },
+      });
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(promptTexts.length).toBe(3);
+    expect(promptTexts[0]?.includes("[Memory Context]")).toBe(true);
+    expect(promptTexts[1]?.includes("[Memory Context]")).toBe(false);
+    expect(promptTexts[2]?.includes("[Memory Context]")).toBe(true);
+  });
+
+  test("reinjects memory context on 404 session recreation even when current turn was deduped", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+    });
+    const marker = `marker-${crypto.randomUUID().slice(0, 8)}`;
+    await seedMemoryFixture(marker);
+
+    const promptCalls: Array<{ sessionId: string; hasMemoryContext: boolean }> = [];
+    let failNextWith404 = false;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptCalls.push({
+            sessionId: request.path.id,
+            hasMemoryContext: text.includes("[Memory Context]"),
+          });
+          if (failNextWith404) {
+            failNextWith404 = false;
+            throw Object.assign(new Error("session missing"), { status: 404 });
+          }
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+      failNextWith404 = true;
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable Memory" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(promptCalls.length).toBe(3);
+    expect(promptCalls[0]?.hasMemoryContext).toBe(true);
+    expect(promptCalls[1]?.hasMemoryContext).toBe(false);
+    expect(promptCalls[2]?.hasMemoryContext).toBe(true);
+    expect(promptCalls[1]?.sessionId).not.toBe(promptCalls[2]?.sessionId);
   });
 
   test("maps quota errors to RuntimeProviderQuotaError", async () => {

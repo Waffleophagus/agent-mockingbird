@@ -136,6 +136,7 @@ const DEFAULT_RUNTIME_TIMEOUT_MS = 120_000;
 const DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS = 300_000;
 const STREAMED_METADATA_CACHE_LIMIT = 10_000;
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
+type MemoryInjectionState = { fingerprint: string; forceReinject: boolean };
 
 function shouldQueueWhenBusy(input: SendUserMessageInput): boolean {
   return input.metadata?.heartbeat !== true;
@@ -204,6 +205,7 @@ export class OpencodeRuntime implements RuntimeEngine {
   private imageCapabilityFetchedAtMs = 0;
   private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
   private partTypeByScopedPartId = new Map<string, Part["type"]>();
+  private memoryInjectionStateBySessionId = new Map<string, MemoryInjectionState>();
 
   constructor(private options: OpencodeRuntimeOptions) {
     if (options.client) {
@@ -412,11 +414,12 @@ export class OpencodeRuntime implements RuntimeEngine {
       }
 
       const primaryText = this.extractPrimaryTextInput(inputParts);
-      const promptInput = await this.buildPromptInputWithMemory(primaryText);
+      const promptInput = await this.buildPromptInputWithMemory(opencodeSessionId, primaryText);
       const memorySystemPrompt = this.buildWafflebotSystemPrompt({
         agentId: input.agent?.trim() || undefined,
       });
       const promptParts = this.applyMemoryPromptToParts(inputParts, promptInput.content);
+      const recreatedSessionPromptParts = this.applyMemoryPromptToParts(inputParts, promptInput.freshSessionContent);
 
       let promptResult: { message: { info: AssistantInfo; parts: Array<Part> }; opencodeSessionId: string };
       try {
@@ -426,6 +429,8 @@ export class OpencodeRuntime implements RuntimeEngine {
           opencodeSessionId,
           primaryModel: selectedModel,
           parts: promptParts,
+          retryPartsOnSessionRecreate: recreatedSessionPromptParts,
+          memoryContextFingerprint: promptInput.memoryContextFingerprint,
           system: memorySystemPrompt,
           agent: input.agent?.trim() || undefined,
         });
@@ -798,6 +803,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         throwOnError: true,
         signal: this.defaultRequestSignal(),
       });
+      this.markMemoryInjectionStateForReinject(opencodeSessionId);
       return Boolean(unwrapSdkData<boolean>(result));
     } catch (error) {
       if (getOpencodeErrorStatus(error) === 404) {
@@ -812,50 +818,128 @@ export class OpencodeRuntime implements RuntimeEngine {
           throwOnError: true,
           signal: this.defaultRequestSignal(),
         });
+        this.markMemoryInjectionStateForReinject(opencodeSessionId);
         return Boolean(unwrapSdkData<boolean>(retry));
       }
       throw this.normalizeRuntimeError(error);
     }
   }
 
-  private async buildPromptInputWithMemory(userContent: string): Promise<{
+  private async buildPromptInputWithMemory(opencodeSessionId: string, userContent: string): Promise<{
     content: string;
+    freshSessionContent: string;
     injectedContextResults: number;
+    memoryContextFingerprint: string | null;
   }> {
     if (currentMemoryConfig().toolMode === "tool_only") {
-      return { content: userContent, injectedContextResults: 0 };
+      return {
+        content: userContent,
+        freshSessionContent: userContent,
+        injectedContextResults: 0,
+        memoryContextFingerprint: null,
+      };
     }
 
     const query = userContent.trim();
-    if (!query) return { content: userContent, injectedContextResults: 0 };
+    if (!query) {
+      this.clearMemoryInjectionState(opencodeSessionId);
+      return {
+        content: userContent,
+        freshSessionContent: userContent,
+        injectedContextResults: 0,
+        memoryContextFingerprint: null,
+      };
+    }
 
     try {
       const results = await searchMemory(query);
       if (!results.length) {
-        return { content: userContent, injectedContextResults: 0 };
+        this.clearMemoryInjectionState(opencodeSessionId);
+        return {
+          content: userContent,
+          freshSessionContent: userContent,
+          injectedContextResults: 0,
+          memoryContextFingerprint: null,
+        };
       }
       const contextLines = results.map(
         (result, index) =>
           `${index + 1}. (${result.score.toFixed(3)}) ${result.citation}\n${result.snippet}`,
       );
       const contextBlock = contextLines.join("\n\n");
+      const wrappedText = [
+        "Use the memory context below only if relevant and non-contradictory to current user intent.",
+        "",
+        "[Memory Context]",
+        contextBlock,
+        "[/Memory Context]",
+        "",
+        "[User Message]",
+        userContent,
+        "[/User Message]",
+      ].join("\n");
+      const fingerprint = stableSerialize(
+        results.map(result => ({
+          id: result.id,
+          path: result.path,
+          startLine: result.startLine,
+          endLine: result.endLine,
+          score: result.score,
+          citation: result.citation,
+          snippet: result.snippet,
+        })),
+      );
+      const existing = this.memoryInjectionStateBySessionId.get(opencodeSessionId);
+      const shouldInject = !existing || existing.forceReinject || existing.fingerprint !== fingerprint;
+      if (shouldInject) {
+        this.setMemoryInjectionState(opencodeSessionId, {
+          fingerprint,
+          forceReinject: false,
+        });
+      }
       return {
-        content: [
-          "Use the memory context below only if relevant and non-contradictory to current user intent.",
-          "",
-          "[Memory Context]",
-          contextBlock,
-          "[/Memory Context]",
-          "",
-          "[User Message]",
-          userContent,
-          "[/User Message]",
-        ].join("\n"),
-        injectedContextResults: results.length,
+        content: shouldInject ? wrappedText : userContent,
+        freshSessionContent: wrappedText,
+        injectedContextResults: shouldInject ? results.length : 0,
+        memoryContextFingerprint: fingerprint,
       };
     } catch {
-      return { content: userContent, injectedContextResults: 0 };
+      return {
+        content: userContent,
+        freshSessionContent: userContent,
+        injectedContextResults: 0,
+        memoryContextFingerprint: null,
+      };
     }
+  }
+
+  private setMemoryInjectionState(sessionId: string, state: MemoryInjectionState) {
+    const normalized = sessionId.trim();
+    if (!normalized) return;
+    this.memoryInjectionStateBySessionId.set(normalized, state);
+  }
+
+  private clearMemoryInjectionState(sessionId: string) {
+    const normalized = sessionId.trim();
+    if (!normalized) return;
+    this.memoryInjectionStateBySessionId.delete(normalized);
+  }
+
+  private markMemoryInjectionStateForReinject(sessionId: string) {
+    const normalized = sessionId.trim();
+    if (!normalized) return;
+    const existing = this.memoryInjectionStateBySessionId.get(normalized);
+    if (existing) {
+      this.memoryInjectionStateBySessionId.set(normalized, {
+        ...existing,
+        forceReinject: true,
+      });
+      return;
+    }
+    this.memoryInjectionStateBySessionId.set(normalized, {
+      fingerprint: "",
+      forceReinject: true,
+    });
   }
 
   private normalizePromptInputParts(content: string, parts?: RuntimeInputPart[]): RuntimeInputPart[] {
@@ -1390,6 +1474,7 @@ export class OpencodeRuntime implements RuntimeEngine {
 
   private handleSessionCompactedEvent(event: Extract<OpencodeEvent, { type: "session.compacted" }>) {
     const opencodeSessionId = event.properties.sessionID;
+    this.markMemoryInjectionStateForReinject(opencodeSessionId);
     const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId) return;
 
@@ -2327,6 +2412,8 @@ export class OpencodeRuntime implements RuntimeEngine {
     opencodeSessionId: string;
     primaryModel: ResolvedModel;
     parts: Array<RuntimeInputPart>;
+    retryPartsOnSessionRecreate?: Array<RuntimeInputPart>;
+    memoryContextFingerprint?: string | null;
     system?: string;
     agent?: string;
   }): Promise<{ message: { info: AssistantInfo; parts: Array<Part> }; opencodeSessionId: string }> {
@@ -2353,7 +2440,14 @@ export class OpencodeRuntime implements RuntimeEngine {
             throw this.normalizeRuntimeError(createError);
           }
           try {
-            const message = await this.sendPrompt(sessionId, model, input.parts, input.system, input.agent);
+            if (input.memoryContextFingerprint) {
+              this.setMemoryInjectionState(sessionId, {
+                fingerprint: input.memoryContextFingerprint,
+                forceReinject: false,
+              });
+            }
+            const retryParts = input.retryPartsOnSessionRecreate ?? input.parts;
+            const message = await this.sendPrompt(sessionId, model, retryParts, input.system, input.agent);
             return { message, opencodeSessionId: sessionId };
           } catch (retryError) {
             attemptError = retryError;
