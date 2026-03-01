@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -13,7 +14,6 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 
 import type { WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
