@@ -16,12 +16,24 @@ const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".wafflebot");
 const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
 const UNIT_OPENCODE = "opencode.service";
 const UNIT_WAFFLEBOT = "wafflebot.service";
+const WAFFLEBOT_API_BASE_URL = "http://127.0.0.1:3001";
+
+const ANSI = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  red: "\x1b[31m",
+};
 
 function parseArgs(argv) {
   const args = {
     command: undefined,
     yes: false,
     json: false,
+    dryRun: false,
     skipLinger: false,
     purgeData: false,
     keepData: false,
@@ -45,6 +57,10 @@ function parseArgs(argv) {
     }
     if (arg === "--json") {
       args.json = true;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      args.dryRun = true;
       continue;
     }
     if (arg === "--skip-linger") {
@@ -111,7 +127,43 @@ function normalizeRegistryUrl(url) {
 }
 
 function printHelp() {
-  console.log(`wafflebot\n\nUsage:\n  wafflebot <install|update|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact wafflebot version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+  console.log(`wafflebot\n\nUsage:\n  wafflebot <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact wafflebot version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+}
+
+function colorEnabled() {
+  return process.stdout.isTTY && !process.env.NO_COLOR;
+}
+
+function paint(text, color) {
+  if (!colorEnabled()) return text;
+  return `${color}${text}${ANSI.reset}`;
+}
+
+function heading(text) {
+  return paint(text, `${ANSI.bold}${ANSI.cyan}`);
+}
+
+function info(text) {
+  return paint(text, ANSI.dim);
+}
+
+function success(text) {
+  return paint(text, ANSI.green);
+}
+
+function warn(text) {
+  return paint(text, ANSI.yellow);
+}
+
+function errorText(text) {
+  return paint(text, ANSI.red);
+}
+
+function summarizeActionPlan(title, lines) {
+  return [
+    heading(title),
+    ...lines,
+  ];
 }
 
 function shell(command, args, options = {}) {
@@ -417,40 +469,165 @@ function checkSystemdUserStatus() {
   return result.code === 0;
 }
 
+function interactivePrompt(message) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return rl.question(message).finally(() => rl.close());
+}
+
+async function promptYesNo(message, defaultValue = false) {
+  const suffix = defaultValue ? "[Y/n]" : "[y/N]";
+  const answer = (await interactivePrompt(`${message} ${suffix} `)).trim().toLowerCase();
+  if (!answer) return defaultValue;
+  return answer === "y" || answer === "yes";
+}
+
+async function promptText(message, defaultValue = "") {
+  const suffix = defaultValue ? ` (${defaultValue})` : "";
+  const answer = (await interactivePrompt(`${message}${suffix}: `)).trim();
+  return answer || defaultValue;
+}
+
+async function promptSelect(message, options, defaultIndex = 0) {
+  console.log(message);
+  for (let index = 0; index < options.length; index += 1) {
+    const option = options[index];
+    const marker = index === defaultIndex ? " (default)" : "";
+    console.log(`  ${index + 1}. ${option.label}${marker}`);
+    if (option.hint) {
+      console.log(`     ${info(option.hint)}`);
+    }
+  }
+  const raw = await interactivePrompt(`Select 1-${options.length}: `);
+  const parsed = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > options.length) {
+    return options[defaultIndex];
+  }
+  return options[parsed - 1];
+}
+
 function buildInstallSummary({ args, paths, mode }) {
   const target = args.version ?? `tag:${args.tag}`;
   const hasBun = Boolean(resolveBunBinary(paths));
   const hasSystemdUser = checkSystemdUserStatus();
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
-  const actionLabel = mode === "update" ? "update" : "install";
-
-  return [
-    `Planned ${actionLabel}:`,
+  return summarizeActionPlan("Install plan", [
     `- Target package: @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
     `- Private registry scope: @${args.scope.replace(/^@/, "")} -> ${args.registryUrl}`,
     `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, opencode-ai)`,
     `- Install root: ${paths.rootDir}`,
     "",
-    "Steps:",
-    `1. Validate required tools: npm, systemd user services.`,
-    `   - npm: ${commandExists("npm") ? "found" : "missing"}`,
-    `   - systemctl --user: ${hasSystemdUser ? "available" : "unavailable (install will fail)"}`,
-    `2. Ensure Bun runtime for service command.`,
+    "What will happen:",
+    `1. Validate required tools: npm + systemd user services.`,
+    `   - npm: ${commandExists("npm") ? success("found") : errorText("missing")}`,
+    `   - systemctl --user: ${hasSystemdUser ? success("available") : errorText("unavailable")}`,
+    "2. Ensure Bun runtime for service command.",
     hasBun
-      ? `   - bun: found at ${resolveBunBinary(paths)}`
-      : `   - bun: not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`,
-    "3. Install OpenCode CLI dependency (`opencode-ai@latest`) from npmjs.",
-    `4. Install Wafflebot package (@${args.scope.replace(/^@/, "")}/wafflebot) from your Gitea registry.`,
-    "5. Write/update config and data directories under install root.",
+      ? `   - bun: ${success(`found at ${resolveBunBinary(paths)}`)}`
+      : `   - bun: ${warn(`not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`)}`,
+    "3. Install/refresh OpenCode CLI dependency (`opencode-ai@latest`) from npmjs.",
+    `4. Install Wafflebot package (@${args.scope.replace(/^@/, "")}/wafflebot) from your scoped registry.`,
+    "5. Create/refresh runtime directories under the install root.",
     `6. Install CLI shim at ${paths.wafflebotShimPath} and ensure ${paths.localBinDir} is on PATH.`,
     `7. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
     "8. Reload systemd user daemon and enable/start both services.",
     args.skipLinger
       ? "9. Skip linger configuration (--skip-linger set)."
-      : `9. Attempt to enable linger via loginctl so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"} .`,
-    "10. Run health check on http://127.0.0.1:3001/api/health.",
+      : `9. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "10. Run health checks and verification.",
+    "",
+    info("After install (interactive only), a provider onboarding wizard can launch OpenCode auth and set a default model."),
+  ]);
+}
+
+function buildUpdateSummary({ args, paths }) {
+  const target = args.version ?? `tag:${args.tag}`;
+  const hasBun = Boolean(resolveBunBinary(paths));
+  const hasSystemdUser = checkSystemdUserStatus();
+  const hasLoginctl = commandExists("loginctl");
+  const hasCurl = commandExists("curl");
+  return summarizeActionPlan("Update plan", [
+    `- Update target: @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
+    `- Install root: ${paths.rootDir}`,
+    "",
+    "What this update does:",
+    "1. Refresh Wafflebot package + OpenCode CLI dependency.",
+    `2. Ensure Bun runtime is available${hasBun ? ` (${success("already present")})` : ` (${warn(`will install${hasCurl ? " with curl fallback" : ""}`)})`}.`,
+    "3. Re-write CLI shim + systemd user units to current paths/entrypoint.",
+    "4. Reload daemon, enable/start services, then force restart both units.",
+    args.skipLinger
+      ? "5. Skip linger configuration (--skip-linger set)."
+      : `5. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "6. Run health + service verification.",
+    "",
+    "What this update does not do:",
+    `- It does not wipe ${paths.dataDir} or ${paths.workspaceDir}.`,
+    "- It does not uninstall/recreate services from scratch unless unit contents changed.",
+    "- It does not reset runtime configuration, DB data, sessions, skills, or agents.",
+    `- It does not rerun full onboarding unless you manually run ${paint("wafflebot install", ANSI.bold)} again.`,
+    "",
+    `Precheck: systemctl --user ${hasSystemdUser ? success("available") : errorText("unavailable (update will fail)")}`,
+  ]);
+}
+
+function buildUpdateDryRun({ args, paths }) {
+  const target = args.version ?? `tag:${args.tag}`;
+  const hasBun = Boolean(resolveBunBinary(paths));
+  const hasSystemdUser = checkSystemdUserStatus();
+  const hasLoginctl = commandExists("loginctl");
+
+  const actions = [
+    `Refresh package @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
+    "Refresh opencode-ai dependency",
+    hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
+    "Rewrite wafflebot CLI shim",
+    "Rewrite systemd user unit files for opencode + wafflebot",
+    "systemctl --user daemon-reload + enable --now opencode.service wafflebot.service",
+    "systemctl --user restart opencode.service wafflebot.service",
+    args.skipLinger
+      ? "Skip loginctl linger step (--skip-linger)"
+      : "Check/enable loginctl linger when needed",
+    `GET ${WAFFLEBOT_API_BASE_URL}/api/health`,
+    "Run service verification checks",
   ];
+
+  const nonActions = [
+    `No deletion of ${paths.dataDir} or ${paths.workspaceDir}`,
+    "No reset of config, DB, sessions, skills, MCPs, or agents",
+    "No onboarding rerun",
+  ];
+
+  return {
+    mode: "update-dry-run",
+    rootDir: paths.rootDir,
+    registryUrl: args.registryUrl,
+    target,
+    precheck: {
+      npm: commandExists("npm"),
+      systemdUser: hasSystemdUser,
+      loginctl: hasLoginctl,
+      bunPresent: hasBun,
+    },
+    actions,
+    nonActions,
+  };
+}
+
+async function runOnboardingCommand(args) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("Onboarding command requires an interactive TTY.");
+  }
+  const paths = pathsFor(args.rootDir, args.scope);
+  const opencodeBin = resolveOpencodeBin(paths) ?? (commandExists("opencode") ? "opencode" : null);
+  if (!opencodeBin) {
+    throw new Error("opencode binary not found. Run `wafflebot install` first.");
+  }
+  const onboarding = await runInteractiveProviderOnboarding({ opencodeBin });
+  return {
+    mode: "onboard",
+    rootDir: paths.rootDir,
+    onboarding,
+  };
 }
 
 async function confirmInstall(args, paths, mode) {
@@ -461,20 +638,15 @@ async function confirmInstall(args, paths, mode) {
     throw new Error("Install is interactive by default. Re-run with --yes in non-interactive environments.");
   }
 
-  const summaryLines = buildInstallSummary({ args, paths, mode });
+  const summaryLines =
+    mode === "update" ? buildUpdateSummary({ args, paths }) : buildInstallSummary({ args, paths, mode });
   for (const line of summaryLines) {
     console.log(line);
   }
   console.log("");
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = (
-    await rl.question(`Proceed with ${mode === "update" ? "update" : "install"}? [y/N] `)
-  )
-    .trim()
-    .toLowerCase();
-  rl.close();
-  if (answer !== "y" && answer !== "yes") {
+  const proceed = await promptYesNo(`Proceed with ${mode === "update" ? "update" : "install"}?`, false);
+  if (!proceed) {
     throw new Error("Aborted by user.");
   }
 }
@@ -503,6 +675,168 @@ function readInstalledOpenCodeVersion(paths) {
     return null;
   }
   return readJson(pkgPath).version ?? null;
+}
+
+async function fetchRuntimeDefaultModel() {
+  try {
+    const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config`, { method: "GET" });
+    if (!response.ok) return "";
+    const payload = await response.json();
+    const providerId = payload?.config?.runtime?.opencode?.providerId;
+    const modelId = payload?.config?.runtime?.opencode?.modelId;
+    if (typeof providerId !== "string" || typeof modelId !== "string") {
+      return "";
+    }
+    const provider = providerId.trim();
+    const model = modelId.trim();
+    return provider && model ? `${provider}/${model}` : "";
+  } catch {
+    return "";
+  }
+}
+
+async function fetchRuntimeModelOptions() {
+  try {
+    const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/opencode/models`, { method: "GET" });
+    const payload = await response.json();
+    if (!response.ok || !Array.isArray(payload?.models)) {
+      return [];
+    }
+    return payload.models
+      .map(model => ({
+        id: typeof model?.id === "string" ? model.id.trim() : "",
+        label: typeof model?.label === "string" ? model.label.trim() : "",
+      }))
+      .filter(model => model.id);
+  } catch {
+    return [];
+  }
+}
+
+async function setRuntimeDefaultModel(modelRef) {
+  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/runtime/default-model`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: modelRef }),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) {
+    const message = typeof payload?.error === "string" ? payload.error : "Failed to set runtime default model";
+    throw new Error(message);
+  }
+}
+
+async function runInteractiveProviderOnboarding(input) {
+  const { opencodeBin } = input;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return { status: "skipped", reason: "non-interactive" };
+  }
+
+  console.log("");
+  console.log(heading("Wafflebot onboarding"));
+  console.log(info("Optional: connect inference providers through OpenCode and pick a default runtime model."));
+
+  const pathChoice = await promptSelect("Choose onboarding flow", [
+    {
+      value: "quickstart",
+      label: "Quick start (recommended)",
+      hint: "Connect at least one provider, then pick a default model",
+    },
+    {
+      value: "model-only",
+      label: "Model only",
+      hint: "Skip provider auth and only set default model",
+    },
+    {
+      value: "skip",
+      label: "Skip for now",
+      hint: "You can rerun later with wafflebot status + dashboard settings",
+    },
+  ]);
+
+  if (pathChoice.value === "skip") {
+    return { status: "skipped", reason: "user-skip" };
+  }
+
+  let authAttempts = 0;
+  let authSuccess = false;
+  if (pathChoice.value === "quickstart") {
+    console.log("");
+    console.log(heading("Provider auth"));
+    console.log(info("Current OpenCode credentials:"));
+    shell(opencodeBin, ["auth", "list"], { stdio: "inherit" });
+
+    while (true) {
+      const provider = (await promptText("Provider slug to connect (blank to finish)", "")).trim();
+      if (!provider) break;
+      authAttempts += 1;
+      const result = shell(opencodeBin, ["auth", "login", provider], { stdio: "inherit" });
+      if (result.code === 0) {
+        authSuccess = true;
+      } else {
+        console.log(warn(`OpenCode login failed for "${provider}".`));
+      }
+      const addAnother = await promptYesNo("Connect another provider?", false);
+      if (!addAnother) break;
+    }
+  }
+
+  const setModelNow = await promptYesNo("Set runtime default model now?", true);
+  let selectedModel = "";
+  if (setModelNow) {
+    const currentModel = await fetchRuntimeDefaultModel();
+    const modelOptions = await fetchRuntimeModelOptions();
+    console.log("");
+    console.log(heading("Default model"));
+    if (currentModel) {
+      console.log(info(`Current runtime default: ${currentModel}`));
+    }
+    if (modelOptions.length === 0) {
+      const manual = (await promptText("No discovered model list; enter provider/model manually", currentModel || "")).trim();
+      if (manual) {
+        await setRuntimeDefaultModel(manual);
+        selectedModel = manual;
+      }
+    } else {
+      const limited = modelOptions.slice(0, 12);
+      const selection = await promptSelect(
+        "Select a default model",
+        [
+          ...limited.map(option => ({
+            value: option.id,
+            label: option.label || option.id,
+            hint: option.id,
+          })),
+          { value: "__manual__", label: "Enter manually", hint: "Type provider/model yourself" },
+          { value: "__keep__", label: "Keep current", hint: currentModel || "No change" },
+        ],
+        0,
+      );
+      if (selection.value === "__manual__") {
+        const manual = (await promptText("Enter provider/model", currentModel || "")).trim();
+        if (manual) {
+          await setRuntimeDefaultModel(manual);
+          selectedModel = manual;
+        }
+      } else if (selection.value !== "__keep__") {
+        await setRuntimeDefaultModel(selection.value);
+        selectedModel = selection.value;
+      }
+    }
+  }
+
+  return {
+    status: "completed",
+    flow: pathChoice.value,
+    authAttempts,
+    authSuccess,
+    selectedModel: selectedModel || null,
+  };
 }
 
 async function installOrUpdate(args, mode) {
@@ -582,6 +916,17 @@ async function installOrUpdate(args, mode) {
   const linger = ensureLinger(args.skipLinger);
   const health = await healthCheck("http://127.0.0.1:3001/api/health");
   const verify = runPostInstallVerification();
+  let onboarding = null;
+  if (mode === "install" && !args.yes && health.ok && verify.wafflebotServiceOk && verify.opencodeServiceOk) {
+    try {
+      onboarding = await runInteractiveProviderOnboarding({ opencodeBin });
+    } catch (error) {
+      onboarding = {
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
 
   return {
     mode,
@@ -595,6 +940,7 @@ async function installOrUpdate(args, mode) {
     health,
     linger,
     verify,
+    onboarding,
   };
 }
 
@@ -733,6 +1079,38 @@ function printResult(result, asJson) {
         console.log(result.verify.commandOutput.linger || "(no output)");
       }
     }
+    if (result.mode === "install" && result.onboarding) {
+      if (result.onboarding.status === "completed") {
+        console.log(`onboarding: completed (${result.onboarding.flow})`);
+        if (result.onboarding.authAttempts > 0) {
+          console.log(`onboarding: provider auth attempts=${result.onboarding.authAttempts} success=${result.onboarding.authSuccess ? "yes" : "no"}`);
+        }
+        if (result.onboarding.selectedModel) {
+          console.log(`onboarding: default model=${result.onboarding.selectedModel}`);
+        }
+      } else if (result.onboarding.status === "skipped") {
+        console.log(`onboarding: skipped (${result.onboarding.reason})`);
+      } else if (result.onboarding.status === "error") {
+        console.log(`onboarding: failed (${result.onboarding.message})`);
+      }
+    }
+    return;
+  }
+
+  if (result.mode === "update-dry-run") {
+    console.log("update dry-run");
+    console.log(`root: ${result.rootDir}`);
+    console.log(`registry: ${result.registryUrl}`);
+    console.log(`target: ${result.target}`);
+    console.log(`precheck: npm=${result.precheck.npm ? "ok" : "missing"}, systemd-user=${result.precheck.systemdUser ? "ok" : "missing"}, bun=${result.precheck.bunPresent ? "present" : "will-install"}`);
+    console.log("planned actions:");
+    for (const action of result.actions) {
+      console.log(`- ${action}`);
+    }
+    console.log("not performed:");
+    for (const nonAction of result.nonActions) {
+      console.log(`- ${nonAction}`);
+    }
     return;
   }
 
@@ -759,6 +1137,29 @@ function printResult(result, asJson) {
   if (result.mode === "uninstall") {
     console.log(`uninstall complete: ${result.purgeData ? `removed ${result.rootDir}` : `removed services/runtime, kept data in ${result.rootDir}`}`);
     console.log(`cli shim removed: ${result.removedShim ? "yes" : "no"}`);
+    return;
+  }
+
+  if (result.mode === "onboard") {
+    if (result.onboarding?.status === "completed") {
+      console.log("onboard complete");
+      if (result.onboarding.authAttempts > 0) {
+        console.log(`provider auth attempts: ${result.onboarding.authAttempts}`);
+      }
+      if (result.onboarding.selectedModel) {
+        console.log(`default model: ${result.onboarding.selectedModel}`);
+      }
+      return;
+    }
+    if (result.onboarding?.status === "skipped") {
+      console.log(`onboard skipped: ${result.onboarding.reason}`);
+      return;
+    }
+    if (result.onboarding?.status === "error") {
+      console.log(`onboard failed: ${result.onboarding.message}`);
+      return;
+    }
+    console.log("onboard complete");
   }
 }
 
@@ -773,6 +1174,9 @@ function evaluateResult(result) {
   }
   if (result.mode === "status" || result.mode === "restart" || result.mode === "start") {
     return isActive && result.health?.ok ? 0 : 2;
+  }
+  if (result.mode === "update-dry-run") {
+    return result.precheck.npm && result.precheck.systemdUser ? 0 : 2;
   }
   if (result.mode === "stop") {
     const stopped =
@@ -794,9 +1198,21 @@ async function main() {
 
   let result;
   if (args.command === "install") {
+    if (args.dryRun) {
+      throw new Error("--dry-run is supported for `wafflebot update` only.");
+    }
     result = await installOrUpdate(args, "install");
   } else if (args.command === "update") {
-    result = await installOrUpdate(args, "update");
+    if (args.dryRun) {
+      result = buildUpdateDryRun({ args, paths: pathsFor(args.rootDir, args.scope) });
+    } else {
+      result = await installOrUpdate(args, "update");
+    }
+  } else if (args.command === "onboard") {
+    if (args.dryRun) {
+      throw new Error("--dry-run is not applicable to `wafflebot onboard`.");
+    }
+    result = await runOnboardingCommand(args);
   } else if (args.command === "status") {
     result = await status(args);
   } else if (args.command === "restart") {
