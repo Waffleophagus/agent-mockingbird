@@ -284,12 +284,12 @@ Direct package execution from private registry:
 
 ```bash
 npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/wafflebot@latest" install
+  "@waffleophagus/wafflebot-installer@latest" install
 ```
 
 ```bash
 bunx --bun npm exec --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/wafflebot@latest" -- install
+  "@waffleophagus/wafflebot-installer@latest" -- install
 ```
 
 Wafflebot commands:
