@@ -166,6 +166,10 @@ function summarizeActionPlan(title, lines) {
   ];
 }
 
+function sleep(ms) {
+  return new Promise(resolve => globalThis.setTimeout(resolve, ms));
+}
+
 function shell(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
@@ -742,6 +746,45 @@ async function fetchRuntimeModelOptions() {
   }
 }
 
+async function fetchRuntimeModelOptionsWithRetry(input = {}) {
+  const attempts = typeof input.attempts === "number" ? Math.max(1, input.attempts) : 8;
+  const delayMs = typeof input.delayMs === "number" ? Math.max(100, input.delayMs) : 1_000;
+  let last = [];
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    last = await fetchRuntimeModelOptions();
+    if (last.length > 0) return last;
+    if (attempt < attempts - 1) {
+      await sleep(delayMs);
+    }
+  }
+  return last;
+}
+
+async function restartOpencodeServiceForAuthRefresh() {
+  if (!checkSystemdUserStatus()) {
+    return {
+      attempted: false,
+      ok: false,
+      message: "systemctl --user unavailable; skipping automatic OpenCode restart.",
+    };
+  }
+  const restarted = shell("systemctl", ["--user", "restart", UNIT_OPENCODE]);
+  if (restarted.code !== 0) {
+    const detail = (restarted.stderr || restarted.stdout).trim() || "unknown error";
+    return {
+      attempted: true,
+      ok: false,
+      message: `Failed to restart ${UNIT_OPENCODE}: ${detail}`,
+    };
+  }
+  await sleep(1_500);
+  return {
+    attempted: true,
+    ok: true,
+    message: `${UNIT_OPENCODE} restarted to refresh provider credentials.`,
+  };
+}
+
 async function fetchRuntimeProviderOptions() {
   const models = await fetchRuntimeModelOptions();
   const providers = new Map();
@@ -884,6 +927,7 @@ async function runInteractiveProviderOnboarding(input) {
 
   let authAttempts = 0;
   let authSuccess = false;
+  let authRefresh = null;
   if (pathChoice.value === "quickstart") {
     console.log("");
     console.log(heading("Provider auth"));
@@ -943,13 +987,26 @@ async function runInteractiveProviderOnboarding(input) {
       const addAnother = await promptYesNo("Connect another provider?", false);
       if (!addAnother) break;
     }
+    if (authAttempts > 0) {
+      console.log("");
+      console.log(info("Applying provider auth changes before model selection..."));
+      authRefresh = await restartOpencodeServiceForAuthRefresh();
+      if (authRefresh.ok) {
+        console.log(success(authRefresh.message));
+      } else {
+        console.log(warn(authRefresh.message));
+      }
+    }
   }
 
   const setModelNow = await promptYesNo("Set runtime default model now?", true);
   let selectedModel = "";
   if (setModelNow) {
     const currentModel = await fetchRuntimeDefaultModel();
-    const modelOptions = await fetchRuntimeModelOptions();
+    const modelOptions =
+      authAttempts > 0
+        ? await fetchRuntimeModelOptionsWithRetry({ attempts: 10, delayMs: 1_000 })
+        : await fetchRuntimeModelOptions();
     console.log("");
     console.log(heading("Default model"));
     if (currentModel) {
@@ -984,6 +1041,7 @@ async function runInteractiveProviderOnboarding(input) {
     flow: pathChoice.value,
     authAttempts,
     authSuccess,
+    authRefresh,
     selectedModel: selectedModel || null,
   };
 }
@@ -1240,6 +1298,9 @@ function printResult(result, asJson) {
         console.log(`onboarding: completed (${result.onboarding.flow})`);
         if (result.onboarding.authAttempts > 0) {
           console.log(`onboarding: provider auth attempts=${result.onboarding.authAttempts} success=${result.onboarding.authSuccess ? "yes" : "no"}`);
+          if (result.onboarding.authRefresh) {
+            console.log(`onboarding: auth refresh=${result.onboarding.authRefresh.ok ? "ok" : "skipped/failed"}`);
+          }
         }
         if (result.onboarding.selectedModel) {
           console.log(`onboarding: default model=${result.onboarding.selectedModel}`);
@@ -1302,6 +1363,9 @@ function printResult(result, asJson) {
       console.log("onboard complete");
       if (result.onboarding.authAttempts > 0) {
         console.log(`provider auth attempts: ${result.onboarding.authAttempts}`);
+        if (result.onboarding.authRefresh) {
+          console.log(`provider auth refresh: ${result.onboarding.authRefresh.ok ? "ok" : "skipped/failed"}`);
+        }
       }
       if (result.onboarding.selectedModel) {
         console.log(`default model: ${result.onboarding.selectedModel}`);
