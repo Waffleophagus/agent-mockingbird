@@ -307,10 +307,11 @@ wafflebot uninstall
 
 `wafflebot install` and `wafflebot update` now show a mode-specific action plan before confirmation.
 
-- `install` plan includes optional interactive provider/model onboarding after services are healthy.
+- `install` flow now launches interactive provider/model onboarding immediately (interactive installs).
 - `update` plan explicitly calls out what is refreshed vs what is preserved (data/workspace/config are not reset).
 - `update --dry-run` previews planned update actions without mutating files/services.
 - `onboard` reruns interactive provider/model onboarding without reinstalling.
+- Install/update now also maintain an `opencode` shim in `~/.local/bin` so the OpenCode CLI is directly available.
 
 Compatibility alias remains available:
 

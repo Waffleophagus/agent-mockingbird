@@ -218,6 +218,7 @@ function pathsFor(rootDir, scope) {
     npmPrefix,
     localBinDir,
     wafflebotShimPath: path.join(localBinDir, "wafflebot"),
+    opencodeShimPath: path.join(localBinDir, "opencode"),
     dataDir: path.join(rootDir, "data"),
     workspaceDir: path.join(rootDir, "workspace"),
     logsDir: path.join(rootDir, "logs"),
@@ -382,6 +383,18 @@ exec "${wafflebotBin}" "$@"
   return paths.wafflebotShimPath;
 }
 
+function writeOpencodeShim(paths, opencodeBin) {
+  ensureDir(paths.localBinDir);
+  const shim = `#!/usr/bin/env bash
+set -euo pipefail
+# managed-by: wafflebot-installer
+exec "${opencodeBin}" "$@"
+`;
+  writeFile(paths.opencodeShimPath, shim);
+  fs.chmodSync(paths.opencodeShimPath, 0o755);
+  return paths.opencodeShimPath;
+}
+
 function removeWafflebotShim(paths) {
   if (!fs.existsSync(paths.wafflebotShimPath)) {
     return false;
@@ -391,6 +404,18 @@ function removeWafflebotShim(paths) {
     return false;
   }
   fs.rmSync(paths.wafflebotShimPath, { force: true });
+  return true;
+}
+
+function removeOpencodeShim(paths) {
+  if (!fs.existsSync(paths.opencodeShimPath)) {
+    return false;
+  }
+  const content = fs.readFileSync(paths.opencodeShimPath, "utf8");
+  if (!content.includes("managed-by: wafflebot-installer")) {
+    return false;
+  }
+  fs.rmSync(paths.opencodeShimPath, { force: true });
   return true;
 }
 
@@ -528,7 +553,7 @@ function buildInstallSummary({ args, paths }) {
     "3. Install/refresh OpenCode CLI dependency (`opencode-ai@latest`) from npmjs.",
     `4. Install Wafflebot package (@${args.scope.replace(/^@/, "")}/wafflebot) from your scoped registry.`,
     "5. Create/refresh runtime directories under the install root.",
-    `6. Install CLI shim at ${paths.wafflebotShimPath} and ensure ${paths.localBinDir} is on PATH.`,
+    `6. Install CLI shims at ${paths.wafflebotShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
     `7. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
     "8. Reload systemd user daemon and enable/start both services.",
     args.skipLinger
@@ -554,6 +579,7 @@ function buildUpdateSummary({ args, paths }) {
     "1. Refresh Wafflebot package + OpenCode CLI dependency.",
     `2. Ensure Bun runtime is available${hasBun ? ` (${success("already present")})` : ` (${warn(`will install${hasCurl ? " with curl fallback" : ""}`)})`}.`,
     "3. Re-write CLI shim + systemd user units to current paths/entrypoint.",
+    "   - Includes wafflebot + opencode shims in ~/.local/bin",
     "4. Reload daemon, enable/start services, then force restart both units.",
     args.skipLinger
       ? "5. Skip linger configuration (--skip-linger set)."
@@ -581,6 +607,7 @@ function buildUpdateDryRun({ args, paths }) {
     "Refresh opencode-ai dependency",
     hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
     "Rewrite wafflebot CLI shim",
+    "Rewrite opencode CLI shim",
     "Rewrite systemd user unit files for opencode + wafflebot",
     "systemctl --user daemon-reload + enable --now opencode.service wafflebot.service",
     "systemctl --user restart opencode.service wafflebot.service",
@@ -705,12 +732,33 @@ async function fetchRuntimeModelOptions() {
     return payload.models
       .map(model => ({
         id: typeof model?.id === "string" ? model.id.trim() : "",
+        providerId: typeof model?.providerId === "string" ? model.providerId.trim() : "",
+        modelId: typeof model?.modelId === "string" ? model.modelId.trim() : "",
         label: typeof model?.label === "string" ? model.label.trim() : "",
       }))
       .filter(model => model.id);
   } catch {
     return [];
   }
+}
+
+async function fetchRuntimeProviderOptions() {
+  const models = await fetchRuntimeModelOptions();
+  const providers = new Map();
+  for (const model of models) {
+    const providerId = model.providerId?.trim() || (model.id.includes("/") ? model.id.split("/")[0] : "");
+    if (!providerId) continue;
+    const current = providers.get(providerId) ?? { providerId, count: 0 };
+    current.count += 1;
+    providers.set(providerId, current);
+  }
+  return [...providers.values()]
+    .sort((a, b) => a.providerId.localeCompare(b.providerId))
+    .map(provider => ({
+      value: provider.providerId,
+      label: provider.providerId,
+      hint: `${provider.count} discovered model${provider.count === 1 ? "" : "s"}`,
+    }));
 }
 
 async function setRuntimeDefaultModel(modelRef) {
@@ -770,16 +818,56 @@ async function runInteractiveProviderOnboarding(input) {
     console.log(heading("Provider auth"));
     console.log(info("Current OpenCode credentials:"));
     shell(opencodeBin, ["auth", "list"], { stdio: "inherit" });
+    const discoveredProviders = await fetchRuntimeProviderOptions();
 
     while (true) {
-      const provider = (await promptText("Provider slug to connect (blank to finish)", "")).trim();
-      if (!provider) break;
-      authAttempts += 1;
-      const result = shell(opencodeBin, ["auth", "login", provider], { stdio: "inherit" });
+      const selection = await promptSelect(
+        "Connect a provider",
+        [
+          {
+            value: "__picker__",
+            label: "OpenCode interactive provider picker (recommended)",
+            hint: "Lets OpenCode show supported providers directly",
+          },
+          ...discoveredProviders,
+          {
+            value: "__manual__",
+            label: "Enter provider slug manually",
+            hint: "Use when provider is not in the discovered list",
+          },
+          {
+            value: "__done__",
+            label: "Done with provider auth",
+          },
+        ],
+        0,
+      );
+
+      if (selection.value === "__done__") break;
+
+      let result;
+      if (selection.value === "__picker__") {
+        authAttempts += 1;
+        result = shell(opencodeBin, ["auth", "login"], { stdio: "inherit" });
+      } else if (selection.value === "__manual__") {
+        const provider = (await promptText("Provider slug", "")).trim();
+        if (!provider) {
+          const continueChoice = await promptYesNo("No slug provided. Continue auth flow?", true);
+          if (!continueChoice) break;
+          continue;
+        }
+        authAttempts += 1;
+        result = shell(opencodeBin, ["auth", "login", provider], { stdio: "inherit" });
+      } else {
+        authAttempts += 1;
+        result = shell(opencodeBin, ["auth", "login", selection.value], { stdio: "inherit" });
+      }
+
       if (result.code === 0) {
         authSuccess = true;
+        shell(opencodeBin, ["auth", "list"], { stdio: "inherit" });
       } else {
-        console.log(warn(`OpenCode login failed for "${provider}".`));
+        console.log(warn("OpenCode login attempt did not complete successfully."));
       }
       const addAnother = await promptYesNo("Connect another provider?", false);
       if (!addAnother) break;
@@ -902,6 +990,7 @@ async function installOrUpdate(args, mode) {
       `opencode binary missing: looked in ${paths.opencodeBinGlobal} and ${paths.opencodeBinLocal}`,
     );
   }
+  const opencodeShimPath = writeOpencodeShim(paths, opencodeBin);
 
   const units = unitContents(paths, bunBin, opencodeBin, wafflebotAppDir, wafflebotEntrypoint);
   writeFile(paths.opencodeUnitPath, units.opencode);
@@ -917,7 +1006,7 @@ async function installOrUpdate(args, mode) {
   const health = await healthCheck("http://127.0.0.1:3001/api/health");
   const verify = runPostInstallVerification();
   let onboarding = null;
-  if (mode === "install" && !args.yes && health.ok && verify.wafflebotServiceOk && verify.opencodeServiceOk) {
+  if (mode === "install" && !args.yes) {
     try {
       onboarding = await runInteractiveProviderOnboarding({ opencodeBin });
     } catch (error) {
@@ -935,6 +1024,7 @@ async function installOrUpdate(args, mode) {
     wafflebotVersion: readInstalledVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
     shimPath,
+    opencodeShimPath,
     pathSetup,
     units: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
     health,
@@ -1011,6 +1101,7 @@ async function uninstall(args) {
   }
   shell("systemctl", ["--user", "daemon-reload"]);
   const removedShim = removeWafflebotShim(paths);
+  const removedOpencodeShim = removeOpencodeShim(paths);
 
   if (args.purgeData) {
     if (fs.existsSync(paths.rootDir)) {
@@ -1034,6 +1125,7 @@ async function uninstall(args) {
     rootDir: paths.rootDir,
     unitsRemoved: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
     removedShim,
+    removedOpencodeShim,
     removed: true,
     purgeData: Boolean(args.purgeData),
   };
@@ -1053,6 +1145,9 @@ function printResult(result, asJson) {
     console.log(`wafflebot: ${result.wafflebotVersion ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "unknown"}`);
     console.log(`cli: ${result.shimPath ?? "unavailable"}`);
+    if (result.opencodeShimPath) {
+      console.log(`opencode-cli: ${result.opencodeShimPath}`);
+    }
     if (result.pathSetup) {
       if (result.pathSetup.inPath) {
         console.log(`path: ${localBinDir} already in PATH`);
@@ -1137,6 +1232,7 @@ function printResult(result, asJson) {
   if (result.mode === "uninstall") {
     console.log(`uninstall complete: ${result.purgeData ? `removed ${result.rootDir}` : `removed services/runtime, kept data in ${result.rootDir}`}`);
     console.log(`cli shim removed: ${result.removedShim ? "yes" : "no"}`);
+    console.log(`opencode shim removed: ${result.removedOpencodeShim ? "yes" : "no"}`);
     return;
   }
 
