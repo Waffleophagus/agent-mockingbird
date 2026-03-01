@@ -761,6 +761,77 @@ async function fetchRuntimeProviderOptions() {
     }));
 }
 
+function modelOptionSearchText(option) {
+  return `${option.label || ""} ${option.id || ""} ${option.providerId || ""} ${option.modelId || ""}`
+    .toLowerCase()
+    .trim();
+}
+
+function matchesSearchQuery(option, query) {
+  const normalizedQuery = String(query ?? "")
+    .toLowerCase()
+    .trim();
+  if (!normalizedQuery) return true;
+  const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  const haystack = modelOptionSearchText(option);
+  return tokens.every(token => haystack.includes(token));
+}
+
+async function promptSearchableModelChoice(input) {
+  const { modelOptions, currentModel } = input;
+  const pageSize = 12;
+  let query = "";
+  let page = 0;
+
+  while (true) {
+    const filtered = modelOptions.filter(option => matchesSearchQuery(option, query));
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (page >= totalPages) page = 0;
+
+    const startIndex = page * pageSize;
+    const pageItems = filtered.slice(startIndex, startIndex + pageSize);
+
+    const titleParts = ["Select a default model"];
+    if (query) titleParts.push(`search="${query}"`);
+    titleParts.push(`matches=${filtered.length}`);
+    titleParts.push(`page=${page + 1}/${totalPages}`);
+
+    const options = [
+      ...pageItems.map(option => ({
+        value: option.id,
+        label: option.label || option.id,
+        hint: option.id,
+      })),
+    ];
+
+    if (filtered.length > 0 && page < totalPages - 1) {
+      options.push({ value: "__next__", label: "Next page", hint: "Show more results" });
+    }
+    if (filtered.length > 0 && page > 0) {
+      options.push({ value: "__prev__", label: "Previous page" });
+    }
+    options.push({ value: "__search__", label: "Change search query", hint: query ? "Edit query" : "Find by provider/model name" });
+    options.push({ value: "__manual__", label: "Enter manually", hint: "Type provider/model yourself" });
+    options.push({ value: "__keep__", label: "Keep current", hint: currentModel || "No change" });
+
+    const selection = await promptSelect(titleParts.join(" | "), options, 0);
+    if (selection.value === "__next__") {
+      page += 1;
+      continue;
+    }
+    if (selection.value === "__prev__") {
+      page = Math.max(0, page - 1);
+      continue;
+    }
+    if (selection.value === "__search__") {
+      query = (await promptText("Search models (provider, model, id)", query)).trim();
+      page = 0;
+      continue;
+    }
+    return selection.value;
+  }
+}
+
 async function setRuntimeDefaultModel(modelRef) {
   const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/runtime/default-model`, {
     method: "PUT",
@@ -891,29 +962,19 @@ async function runInteractiveProviderOnboarding(input) {
         selectedModel = manual;
       }
     } else {
-      const limited = modelOptions.slice(0, 12);
-      const selection = await promptSelect(
-        "Select a default model",
-        [
-          ...limited.map(option => ({
-            value: option.id,
-            label: option.label || option.id,
-            hint: option.id,
-          })),
-          { value: "__manual__", label: "Enter manually", hint: "Type provider/model yourself" },
-          { value: "__keep__", label: "Keep current", hint: currentModel || "No change" },
-        ],
-        0,
-      );
-      if (selection.value === "__manual__") {
+      const selection = await promptSearchableModelChoice({
+        modelOptions,
+        currentModel,
+      });
+      if (selection === "__manual__") {
         const manual = (await promptText("Enter provider/model", currentModel || "")).trim();
         if (manual) {
           await setRuntimeDefaultModel(manual);
           selectedModel = manual;
         }
-      } else if (selection.value !== "__keep__") {
-        await setRuntimeDefaultModel(selection.value);
-        selectedModel = selection.value;
+      } else if (selection !== "__keep__") {
+        await setRuntimeDefaultModel(selection);
+        selectedModel = selection;
       }
     }
   }
