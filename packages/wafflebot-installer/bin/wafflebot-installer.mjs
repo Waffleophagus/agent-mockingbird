@@ -150,7 +150,6 @@ function userName() {
 function pathsFor(rootDir, scope) {
   const normalizedScope = scope.replace(/^@/, "");
   const npmPrefix = path.join(rootDir, "npm");
-  const wafflebotAppDir = path.join(npmPrefix, "lib", "node_modules", `@${normalizedScope}`, "wafflebot");
   return {
     rootDir,
     npmPrefix,
@@ -159,14 +158,35 @@ function pathsFor(rootDir, scope) {
     logsDir: path.join(rootDir, "logs"),
     etcDir: path.join(rootDir, "etc"),
     npmrcPath: path.join(rootDir, "etc", "npmrc"),
-    wafflebotAppDir,
-    wafflebotBin: path.join(npmPrefix, "bin", "wafflebot"),
-    opencodeBin: path.join(npmPrefix, "bin", "opencode"),
-    bunBinManaged: path.join(npmPrefix, "bin", "bun"),
+    wafflebotAppDirGlobal: path.join(npmPrefix, "lib", "node_modules", `@${normalizedScope}`, "wafflebot"),
+    wafflebotAppDirLocal: path.join(npmPrefix, "node_modules", `@${normalizedScope}`, "wafflebot"),
+    wafflebotBinGlobal: path.join(npmPrefix, "bin", "wafflebot"),
+    wafflebotBinLocal: path.join(npmPrefix, "node_modules", ".bin", "wafflebot"),
+    opencodeBinGlobal: path.join(npmPrefix, "bin", "opencode"),
+    opencodeBinLocal: path.join(npmPrefix, "node_modules", ".bin", "opencode"),
+    bunBinManagedGlobal: path.join(npmPrefix, "bin", "bun"),
+    bunBinManagedLocal: path.join(npmPrefix, "node_modules", ".bin", "bun"),
     bunBinTools: path.join(rootDir, "tools", "bun", "bin", "bun"),
     opencodeUnitPath: path.join(USER_UNIT_DIR, UNIT_OPENCODE),
     wafflebotUnitPath: path.join(USER_UNIT_DIR, UNIT_WAFFLEBOT),
   };
+}
+
+function firstExistingPath(candidates) {
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function resolveWafflebotAppDir(paths) {
+  return firstExistingPath([paths.wafflebotAppDirGlobal, paths.wafflebotAppDirLocal]);
+}
+
+function resolveOpencodeBin(paths) {
+  return firstExistingPath([paths.opencodeBinGlobal, paths.opencodeBinLocal]);
 }
 
 function resolveBunBinary(paths) {
@@ -174,18 +194,12 @@ function resolveBunBinary(paths) {
     const out = shell("bash", ["-lc", "command -v bun"]);
     return out.stdout.trim();
   }
-  if (fs.existsSync(paths.bunBinManaged)) {
-    return paths.bunBinManaged;
-  }
-  if (fs.existsSync(paths.bunBinTools)) {
-    return paths.bunBinTools;
-  }
-  return null;
+  return firstExistingPath([paths.bunBinManagedGlobal, paths.bunBinManagedLocal, paths.bunBinTools]);
 }
 
 function tryInstallBun(paths) {
   try {
-    npmInstall(paths.npmPrefix, ["bun@latest"], ["--registry", PUBLIC_NPM_REGISTRY]);
+    npmInstall(paths.npmPrefix, ["bun@latest"], ["-g", "--registry", PUBLIC_NPM_REGISTRY]);
   } catch {
     // Fallback below.
   }
@@ -202,7 +216,7 @@ function tryInstallBun(paths) {
     "bash",
     [
       "-lc",
-      `BUN_INSTALL="${path.join(paths.rootDir, "tools", "bun")}" curl -fsSL https://bun.com/install | bash`,
+      `curl -fsSL https://bun.com/install | BUN_INSTALL="${path.join(paths.rootDir, "tools", "bun")}" bash`,
     ],
     { stdio: "inherit" },
   );
@@ -224,10 +238,10 @@ function npmInstall(prefix, packages, extraArgs = [], env = process.env) {
   must("npm", args, { stdio: "inherit", env });
 }
 
-function unitContents(paths, bunBin) {
-  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Wafflebot (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=WAFFLEBOT_PORT=3001\nEnvironment=WAFFLEBOT_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nExecStart=${paths.opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+function unitContents(paths, bunBin, opencodeBin, wafflebotAppDir) {
+  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Wafflebot (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=WAFFLEBOT_PORT=3001\nEnvironment=WAFFLEBOT_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const wafflebot = `[Unit]\nDescription=Wafflebot API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.wafflebotAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=WAFFLEBOT_CONFIG_PATH=${path.join(paths.dataDir, "wafflebot.config.json")}\nEnvironment=WAFFLEBOT_DB_PATH=${path.join(paths.dataDir, "wafflebot.db")}\nEnvironment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=WAFFLEBOT_OPENCODE_DIRECTORY=${paths.workspaceDir}\nExecStart=${bunBin} ${path.join(paths.wafflebotAppDir, "src", "index.ts")}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const wafflebot = `[Unit]\nDescription=Wafflebot API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${wafflebotAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=WAFFLEBOT_CONFIG_PATH=${path.join(paths.dataDir, "wafflebot.config.json")}\nEnvironment=WAFFLEBOT_DB_PATH=${path.join(paths.dataDir, "wafflebot.db")}\nEnvironment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=WAFFLEBOT_OPENCODE_DIRECTORY=${paths.workspaceDir}\nExecStart=${bunBin} ${path.join(wafflebotAppDir, "src", "index.ts")}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   return { opencode, wafflebot };
 }
@@ -276,6 +290,22 @@ async function healthCheck(url) {
   } catch {
     return { ok: false, status: 0 };
   }
+}
+
+function runPostInstallVerification() {
+  const wafflebotStatus = shell("systemctl", ["--user", "status", UNIT_WAFFLEBOT, "--no-pager"]);
+  const opencodeStatus = shell("systemctl", ["--user", "status", UNIT_OPENCODE, "--no-pager"]);
+  const linger = shell("loginctl", ["show-user", userName(), "-p", "Linger"]);
+  return {
+    wafflebotServiceOk: wafflebotStatus.code === 0,
+    opencodeServiceOk: opencodeStatus.code === 0,
+    lingerOk: linger.code === 0 && linger.stdout.toLowerCase().includes("linger=yes"),
+    commandOutput: {
+      wafflebotStatus: (wafflebotStatus.stdout || wafflebotStatus.stderr).trim(),
+      opencodeStatus: (opencodeStatus.stdout || opencodeStatus.stderr).trim(),
+      linger: (linger.stdout || linger.stderr).trim(),
+    },
+  };
 }
 
 function checkSystemdUserStatus() {
@@ -351,7 +381,11 @@ function packageSpec(scope, version, tag) {
 }
 
 function readInstalledVersion(paths) {
-  const pkgPath = path.join(paths.wafflebotAppDir, "package.json");
+  const appDir = resolveWafflebotAppDir(paths);
+  if (!appDir) {
+    return null;
+  }
+  const pkgPath = path.join(appDir, "package.json");
   if (!fs.existsSync(pkgPath)) {
     return null;
   }
@@ -387,7 +421,7 @@ async function installOrUpdate(args, mode) {
     tryInstallBun(paths);
   }
 
-  npmInstall(paths.npmPrefix, ["opencode-ai@latest"], ["--registry", PUBLIC_NPM_REGISTRY]);
+  npmInstall(paths.npmPrefix, ["opencode-ai@latest"], ["-g", "--registry", PUBLIC_NPM_REGISTRY]);
 
   const env = {
     ...process.env,
@@ -395,21 +429,27 @@ async function installOrUpdate(args, mode) {
     npm_config_registry: PUBLIC_NPM_REGISTRY,
   };
 
-  npmInstall(paths.npmPrefix, [packageSpec(args.scope, args.version, args.tag)], [], env);
+  npmInstall(paths.npmPrefix, [packageSpec(args.scope, args.version, args.tag)], ["-g"], env);
 
   const bunBin = resolveBunBinary(paths);
   if (!bunBin) {
     throw new Error("bun binary was not found after install.");
   }
 
-  if (!fs.existsSync(paths.wafflebotAppDir)) {
-    throw new Error(`wafflebot package directory missing: ${paths.wafflebotAppDir}`);
+  const wafflebotAppDir = resolveWafflebotAppDir(paths);
+  if (!wafflebotAppDir) {
+    throw new Error(
+      `wafflebot package directory missing: looked in ${paths.wafflebotAppDirGlobal} and ${paths.wafflebotAppDirLocal}`,
+    );
   }
-  if (!fs.existsSync(paths.opencodeBin)) {
-    throw new Error(`opencode binary missing: ${paths.opencodeBin}`);
+  const opencodeBin = resolveOpencodeBin(paths);
+  if (!opencodeBin) {
+    throw new Error(
+      `opencode binary missing: looked in ${paths.opencodeBinGlobal} and ${paths.opencodeBinLocal}`,
+    );
   }
 
-  const units = unitContents(paths, bunBin);
+  const units = unitContents(paths, bunBin, opencodeBin, wafflebotAppDir);
   writeFile(paths.opencodeUnitPath, units.opencode);
   writeFile(paths.wafflebotUnitPath, units.wafflebot);
 
@@ -418,6 +458,7 @@ async function installOrUpdate(args, mode) {
 
   const linger = ensureLinger(args.skipLinger);
   const health = await healthCheck("http://127.0.0.1:3001/api/health");
+  const verify = runPostInstallVerification();
 
   return {
     mode,
@@ -428,6 +469,7 @@ async function installOrUpdate(args, mode) {
     units: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
     health,
     linger,
+    verify,
   };
 }
 
@@ -502,6 +544,17 @@ function printResult(result, asJson) {
       console.log(`linger: ${result.linger.warning}`);
     } else if (result.linger.changed) {
       console.log("linger: enabled");
+    }
+    if (result.verify) {
+      console.log(`verify: wafflebot.service=${result.verify.wafflebotServiceOk ? "ok" : "failed"}`);
+      console.log(`verify: opencode.service=${result.verify.opencodeServiceOk ? "ok" : "failed"}`);
+      console.log(`verify: linger=${result.verify.lingerOk ? "yes" : "no"}`);
+      if (!result.verify.wafflebotServiceOk || !result.verify.opencodeServiceOk || !result.verify.lingerOk) {
+        console.log("verify-details:");
+        console.log(result.verify.commandOutput.wafflebotStatus || "(no output)");
+        console.log(result.verify.commandOutput.opencodeStatus || "(no output)");
+        console.log(result.verify.commandOutput.linger || "(no output)");
+      }
     }
     return;
   }
