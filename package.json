@@ -9,9 +9,10 @@
   "private": true,
   "scripts": {
     "dev": "bun --hot src/index.ts",
-    "dev:stack": "bash scripts/dev-stack.sh",
+    "dev:stack": "bun run build:cli && bash scripts/dev-stack.sh",
     "start": "NODE_ENV=production bun src/index.ts",
-    "build": "bun run build.ts",
+    "build:cli": "bun run build-cli.mjs",
+    "build": "bun run build:cli && bun run build.ts",
     "build:bin": "bun run build-bin.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

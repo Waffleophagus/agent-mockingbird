@@ -15,6 +15,7 @@ Bun-native orchestration dashboard scaffold for a long-running agent stack.
 ```bash
 bun install
 bun run dev
+bun run build:cli
 ```
 
 Run wafflebot + OpenCode together for smoke testing:
@@ -22,6 +23,8 @@ Run wafflebot + OpenCode together for smoke testing:
 ```bash
 bun run dev:stack
 ```
+
+`dev:stack` runs `build:cli` first so the local `bin/wafflebot` command stays in sync.
 
 Production build and run:
 
@@ -281,21 +284,30 @@ Direct package execution from private registry:
 
 ```bash
 npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/wafflebot-installer@latest" install
+  "@waffleophagus/wafflebot@latest" install
 ```
 
 ```bash
 bunx --bun npm exec --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/wafflebot-installer@latest" -- install
+  "@waffleophagus/wafflebot@latest" -- install
 ```
 
-Installer commands:
+Wafflebot commands:
+
+```bash
+wafflebot install
+wafflebot update
+wafflebot status
+wafflebot restart
+wafflebot start
+wafflebot stop
+wafflebot uninstall
+```
+
+Compatibility alias remains available:
 
 ```bash
 wafflebot-installer install
-wafflebot-installer update
-wafflebot-installer status
-wafflebot-installer uninstall
 ```
 
 Default install root is `~/.wafflebot`, with systemd **user** services:

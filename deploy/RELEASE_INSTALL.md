@@ -18,6 +18,14 @@ This installs:
 
 Install root defaults to `~/.wafflebot`.
 
+After install, operational commands are available through `wafflebot`:
+
+```bash
+wafflebot status
+wafflebot restart
+wafflebot update
+```
+
 ## Maintainer flow (build + publish)
 
 1. Push a tag (for example `v0.1.0`) or run the `Release Bundle` workflow manually.

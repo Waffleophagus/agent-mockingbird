@@ -1,12 +1,21 @@
 # @waffleophagus/wafflebot-installer
 
-Private Linux onboarding installer for Wafflebot and OpenCode.
+Compatibility wrapper for `@waffleophagus/wafflebot`.
 
-## Commands
+It forwards all arguments to:
 
 ```bash
-wafflebot-installer install
-wafflebot-installer update
-wafflebot-installer status
-wafflebot-installer uninstall
+npm exec --yes --registry <your-registry> @waffleophagus/wafflebot@latest -- <args>
+```
+
+Primary CLI is now:
+
+```bash
+wafflebot install
+wafflebot update
+wafflebot status
+wafflebot restart
+wafflebot start
+wafflebot stop
+wafflebot uninstall
 ```

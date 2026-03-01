@@ -2,8 +2,8 @@
 set -euo pipefail
 
 REGISTRY_URL="${WAFFLEBOT_REGISTRY_URL:-https://git.waffleophagus.com/api/packages/waffleophagus/npm/}"
-INSTALLER_SCOPE="${WAFFLEBOT_INSTALLER_SCOPE:-waffleophagus}"
-INSTALLER_TAG="${WAFFLEBOT_INSTALLER_TAG:-latest}"
+WAFFLEBOT_SCOPE="${WAFFLEBOT_SCOPE:-waffleophagus}"
+WAFFLEBOT_TAG="${WAFFLEBOT_TAG:-latest}"
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "npm is required. Please install npm and run again."
@@ -17,5 +17,5 @@ fi
 exec npm exec \
   --yes \
   --registry "${REGISTRY_URL}" \
-  "@${INSTALLER_SCOPE}/wafflebot-installer@${INSTALLER_TAG}" \
+  "@${WAFFLEBOT_SCOPE}/wafflebot@${WAFFLEBOT_TAG}" \
   -- "$@"

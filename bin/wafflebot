@@ -1,0 +1,692 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import readline from "node:readline/promises";
+import { spawnSync } from "node:child_process";
+
+const { console, fetch } = globalThis;
+
+const DEFAULT_SCOPE = "waffleophagus";
+const DEFAULT_REGISTRY_URL = "https://git.waffleophagus.com/api/packages/waffleophagus/npm/";
+const PUBLIC_NPM_REGISTRY = "https://registry.npmjs.org/";
+const DEFAULT_TAG = "latest";
+const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".wafflebot");
+const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
+const UNIT_OPENCODE = "opencode.service";
+const UNIT_WAFFLEBOT = "wafflebot.service";
+
+function parseArgs(argv) {
+  const args = {
+    command: undefined,
+    yes: false,
+    json: false,
+    skipLinger: false,
+    purgeData: false,
+    keepData: false,
+    registryUrl: DEFAULT_REGISTRY_URL,
+    scope: DEFAULT_SCOPE,
+    tag: DEFAULT_TAG,
+    version: undefined,
+    rootDir: DEFAULT_ROOT_DIR,
+  };
+
+  const positionals = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (!arg.startsWith("-")) {
+      positionals.push(arg);
+      continue;
+    }
+    if (arg === "--yes" || arg === "-y") {
+      args.yes = true;
+      continue;
+    }
+    if (arg === "--json") {
+      args.json = true;
+      continue;
+    }
+    if (arg === "--skip-linger") {
+      args.skipLinger = true;
+      continue;
+    }
+    if (arg === "--purge-data") {
+      args.purgeData = true;
+      continue;
+    }
+    if (arg === "--keep-data") {
+      args.keepData = true;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      args.command = "help";
+      continue;
+    }
+
+    const next = argv[i + 1];
+    if ((arg === "--registry-url" || arg === "--registry") && next) {
+      args.registryUrl = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--scope" && next) {
+      args.scope = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--tag" && next) {
+      args.tag = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--version" && next) {
+      args.version = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--root-dir" && next) {
+      args.rootDir = path.resolve(next);
+      i += 1;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  if (positionals.length > 0) {
+    args.command = positionals[0];
+  }
+
+  args.registryUrl = normalizeRegistryUrl(args.registryUrl);
+  return args;
+}
+
+function normalizeRegistryUrl(url) {
+  const trimmed = (url || "").trim();
+  if (!trimmed) {
+    return DEFAULT_REGISTRY_URL;
+  }
+  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+}
+
+function printHelp() {
+  console.log(`wafflebot\n\nUsage:\n  wafflebot <install|update|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact wafflebot version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+}
+
+function shell(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    stdio: options.stdio ?? "pipe",
+    env: options.env ?? process.env,
+  });
+  return {
+    code: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+function must(command, args, options = {}) {
+  const result = shell(command, args, options);
+  if (result.code !== 0) {
+    throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim()}`);
+  }
+  return result;
+}
+
+function commandExists(command) {
+  const result = shell("bash", ["-lc", `command -v ${command}`]);
+  return result.code === 0;
+}
+
+function ensureDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function writeFile(file, content) {
+  ensureDir(path.dirname(file));
+  fs.writeFileSync(file, content, "utf8");
+}
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function userName() {
+  return process.env.USER || process.env.LOGNAME || os.userInfo().username;
+}
+
+function pathsFor(rootDir, scope) {
+  const normalizedScope = scope.replace(/^@/, "");
+  const npmPrefix = path.join(rootDir, "npm");
+  return {
+    rootDir,
+    npmPrefix,
+    dataDir: path.join(rootDir, "data"),
+    workspaceDir: path.join(rootDir, "workspace"),
+    logsDir: path.join(rootDir, "logs"),
+    etcDir: path.join(rootDir, "etc"),
+    npmrcPath: path.join(rootDir, "etc", "npmrc"),
+    wafflebotAppDirGlobal: path.join(npmPrefix, "lib", "node_modules", `@${normalizedScope}`, "wafflebot"),
+    wafflebotAppDirLocal: path.join(npmPrefix, "node_modules", `@${normalizedScope}`, "wafflebot"),
+    wafflebotBinGlobal: path.join(npmPrefix, "bin", "wafflebot"),
+    wafflebotBinLocal: path.join(npmPrefix, "node_modules", ".bin", "wafflebot"),
+    opencodeBinGlobal: path.join(npmPrefix, "bin", "opencode"),
+    opencodeBinLocal: path.join(npmPrefix, "node_modules", ".bin", "opencode"),
+    bunBinManagedGlobal: path.join(npmPrefix, "bin", "bun"),
+    bunBinManagedLocal: path.join(npmPrefix, "node_modules", ".bin", "bun"),
+    bunBinTools: path.join(rootDir, "tools", "bun", "bin", "bun"),
+    opencodeUnitPath: path.join(USER_UNIT_DIR, UNIT_OPENCODE),
+    wafflebotUnitPath: path.join(USER_UNIT_DIR, UNIT_WAFFLEBOT),
+  };
+}
+
+function firstExistingPath(candidates) {
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function resolveWafflebotAppDir(paths) {
+  return firstExistingPath([paths.wafflebotAppDirGlobal, paths.wafflebotAppDirLocal]);
+}
+
+function resolveOpencodeBin(paths) {
+  return firstExistingPath([paths.opencodeBinGlobal, paths.opencodeBinLocal]);
+}
+
+function resolveBunBinary(paths) {
+  if (commandExists("bun")) {
+    const out = shell("bash", ["-lc", "command -v bun"]);
+    return out.stdout.trim();
+  }
+  return firstExistingPath([paths.bunBinManagedGlobal, paths.bunBinManagedLocal, paths.bunBinTools]);
+}
+
+function tryInstallBun(paths) {
+  try {
+    npmInstall(paths.npmPrefix, ["bun@latest"], ["-g", "--registry", PUBLIC_NPM_REGISTRY]);
+  } catch {
+    // Fallback below.
+  }
+  if (resolveBunBinary(paths)) {
+    return;
+  }
+
+  if (!commandExists("curl")) {
+    throw new Error("bun is not installed and curl is unavailable for bun.com fallback install.");
+  }
+
+  ensureDir(path.join(paths.rootDir, "tools"));
+  const fallback = shell(
+    "bash",
+    [
+      "-lc",
+      `curl -fsSL https://bun.com/install | BUN_INSTALL="${path.join(paths.rootDir, "tools", "bun")}" bash`,
+    ],
+    { stdio: "inherit" },
+  );
+  if (fallback.code !== 0 || !resolveBunBinary(paths)) {
+    throw new Error("Failed to install bun via npm and bun.com install script fallback.");
+  }
+}
+
+function writeScopedNpmrc(paths, scope, registryUrl) {
+  const normalizedScope = scope.replace(/^@/, "");
+  writeFile(
+    paths.npmrcPath,
+    `registry=${PUBLIC_NPM_REGISTRY}\n@${normalizedScope}:registry=${registryUrl}\n`,
+  );
+}
+
+function npmInstall(prefix, packages, extraArgs = [], env = process.env) {
+  const args = ["install", "--no-audit", "--no-fund", "--prefix", prefix, ...extraArgs, ...packages];
+  must("npm", args, { stdio: "inherit", env });
+}
+
+function unitContents(paths, bunBin, opencodeBin, wafflebotAppDir) {
+  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Wafflebot (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=WAFFLEBOT_PORT=3001\nEnvironment=WAFFLEBOT_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+
+  const wafflebot = `[Unit]\nDescription=Wafflebot API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${wafflebotAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=WAFFLEBOT_CONFIG_PATH=${path.join(paths.dataDir, "wafflebot.config.json")}\nEnvironment=WAFFLEBOT_DB_PATH=${path.join(paths.dataDir, "wafflebot.db")}\nEnvironment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=WAFFLEBOT_OPENCODE_DIRECTORY=${paths.workspaceDir}\nExecStart=${bunBin} ${path.join(wafflebotAppDir, "src", "index.ts")}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+
+  return { opencode, wafflebot };
+}
+
+function ensureSystemdUserAvailable() {
+  const result = shell("systemctl", ["--user", "status"]);
+  if (result.code !== 0) {
+    throw new Error("systemd user services are unavailable (`systemctl --user status` failed)");
+  }
+}
+
+function ensureLinger(skipLinger) {
+  if (skipLinger) {
+    return { changed: false, skipped: true };
+  }
+  const user = userName();
+  const status = shell("loginctl", ["show-user", user, "-p", "Linger"]);
+  if (status.code !== 0) {
+    return { changed: false, skipped: true, warning: "Could not read linger status via loginctl." };
+  }
+  if (status.stdout.toLowerCase().includes("linger=yes")) {
+    return { changed: false, skipped: false };
+  }
+
+  const direct = shell("loginctl", ["enable-linger", user]);
+  if (direct.code === 0) {
+    return { changed: true, skipped: false };
+  }
+
+  const sudo = shell("sudo", ["loginctl", "enable-linger", user], { stdio: "inherit" });
+  if (sudo.code === 0) {
+    return { changed: true, skipped: false };
+  }
+
+  return {
+    changed: false,
+    skipped: false,
+    warning: `Failed to enable lingering automatically. Run: sudo loginctl enable-linger ${user}`,
+  };
+}
+
+async function healthCheck(url) {
+  try {
+    const response = await fetch(url, { method: "GET" });
+    return { ok: response.ok, status: response.status };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+function runPostInstallVerification() {
+  const wafflebotStatus = shell("systemctl", ["--user", "status", UNIT_WAFFLEBOT, "--no-pager"]);
+  const opencodeStatus = shell("systemctl", ["--user", "status", UNIT_OPENCODE, "--no-pager"]);
+  const linger = shell("loginctl", ["show-user", userName(), "-p", "Linger"]);
+  return {
+    wafflebotServiceOk: wafflebotStatus.code === 0,
+    opencodeServiceOk: opencodeStatus.code === 0,
+    lingerOk: linger.code === 0 && linger.stdout.toLowerCase().includes("linger=yes"),
+    commandOutput: {
+      wafflebotStatus: (wafflebotStatus.stdout || wafflebotStatus.stderr).trim(),
+      opencodeStatus: (opencodeStatus.stdout || opencodeStatus.stderr).trim(),
+      linger: (linger.stdout || linger.stderr).trim(),
+    },
+  };
+}
+
+function checkSystemdUserStatus() {
+  const result = shell("systemctl", ["--user", "status"]);
+  return result.code === 0;
+}
+
+function buildInstallSummary({ args, paths, mode }) {
+  const target = args.version ?? `tag:${args.tag}`;
+  const hasBun = Boolean(resolveBunBinary(paths));
+  const hasSystemdUser = checkSystemdUserStatus();
+  const hasLoginctl = commandExists("loginctl");
+  const hasCurl = commandExists("curl");
+  const actionLabel = mode === "update" ? "update" : "install";
+
+  return [
+    `Planned ${actionLabel}:`,
+    `- Target package: @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
+    `- Private registry scope: @${args.scope.replace(/^@/, "")} -> ${args.registryUrl}`,
+    `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, opencode-ai)`,
+    `- Install root: ${paths.rootDir}`,
+    "",
+    "Steps:",
+    `1. Validate required tools: npm, systemd user services.`,
+    `   - npm: ${commandExists("npm") ? "found" : "missing"}`,
+    `   - systemctl --user: ${hasSystemdUser ? "available" : "unavailable (install will fail)"}`,
+    `2. Ensure Bun runtime for service command.`,
+    hasBun
+      ? `   - bun: found at ${resolveBunBinary(paths)}`
+      : `   - bun: not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`,
+    "3. Install OpenCode CLI dependency (`opencode-ai@latest`) from npmjs.",
+    `4. Install Wafflebot package (@${args.scope.replace(/^@/, "")}/wafflebot) from your Gitea registry.`,
+    "5. Write/update config and data directories under install root.",
+    `6. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
+    "7. Reload systemd user daemon and enable/start both services.",
+    args.skipLinger
+      ? "8. Skip linger configuration (--skip-linger set)."
+      : `8. Attempt to enable linger via loginctl so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"} .`,
+    "9. Run health check on http://127.0.0.1:3001/api/health.",
+  ];
+}
+
+async function confirmInstall(args, paths, mode) {
+  if (args.yes) {
+    return;
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("Install is interactive by default. Re-run with --yes in non-interactive environments.");
+  }
+
+  const summaryLines = buildInstallSummary({ args, paths, mode });
+  for (const line of summaryLines) {
+    console.log(line);
+  }
+  console.log("");
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = (
+    await rl.question(`Proceed with ${mode === "update" ? "update" : "install"}? [y/N] `)
+  )
+    .trim()
+    .toLowerCase();
+  rl.close();
+  if (answer !== "y" && answer !== "yes") {
+    throw new Error("Aborted by user.");
+  }
+}
+
+function packageSpec(scope, version, tag) {
+  const normalizedScope = scope.replace(/^@/, "");
+  const target = version || tag;
+  return `@${normalizedScope}/wafflebot@${target}`;
+}
+
+function readInstalledVersion(paths) {
+  const appDir = resolveWafflebotAppDir(paths);
+  if (!appDir) {
+    return null;
+  }
+  const pkgPath = path.join(appDir, "package.json");
+  if (!fs.existsSync(pkgPath)) {
+    return null;
+  }
+  return readJson(pkgPath).version ?? null;
+}
+
+function readInstalledOpenCodeVersion(paths) {
+  const pkgPath = path.join(paths.npmPrefix, "lib", "node_modules", "opencode-ai", "package.json");
+  if (!fs.existsSync(pkgPath)) {
+    return null;
+  }
+  return readJson(pkgPath).version ?? null;
+}
+
+async function installOrUpdate(args, mode) {
+  if (!commandExists("npm")) {
+    throw new Error("npm is required. Please install npm and run again.");
+  }
+
+  const paths = pathsFor(args.rootDir, args.scope);
+  await confirmInstall(args, paths, mode);
+  ensureDir(paths.rootDir);
+  ensureDir(paths.npmPrefix);
+  ensureDir(paths.dataDir);
+  ensureDir(paths.workspaceDir);
+  ensureDir(paths.logsDir);
+  ensureDir(paths.etcDir);
+
+  ensureSystemdUserAvailable();
+  writeScopedNpmrc(paths, args.scope, args.registryUrl);
+
+  if (!resolveBunBinary(paths)) {
+    tryInstallBun(paths);
+  }
+
+  npmInstall(paths.npmPrefix, ["opencode-ai@latest"], ["-g", "--registry", PUBLIC_NPM_REGISTRY]);
+
+  const env = {
+    ...process.env,
+    npm_config_userconfig: paths.npmrcPath,
+    npm_config_registry: PUBLIC_NPM_REGISTRY,
+  };
+
+  npmInstall(paths.npmPrefix, [packageSpec(args.scope, args.version, args.tag)], ["-g"], env);
+
+  const bunBin = resolveBunBinary(paths);
+  if (!bunBin) {
+    throw new Error("bun binary was not found after install.");
+  }
+
+  const wafflebotAppDir = resolveWafflebotAppDir(paths);
+  if (!wafflebotAppDir) {
+    throw new Error(
+      `wafflebot package directory missing: looked in ${paths.wafflebotAppDirGlobal} and ${paths.wafflebotAppDirLocal}`,
+    );
+  }
+  const opencodeBin = resolveOpencodeBin(paths);
+  if (!opencodeBin) {
+    throw new Error(
+      `opencode binary missing: looked in ${paths.opencodeBinGlobal} and ${paths.opencodeBinLocal}`,
+    );
+  }
+
+  const units = unitContents(paths, bunBin, opencodeBin, wafflebotAppDir);
+  writeFile(paths.opencodeUnitPath, units.opencode);
+  writeFile(paths.wafflebotUnitPath, units.wafflebot);
+
+  must("systemctl", ["--user", "daemon-reload"]);
+  must("systemctl", ["--user", "enable", "--now", UNIT_OPENCODE, UNIT_WAFFLEBOT]);
+
+  const linger = ensureLinger(args.skipLinger);
+  const health = await healthCheck("http://127.0.0.1:3001/api/health");
+  const verify = runPostInstallVerification();
+
+  return {
+    mode,
+    rootDir: paths.rootDir,
+    registryUrl: args.registryUrl,
+    wafflebotVersion: readInstalledVersion(paths),
+    opencodeVersion: readInstalledOpenCodeVersion(paths),
+    units: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
+    health,
+    linger,
+    verify,
+  };
+}
+
+async function status(args) {
+  const paths = pathsFor(args.rootDir, args.scope);
+  const unitStates = {};
+  for (const unit of [UNIT_OPENCODE, UNIT_WAFFLEBOT]) {
+    const result = shell("systemctl", ["--user", "is-active", unit]);
+    unitStates[unit] = result.code === 0 ? result.stdout.trim() : "inactive";
+  }
+  const health = await healthCheck("http://127.0.0.1:3001/api/health");
+
+  return {
+    mode: "status",
+    rootDir: paths.rootDir,
+    wafflebotVersion: readInstalledVersion(paths),
+    opencodeVersion: readInstalledOpenCodeVersion(paths),
+    unitStates,
+    health,
+  };
+}
+
+function serviceCommand(action) {
+  must("systemctl", ["--user", action, UNIT_OPENCODE, UNIT_WAFFLEBOT]);
+}
+
+async function manageService(args, action) {
+  ensureSystemdUserAvailable();
+  serviceCommand(action);
+  const base = await status(args);
+  return {
+    ...base,
+    mode: action,
+  };
+}
+
+async function uninstall(args) {
+  const paths = pathsFor(args.rootDir, args.scope);
+
+  if (args.purgeData && args.keepData) {
+    throw new Error("Choose only one of --purge-data or --keep-data.");
+  }
+
+  if (!args.yes && process.stdin.isTTY && process.stdout.isTTY) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = (await rl.question(`Remove user services at ${paths.rootDir}? [y/N] `)).trim().toLowerCase();
+    if (answer !== "y" && answer !== "yes") {
+      rl.close();
+      throw new Error("Aborted by user.");
+    }
+    const purgeAnswer = (await rl.question("Purge data/workspace under ~/.wafflebot/data and ~/.wafflebot/workspace? [y/N] ")).trim().toLowerCase();
+    args.purgeData = purgeAnswer === "y" || purgeAnswer === "yes";
+    rl.close();
+  } else if (!args.yes) {
+    throw new Error("Uninstall requires confirmation. Re-run with --yes in non-interactive environments.");
+  }
+
+  if (args.yes && !args.purgeData) {
+    args.keepData = true;
+  }
+
+  shell("systemctl", ["--user", "disable", "--now", UNIT_WAFFLEBOT, UNIT_OPENCODE]);
+  if (fs.existsSync(paths.wafflebotUnitPath)) {
+    fs.rmSync(paths.wafflebotUnitPath, { force: true });
+  }
+  if (fs.existsSync(paths.opencodeUnitPath)) {
+    fs.rmSync(paths.opencodeUnitPath, { force: true });
+  }
+  shell("systemctl", ["--user", "daemon-reload"]);
+
+  if (args.purgeData) {
+    if (fs.existsSync(paths.rootDir)) {
+      fs.rmSync(paths.rootDir, { recursive: true, force: true });
+    }
+  } else {
+    const preserve = [paths.dataDir, paths.workspaceDir, paths.logsDir];
+    for (const target of preserve) {
+      ensureDir(target);
+    }
+    const removePaths = [paths.etcDir, paths.npmPrefix];
+    for (const target of removePaths) {
+      if (fs.existsSync(target)) {
+        fs.rmSync(target, { recursive: true, force: true });
+      }
+    }
+  }
+
+  return {
+    mode: "uninstall",
+    rootDir: paths.rootDir,
+    unitsRemoved: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
+    removed: true,
+    purgeData: Boolean(args.purgeData),
+  };
+}
+
+function printResult(result, asJson) {
+  if (asJson) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (result.mode === "install" || result.mode === "update") {
+    console.log(`${result.mode} complete`);
+    console.log(`root: ${result.rootDir}`);
+    console.log(`registry: ${result.registryUrl}`);
+    console.log(`wafflebot: ${result.wafflebotVersion ?? "unknown"}`);
+    console.log(`opencode: ${result.opencodeVersion ?? "unknown"}`);
+    console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
+    if (result.linger.warning) {
+      console.log(`linger: ${result.linger.warning}`);
+    } else if (result.linger.changed) {
+      console.log("linger: enabled");
+    }
+    if (result.verify) {
+      console.log(`verify: wafflebot.service=${result.verify.wafflebotServiceOk ? "ok" : "failed"}`);
+      console.log(`verify: opencode.service=${result.verify.opencodeServiceOk ? "ok" : "failed"}`);
+      console.log(`verify: linger=${result.verify.lingerOk ? "yes" : "no"}`);
+      if (!result.verify.wafflebotServiceOk || !result.verify.opencodeServiceOk || !result.verify.lingerOk) {
+        console.log("verify-details:");
+        console.log(result.verify.commandOutput.wafflebotStatus || "(no output)");
+        console.log(result.verify.commandOutput.opencodeStatus || "(no output)");
+        console.log(result.verify.commandOutput.linger || "(no output)");
+      }
+    }
+    return;
+  }
+
+  if (result.mode === "status") {
+    console.log("status");
+    console.log(`root: ${result.rootDir}`);
+    console.log(`wafflebot: ${result.wafflebotVersion ?? "not installed"}`);
+    console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
+    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_WAFFLEBOT}=${result.unitStates[UNIT_WAFFLEBOT]}`);
+    console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
+    return;
+  }
+
+  if (result.mode === "restart" || result.mode === "start" || result.mode === "stop") {
+    console.log(`${result.mode} complete`);
+    console.log(`root: ${result.rootDir}`);
+    console.log(`wafflebot: ${result.wafflebotVersion ?? "not installed"}`);
+    console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
+    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_WAFFLEBOT}=${result.unitStates[UNIT_WAFFLEBOT]}`);
+    console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
+    return;
+  }
+
+  if (result.mode === "uninstall") {
+    console.log(`uninstall complete: ${result.purgeData ? `removed ${result.rootDir}` : `removed services/runtime, kept data in ${result.rootDir}`}`);
+  }
+}
+
+function evaluateResult(result) {
+  const isActive =
+    result?.unitStates?.[UNIT_OPENCODE] === "active" && result?.unitStates?.[UNIT_WAFFLEBOT] === "active";
+  if (result.mode === "install" || result.mode === "update") {
+    if (!result.health?.ok || !result.verify?.wafflebotServiceOk || !result.verify?.opencodeServiceOk) {
+      return 2;
+    }
+    return 0;
+  }
+  if (result.mode === "status" || result.mode === "restart" || result.mode === "start") {
+    return isActive && result.health?.ok ? 0 : 2;
+  }
+  if (result.mode === "stop") {
+    const stopped =
+      result?.unitStates?.[UNIT_OPENCODE] !== "active" && result?.unitStates?.[UNIT_WAFFLEBOT] !== "active";
+    return stopped ? 0 : 2;
+  }
+  return 0;
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (!args.command || args.command === "help") {
+    printHelp();
+    if (!args.command) {
+      console.log("\nHint: run `wafflebot status` to check service health.");
+    }
+    return;
+  }
+
+  let result;
+  if (args.command === "install") {
+    result = await installOrUpdate(args, "install");
+  } else if (args.command === "update") {
+    result = await installOrUpdate(args, "update");
+  } else if (args.command === "status") {
+    result = await status(args);
+  } else if (args.command === "restart") {
+    result = await manageService(args, "restart");
+  } else if (args.command === "start") {
+    result = await manageService(args, "start");
+  } else if (args.command === "stop") {
+    result = await manageService(args, "stop");
+  } else if (args.command === "uninstall") {
+    result = await uninstall(args);
+  } else {
+    throw new Error(`Unknown command: ${args.command}`);
+  }
+
+  printResult(result, args.json);
+  process.exitCode = evaluateResult(result);
+}
+
+await main().catch(error => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});
