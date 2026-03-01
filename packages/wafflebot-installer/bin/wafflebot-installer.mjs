@@ -163,6 +163,7 @@ function pathsFor(rootDir, scope) {
     wafflebotBin: path.join(npmPrefix, "bin", "wafflebot"),
     opencodeBin: path.join(npmPrefix, "bin", "opencode"),
     bunBinManaged: path.join(npmPrefix, "bin", "bun"),
+    bunBinTools: path.join(rootDir, "tools", "bun", "bin", "bun"),
     opencodeUnitPath: path.join(USER_UNIT_DIR, UNIT_OPENCODE),
     wafflebotUnitPath: path.join(USER_UNIT_DIR, UNIT_WAFFLEBOT),
   };
@@ -176,7 +177,38 @@ function resolveBunBinary(paths) {
   if (fs.existsSync(paths.bunBinManaged)) {
     return paths.bunBinManaged;
   }
+  if (fs.existsSync(paths.bunBinTools)) {
+    return paths.bunBinTools;
+  }
   return null;
+}
+
+function tryInstallBun(paths) {
+  try {
+    npmInstall(paths.npmPrefix, ["bun@latest"], ["--registry", PUBLIC_NPM_REGISTRY]);
+  } catch {
+    // Fallback below.
+  }
+  if (resolveBunBinary(paths)) {
+    return;
+  }
+
+  if (!commandExists("curl")) {
+    throw new Error("bun is not installed and curl is unavailable for bun.com fallback install.");
+  }
+
+  ensureDir(path.join(paths.rootDir, "tools"));
+  const fallback = shell(
+    "bash",
+    [
+      "-lc",
+      `BUN_INSTALL="${path.join(paths.rootDir, "tools", "bun")}" curl -fsSL https://bun.com/install | bash`,
+    ],
+    { stdio: "inherit" },
+  );
+  if (fallback.code !== 0 || !resolveBunBinary(paths)) {
+    throw new Error("Failed to install bun via npm and bun.com install script fallback.");
+  }
 }
 
 function writeScopedNpmrc(paths, scope, registryUrl) {
@@ -302,7 +334,7 @@ async function installOrUpdate(args, mode) {
   writeScopedNpmrc(paths, args.scope, args.registryUrl);
 
   if (!resolveBunBinary(paths)) {
-    npmInstall(paths.npmPrefix, ["bun@latest"], ["--registry", PUBLIC_NPM_REGISTRY]);
+    tryInstallBun(paths);
   }
 
   npmInstall(paths.npmPrefix, ["opencode-ai@latest"], ["--registry", PUBLIC_NPM_REGISTRY]);
