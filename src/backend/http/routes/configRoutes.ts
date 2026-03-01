@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { importOpenclawBootstrapFromDirectory } from "../../agents/bootstrapContext";
+import { applyOpenclawImport, previewOpenclawImport } from "../../agents/openclawImport";
 import {
   getOpencodeAgentStorageInfo,
   listOpencodeAgentTypes,
@@ -338,6 +339,97 @@ async function importOpenclawBootstrap(req: Request) {
   }
 }
 
+const openclawImportPreviewSchema = z.object({
+  source: z.discriminatedUnion("mode", [
+    z.object({
+      mode: z.literal("local"),
+      path: z.string().min(1),
+    }),
+    z.object({
+      mode: z.literal("git"),
+      url: z.string().min(1),
+      ref: z.string().optional(),
+    }),
+  ]),
+  targetDirectory: z.string().optional(),
+});
+
+const openclawImportApplySchema = z.object({
+  previewId: z.string().min(1),
+  overwritePaths: z.array(z.string()).optional(),
+  skipPaths: z.array(z.string()).optional(),
+  runMemorySync: z.boolean().optional(),
+});
+
+async function previewOpenclawBootstrapImport(req: Request) {
+  const body = (await req.json()) as unknown;
+  const parsed = openclawImportPreviewSchema.safeParse(body);
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: "Invalid preview request",
+        issues: parsed.error.issues.map(issue => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+      },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const preview = previewOpenclawImport({
+      source:
+        parsed.data.source.mode === "local"
+          ? {
+              mode: "local",
+              path: parsed.data.source.path,
+            }
+          : {
+              mode: "git",
+              url: parsed.data.source.url,
+              ref: parsed.data.source.ref,
+            },
+      targetDirectory: parsed.data.targetDirectory,
+    });
+    return Response.json({ preview });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to build OpenClaw import preview";
+    return Response.json({ error: message }, { status: 422 });
+  }
+}
+
+async function applyOpenclawBootstrapImport(req: Request) {
+  const body = (await req.json()) as unknown;
+  const parsed = openclawImportApplySchema.safeParse(body);
+  if (!parsed.success) {
+    return Response.json(
+      {
+        error: "Invalid apply request",
+        issues: parsed.error.issues.map(issue => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+      },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const applied = await applyOpenclawImport({
+      previewId: parsed.data.previewId,
+      overwritePaths: parsed.data.overwritePaths,
+      skipPaths: parsed.data.skipPaths,
+      runMemorySync: parsed.data.runMemorySync,
+    });
+    return Response.json({ applied });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to apply OpenClaw import";
+    const status = message.includes("expired") || message.includes("not found") ? 409 : 422;
+    return Response.json({ error: message }, { status });
+  }
+}
+
 export function createConfigRoutes(eventStream: RuntimeEventStream) {
   return {
     "/api/config": {
@@ -442,6 +534,14 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
 
     "/api/config/opencode/bootstrap/import-openclaw": {
       POST: async (req: Request) => importOpenclawBootstrap(req),
+    },
+
+    "/api/config/opencode/bootstrap/import-openclaw/preview": {
+      POST: async (req: Request) => previewOpenclawBootstrapImport(req),
+    },
+
+    "/api/config/opencode/bootstrap/import-openclaw/apply": {
+      POST: async (req: Request) => applyOpenclawBootstrapImport(req),
     },
 
     "/api/config/mcps": {

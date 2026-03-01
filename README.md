@@ -132,7 +132,7 @@ Memory mode environment variables:
 - `WAFFLEBOT_MEMORY_ENABLED` (default `true`)
 - `WAFFLEBOT_MEMORY_WORKSPACE_DIR` (default `./data/workspace`)
 - `WAFFLEBOT_MEMORY_EMBED_PROVIDER` (`ollama` or `none`, default `ollama`)
-- `WAFFLEBOT_MEMORY_EMBED_MODEL` (default `nomic-embed-text`)
+- `WAFFLEBOT_MEMORY_EMBED_MODEL` (default `qwen3-embedding:4b`)
 - `WAFFLEBOT_MEMORY_OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
 - `WAFFLEBOT_MEMORY_CHUNK_TOKENS` (default `400`)
 - `WAFFLEBOT_MEMORY_CHUNK_OVERLAP` (default `80`)
@@ -223,7 +223,24 @@ Behavior:
 - `IDENTITY.md` is parsed for metadata (name/emoji/avatar/theme/creature/vibe) and returned via `GET /api/runtime/info`.
 - Selected agent prompt text can also be mirrored into runtime system prompts with `runtime.opencode.bootstrap.includeAgentPrompt=true`.
 
-OpenClaw import helper:
+OpenClaw import helpers:
+
+- `POST /api/config/opencode/bootstrap/import-openclaw/preview`
+  - Body:
+    - Local source: `{ "source": { "mode": "local", "path": "/path/to/openclaw/workspace" } }`
+    - Git source: `{ "source": { "mode": "git", "url": "git@github.com:you/openclaw-memory.git", "ref": "main" } }`
+  - Response includes `previewId`, discovered files, and conflict/new/identical breakdown.
+- `POST /api/config/opencode/bootstrap/import-openclaw/apply`
+  - Body: `{ "previewId": "<id-from-preview>", "overwritePaths": ["AGENTS.md","memory/notes.md"], "runMemorySync": true }`
+  - Applies selected conflicts/new files and runs memory sync by default.
+
+CLI:
+
+- `wafflebot import openclaw preview --path /path/to/openclaw/workspace`
+- `wafflebot import openclaw preview --git git@github.com:you/openclaw-memory.git --ref main`
+- `wafflebot import openclaw apply --preview-id <id> --overwrite AGENTS.md --overwrite memory/notes.md`
+
+Legacy compatibility helper remains available:
 
 - `POST /api/config/opencode/bootstrap/import-openclaw`
 - Body: `{ "sourceDirectory": "/path/to/openclaw/workspace", "overwrite": false, "files": ["AGENTS.md","SOUL.md","IDENTITY.md"] }`
@@ -314,6 +331,8 @@ wafflebot uninstall
 - Install/update now also maintain an `opencode` shim in `~/.local/bin` so the OpenCode CLI is directly available.
 - Onboarding model selection is searchable + paginated (works with providers that expose large model catalogs).
 - During onboarding, provider-auth changes trigger a transparent `opencode.service` refresh before model selection, so newly added providers/models show up immediately.
+- Onboarding can now configure memory embeddings for Ollama: set the Ollama URL, discover `/api/tags` models live, then select an embedding model with searchable pagination.
+- `wafflebot onboard` supports a memory-only path if you just want to configure Ollama embedding settings later.
 
 Compatibility alias remains available:
 
