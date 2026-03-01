@@ -8,6 +8,7 @@ dist
 data/*
 data/*
 bin/*
+!bin/wafflebot
 data/workspace/
 data/wafflebot.config.json
 data/wafflebot.config.json.bak
