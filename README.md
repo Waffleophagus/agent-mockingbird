@@ -297,6 +297,7 @@ Wafflebot commands:
 ```bash
 wafflebot install
 wafflebot update
+wafflebot onboard
 wafflebot status
 wafflebot restart
 wafflebot start
@@ -308,6 +309,8 @@ wafflebot uninstall
 
 - `install` plan includes optional interactive provider/model onboarding after services are healthy.
 - `update` plan explicitly calls out what is refreshed vs what is preserved (data/workspace/config are not reset).
+- `update --dry-run` previews planned update actions without mutating files/services.
+- `onboard` reruns interactive provider/model onboarding without reinstalling.
 
 Compatibility alias remains available:
 
