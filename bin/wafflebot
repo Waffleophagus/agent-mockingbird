@@ -1025,6 +1025,135 @@ async function setRuntimeDefaultModel(modelRef) {
   }
 }
 
+async function fetchRuntimeMemoryConfig() {
+  try {
+    const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config`, { method: "GET" });
+    if (!response.ok) {
+      return {
+        enabled: true,
+        embedModel: "qwen3-embedding:4b",
+        ollamaBaseUrl: "http://127.0.0.1:11434",
+      };
+    }
+    const payload = await response.json();
+    const memory = payload?.config?.runtime?.memory ?? {};
+    return {
+      enabled: typeof memory?.enabled === "boolean" ? memory.enabled : true,
+      embedModel: typeof memory?.embedModel === "string" && memory.embedModel.trim()
+        ? memory.embedModel.trim()
+        : "qwen3-embedding:4b",
+      ollamaBaseUrl: typeof memory?.ollamaBaseUrl === "string" && memory.ollamaBaseUrl.trim()
+        ? memory.ollamaBaseUrl.trim()
+        : "http://127.0.0.1:11434",
+    };
+  } catch {
+    return {
+      enabled: true,
+      embedModel: "qwen3-embedding:4b",
+      ollamaBaseUrl: "http://127.0.0.1:11434",
+    };
+  }
+}
+
+async function setRuntimeMemoryEmbeddingConfig(input) {
+  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/patch-safe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      patch: {
+        runtime: {
+          memory: {
+            enabled: input.enabled,
+            embedProvider: "ollama",
+            embedModel: input.embedModel,
+            ollamaBaseUrl: input.ollamaBaseUrl,
+          },
+        },
+      },
+      runSmokeTest: false,
+    }),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) {
+    const message = typeof payload?.error === "string" ? payload.error : "Failed to update memory embedding config";
+    throw new Error(message);
+  }
+}
+
+async function fetchOllamaModels(ollamaBaseUrl) {
+  const base = ollamaBaseUrl.replace(/\/+$/, "");
+  const response = await fetch(`${base}/api/tags`, { method: "GET" });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Ollama tags request failed: ${response.status} ${text}`.trim());
+  }
+  const payload = await response.json();
+  const models = Array.isArray(payload?.models) ? payload.models : [];
+  const names = models
+    .map(model => {
+      if (typeof model?.name === "string" && model.name.trim()) return model.name.trim();
+      if (typeof model?.model === "string" && model.model.trim()) return model.model.trim();
+      return "";
+    })
+    .filter(Boolean);
+  return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+}
+
+async function promptSearchableStringChoice(input) {
+  const { title = "Select value", values, currentValue, searchPrompt = "Search", manualLabel = "Enter manually", keepLabel = "Keep current" } = input;
+  const pageSize = 12;
+  let query = "";
+  let page = 0;
+
+  while (true) {
+    const filtered = values.filter(value => matchesSearchQuery({ label: value, id: value, providerId: "", modelId: "" }, query));
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (page >= totalPages) page = 0;
+    const pageItems = filtered.slice(page * pageSize, page * pageSize + pageSize);
+
+    const options = [
+      ...pageItems.map(value => ({
+        value,
+        label: value,
+      })),
+    ];
+    if (filtered.length > 0 && page < totalPages - 1) {
+      options.push({ value: "__next__", label: "Next page" });
+    }
+    if (filtered.length > 0 && page > 0) {
+      options.push({ value: "__prev__", label: "Previous page" });
+    }
+    options.push({ value: "__search__", label: "Change search query", hint: query ? `Current: ${query}` : "Filter the list" });
+    options.push({ value: "__manual__", label: manualLabel });
+    options.push({ value: "__keep__", label: keepLabel, hint: currentValue || "No change" });
+
+    const selection = await promptSelect(
+      `${title} | matches=${filtered.length} | page=${page + 1}/${totalPages}`,
+      options,
+      0,
+    );
+    if (selection.value === "__next__") {
+      page += 1;
+      continue;
+    }
+    if (selection.value === "__prev__") {
+      page = Math.max(0, page - 1);
+      continue;
+    }
+    if (selection.value === "__search__") {
+      query = (await promptText(searchPrompt, query)).trim();
+      page = 0;
+      continue;
+    }
+    return selection.value;
+  }
+}
+
 async function runInteractiveProviderOnboarding(input) {
   const { opencodeBin } = input;
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -1045,6 +1174,11 @@ async function runInteractiveProviderOnboarding(input) {
       value: "model-only",
       label: "Model only",
       hint: "Skip provider auth and only set default model",
+    },
+    {
+      value: "memory-only",
+      label: "Memory only",
+      hint: "Configure Ollama memory embedding settings only",
     },
     {
       value: "skip",
@@ -1131,7 +1265,10 @@ async function runInteractiveProviderOnboarding(input) {
     }
   }
 
-  const setModelNow = await promptYesNo("Set runtime default model now?", true);
+  const allowModelSetup = pathChoice.value !== "memory-only";
+  const setModelNow = allowModelSetup
+    ? await promptYesNo("Set runtime default model now?", true)
+    : false;
   let selectedModel = "";
   if (setModelNow) {
     const currentModel = await fetchRuntimeDefaultModel();
@@ -1168,6 +1305,110 @@ async function runInteractiveProviderOnboarding(input) {
     }
   }
 
+  const configureMemoryNow = await promptYesNo("Configure memory embedding model (Ollama) now?", true);
+  let memoryEmbedding = null;
+  if (configureMemoryNow) {
+    const currentMemory = await fetchRuntimeMemoryConfig();
+    console.log("");
+    console.log(heading("Memory embeddings"));
+    console.log(info(`Current provider: ollama`));
+    console.log(info(`Current Ollama URL: ${currentMemory.ollamaBaseUrl}`));
+    console.log(info(`Current embedding model: ${currentMemory.embedModel}`));
+
+    const memoryEnabled = await promptYesNo("Enable memory features?", currentMemory.enabled);
+    if (!memoryEnabled) {
+      await setRuntimeMemoryEmbeddingConfig({
+        enabled: false,
+        embedModel: currentMemory.embedModel,
+        ollamaBaseUrl: currentMemory.ollamaBaseUrl,
+      });
+      memoryEmbedding = {
+        configured: true,
+        enabled: false,
+        ollamaBaseUrl: currentMemory.ollamaBaseUrl,
+        embedModel: currentMemory.embedModel,
+      };
+    } else {
+      let ollamaBaseUrl = await promptText("Ollama base URL", currentMemory.ollamaBaseUrl);
+      let models = [];
+
+      while (true) {
+        try {
+          models = await fetchOllamaModels(ollamaBaseUrl);
+          if (models.length === 0) {
+            console.log(warn("Connected to Ollama but no models were returned from /api/tags."));
+          } else {
+            console.log(success(`Discovered ${models.length} model${models.length === 1 ? "" : "s"} from Ollama.`));
+          }
+          break;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.log(warn(`Could not query Ollama at ${ollamaBaseUrl}: ${message}`));
+          const retryChoice = await promptSelect("Ollama model discovery failed", [
+            { value: "retry", label: "Retry same URL" },
+            { value: "change", label: "Change Ollama URL" },
+            { value: "manual", label: "Skip discovery and enter model manually" },
+            { value: "skip", label: "Skip memory embedding setup" },
+          ]);
+          if (retryChoice.value === "retry") continue;
+          if (retryChoice.value === "change") {
+            ollamaBaseUrl = await promptText("Ollama base URL", ollamaBaseUrl);
+            continue;
+          }
+          if (retryChoice.value === "manual") {
+            models = [];
+            break;
+          }
+          memoryEmbedding = {
+            configured: false,
+            reason: "model-discovery-skipped",
+          };
+          break;
+        }
+      }
+
+      if (!memoryEmbedding) {
+        let embedModel = currentMemory.embedModel;
+        if (models.length === 0) {
+          const manualModel = (await promptText("Embedding model (manual)", currentMemory.embedModel)).trim();
+          if (manualModel) {
+            embedModel = manualModel;
+          }
+        } else {
+          const selection = await promptSearchableStringChoice({
+            title: "Select Ollama embedding model",
+            values: models,
+            currentValue: currentMemory.embedModel,
+            searchPrompt: "Search Ollama models",
+            manualLabel: "Enter model manually",
+            keepLabel: "Keep current model",
+          });
+          if (selection === "__manual__") {
+            const manualModel = (await promptText("Embedding model (manual)", currentMemory.embedModel)).trim();
+            if (manualModel) {
+              embedModel = manualModel;
+            }
+          } else if (selection !== "__keep__") {
+            embedModel = selection;
+          }
+        }
+
+        await setRuntimeMemoryEmbeddingConfig({
+          enabled: true,
+          embedModel,
+          ollamaBaseUrl,
+        });
+        memoryEmbedding = {
+          configured: true,
+          enabled: true,
+          ollamaBaseUrl,
+          embedModel,
+          discoveredModelCount: models.length,
+        };
+      }
+    }
+  }
+
   return {
     status: "completed",
     flow: pathChoice.value,
@@ -1175,6 +1416,7 @@ async function runInteractiveProviderOnboarding(input) {
     authSuccess,
     authRefresh,
     selectedModel: selectedModel || null,
+    memoryEmbedding,
   };
 }
 
@@ -1437,6 +1679,19 @@ function printResult(result, asJson) {
         if (result.onboarding.selectedModel) {
           console.log(`onboarding: default model=${result.onboarding.selectedModel}`);
         }
+        if (result.onboarding.memoryEmbedding) {
+          if (result.onboarding.memoryEmbedding.configured === false) {
+            console.log(`onboarding: memory embeddings=skipped (${result.onboarding.memoryEmbedding.reason ?? "not-configured"})`);
+          } else {
+            console.log(`onboarding: memory enabled=${result.onboarding.memoryEmbedding.enabled ? "yes" : "no"}`);
+            if (result.onboarding.memoryEmbedding.ollamaBaseUrl) {
+              console.log(`onboarding: memory ollama=${result.onboarding.memoryEmbedding.ollamaBaseUrl}`);
+            }
+            if (result.onboarding.memoryEmbedding.embedModel) {
+              console.log(`onboarding: memory embedModel=${result.onboarding.memoryEmbedding.embedModel}`);
+            }
+          }
+        }
       } else if (result.onboarding.status === "skipped") {
         console.log(`onboarding: skipped (${result.onboarding.reason})`);
       } else if (result.onboarding.status === "error") {
@@ -1501,6 +1756,19 @@ function printResult(result, asJson) {
       }
       if (result.onboarding.selectedModel) {
         console.log(`default model: ${result.onboarding.selectedModel}`);
+      }
+      if (result.onboarding.memoryEmbedding) {
+        if (result.onboarding.memoryEmbedding.configured === false) {
+          console.log(`memory embeddings: skipped (${result.onboarding.memoryEmbedding.reason ?? "not-configured"})`);
+        } else {
+          console.log(`memory enabled: ${result.onboarding.memoryEmbedding.enabled ? "yes" : "no"}`);
+          if (result.onboarding.memoryEmbedding.ollamaBaseUrl) {
+            console.log(`memory ollama: ${result.onboarding.memoryEmbedding.ollamaBaseUrl}`);
+          }
+          if (result.onboarding.memoryEmbedding.embedModel) {
+            console.log(`memory embedModel: ${result.onboarding.memoryEmbedding.embedModel}`);
+          }
+        }
       }
       return;
     }

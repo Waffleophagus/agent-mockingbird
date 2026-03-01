@@ -331,6 +331,8 @@ wafflebot uninstall
 - Install/update now also maintain an `opencode` shim in `~/.local/bin` so the OpenCode CLI is directly available.
 - Onboarding model selection is searchable + paginated (works with providers that expose large model catalogs).
 - During onboarding, provider-auth changes trigger a transparent `opencode.service` refresh before model selection, so newly added providers/models show up immediately.
+- Onboarding can now configure memory embeddings for Ollama: set the Ollama URL, discover `/api/tags` models live, then select an embedding model with searchable pagination.
+- `wafflebot onboard` supports a memory-only path if you just want to configure Ollama embedding settings later.
 
 Compatibility alias remains available:
 
