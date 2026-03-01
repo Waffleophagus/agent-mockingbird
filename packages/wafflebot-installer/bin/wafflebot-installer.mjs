@@ -278,7 +278,47 @@ async function healthCheck(url) {
   }
 }
 
-async function confirmInstall(args) {
+function checkSystemdUserStatus() {
+  const result = shell("systemctl", ["--user", "status"]);
+  return result.code === 0;
+}
+
+function buildInstallSummary({ args, paths, mode }) {
+  const target = args.version ?? `tag:${args.tag}`;
+  const hasBun = Boolean(resolveBunBinary(paths));
+  const hasSystemdUser = checkSystemdUserStatus();
+  const hasLoginctl = commandExists("loginctl");
+  const hasCurl = commandExists("curl");
+  const actionLabel = mode === "update" ? "update" : "install";
+
+  return [
+    `Planned ${actionLabel}:`,
+    `- Target package: @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
+    `- Private registry scope: @${args.scope.replace(/^@/, "")} -> ${args.registryUrl}`,
+    `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, opencode-ai)`,
+    `- Install root: ${paths.rootDir}`,
+    "",
+    "Steps:",
+    `1. Validate required tools: npm, systemd user services.`,
+    `   - npm: ${commandExists("npm") ? "found" : "missing"}`,
+    `   - systemctl --user: ${hasSystemdUser ? "available" : "unavailable (install will fail)"}`,
+    `2. Ensure Bun runtime for service command.`,
+    hasBun
+      ? `   - bun: found at ${resolveBunBinary(paths)}`
+      : `   - bun: not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`,
+    "3. Install OpenCode CLI dependency (`opencode-ai@latest`) from npmjs.",
+    `4. Install Wafflebot package (@${args.scope.replace(/^@/, "")}/wafflebot) from your Gitea registry.`,
+    "5. Write/update config and data directories under install root.",
+    `6. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
+    "7. Reload systemd user daemon and enable/start both services.",
+    args.skipLinger
+      ? "8. Skip linger configuration (--skip-linger set)."
+      : `8. Attempt to enable linger via loginctl so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"} .`,
+    "9. Run health check on http://127.0.0.1:3001/api/health.",
+  ];
+}
+
+async function confirmInstall(args, paths, mode) {
   if (args.yes) {
     return;
   }
@@ -286,8 +326,18 @@ async function confirmInstall(args) {
     throw new Error("Install is interactive by default. Re-run with --yes in non-interactive environments.");
   }
 
+  const summaryLines = buildInstallSummary({ args, paths, mode });
+  for (const line of summaryLines) {
+    console.log(line);
+  }
+  console.log("");
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = (await rl.question(`Install Wafflebot into ${args.rootDir} using @${args.scope}/wafflebot (${args.version ?? `tag:${args.tag}`})? [y/N] `)).trim().toLowerCase();
+  const answer = (
+    await rl.question(`Proceed with ${mode === "update" ? "update" : "install"}? [y/N] `)
+  )
+    .trim()
+    .toLowerCase();
   rl.close();
   if (answer !== "y" && answer !== "yes") {
     throw new Error("Aborted by user.");
@@ -317,12 +367,12 @@ function readInstalledOpenCodeVersion(paths) {
 }
 
 async function installOrUpdate(args, mode) {
-  await confirmInstall(args);
   if (!commandExists("npm")) {
     throw new Error("npm is required. Please install npm and run again.");
   }
 
   const paths = pathsFor(args.rootDir, args.scope);
+  await confirmInstall(args, paths, mode);
   ensureDir(paths.rootDir);
   ensureDir(paths.npmPrefix);
   ensureDir(paths.dataDir);
