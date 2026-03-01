@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -774,6 +774,78 @@ describe("config routes", () => {
     expect(payload.stage).toBe("policy");
     expect(Array.isArray(payload.details?.rejectedPaths)).toBe(true);
     expect(payload.details?.rejectedPaths?.some(path => path.startsWith("runtime.smokeTest"))).toBe(true);
+  });
+
+  test("POST /api/config/opencode/bootstrap/import-openclaw preview/apply imports recursive markdown", async () => {
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+
+    const sourceDir = path.join(testRoot, "openclaw-source");
+    const targetDir = path.join(testRoot, "openclaw-target");
+    rmSync(sourceDir, { recursive: true, force: true });
+    rmSync(targetDir, { recursive: true, force: true });
+    mkdirSync(path.join(sourceDir, "memory"), { recursive: true });
+    mkdirSync(targetDir, { recursive: true });
+    writeFileSync(path.join(sourceDir, "AGENTS.md"), "# Agents\n- imported\n", "utf8");
+    writeFileSync(path.join(sourceDir, "memory", "notes.md"), "# Memory\nhello\n", "utf8");
+    writeFileSync(path.join(sourceDir, "README.txt"), "not markdown", "utf8");
+    writeFileSync(path.join(targetDir, "AGENTS.md"), "# Agents\n- existing\n", "utf8");
+
+    const previewRoute = routes["/api/config/opencode/bootstrap/import-openclaw/preview"] as {
+      POST: (req: Request) => Promise<Response>;
+    };
+    const previewResponse = await previewRoute.POST(
+      new Request("http://localhost/api/config/opencode/bootstrap/import-openclaw/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: {
+            mode: "local",
+            path: sourceDir,
+          },
+          targetDirectory: targetDir,
+        }),
+      }),
+    );
+    expect(previewResponse.status).toBe(200);
+    const previewPayload = (await previewResponse.json()) as {
+      preview?: {
+        previewId?: string;
+        filesNew?: Array<{ relativePath?: string }>;
+        filesConflicting?: Array<{ relativePath?: string }>;
+      };
+    };
+    expect(typeof previewPayload.preview?.previewId).toBe("string");
+    expect(previewPayload.preview?.filesNew?.some(file => file.relativePath === "memory/notes.md")).toBe(true);
+    expect(previewPayload.preview?.filesConflicting?.some(file => file.relativePath === "AGENTS.md")).toBe(
+      true,
+    );
+
+    const applyRoute = routes["/api/config/opencode/bootstrap/import-openclaw/apply"] as {
+      POST: (req: Request) => Promise<Response>;
+    };
+    const applyResponse = await applyRoute.POST(
+      new Request("http://localhost/api/config/opencode/bootstrap/import-openclaw/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          previewId: previewPayload.preview?.previewId,
+          overwritePaths: ["AGENTS.md"],
+        }),
+      }),
+    );
+    expect(applyResponse.status).toBe(200);
+    const applyPayload = (await applyResponse.json()) as {
+      applied?: {
+        summary?: { copied?: number };
+        memorySync?: { status?: string };
+      };
+    };
+    expect(applyPayload.applied?.summary?.copied).toBe(2);
+    const memorySyncStatus = applyPayload.applied?.memorySync?.status;
+    expect(typeof memorySyncStatus).toBe("string");
+    expect(["completed", "failed"]).toContain(memorySyncStatus as string);
+    expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toContain("imported");
+    expect(readFileSync(path.join(targetDir, "memory", "notes.md"), "utf8")).toContain("hello");
   });
 });
 

@@ -31,6 +31,7 @@ const ANSI = {
 function parseArgs(argv) {
   const args = {
     command: undefined,
+    positionals: [],
     yes: false,
     json: false,
     dryRun: false,
@@ -42,6 +43,14 @@ function parseArgs(argv) {
     tag: DEFAULT_TAG,
     version: undefined,
     rootDir: DEFAULT_ROOT_DIR,
+    importGitUrl: undefined,
+    importPath: undefined,
+    importRef: undefined,
+    importTargetDir: undefined,
+    previewId: undefined,
+    overwritePaths: [],
+    skipPaths: [],
+    skipMemorySync: false,
   };
 
   const positionals = [];
@@ -79,6 +88,10 @@ function parseArgs(argv) {
       args.command = "help";
       continue;
     }
+    if (arg === "--skip-memory-sync") {
+      args.skipMemorySync = true;
+      continue;
+    }
 
     const next = argv[i + 1];
     if ((arg === "--registry-url" || arg === "--registry") && next) {
@@ -106,12 +119,54 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (arg === "--git" && next) {
+      args.importGitUrl = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--path" && next) {
+      args.importPath = path.resolve(next);
+      i += 1;
+      continue;
+    }
+    if (arg === "--ref" && next) {
+      args.importRef = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--target-dir" && next) {
+      args.importTargetDir = path.resolve(next);
+      i += 1;
+      continue;
+    }
+    if (arg === "--preview-id" && next) {
+      args.previewId = next;
+      i += 1;
+      continue;
+    }
+    if (arg === "--overwrite" && next) {
+      args.overwritePaths.push(next);
+      i += 1;
+      continue;
+    }
+    if (arg === "--skip-path" && next) {
+      args.skipPaths.push(next);
+      i += 1;
+      continue;
+    }
 
     throw new Error(`Unknown argument: ${arg}`);
   }
 
   if (positionals.length > 0) {
-    args.command = positionals[0];
+    args.positionals = positionals;
+    if (positionals[0] === "import" && positionals[1] === "openclaw" && positionals[2] === "preview") {
+      args.command = "import-openclaw-preview";
+    } else if (positionals[0] === "import" && positionals[1] === "openclaw" && positionals[2] === "apply") {
+      args.command = "import-openclaw-apply";
+    } else {
+      args.command = positionals[0];
+    }
   }
 
   args.registryUrl = normalizeRegistryUrl(args.registryUrl);
@@ -127,7 +182,7 @@ function normalizeRegistryUrl(url) {
 }
 
 function printHelp() {
-  console.log(`wafflebot\n\nUsage:\n  wafflebot <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact wafflebot version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+  console.log(`wafflebot\n\nUsage:\n  wafflebot <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n  wafflebot import openclaw preview (--git <url> [--ref <ref>] | --path <dir>) [--target-dir <dir>] [--json]\n  wafflebot import openclaw apply --preview-id <id> [--overwrite <path> ...] [--skip-path <path> ...] [--skip-memory-sync] [--json]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact wafflebot version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
 }
 
 function colorEnabled() {
@@ -658,6 +713,83 @@ async function runOnboardingCommand(args) {
     mode: "onboard",
     rootDir: paths.rootDir,
     onboarding,
+  };
+}
+
+async function importOpenclawPreview(args) {
+  const hasGit = Boolean(args.importGitUrl);
+  const hasPath = Boolean(args.importPath);
+  if (hasGit === hasPath) {
+    throw new Error("Specify exactly one source: --git <url> or --path <dir>.");
+  }
+
+  const source = hasGit
+    ? {
+        mode: "git",
+        url: args.importGitUrl,
+        ref: args.importRef || undefined,
+      }
+    : {
+        mode: "local",
+        path: args.importPath,
+      };
+
+  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source,
+      targetDirectory: args.importTargetDir || undefined,
+    }),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) {
+    const message =
+      typeof payload?.error === "string" ? payload.error : "Failed to preview OpenClaw import";
+    throw new Error(message);
+  }
+
+  return {
+    mode: "import-openclaw-preview",
+    preview: payload.preview ?? {},
+  };
+}
+
+async function importOpenclawApply(args) {
+  const previewId = (args.previewId || "").trim();
+  if (!previewId) {
+    throw new Error("--preview-id is required.");
+  }
+
+  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      previewId,
+      overwritePaths: args.overwritePaths,
+      skipPaths: args.skipPaths,
+      runMemorySync: args.skipMemorySync ? false : true,
+    }),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) {
+    const message = typeof payload?.error === "string" ? payload.error : "Failed to apply OpenClaw import";
+    throw new Error(message);
+  }
+
+  return {
+    mode: "import-openclaw-apply",
+    applied: payload.applied ?? {},
   };
 }
 
@@ -1381,6 +1513,40 @@ function printResult(result, asJson) {
       return;
     }
     console.log("onboard complete");
+    return;
+  }
+
+  if (result.mode === "import-openclaw-preview") {
+    const preview = result.preview ?? {};
+    console.log("openclaw import preview");
+    console.log(`previewId: ${preview.previewId ?? ""}`);
+    console.log(`source: ${preview.source?.mode ?? "unknown"} ${preview.source?.resolvedDirectory ?? ""}`);
+    if (preview.source?.commit) {
+      console.log(`commit: ${preview.source.commit}`);
+    }
+    console.log(`target: ${preview.targetDirectory ?? ""}`);
+    console.log(`files: discovered=${preview.discoveredCount ?? 0}, new=${preview.filesNew?.length ?? 0}, identical=${preview.filesIdentical?.length ?? 0}, conflicting=${preview.filesConflicting?.length ?? 0}`);
+    if (Array.isArray(preview.warnings) && preview.warnings.length > 0) {
+      console.log(`warnings: ${preview.warnings.length}`);
+    }
+    return;
+  }
+
+  if (result.mode === "import-openclaw-apply") {
+    const applied = result.applied ?? {};
+    console.log("openclaw import apply");
+    console.log(`previewId: ${applied.previewId ?? ""}`);
+    console.log(`source: ${applied.sourceDirectory ?? ""}`);
+    console.log(`target: ${applied.targetDirectory ?? ""}`);
+    console.log(
+      `summary: copied=${applied.summary?.copied ?? 0}, skippedExisting=${applied.summary?.skippedExisting ?? 0}, skippedIdentical=${applied.summary?.skippedIdentical ?? 0}, skippedRequested=${applied.summary?.skippedRequested ?? 0}, failed=${applied.summary?.failed ?? 0}`,
+    );
+    if (applied.memorySync?.status) {
+      console.log(`memorySync: ${applied.memorySync.status}`);
+      if (applied.memorySync.status === "failed" && applied.memorySync.error) {
+        console.log(`memorySyncError: ${applied.memorySync.error}`);
+      }
+    }
   }
 }
 
@@ -1403,6 +1569,12 @@ function evaluateResult(result) {
     const stopped =
       result?.unitStates?.[UNIT_OPENCODE] !== "active" && result?.unitStates?.[UNIT_WAFFLEBOT] !== "active";
     return stopped ? 0 : 2;
+  }
+  if (result.mode === "import-openclaw-preview") {
+    return result?.preview?.previewId ? 0 : 2;
+  }
+  if (result.mode === "import-openclaw-apply") {
+    return Array.isArray(result?.applied?.failed) && result.applied.failed.length > 0 ? 2 : 0;
   }
   return 0;
 }
@@ -1444,6 +1616,16 @@ async function main() {
     result = await manageService(args, "stop");
   } else if (args.command === "uninstall") {
     result = await uninstall(args);
+  } else if (args.command === "import-openclaw-preview") {
+    if (args.dryRun) {
+      throw new Error("--dry-run is not applicable to `wafflebot import openclaw preview`.");
+    }
+    result = await importOpenclawPreview(args);
+  } else if (args.command === "import-openclaw-apply") {
+    if (args.dryRun) {
+      throw new Error("--dry-run is not applicable to `wafflebot import openclaw apply`.");
+    }
+    result = await importOpenclawApply(args);
   } else {
     throw new Error(`Unknown command: ${args.command}`);
   }
