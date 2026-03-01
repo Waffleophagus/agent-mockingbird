@@ -505,7 +505,7 @@ async function promptSelect(message, options, defaultIndex = 0) {
   return options[parsed - 1];
 }
 
-function buildInstallSummary({ args, paths, mode }) {
+function buildInstallSummary({ args, paths }) {
   const target = args.version ?? `tag:${args.tag}`;
   const hasBun = Boolean(resolveBunBinary(paths));
   const hasSystemdUser = checkSystemdUserStatus();
@@ -639,7 +639,7 @@ async function confirmInstall(args, paths, mode) {
   }
 
   const summaryLines =
-    mode === "update" ? buildUpdateSummary({ args, paths }) : buildInstallSummary({ args, paths, mode });
+    mode === "update" ? buildUpdateSummary({ args, paths }) : buildInstallSummary({ args, paths });
   for (const line of summaryLines) {
     console.log(line);
   }
