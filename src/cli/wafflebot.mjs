@@ -202,6 +202,33 @@ function resolveWafflebotBin(paths) {
   return firstExistingPath([paths.wafflebotBinGlobal, paths.wafflebotBinLocal]);
 }
 
+function resolveWafflebotServiceEntrypoint(wafflebotAppDir) {
+  const pkgPath = path.join(wafflebotAppDir, "package.json");
+  const candidates = [];
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = readJson(pkgPath);
+      if (typeof pkg.module === "string") {
+        candidates.push(pkg.module);
+      }
+      if (typeof pkg.main === "string") {
+        candidates.push(pkg.main);
+      }
+    } catch {
+      // Ignore parse errors and fall back to static candidates.
+    }
+  }
+
+  candidates.push("src/index.ts", "src/index.js", "dist/index.js", "index.js");
+  for (const relPath of candidates) {
+    const absolutePath = path.join(wafflebotAppDir, relPath);
+    if (fs.existsSync(absolutePath)) {
+      return absolutePath;
+    }
+  }
+  return null;
+}
+
 function resolveOpencodeBin(paths) {
   return firstExistingPath([paths.opencodeBinGlobal, paths.opencodeBinLocal]);
 }
@@ -315,10 +342,10 @@ function removeWafflebotShim(paths) {
   return true;
 }
 
-function unitContents(paths, bunBin, opencodeBin, wafflebotAppDir) {
+function unitContents(paths, bunBin, opencodeBin, wafflebotAppDir, wafflebotEntrypoint) {
   const opencode = `[Unit]\nDescription=OpenCode Sidecar for Wafflebot (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=WAFFLEBOT_PORT=3001\nEnvironment=WAFFLEBOT_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const wafflebot = `[Unit]\nDescription=Wafflebot API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${wafflebotAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=WAFFLEBOT_CONFIG_PATH=${path.join(paths.dataDir, "wafflebot.config.json")}\nEnvironment=WAFFLEBOT_DB_PATH=${path.join(paths.dataDir, "wafflebot.db")}\nEnvironment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=WAFFLEBOT_OPENCODE_DIRECTORY=${paths.workspaceDir}\nExecStart=${bunBin} ${path.join(wafflebotAppDir, "src", "index.ts")}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const wafflebot = `[Unit]\nDescription=Wafflebot API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${wafflebotAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=WAFFLEBOT_CONFIG_PATH=${path.join(paths.dataDir, "wafflebot.config.json")}\nEnvironment=WAFFLEBOT_DB_PATH=${path.join(paths.dataDir, "wafflebot.db")}\nEnvironment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=WAFFLEBOT_OPENCODE_DIRECTORY=${paths.workspaceDir}\nExecStart=${bunBin} ${wafflebotEntrypoint}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   return { opencode, wafflebot };
 }
@@ -529,6 +556,12 @@ async function installOrUpdate(args, mode) {
       `wafflebot package directory missing: looked in ${paths.wafflebotAppDirGlobal} and ${paths.wafflebotAppDirLocal}`,
     );
   }
+  const wafflebotEntrypoint = resolveWafflebotServiceEntrypoint(wafflebotAppDir);
+  if (!wafflebotEntrypoint) {
+    throw new Error(
+      `wafflebot runtime entrypoint missing in ${wafflebotAppDir} (checked package module/main and common entry files).`,
+    );
+  }
   const opencodeBin = resolveOpencodeBin(paths);
   if (!opencodeBin) {
     throw new Error(
@@ -536,7 +569,7 @@ async function installOrUpdate(args, mode) {
     );
   }
 
-  const units = unitContents(paths, bunBin, opencodeBin, wafflebotAppDir);
+  const units = unitContents(paths, bunBin, opencodeBin, wafflebotAppDir, wafflebotEntrypoint);
   writeFile(paths.opencodeUnitPath, units.opencode);
   writeFile(paths.wafflebotUnitPath, units.wafflebot);
 
