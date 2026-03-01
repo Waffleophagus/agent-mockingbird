@@ -153,6 +153,7 @@ jobs:
             pkg.publishConfig = { registry: process.env.REGISTRY_URL };
             pkg.files = [
               "bin",
+              "src",
               "dist",
               "deploy",
               "scripts",
@@ -192,6 +193,7 @@ jobs:
           tarball="wafflebot-${{ steps.meta.outputs.package_version }}.tgz"
           bun pm pack --filename "${tarball}" --quiet >/dev/null
           test -f "${tarball}"
+          tar -tzf "${tarball}" | grep -qx "package/src/index.ts"
           echo "WAFFLEBOT_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
