@@ -152,6 +152,36 @@ function hashFile(filePath: string) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
+type TargetPathState =
+  | { kind: "missing" }
+  | { kind: "file"; hash: string }
+  | { kind: "non-file"; fileType: string };
+
+function describeFileType(stats: ReturnType<typeof lstatSync>) {
+  if (stats.isFile()) return "file";
+  if (stats.isDirectory()) return "directory";
+  if (stats.isSymbolicLink()) return "symlink";
+  if (stats.isBlockDevice()) return "block-device";
+  if (stats.isCharacterDevice()) return "character-device";
+  if (stats.isFIFO()) return "fifo";
+  if (stats.isSocket()) return "socket";
+  return "other";
+}
+
+function readTargetPathState(targetPath: string): TargetPathState {
+  try {
+    const stats = lstatSync(targetPath);
+    const fileType = describeFileType(stats);
+    if (!stats.isFile()) return { kind: "non-file", fileType };
+    return { kind: "file", hash: hashFile(targetPath) };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing" };
+    }
+    throw error;
+  }
+}
+
 function normalizeStringArray(input: unknown) {
   if (!Array.isArray(input)) return new Set<string>();
   const normalized = new Set<string>();
@@ -368,10 +398,10 @@ export function previewOpenclawImport(input: OpenclawImportPreviewInput): Opencl
 
   for (const file of discovered.files) {
     const targetPath = path.join(targetDirectory, file.relativePath);
-    const targetExists = existsSync(targetPath);
-    const targetHash = targetExists ? hashFile(targetPath) : null;
+    const targetState = readTargetPathState(targetPath);
+    const targetHash = targetState.kind === "file" ? targetState.hash : null;
     const status: OpenclawImportPreviewFile["status"] =
-      !targetExists ? "new" : targetHash === file.sourceHash ? "identical" : "conflict";
+      targetState.kind === "missing" ? "new" : targetHash === file.sourceHash ? "identical" : "conflict";
 
     const previewFile: OpenclawImportPreviewFile = {
       relativePath: file.relativePath,
@@ -431,15 +461,6 @@ export async function applyOpenclawImport(input: OpenclawImportApplyInput): Prom
       skippedRequested.push({ relativePath: file.relativePath, targetPath: file.targetPath });
       continue;
     }
-    if (file.status === "identical") {
-      skippedIdentical.push({ relativePath: file.relativePath, targetPath: file.targetPath });
-      continue;
-    }
-    if (file.status === "conflict" && !overwritePaths.has(file.relativePath)) {
-      skippedExisting.push({ relativePath: file.relativePath, targetPath: file.targetPath });
-      continue;
-    }
-
     try {
       if (!existsSync(file.sourcePath)) {
         failed.push({ relativePath: file.relativePath, reason: `source file no longer exists: ${file.sourcePath}` });
@@ -450,6 +471,24 @@ export async function applyOpenclawImport(input: OpenclawImportApplyInput): Prom
         failed.push({ relativePath: file.relativePath, reason: "source file changed after preview; rerun preview" });
         continue;
       }
+
+      const targetState = readTargetPathState(file.targetPath);
+      if (targetState.kind === "file" && targetState.hash === file.sourceHash) {
+        skippedIdentical.push({ relativePath: file.relativePath, targetPath: file.targetPath });
+        continue;
+      }
+      if (targetState.kind !== "missing" && !overwritePaths.has(file.relativePath)) {
+        skippedExisting.push({ relativePath: file.relativePath, targetPath: file.targetPath });
+        continue;
+      }
+      if (targetState.kind === "non-file") {
+        failed.push({
+          relativePath: file.relativePath,
+          reason: `cannot overwrite ${targetState.fileType} target: ${file.targetPath}`,
+        });
+        continue;
+      }
+
       ensureDir(path.dirname(file.targetPath));
       copyFileSync(file.sourcePath, file.targetPath);
       copied.push({
