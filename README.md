@@ -304,6 +304,11 @@ wafflebot stop
 wafflebot uninstall
 ```
 
+`wafflebot install` and `wafflebot update` now show a mode-specific action plan before confirmation.
+
+- `install` plan includes optional interactive provider/model onboarding after services are healthy.
+- `update` plan explicitly calls out what is refreshed vs what is preserved (data/workspace/config are not reset).
+
 Compatibility alias remains available:
 
 ```bash
