@@ -160,9 +160,12 @@ function userName() {
 function pathsFor(rootDir, scope) {
   const normalizedScope = scope.replace(/^@/, "");
   const npmPrefix = path.join(rootDir, "npm");
+  const localBinDir = path.join(os.homedir(), ".local", "bin");
   return {
     rootDir,
     npmPrefix,
+    localBinDir,
+    wafflebotShimPath: path.join(localBinDir, "wafflebot"),
     dataDir: path.join(rootDir, "data"),
     workspaceDir: path.join(rootDir, "workspace"),
     logsDir: path.join(rootDir, "logs"),
@@ -193,6 +196,10 @@ function firstExistingPath(candidates) {
 
 function resolveWafflebotAppDir(paths) {
   return firstExistingPath([paths.wafflebotAppDirGlobal, paths.wafflebotAppDirLocal]);
+}
+
+function resolveWafflebotBin(paths) {
+  return firstExistingPath([paths.wafflebotBinGlobal, paths.wafflebotBinLocal]);
 }
 
 function resolveOpencodeBin(paths) {
@@ -246,6 +253,66 @@ function writeScopedNpmrc(paths, scope, registryUrl) {
 function npmInstall(prefix, packages, extraArgs = [], env = process.env) {
   const args = ["install", "--no-audit", "--no-fund", "--prefix", prefix, ...extraArgs, ...packages];
   must("npm", args, { stdio: "inherit", env });
+}
+
+function ensurePathExportInFile(filePath, exportLine) {
+  const exists = fs.existsSync(filePath);
+  const content = exists ? fs.readFileSync(filePath, "utf8") : "";
+  if (content.includes(exportLine) || content.includes(".local/bin")) {
+    return false;
+  }
+  const suffix = content.length === 0 || content.endsWith("\n") ? "" : "\n";
+  fs.appendFileSync(filePath, `${suffix}${exportLine}\n`, "utf8");
+  return true;
+}
+
+function ensureLocalBinPath(paths) {
+  const entries = (process.env.PATH || "").split(":");
+  if (entries.includes(paths.localBinDir)) {
+    return { inPath: true, updatedFiles: [] };
+  }
+
+  const exportLine = `export PATH="${paths.localBinDir}:$PATH"`;
+  const rcFiles = [".bashrc", ".zshrc", ".profile"].map(name => path.join(os.homedir(), name));
+  const updatedFiles = [];
+  for (const rc of rcFiles) {
+    if (fs.existsSync(rc) && ensurePathExportInFile(rc, exportLine)) {
+      updatedFiles.push(rc);
+    }
+  }
+
+  if (updatedFiles.length === 0) {
+    const profile = path.join(os.homedir(), ".profile");
+    if (ensurePathExportInFile(profile, exportLine)) {
+      updatedFiles.push(profile);
+    }
+  }
+
+  return { inPath: false, updatedFiles };
+}
+
+function writeWafflebotShim(paths, wafflebotBin) {
+  ensureDir(paths.localBinDir);
+  const shim = `#!/usr/bin/env bash
+set -euo pipefail
+# managed-by: wafflebot-installer
+exec "${wafflebotBin}" "$@"
+`;
+  writeFile(paths.wafflebotShimPath, shim);
+  fs.chmodSync(paths.wafflebotShimPath, 0o755);
+  return paths.wafflebotShimPath;
+}
+
+function removeWafflebotShim(paths) {
+  if (!fs.existsSync(paths.wafflebotShimPath)) {
+    return false;
+  }
+  const content = fs.readFileSync(paths.wafflebotShimPath, "utf8");
+  if (!content.includes("managed-by: wafflebot-installer")) {
+    return false;
+  }
+  fs.rmSync(paths.wafflebotShimPath, { force: true });
+  return true;
 }
 
 function unitContents(paths, bunBin, opencodeBin, wafflebotAppDir) {
@@ -349,12 +416,13 @@ function buildInstallSummary({ args, paths, mode }) {
     "3. Install OpenCode CLI dependency (`opencode-ai@latest`) from npmjs.",
     `4. Install Wafflebot package (@${args.scope.replace(/^@/, "")}/wafflebot) from your Gitea registry.`,
     "5. Write/update config and data directories under install root.",
-    `6. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
-    "7. Reload systemd user daemon and enable/start both services.",
+    `6. Install CLI shim at ${paths.wafflebotShimPath} and ensure ${paths.localBinDir} is on PATH.`,
+    `7. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
+    "8. Reload systemd user daemon and enable/start both services.",
     args.skipLinger
-      ? "8. Skip linger configuration (--skip-linger set)."
-      : `8. Attempt to enable linger via loginctl so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"} .`,
-    "9. Run health check on http://127.0.0.1:3001/api/health.",
+      ? "9. Skip linger configuration (--skip-linger set)."
+      : `9. Attempt to enable linger via loginctl so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"} .`,
+    "10. Run health check on http://127.0.0.1:3001/api/health.",
   ];
 }
 
@@ -441,6 +509,15 @@ async function installOrUpdate(args, mode) {
 
   npmInstall(paths.npmPrefix, [packageSpec(args.scope, args.version, args.tag)], ["-g"], env);
 
+  const wafflebotBin = resolveWafflebotBin(paths);
+  if (!wafflebotBin) {
+    throw new Error(
+      `wafflebot binary missing: looked in ${paths.wafflebotBinGlobal} and ${paths.wafflebotBinLocal}`,
+    );
+  }
+  const shimPath = writeWafflebotShim(paths, wafflebotBin);
+  const pathSetup = ensureLocalBinPath(paths);
+
   const bunBin = resolveBunBinary(paths);
   if (!bunBin) {
     throw new Error("bun binary was not found after install.");
@@ -476,6 +553,8 @@ async function installOrUpdate(args, mode) {
     registryUrl: args.registryUrl,
     wafflebotVersion: readInstalledVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
+    shimPath,
+    pathSetup,
     units: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
     health,
     linger,
@@ -549,6 +628,7 @@ async function uninstall(args) {
     fs.rmSync(paths.opencodeUnitPath, { force: true });
   }
   shell("systemctl", ["--user", "daemon-reload"]);
+  const removedShim = removeWafflebotShim(paths);
 
   if (args.purgeData) {
     if (fs.existsSync(paths.rootDir)) {
@@ -571,6 +651,7 @@ async function uninstall(args) {
     mode: "uninstall",
     rootDir: paths.rootDir,
     unitsRemoved: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
+    removedShim,
     removed: true,
     purgeData: Boolean(args.purgeData),
   };
@@ -583,11 +664,22 @@ function printResult(result, asJson) {
   }
 
   if (result.mode === "install" || result.mode === "update") {
+    const localBinDir = path.join(os.homedir(), ".local", "bin");
     console.log(`${result.mode} complete`);
     console.log(`root: ${result.rootDir}`);
     console.log(`registry: ${result.registryUrl}`);
     console.log(`wafflebot: ${result.wafflebotVersion ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "unknown"}`);
+    console.log(`cli: ${result.shimPath ?? "unavailable"}`);
+    if (result.pathSetup) {
+      if (result.pathSetup.inPath) {
+        console.log(`path: ${localBinDir} already in PATH`);
+      } else if (result.pathSetup.updatedFiles?.length > 0) {
+        console.log(`path: added ${localBinDir} to ${result.pathSetup.updatedFiles.join(", ")}`);
+      } else {
+        console.log(`path: add ${localBinDir} to PATH, then restart your shell`);
+      }
+    }
     console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
     if (result.linger.warning) {
       console.log(`linger: ${result.linger.warning}`);
@@ -630,6 +722,7 @@ function printResult(result, asJson) {
 
   if (result.mode === "uninstall") {
     console.log(`uninstall complete: ${result.purgeData ? `removed ${result.rootDir}` : `removed services/runtime, kept data in ${result.rootDir}`}`);
+    console.log(`cli shim removed: ${result.removedShim ? "yes" : "no"}`);
   }
 }
 
