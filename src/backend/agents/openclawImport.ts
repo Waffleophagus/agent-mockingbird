@@ -12,6 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import type { Stats } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -157,7 +158,7 @@ type TargetPathState =
   | { kind: "file"; hash: string }
   | { kind: "non-file"; fileType: string };
 
-function describeFileType(stats: ReturnType<typeof lstatSync>) {
+function describeFileType(stats: Stats) {
   if (stats.isFile()) return "file";
   if (stats.isDirectory()) return "directory";
   if (stats.isSymbolicLink()) return "symlink";
