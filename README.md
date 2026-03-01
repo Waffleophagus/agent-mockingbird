@@ -132,7 +132,7 @@ Memory mode environment variables:
 - `WAFFLEBOT_MEMORY_ENABLED` (default `true`)
 - `WAFFLEBOT_MEMORY_WORKSPACE_DIR` (default `./data/workspace`)
 - `WAFFLEBOT_MEMORY_EMBED_PROVIDER` (`ollama` or `none`, default `ollama`)
-- `WAFFLEBOT_MEMORY_EMBED_MODEL` (default `nomic-embed-text`)
+- `WAFFLEBOT_MEMORY_EMBED_MODEL` (default `qwen3-embedding:4b`)
 - `WAFFLEBOT_MEMORY_OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
 - `WAFFLEBOT_MEMORY_CHUNK_TOKENS` (default `400`)
 - `WAFFLEBOT_MEMORY_CHUNK_OVERLAP` (default `80`)

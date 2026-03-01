@@ -17,7 +17,7 @@ export const env = createEnv({
     WAFFLEBOT_MEMORY_ENABLED: z.coerce.boolean().default(true),
     WAFFLEBOT_MEMORY_WORKSPACE_DIR: z.string().default("./data/workspace"),
     WAFFLEBOT_MEMORY_EMBED_PROVIDER: z.enum(["ollama", "none"]).default("ollama"),
-    WAFFLEBOT_MEMORY_EMBED_MODEL: z.string().min(1).default("nomic-embed-text"),
+    WAFFLEBOT_MEMORY_EMBED_MODEL: z.string().min(1).default("qwen3-embedding:4b"),
     WAFFLEBOT_MEMORY_OLLAMA_BASE_URL: z.string().url().default("http://127.0.0.1:11434"),
     WAFFLEBOT_MEMORY_CHUNK_TOKENS: z.coerce.number().int().positive().default(400),
     WAFFLEBOT_MEMORY_CHUNK_OVERLAP: z.coerce.number().int().min(0).default(80),
