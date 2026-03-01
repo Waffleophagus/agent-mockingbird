@@ -575,6 +575,9 @@ async function installOrUpdate(args, mode) {
 
   must("systemctl", ["--user", "daemon-reload"]);
   must("systemctl", ["--user", "enable", "--now", UNIT_OPENCODE, UNIT_WAFFLEBOT]);
+  if (mode === "update") {
+    must("systemctl", ["--user", "restart", UNIT_OPENCODE, UNIT_WAFFLEBOT]);
+  }
 
   const linger = ensureLinger(args.skipLinger);
   const health = await healthCheck("http://127.0.0.1:3001/api/health");
