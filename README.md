@@ -76,7 +76,8 @@ Memory operator references:
 
 - `docs/memory-ops.md`
 - `docs/memory-runtime-contract.md`
-- `.agents/skills/memory-ops/SKILL.md`
+- `runtime-assets/workspace/.agents/skills/memory-ops/SKILL.md` (runtime bundle source)
+- `.agents/skills/memory-ops/SKILL.md` (development copy)
 
 ## Runtime
 
@@ -90,7 +91,13 @@ If you still have legacy `WAFFLEBOT_OPENCODE_*` runtime vars, run `bun run confi
 
 Skill deployment behavior (install/update):
 
-- Bundled managed skills are seeded into workspace at `.agents/skills` (replaced from package on install/update).
+- Runtime bundle source files live in `runtime-assets/workspace`.
+- Install/update syncs that bundle into the active workspace root (including `.agents/skills` and `AGENTS.md`).
+- Sync state is tracked in `data/runtime-assets-state.json`.
+- On update, interactive installs prompt only when both:
+  - local file changed since last sync
+  - packaged runtime asset also changed since last sync
+- On non-interactive update conflicts, install creates `<file>.backup-<UTCSTAMP>` then overwrites with packaged content.
 - Runtime OpenCode `skills.paths` is synced to include workspace `.agents/skills`.
 - If `ui.skills` is empty, install/update initializes defaults:
   - `config-editor`

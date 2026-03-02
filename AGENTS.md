@@ -104,17 +104,3 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
-
-## OpenCode Memory Runtime Policy
-
-- Durable memory source of truth is markdown in the OpenCode workspace: `MEMORY.md` and `memory/*.md`.
-- For retrieval-first memory usage in runtime sessions:
-  1. Use `memory_search` to find relevant snippets.
-  2. Use `memory_get` on cited paths before relying on details.
-  3. Use `memory_remember` for durable facts, decisions, and preferences.
-- Respect `runtime.memory.toolMode`:
-  - `hybrid`: prompt injection + tools.
-  - `inject_only`: injected context without tool guidance.
-  - `tool_only`: tools only, no injected memory block.
-- When replacing older memory, include `supersedes` where possible.
-- Avoid duplicate writes; if memory is disabled or validation rejects content, do not force writes.

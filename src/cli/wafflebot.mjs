@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline/promises";
 import { spawnSync } from "node:child_process";
+import { syncRuntimeWorkspaceAssets } from "./runtime-assets.mjs";
 
 const { console, fetch } = globalThis;
 
@@ -265,21 +266,30 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function syncBundledSkillsIntoWorkspace(paths, wafflebotAppDir) {
-  const sourceSkillsDir = path.join(wafflebotAppDir, ".agents", "skills");
-  const targetSkillsDir = path.join(paths.workspaceDir, ".agents", "skills");
-  if (!fs.existsSync(sourceSkillsDir)) {
-    throw new Error(`bundled skills directory missing: ${sourceSkillsDir}`);
+async function promptRuntimeAssetConflictDecision(conflict) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return "use-packaged";
   }
-
-  fs.rmSync(targetSkillsDir, { recursive: true, force: true });
-  ensureDir(path.dirname(targetSkillsDir));
-  fs.cpSync(sourceSkillsDir, targetSkillsDir, { recursive: true, force: true });
-
-  return {
-    source: sourceSkillsDir,
-    target: targetSkillsDir,
-  };
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    while (true) {
+      const answer = (
+        await rl.question(
+          `runtime-assets conflict for ${conflict.relativePath}\n  [k]eep local or [u]se packaged? [k/u] `,
+        )
+      )
+        .trim()
+        .toLowerCase();
+      if (answer === "k" || answer === "keep" || answer === "keep-local") {
+        return "keep-local";
+      }
+      if (answer === "u" || answer === "use" || answer === "use-packaged") {
+        return "use-packaged";
+      }
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
@@ -1574,7 +1584,16 @@ async function installOrUpdate(args, mode) {
       `wafflebot package directory missing: looked in ${paths.wafflebotAppDirGlobal} and ${paths.wafflebotAppDirLocal}`,
     );
   }
-  const skillSeed = syncBundledSkillsIntoWorkspace(paths, wafflebotAppDir);
+  const runtimeAssetsSourceDir = path.join(wafflebotAppDir, "runtime-assets", "workspace");
+  const runtimeAssetsStatePath = path.join(paths.dataDir, "runtime-assets-state.json");
+  const runtimeAssets = await syncRuntimeWorkspaceAssets({
+    sourceWorkspaceDir: runtimeAssetsSourceDir,
+    targetWorkspaceDir: paths.workspaceDir,
+    stateFilePath: runtimeAssetsStatePath,
+    mode,
+    interactive: mode === "update" && !args.yes,
+    onConflict: promptRuntimeAssetConflictDecision,
+  });
   const wafflebotEntrypoint = resolveWafflebotServiceEntrypoint(wafflebotAppDir);
   if (!wafflebotEntrypoint) {
     throw new Error(
@@ -1633,7 +1652,7 @@ async function installOrUpdate(args, mode) {
     opencodeShimPath,
     pathSetup,
     units: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
-    skillSeed,
+    runtimeAssets,
     defaultSkillSync,
     health,
     linger,
@@ -1765,8 +1784,15 @@ function printResult(result, asJson) {
         console.log(`path: add ${localBinDir} to PATH, then restart your shell`);
       }
     }
-    if (result.skillSeed?.target) {
-      console.log(`skills: seeded ${result.skillSeed.target}`);
+    if (result.runtimeAssets?.target) {
+      console.log(`runtime-assets: source ${result.runtimeAssets.source}`);
+      console.log(`runtime-assets: target ${result.runtimeAssets.target}`);
+      console.log(
+        `runtime-assets: copied=${result.runtimeAssets.copied}, overwritten=${result.runtimeAssets.overwritten}, unchanged=${result.runtimeAssets.unchanged}, keptLocal=${result.runtimeAssets.keptLocal}, conflicts=${result.runtimeAssets.conflicts}`,
+      );
+      if (result.runtimeAssets.backupsCreated > 0) {
+        console.log(`runtime-assets: backups created=${result.runtimeAssets.backupsCreated}`);
+      }
     }
     if (result.defaultSkillSync?.attempted) {
       if (result.defaultSkillSync.updated) {
