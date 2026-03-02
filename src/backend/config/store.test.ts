@@ -58,7 +58,7 @@ test("parseConfig auto-fills opencode directory from memory workspace when unset
   expect(parsed.runtime.memory.workspaceDir).toBe(expected);
 });
 
-test("parseConfig rejects mismatched opencode and memory workspace paths", () => {
+test("parseConfig auto-aligns mismatched memory workspace to explicit opencode directory", () => {
   const filePath = path.resolve(process.cwd(), "wafflebot.config.example.json");
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
     runtime?: { opencode?: Record<string, unknown>; memory?: Record<string, unknown> };
@@ -69,10 +69,7 @@ test("parseConfig rejects mismatched opencode and memory workspace paths", () =>
 
   raw.runtime.opencode.directory = "/tmp/opencode-workspace";
   raw.runtime.memory.workspaceDir = "/tmp/memory-workspace";
-  expect(() => parseConfig(raw)).toThrowError(
-    new ConfigApplyError(
-      "schema",
-      "runtime.opencode.directory and runtime.memory.workspaceDir must resolve to the same workspace path",
-    ),
-  );
+  const parsed = parseConfig(raw);
+  expect(parsed.runtime.opencode.directory).toBe("/tmp/opencode-workspace");
+  expect(parsed.runtime.memory.workspaceDir).toBe("/tmp/opencode-workspace");
 });

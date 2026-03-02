@@ -384,11 +384,15 @@ function ensureAuxiliaryTables() {
 ensureAuxiliaryTables();
 
 function getDefaultSessionModel() {
-  const runtimeConfig = getManagedConfig();
-  const provider = runtimeConfig.runtime.opencode.providerId.trim();
-  const model = runtimeConfig.runtime.opencode.modelId.trim();
-  if (provider && model) {
-    return `${provider}/${model}`;
+  try {
+    const runtimeConfig = getManagedConfig();
+    const provider = runtimeConfig.runtime.opencode.providerId.trim();
+    const model = runtimeConfig.runtime.opencode.modelId.trim();
+    if (provider && model) {
+      return `${provider}/${model}`;
+    }
+  } catch {
+    // db:wipe should remain operable even when runtime config is temporarily invalid.
   }
   return DEFAULT_SESSIONS[0]?.model ?? "default";
 }
@@ -502,7 +506,19 @@ export function resetDatabaseToDefaults(): DashboardBootstrap {
     seedDefaultState(nowMs());
   });
   reset();
-  return getDashboardBootstrap();
+  try {
+    return getDashboardBootstrap();
+  } catch {
+    // Keep reset operable even when config is temporarily invalid.
+    return {
+      sessions: listSessions(),
+      skills: [],
+      mcps: [],
+      agents: [],
+      usage: getUsageSnapshot(),
+      heartbeat: getHeartbeatSnapshot(),
+    };
+  }
 }
 
 export function listSessions(): SessionSummary[] {

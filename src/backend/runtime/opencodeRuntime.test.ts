@@ -66,6 +66,7 @@ type PromptInput = {
       modelID?: string;
     };
     system?: string;
+    agent?: string;
     parts?: Array<{ type: string; text?: string }>;
   };
   signal?: AbortSignal;
@@ -102,6 +103,9 @@ interface MockClient {
   config: {
     get: (input: unknown) => Promise<unknown>;
     update: (input: unknown) => Promise<unknown>;
+  };
+  app: {
+    agents: (input?: unknown) => Promise<unknown>;
   };
 }
 
@@ -407,6 +411,7 @@ function createMockClient(input: {
   messages?: (request: unknown) => Promise<unknown>;
   message?: (request: unknown) => Promise<unknown>;
   children?: (request: unknown) => Promise<unknown>;
+  appAgents?: (request?: unknown) => Promise<unknown>;
 }): MockClient {
   let createCount = 0;
   return {
@@ -471,6 +476,17 @@ function createMockClient(input: {
         data: { small_model: "test-provider/test-small" },
       }),
       update: async () => ({ data: {} }),
+    },
+    app: {
+      agents: async (request) => {
+        if (input.appAgents) return input.appAgents(request);
+        return {
+          data: [
+            { name: "wafflebot", mode: "primary" },
+            { name: "general", mode: "subagent" },
+          ],
+        };
+      },
     },
   };
 }
@@ -606,6 +622,88 @@ describe("opencode runtime failover contract", () => {
     expect(createCount).toBe(2);
     expect(sessionIds.length).toBe(2);
     expect(sessionIds[0]).not.toBe(sessionIds[1]);
+  });
+
+  test("drops unavailable requested agent before prompt dispatch", async () => {
+    const seenAgents: Array<string | undefined> = [];
+    const events: Array<unknown> = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        appAgents: async () => ({
+          data: [{ name: "wafflebot", mode: "primary" }],
+        }),
+        prompt: async (request) => {
+          seenAgents.push(request.body?.agent);
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+    );
+    runtime.subscribe((event) => {
+      events.push(event);
+    });
+
+    const ack = await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "hello",
+      agent: "ghost-agent",
+    });
+
+    expect(ack.messages.at(-1)?.content).toBe("OK");
+    expect(seenAgents).toEqual(["build"]);
+    const retryEvent = events.find((event) => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as { type?: string; payload?: { message?: string } };
+      return (
+        record.type === "session.run.status.updated" &&
+        typeof record.payload?.message === "string" &&
+        record.payload.message.includes('Requested agent "ghost-agent" is unavailable')
+      );
+    });
+    expect(retryEvent).toBeTruthy();
+  });
+
+  test("retries without explicit agent when OpenCode throws agent.variant error", async () => {
+    const seenAgents: Array<string | undefined> = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          seenAgents.push(request.body?.agent);
+          if (request.body?.agent) {
+            throw new TypeError("undefined is not an object (evaluating 'agent.variant')");
+          }
+          return assistantResponse(request.path.id, "Recovered");
+        },
+      }),
+    );
+
+    const ack = await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "hello",
+      agent: "build",
+    });
+
+    expect(ack.messages.at(-1)?.content).toBe("Recovered");
+    expect(seenAgents).toEqual(["build", undefined]);
+  });
+
+  test("uses explicit primary agent id when no agent is provided", async () => {
+    const seenAgents: Array<string | undefined> = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          seenAgents.push(request.body?.agent);
+          return assistantResponse(request.path.id, "Recovered via primary agent");
+        },
+      }),
+    );
+
+    const ack = await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "hello",
+    });
+
+    expect(ack.messages.at(-1)?.content).toBe("Recovered via primary agent");
+    expect(seenAgents).toEqual(["build"]);
   });
 
   test("injects memory context once for stable retrieval and re-injects after compaction", async () => {

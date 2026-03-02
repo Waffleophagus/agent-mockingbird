@@ -323,18 +323,12 @@ export function parseConfig(raw: unknown) {
   }
   const config = parsed.data;
   const workspaceAlignment = resolveWorkspaceAlignment(config);
+  let normalizedMemoryWorkspaceDir = workspaceAlignment.memoryWorkspaceDir;
   if (workspaceAlignment.opencodeDirectoryExplicit && !workspaceAlignment.aligned) {
-    throw new ConfigApplyError(
-      "schema",
-      "runtime.opencode.directory and runtime.memory.workspaceDir must resolve to the same workspace path",
-      {
-        opencodeDirectory: workspaceAlignment.opencodeWorkspaceDir,
-        memoryWorkspaceDir: workspaceAlignment.memoryWorkspaceDir,
-      },
-    );
+    normalizedMemoryWorkspaceDir = workspaceAlignment.opencodeWorkspaceDir;
   }
   config.runtime.opencode.directory = workspaceAlignment.opencodeWorkspaceDir;
-  config.runtime.memory.workspaceDir = workspaceAlignment.memoryWorkspaceDir;
+  config.runtime.memory.workspaceDir = normalizedMemoryWorkspaceDir;
   config.ui.agentTypes = mergeAgentTypesWithLegacyAgents(config.ui.agentTypes, config.ui.agents);
   return config;
 }

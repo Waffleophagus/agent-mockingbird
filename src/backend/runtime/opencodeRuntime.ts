@@ -107,6 +107,10 @@ type OpencodeMessagePartDeltaEvent = {
 type OpencodeRuntimeEvent = OpencodeEvent | OpencodeMessagePartDeltaEvent;
 type ResolvedModel = { providerId: string; modelId: string };
 type RuntimeOpencodeConfig = WafflebotConfig["runtime"]["opencode"];
+type RuntimeAgentCatalog = {
+  ids: Set<string>;
+  primaryId?: string;
+};
 
 interface OpencodeRuntimeOptions {
   defaultProviderId: string;
@@ -135,6 +139,9 @@ const QUEUE_DRAIN_METADATA_KEY = "__queueDrain";
 const DEFAULT_RUNTIME_TIMEOUT_MS = 120_000;
 const DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS = 300_000;
 const STREAMED_METADATA_CACHE_LIMIT = 10_000;
+const AGENT_NAME_CACHE_TTL_MS = 5_000;
+const BUILTIN_SUBAGENT_IDS = new Set(["general", "explore"]);
+const BUILTIN_PRIMARY_AGENT_IDS = new Set(["build", "plan", "title", "summary", "compaction"]);
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
 type MemoryInjectionState = { fingerprint: string; forceReinject: boolean };
 
@@ -206,6 +213,12 @@ export class OpencodeRuntime implements RuntimeEngine {
   private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
   private partTypeByScopedPartId = new Map<string, Part["type"]>();
   private memoryInjectionStateBySessionId = new Map<string, MemoryInjectionState>();
+  private availableAgentNamesCache:
+    | {
+        fetchedAtMs: number;
+        catalog: RuntimeAgentCatalog;
+      }
+    | null = null;
 
   constructor(private options: OpencodeRuntimeOptions) {
     if (options.client) {
@@ -415,8 +428,10 @@ export class OpencodeRuntime implements RuntimeEngine {
 
       const primaryText = this.extractPrimaryTextInput(inputParts);
       const promptInput = await this.buildPromptInputWithMemory(opencodeSessionId, primaryText);
+      const requestedAgent = await this.resolveRequestedAgentId(input.agent?.trim(), session.id);
+      const effectiveAgent = requestedAgent ?? (await this.resolvePrimaryAgentId(undefined, { emitRetryStatus: false }));
       const memorySystemPrompt = this.buildWafflebotSystemPrompt({
-        agentId: input.agent?.trim() || undefined,
+        agentId: effectiveAgent,
       });
       const promptParts = this.applyMemoryPromptToParts(inputParts, promptInput.content);
       const recreatedSessionPromptParts = this.applyMemoryPromptToParts(inputParts, promptInput.freshSessionContent);
@@ -432,7 +447,7 @@ export class OpencodeRuntime implements RuntimeEngine {
           retryPartsOnSessionRecreate: recreatedSessionPromptParts,
           memoryContextFingerprint: promptInput.memoryContextFingerprint,
           system: memorySystemPrompt,
-          agent: input.agent?.trim() || undefined,
+          agent: effectiveAgent,
         });
       } catch (error) {
         const childRunCount = this.inFlightBackgroundChildRunCount(session.id);
@@ -626,6 +641,8 @@ export class OpencodeRuntime implements RuntimeEngine {
 
     await this.ensureRuntimeConfigSynced();
     const model = this.resolveModel(input.model?.trim() || parentSession.model);
+    const requestedAgent = await this.resolveRequestedAgentId(input.agent?.trim());
+    const effectiveAgent = requestedAgent ?? (await this.resolvePrimaryAgentId(undefined, { emitRetryStatus: false }));
     const startedAt = run.startedAt ? undefined : Date.now();
 
     const running =
@@ -649,7 +666,7 @@ export class OpencodeRuntime implements RuntimeEngine {
             modelID: model.modelId,
           },
           system: input.system,
-          agent: input.agent?.trim() || undefined,
+          agent: effectiveAgent,
           noReply: input.noReply,
           parts: inputParts,
         },
@@ -2430,7 +2447,14 @@ export class OpencodeRuntime implements RuntimeEngine {
 
       let attemptError: unknown = null;
       try {
-        const message = await this.sendPrompt(sessionId, model, input.parts, input.system, input.agent);
+        const message = await this.sendPromptWithAgentFallback({
+          localSessionId: input.localSessionId,
+          sessionId,
+          model,
+          parts: input.parts,
+          system: input.system,
+          agent: input.agent,
+        });
         return { message, opencodeSessionId: sessionId };
       } catch (error) {
         if (getOpencodeErrorStatus(error) === 404) {
@@ -2447,7 +2471,14 @@ export class OpencodeRuntime implements RuntimeEngine {
               });
             }
             const retryParts = input.retryPartsOnSessionRecreate ?? input.parts;
-            const message = await this.sendPrompt(sessionId, model, retryParts, input.system, input.agent);
+            const message = await this.sendPromptWithAgentFallback({
+              localSessionId: input.localSessionId,
+              sessionId,
+              model,
+              parts: retryParts,
+              system: input.system,
+              agent: input.agent,
+            });
             return { message, opencodeSessionId: sessionId };
           } catch (retryError) {
             attemptError = retryError;
@@ -2468,6 +2499,44 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
 
     throw this.normalizeRuntimeError(previousError);
+  }
+
+  private async sendPromptWithAgentFallback(input: {
+    localSessionId?: string;
+    sessionId: string;
+    model: ResolvedModel;
+    parts: Array<RuntimeInputPart>;
+    system?: string;
+    agent?: string;
+  }): Promise<{ info: AssistantInfo; parts: Array<Part> }> {
+    try {
+      return await this.sendPrompt(input.sessionId, input.model, input.parts, input.system, input.agent);
+    } catch (error) {
+      if (!this.isInvalidAgentPromptError(error)) {
+        throw error;
+      }
+
+      if (input.agent) {
+        try {
+          return await this.sendPrompt(input.sessionId, input.model, input.parts, input.system, undefined);
+        } catch (fallbackError) {
+          if (!this.isInvalidAgentPromptError(fallbackError)) {
+            throw fallbackError;
+          }
+          const primaryAgent = await this.resolvePrimaryAgentId(input.localSessionId);
+          if (!primaryAgent) {
+            throw fallbackError;
+          }
+          return this.sendPrompt(input.sessionId, input.model, input.parts, input.system, primaryAgent);
+        }
+      }
+
+      const fallbackAgent = await this.resolvePrimaryAgentId(input.localSessionId);
+      if (!fallbackAgent) {
+        throw error;
+      }
+      return this.sendPrompt(input.sessionId, input.model, input.parts, input.system, fallbackAgent);
+    }
   }
 
   private resolvePromptModels(primaryModel: ResolvedModel): Array<ResolvedModel> {
@@ -2739,6 +2808,145 @@ export class OpencodeRuntime implements RuntimeEngine {
     return message.includes("timed out") || message.includes("timeout") || message.includes("operation timed out");
   }
 
+  private isInvalidAgentPromptError(error: unknown): boolean {
+    const normalized = (this.describeUnknownError(error) ?? "").toLowerCase();
+    if (!normalized) return false;
+    return (
+      normalized.includes("agent.variant") ||
+      (normalized.includes("default agent") && normalized.includes("not found")) ||
+      (normalized.includes("default agent") && normalized.includes("subagent")) ||
+      normalized.includes("is not an object")
+    );
+  }
+
+  private async resolveRequestedAgentId(agent: string | undefined, sessionId?: string): Promise<string | undefined> {
+    const normalized = agent?.trim();
+    if (!normalized) return undefined;
+    const names = await this.fetchAvailableAgentNames();
+    if (!names) return normalized;
+    if (names.has(normalized)) return normalized;
+    if (sessionId) {
+      this.emit(
+        createSessionRunStatusUpdatedEvent(
+          {
+            sessionId,
+            status: "retry",
+            attempt: 1,
+            message: `Requested agent "${normalized}" is unavailable in OpenCode. Falling back to default agent.`,
+          },
+          "runtime",
+        ),
+      );
+    }
+    return undefined;
+  }
+
+  private agentModeFromConfig(agentId: string, config: Record<string, unknown>): "subagent" | "primary" | "all" {
+    const explicit = typeof config.mode === "string" ? config.mode.trim() : "";
+    if (explicit === "subagent" || explicit === "primary" || explicit === "all") {
+      return explicit;
+    }
+    if (BUILTIN_SUBAGENT_IDS.has(agentId)) return "subagent";
+    if (BUILTIN_PRIMARY_AGENT_IDS.has(agentId)) return "primary";
+    return "all";
+  }
+
+  private async resolvePrimaryAgentId(
+    sessionId?: string,
+    options?: {
+      emitRetryStatus?: boolean;
+    },
+  ): Promise<string | undefined> {
+    const catalog = await this.fetchAvailableAgentCatalog();
+    const selected = catalog?.primaryId;
+    if (!selected) return undefined;
+
+    if ((options?.emitRetryStatus ?? true) && sessionId) {
+      this.emit(
+        createSessionRunStatusUpdatedEvent(
+          {
+            sessionId,
+            status: "retry",
+            attempt: 1,
+            message: `OpenCode default agent is unavailable. Retrying with primary agent "${selected}" (by id).`,
+          },
+          "runtime",
+        ),
+      );
+    }
+
+    return selected;
+  }
+
+  private async fetchAvailableAgentNames(): Promise<Set<string> | null> {
+    const catalog = await this.fetchAvailableAgentCatalog();
+    return catalog?.ids ?? null;
+  }
+
+  private async fetchAvailableAgentCatalog(): Promise<RuntimeAgentCatalog | null> {
+    const now = Date.now();
+    if (this.availableAgentNamesCache && now - this.availableAgentNamesCache.fetchedAtMs <= AGENT_NAME_CACHE_TTL_MS) {
+      return this.availableAgentNamesCache.catalog;
+    }
+
+    try {
+      const config = unwrapSdkData<Config>(
+        await this.getClient().config.get({
+          responseStyle: "data",
+          throwOnError: true,
+          signal: this.defaultRequestSignal(),
+        }),
+      );
+
+      const record = config as Record<string, unknown>;
+      const configuredAgentMap = isPlainObject(record.agent) ? (record.agent as Record<string, unknown>) : {};
+      const defaultAgentId = typeof record.default_agent === "string" ? record.default_agent.trim() : "";
+      const ids = new Set<string>(["build", "plan", "general", "explore", "title", "summary", "compaction"]);
+      let primaryId: string | undefined;
+
+      for (const [rawId, rawConfig] of Object.entries(configuredAgentMap)) {
+        const id = rawId.trim();
+        if (!id) continue;
+        ids.add(id);
+        if (!isPlainObject(rawConfig)) continue;
+        const disabled = rawConfig.disable === true;
+        if (disabled) continue;
+        const hidden = rawConfig.hidden === true;
+        const mode = this.agentModeFromConfig(id, rawConfig);
+        if (!primaryId && mode !== "subagent" && !hidden) {
+          primaryId = id;
+        }
+      }
+
+      if (defaultAgentId) {
+        const defaultConfig =
+          isPlainObject(configuredAgentMap[defaultAgentId]) ? (configuredAgentMap[defaultAgentId] as Record<string, unknown>) : null;
+        const disabled = defaultConfig?.disable === true;
+        const hidden = defaultConfig?.hidden === true;
+        const mode = defaultConfig ? this.agentModeFromConfig(defaultAgentId, defaultConfig) : "primary";
+        if (!disabled && !hidden && mode !== "subagent") {
+          primaryId = defaultAgentId;
+        }
+      }
+
+      if (!primaryId) {
+        const buildConfig = isPlainObject(configuredAgentMap.build) ? (configuredAgentMap.build as Record<string, unknown>) : null;
+        if (buildConfig?.disable !== true) {
+          primaryId = "build";
+        }
+      }
+
+      const catalog: RuntimeAgentCatalog = { ids, primaryId };
+      this.availableAgentNamesCache = {
+        fetchedAtMs: now,
+        catalog,
+      };
+      return catalog;
+    } catch {
+      return null;
+    }
+  }
+
   private defaultRequestSignal() {
     return AbortSignal.timeout(this.currentTimeoutMs());
   }
@@ -2925,6 +3133,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       }
 
       this.runtimeConfigSyncKey = targetKey;
+      this.availableAgentNamesCache = null;
     } catch (error) {
       console.error("[opencode] Config sync failed:", error instanceof Error ? error.message : error);
       return;
