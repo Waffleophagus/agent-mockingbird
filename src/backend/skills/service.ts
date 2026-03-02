@@ -7,7 +7,7 @@ import type { WafflebotConfig } from "../config/schema";
 import { createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";
 
 const SKILL_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
-const MANAGED_SKILLS_ROOT = path.resolve(process.cwd(), ".agents", "skills");
+const MANAGED_SKILLS_RELATIVE = path.join(".agents", "skills");
 
 type PermissionAction = "allow" | "deny" | "ask";
 
@@ -32,6 +32,12 @@ export interface ManagedSkillWriteResult {
   directoryPath: string;
   filePath: string;
   created: boolean;
+}
+
+function resolveManagedSkillRoot(workspaceDir?: string | null) {
+  const normalizedWorkspace = typeof workspaceDir === "string" ? workspaceDir.trim() : "";
+  const baseDirectory = normalizedWorkspace ? path.resolve(normalizedWorkspace) : path.resolve(process.cwd());
+  return path.join(baseDirectory, MANAGED_SKILLS_RELATIVE);
 }
 
 function toAbsoluteLocation(location: string) {
@@ -72,22 +78,27 @@ export function normalizeSkillId(id: string) {
   return normalized;
 }
 
-export function getManagedSkillsRootPath() {
-  return MANAGED_SKILLS_ROOT;
+export function getManagedSkillsRootPath(workspaceDir?: string | null) {
+  return resolveManagedSkillRoot(workspaceDir);
 }
 
-export function getManagedSkillDirectoryPath(skillId: string) {
-  return path.join(MANAGED_SKILLS_ROOT, normalizeSkillId(skillId));
+export function getManagedSkillDirectoryPath(skillId: string, workspaceDir?: string | null) {
+  return path.join(resolveManagedSkillRoot(workspaceDir), normalizeSkillId(skillId));
 }
 
-export function writeManagedSkill(input: { id: string; content: string; overwrite?: boolean }): ManagedSkillWriteResult {
+export function writeManagedSkill(input: {
+  id: string;
+  content: string;
+  overwrite?: boolean;
+  workspaceDir?: string | null;
+}): ManagedSkillWriteResult {
   const id = normalizeSkillId(input.id);
   const trimmedContent = input.content.trim();
   if (!trimmedContent) {
     throw new Error("skill content is required");
   }
 
-  const directoryPath = getManagedSkillDirectoryPath(id);
+  const directoryPath = getManagedSkillDirectoryPath(id, input.workspaceDir);
   const filePath = path.join(directoryPath, "SKILL.md");
   const created = !existsSync(filePath);
   if (!created && input.overwrite !== true) {
@@ -107,17 +118,17 @@ export function writeManagedSkill(input: { id: string; content: string; overwrit
   };
 }
 
-export function removeManagedSkill(skillId: string) {
-  const directoryPath = getManagedSkillDirectoryPath(skillId);
+export function removeManagedSkill(skillId: string, workspaceDir?: string | null) {
+  const directoryPath = getManagedSkillDirectoryPath(skillId, workspaceDir);
   if (existsSync(directoryPath)) {
     rmSync(directoryPath, { recursive: true, force: true });
   }
 }
 
-export function isManagedSkillLocation(location: string) {
+export function isManagedSkillLocation(location: string, workspaceDir?: string | null) {
   const absolute = toAbsoluteLocation(location);
   if (!absolute) return false;
-  const root = getManagedSkillsRootPath();
+  const root = getManagedSkillsRootPath(workspaceDir);
   return absolute === root || absolute.startsWith(`${root}${path.sep}`);
 }
 
@@ -145,13 +156,13 @@ export async function listRuntimeSkills(config: WafflebotConfig, enabledIds: Arr
       description: record.description,
       location: record.location,
       enabled: enabled.has(record.name),
-      managed: isManagedSkillLocation(record.location),
+      managed: isManagedSkillLocation(record.location, config.runtime.opencode.directory),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function buildManagedSkillPaths(currentConfig: Config) {
-  const root = getManagedSkillsRootPath();
+export function buildManagedSkillPaths(currentConfig: Config, workspaceDir?: string | null) {
+  const root = getManagedSkillsRootPath(workspaceDir);
   const configRecord = currentConfig as Record<string, unknown>;
   const currentSkills =
     configRecord.skills && typeof configRecord.skills === "object" ? (configRecord.skills as Record<string, unknown>) : {};

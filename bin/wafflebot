@@ -17,6 +17,7 @@ const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
 const UNIT_OPENCODE = "opencode.service";
 const UNIT_WAFFLEBOT = "wafflebot.service";
 const WAFFLEBOT_API_BASE_URL = "http://127.0.0.1:3001";
+const DEFAULT_ENABLED_SKILLS = ["config-editor", "config-auditor", "runtime-diagnose"];
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -262,6 +263,104 @@ function writeFile(file, content) {
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function syncBundledSkillsIntoWorkspace(paths, wafflebotAppDir) {
+  const sourceSkillsDir = path.join(wafflebotAppDir, ".agents", "skills");
+  const targetSkillsDir = path.join(paths.workspaceDir, ".agents", "skills");
+  if (!fs.existsSync(sourceSkillsDir)) {
+    throw new Error(`bundled skills directory missing: ${sourceSkillsDir}`);
+  }
+
+  fs.rmSync(targetSkillsDir, { recursive: true, force: true });
+  ensureDir(path.dirname(targetSkillsDir));
+  fs.cpSync(sourceSkillsDir, targetSkillsDir, { recursive: true, force: true });
+
+  return {
+    source: sourceSkillsDir,
+    target: targetSkillsDir,
+  };
+}
+
+async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
+  const retries = typeof input.retries === "number" ? Math.max(1, input.retries) : 5;
+  const delayMs = typeof input.delayMs === "number" ? Math.max(100, input.delayMs) : 750;
+
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      const configResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config`, { method: "GET" });
+      if (!configResponse.ok) {
+        throw new Error(`GET /api/config failed (${configResponse.status})`);
+      }
+      const payload = await configResponse.json();
+      const currentSkills = Array.isArray(payload?.config?.ui?.skills)
+        ? payload.config.ui.skills.filter((value) => typeof value === "string" && value.trim().length > 0)
+        : [];
+      if (currentSkills.length > 0) {
+        return {
+          attempted: true,
+          updated: false,
+          reason: "existing skills preserved",
+          skills: currentSkills,
+        };
+      }
+
+      const expectedHash = typeof payload?.hash === "string" ? payload.hash.trim() : "";
+      if (!expectedHash) {
+        throw new Error("Config hash missing from /api/config response");
+      }
+
+      const patchResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/patch-safe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patch: {
+            ui: {
+              skills: DEFAULT_ENABLED_SKILLS,
+            },
+          },
+          expectedHash,
+          runSmokeTest: true,
+        }),
+      });
+
+      const patchPayload = await patchResponse.json().catch(() => ({}));
+      if (!patchResponse.ok) {
+        const message =
+          typeof patchPayload?.error === "string"
+            ? patchPayload.error
+            : `POST /api/config/patch-safe failed (${patchResponse.status})`;
+        throw new Error(message);
+      }
+
+      const nextSkills = Array.isArray(patchPayload?.snapshot?.config?.ui?.skills)
+        ? patchPayload.snapshot.config.ui.skills
+        : DEFAULT_ENABLED_SKILLS;
+      return {
+        attempted: true,
+        updated: true,
+        reason: "initialized defaults",
+        skills: nextSkills,
+      };
+    } catch (error) {
+      if (attempt === retries) {
+        return {
+          attempted: true,
+          updated: false,
+          reason: error instanceof Error ? error.message : String(error),
+          skills: [],
+        };
+      }
+      await sleep(delayMs);
+    }
+  }
+
+  return {
+    attempted: false,
+    updated: false,
+    reason: "skipped",
+    skills: [],
+  };
 }
 
 function userName() {
@@ -613,12 +712,13 @@ function buildInstallSummary({ args, paths }) {
     `4. Install Wafflebot package (@${args.scope.replace(/^@/, "")}/wafflebot) from your scoped registry.`,
     "5. Create/refresh runtime directories under the install root.",
     `6. Install CLI shims at ${paths.wafflebotShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
-    `7. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
-    "8. Reload systemd user daemon and enable/start both services.",
+    `7. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
+    `8. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
+    "9. Reload systemd user daemon and enable/start both services.",
     args.skipLinger
-      ? "9. Skip linger configuration (--skip-linger set)."
-      : `9. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
-    "10. Run health checks and verification.",
+      ? "10. Skip linger configuration (--skip-linger set)."
+      : `10. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "11. Run health checks, and initialize default enabled skills if config has none.",
     "",
     info("After install (interactive only), a provider onboarding wizard can launch OpenCode auth and set a default model."),
   ]);
@@ -637,13 +737,14 @@ function buildUpdateSummary({ args, paths }) {
     "What this update does:",
     "1. Refresh Wafflebot package + OpenCode CLI dependency.",
     `2. Ensure Bun runtime is available${hasBun ? ` (${success("already present")})` : ` (${warn(`will install${hasCurl ? " with curl fallback" : ""}`)})`}.`,
-    "3. Re-write CLI shim + systemd user units to current paths/entrypoint.",
+    "3. Re-seed workspace skills from bundled package.",
+    "4. Re-write CLI shim + systemd user units to current paths/entrypoint.",
     "   - Includes wafflebot + opencode shims in ~/.local/bin",
-    "4. Reload daemon, enable/start services, then force restart both units.",
+    "5. Reload daemon, enable/start services, then force restart both units.",
     args.skipLinger
-      ? "5. Skip linger configuration (--skip-linger set)."
-      : `5. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
-    "6. Run health + service verification.",
+      ? "6. Skip linger configuration (--skip-linger set)."
+      : `6. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "7. Run health + service verification, and initialize default enabled skills if config has none.",
     "",
     "What this update does not do:",
     `- It does not wipe ${paths.dataDir} or ${paths.workspaceDir}.`,
@@ -665,6 +766,7 @@ function buildUpdateDryRun({ args, paths }) {
     `Refresh package @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
     "Refresh opencode-ai dependency",
     hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
+    "Reseed workspace skills from bundled package",
     "Rewrite wafflebot CLI shim",
     "Rewrite opencode CLI shim",
     "Rewrite systemd user unit files for opencode + wafflebot",
@@ -675,6 +777,7 @@ function buildUpdateDryRun({ args, paths }) {
       : "Check/enable loginctl linger when needed",
     `GET ${WAFFLEBOT_API_BASE_URL}/api/health`,
     "Run service verification checks",
+    "Initialize default enabled skills if runtime config currently has none",
   ];
 
   const nonActions = [
@@ -1471,6 +1574,7 @@ async function installOrUpdate(args, mode) {
       `wafflebot package directory missing: looked in ${paths.wafflebotAppDirGlobal} and ${paths.wafflebotAppDirLocal}`,
     );
   }
+  const skillSeed = syncBundledSkillsIntoWorkspace(paths, wafflebotAppDir);
   const wafflebotEntrypoint = resolveWafflebotServiceEntrypoint(wafflebotAppDir);
   if (!wafflebotEntrypoint) {
     throw new Error(
@@ -1497,6 +1601,15 @@ async function installOrUpdate(args, mode) {
 
   const linger = ensureLinger(args.skipLinger);
   const health = await healthCheck("http://127.0.0.1:3001/api/health");
+  const defaultSkillSync =
+    health.ok
+      ? await ensureDefaultRuntimeSkillsWhenEmpty({ retries: 6, delayMs: 800 })
+      : {
+          attempted: false,
+          updated: false,
+          reason: "skipped (runtime health failed)",
+          skills: [],
+        };
   const verify = runPostInstallVerification();
   let onboarding = null;
   if (mode === "install" && !args.yes) {
@@ -1520,6 +1633,8 @@ async function installOrUpdate(args, mode) {
     opencodeShimPath,
     pathSetup,
     units: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
+    skillSeed,
+    defaultSkillSync,
     health,
     linger,
     verify,
@@ -1648,6 +1763,16 @@ function printResult(result, asJson) {
         console.log(`path: added ${localBinDir} to ${result.pathSetup.updatedFiles.join(", ")}`);
       } else {
         console.log(`path: add ${localBinDir} to PATH, then restart your shell`);
+      }
+    }
+    if (result.skillSeed?.target) {
+      console.log(`skills: seeded ${result.skillSeed.target}`);
+    }
+    if (result.defaultSkillSync?.attempted) {
+      if (result.defaultSkillSync.updated) {
+        console.log(`skills: enabled defaults (${result.defaultSkillSync.skills.join(", ")})`);
+      } else {
+        console.log(`skills: ${result.defaultSkillSync.reason}`);
       }
     }
     console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);

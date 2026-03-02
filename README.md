@@ -72,6 +72,12 @@ bun run memory:lint
 
 `memory:trace:e2e` auto-selects a model from existing sessions (prefers `main`). Override with `WAFFLEBOT_E2E_MODEL=provider/model`.
 
+Memory operator references:
+
+- `docs/memory-ops.md`
+- `docs/memory-runtime-contract.md`
+- `.agents/skills/memory-ops/SKILL.md`
+
 ## Runtime
 
 Wafflebot runs with an OpenCode-backed runtime that forwards prompts to OpenCode and stores mirrored messages locally.
@@ -81,6 +87,15 @@ Example config template: `wafflebot.config.example.json`.
 `./config.json` at repo root is OpenCode config, not wafflebot runtime config.
 Runtime behavior is sourced from wafflebot config JSON. OpenCode runtime env vars are no longer accepted for model/provider/timeouts/directory.
 If you still have legacy `WAFFLEBOT_OPENCODE_*` runtime vars, run `bun run config:migrate-opencode-env` once, then unset them.
+
+Skill deployment behavior (install/update):
+
+- Bundled managed skills are seeded into workspace at `.agents/skills` (replaced from package on install/update).
+- Runtime OpenCode `skills.paths` is synced to include workspace `.agents/skills`.
+- If `ui.skills` is empty, install/update initializes defaults:
+  - `config-editor`
+  - `config-auditor`
+  - `runtime-diagnose`
 
 Config API:
 

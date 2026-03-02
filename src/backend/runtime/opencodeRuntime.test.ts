@@ -484,6 +484,7 @@ function createRuntimeWithClient(
     getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
     enableSmallModelSync?: boolean;
     enableBackgroundSync?: boolean;
+    runtimeDirectory?: string | null;
   },
 ) {
   return new OpencodeRuntime({
@@ -501,7 +502,7 @@ function createRuntimeWithClient(
       promptTimeoutMs: 20,
       runWaitTimeoutMs: 180_000,
       childSessionHideAfterDays: 3,
-      directory: null,
+      directory: options?.runtimeDirectory ?? null,
       bootstrap: {
         enabled: true,
         maxCharsPerFile: 20_000,
@@ -856,6 +857,7 @@ describe("opencode runtime failover contract", () => {
 
     const runtime = createRuntimeWithClient(client, {
       enableSmallModelSync: true,
+      runtimeDirectory: testWorkspacePath,
       getEnabledSkills: () => ["btca-cli"],
       getEnabledMcps: () => ["github"],
       getConfiguredMcpServers: () => [
@@ -893,7 +895,7 @@ describe("opencode runtime failover contract", () => {
         }
       | undefined;
     expect(updated).toBeTruthy();
-    expect(updated?.skills?.paths).toContain(path.resolve(process.cwd(), ".agents", "skills"));
+    expect(updated?.skills?.paths).toContain(path.resolve(testWorkspacePath, ".agents", "skills"));
     expect(updated?.permission).toEqual({});
     expect(updated?.mcp?.github?.enabled).toBe(true);
     expect(updated?.mcp?.github?.url).toBe("https://api.github.com/mcp");

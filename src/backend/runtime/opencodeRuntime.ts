@@ -2842,7 +2842,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       enabledSkills: this.currentEnabledSkills(),
       enabledMcps: this.currentEnabledMcps(),
       configuredMcpServers: this.currentConfiguredMcpServers(),
-      managedSkillsRoot: getManagedSkillsRootPath(),
+      managedSkillsRoot: getManagedSkillsRootPath(this.currentRuntimeConfig()?.directory ?? null),
     });
   }
 
@@ -2888,7 +2888,9 @@ export class OpencodeRuntime implements RuntimeEngine {
         changed = true;
       }
 
-      const desiredSkillPaths = normalizeStringArray(buildManagedSkillPaths(current));
+      const desiredSkillPaths = normalizeStringArray(
+        buildManagedSkillPaths(current, this.currentRuntimeConfig()?.directory ?? null),
+      );
       const currentSkillsValue = currentRecord.skills;
       const currentSkillPaths = normalizeStringArray(
         isPlainObject(currentSkillsValue) ? (currentSkillsValue as { paths?: unknown }).paths : undefined,

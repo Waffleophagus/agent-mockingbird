@@ -110,7 +110,7 @@ export async function loadRuntimeSkillCatalog(): Promise<RuntimeSkillCatalogResu
         skills,
         enabled: snapshot.config.ui.skills,
         hash: snapshot.hash,
-        managedPath: getManagedSkillsRootPath(),
+        managedPath: getManagedSkillsRootPath(snapshot.config.runtime.opencode.directory),
       },
     };
   } catch (error) {
@@ -121,7 +121,7 @@ export async function loadRuntimeSkillCatalog(): Promise<RuntimeSkillCatalogResu
         skills: [],
         enabled: snapshot.config.ui.skills,
         hash: snapshot.hash,
-        managedPath: getManagedSkillsRootPath(),
+        managedPath: getManagedSkillsRootPath(snapshot.config.runtime.opencode.directory),
         error: message,
       },
     };
@@ -179,13 +179,14 @@ export async function importManagedSkillWithConfigUpdate(input: {
 
   let created = false;
   try {
+    const current = getConfigSnapshot();
     const writeResult = writeManagedSkill({
       id,
       content: trimmedContent,
       overwrite: false,
+      workspaceDir: current.config.runtime.opencode.directory,
     });
     created = writeResult.created;
-    const current = getConfigSnapshot();
     const enabledSkills = new Set(current.config.ui.skills);
     if (input.enable) {
       enabledSkills.add(id);
@@ -210,7 +211,8 @@ export async function importManagedSkillWithConfigUpdate(input: {
     };
   } catch (error) {
     if (created) {
-      removeManagedSkill(id);
+      const current = getConfigSnapshot();
+      removeManagedSkill(id, current.config.runtime.opencode.directory);
     }
     throw error;
   }
