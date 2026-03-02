@@ -2,6 +2,8 @@
 import process from "node:process";
 import { syncRuntimeWorkspaceAssets } from "../src/cli/runtime-assets.mjs";
 
+const { console } = globalThis;
+
 function parseArgs(argv) {
   const args = {
     source: "",
