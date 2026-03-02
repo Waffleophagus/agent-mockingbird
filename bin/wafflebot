@@ -18,7 +18,7 @@ const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
 const UNIT_OPENCODE = "opencode.service";
 const UNIT_WAFFLEBOT = "wafflebot.service";
 const WAFFLEBOT_API_BASE_URL = "http://127.0.0.1:3001";
-const DEFAULT_ENABLED_SKILLS = ["config-editor", "config-auditor", "runtime-diagnose"];
+const DEFAULT_ENABLED_SKILLS = ["config-editor", "config-auditor", "runtime-diagnose", "memory-ops"];
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -685,6 +685,22 @@ async function healthCheck(url) {
   }
 }
 
+async function healthCheckWithRetry(url, input = {}) {
+  const attempts = Number.isFinite(input.attempts) ? Math.max(1, Math.trunc(input.attempts)) : 6;
+  const delayMs = Number.isFinite(input.delayMs) ? Math.max(50, Math.trunc(input.delayMs)) : 500;
+  let last = { ok: false, status: 0 };
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    last = await healthCheck(url);
+    if (last.ok) {
+      return last;
+    }
+    if (attempt < attempts) {
+      await sleep(delayMs);
+    }
+  }
+  return last;
+}
+
 function runPostInstallVerification() {
   const wafflebotStatus = shell("systemctl", ["--user", "status", UNIT_WAFFLEBOT, "--no-pager"]);
   const opencodeStatus = shell("systemctl", ["--user", "status", UNIT_OPENCODE, "--no-pager"]);
@@ -1212,7 +1228,21 @@ async function fetchRuntimeMemoryConfig() {
   }
 }
 
+async function fetchRuntimeConfigHash() {
+  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config`, { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`Failed to read runtime config hash (${response.status})`);
+  }
+  const payload = await response.json();
+  const expectedHash = typeof payload?.hash === "string" ? payload.hash.trim() : "";
+  if (!expectedHash) {
+    throw new Error("Runtime config hash missing from /api/config response");
+  }
+  return expectedHash;
+}
+
 async function setRuntimeMemoryEmbeddingConfig(input) {
+  const expectedHash = await fetchRuntimeConfigHash();
   const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/patch-safe`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1227,6 +1257,7 @@ async function setRuntimeMemoryEmbeddingConfig(input) {
           },
         },
       },
+      expectedHash,
       runSmokeTest: false,
     }),
   });
@@ -1671,7 +1702,10 @@ async function installOrUpdate(args, mode) {
   }
 
   const linger = ensureLinger(args.skipLinger);
-  const health = await healthCheck("http://127.0.0.1:3001/api/health");
+  const health = await healthCheckWithRetry("http://127.0.0.1:3001/api/health", {
+    attempts: 8,
+    delayMs: 500,
+  });
   const defaultSkillSync =
     health.ok
       ? await ensureDefaultRuntimeSkillsWhenEmpty({ retries: 6, delayMs: 800 })

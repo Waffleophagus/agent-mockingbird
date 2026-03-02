@@ -103,6 +103,9 @@ Skill deployment behavior (install/update):
   - `config-editor`
   - `config-auditor`
   - `runtime-diagnose`
+  - `memory-ops`
+- Install/update also seeds runtime OpenCode workspace config at `.opencode/opencode.jsonc` from `runtime-assets/workspace`:
+  - default `agent.general.tools` enables `memory_search`, `memory_get`, and `memory_remember`.
 
 Config API:
 

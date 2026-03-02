@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "general": {
+      "tools": {
+        "memory_search": true,
+        "memory_get": true,
+        "memory_remember": true
+      }
+    }
+  }
+}
