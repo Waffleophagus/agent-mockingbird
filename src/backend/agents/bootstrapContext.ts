@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
+import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
 const DEFAULT_BOOTSTRAP_FILE_NAMES = [
   "AGENTS.md",
@@ -83,7 +84,7 @@ export interface ImportedOpenclawBootstrap {
 }
 
 function resolveWorkspaceDir(config: WafflebotConfig): string {
-  return config.runtime.opencode.directory?.trim() || process.cwd();
+  return resolveOpencodeWorkspaceDir(config);
 }
 
 function resolveBootstrapConfig(config: WafflebotConfig): BootstrapConfig {

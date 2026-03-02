@@ -258,6 +258,7 @@ Recommended production topology is **single VM + systemd sidecar**:
 - `opencode.service` running on `127.0.0.1:4096`
 - `wafflebot.service` running on `127.0.0.1:3001`
 - both pinned to one workspace path via `runtime.opencode.directory` in wafflebot config
+- `runtime.memory.workspaceDir` must resolve to the same path as `runtime.opencode.directory`
 
 Deployment artifacts:
 

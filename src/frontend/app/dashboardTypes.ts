@@ -56,6 +56,12 @@ export interface RuntimeInfoResponse {
     directory?: string;
     effectiveConfigPath?: string;
     persistenceMode?: string;
+    workspace?: {
+      aligned?: boolean;
+      opencodeDirectoryExplicit?: boolean;
+      opencodeDirectory?: string;
+      memoryWorkspaceDir?: string;
+    };
     projection?: {
       source?: string;
       syncs?: string[];

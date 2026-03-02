@@ -40,3 +40,39 @@ test("parseConfig does not use WAFFLEBOT_OPENCODE_* env vars as runtime fallback
     }
   }
 });
+
+test("parseConfig auto-fills opencode directory from memory workspace when unset", () => {
+  const filePath = path.resolve(process.cwd(), "wafflebot.config.example.json");
+  const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    runtime?: { opencode?: Record<string, unknown>; memory?: Record<string, unknown> };
+  };
+  if (!raw.runtime?.opencode || !raw.runtime.memory) {
+    throw new Error("Test fixture missing runtime workspace settings");
+  }
+
+  raw.runtime.opencode.directory = null;
+  raw.runtime.memory.workspaceDir = "./custom-workspace";
+  const parsed = parseConfig(raw);
+  const expected = path.resolve(process.cwd(), "custom-workspace");
+  expect(parsed.runtime.opencode.directory).toBe(expected);
+  expect(parsed.runtime.memory.workspaceDir).toBe(expected);
+});
+
+test("parseConfig rejects mismatched opencode and memory workspace paths", () => {
+  const filePath = path.resolve(process.cwd(), "wafflebot.config.example.json");
+  const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    runtime?: { opencode?: Record<string, unknown>; memory?: Record<string, unknown> };
+  };
+  if (!raw.runtime?.opencode || !raw.runtime.memory) {
+    throw new Error("Test fixture missing runtime workspace settings");
+  }
+
+  raw.runtime.opencode.directory = "/tmp/opencode-workspace";
+  raw.runtime.memory.workspaceDir = "/tmp/memory-workspace";
+  expect(() => parseConfig(raw)).toThrowError(
+    new ConfigApplyError(
+      "schema",
+      "runtime.opencode.directory and runtime.memory.workspaceDir must resolve to the same workspace path",
+    ),
+  );
+});

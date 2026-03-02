@@ -40,6 +40,7 @@ journalctl -u wafflebot.service -f
 ## Notes
 
 - OpenCode runtime settings (`baseUrl`, `directory`, model/provider/timeouts) now come from wafflebot config JSON (`runtime.opencode.*`), not runtime env vars.
+- Set `WAFFLEBOT_MEMORY_WORKSPACE_DIR` in `wafflebot.service` to the same project path used by `opencode.service` `WorkingDirectory`.
 - If migrating older env-based settings, run `bun run config:migrate-opencode-env` once before service start.
 - Agent edits from Wafflebot persist to project-local OpenCode config (typically `.opencode/opencode.jsonc` under that directory).
 - If OpenCode TUI/web appears different, launch/attach it with the same workspace directory.

@@ -16,6 +16,7 @@ import {
   type WafflebotConfig,
 } from "./schema";
 import { ConfigApplyError, type WafflebotConfigSnapshot } from "./types";
+import { resolveWorkspaceAlignment } from "../workspace/resolve";
 
 interface ConfigRow {
   value_json: string;
@@ -195,7 +196,7 @@ function buildLegacyBootstrappedConfig() {
         promptTimeoutMs: DEFAULT_OPENCODE_PROMPT_TIMEOUT_MS,
         runWaitTimeoutMs: DEFAULT_OPENCODE_RUN_WAIT_TIMEOUT_MS,
         childSessionHideAfterDays: 3,
-        directory: null,
+        directory: env.WAFFLEBOT_MEMORY_WORKSPACE_DIR,
         bootstrap: {
           enabled: true,
           maxCharsPerFile: 20_000,
@@ -321,6 +322,19 @@ export function parseConfig(raw: unknown) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }
   const config = parsed.data;
+  const workspaceAlignment = resolveWorkspaceAlignment(config);
+  if (workspaceAlignment.opencodeDirectoryExplicit && !workspaceAlignment.aligned) {
+    throw new ConfigApplyError(
+      "schema",
+      "runtime.opencode.directory and runtime.memory.workspaceDir must resolve to the same workspace path",
+      {
+        opencodeDirectory: workspaceAlignment.opencodeWorkspaceDir,
+        memoryWorkspaceDir: workspaceAlignment.memoryWorkspaceDir,
+      },
+    );
+  }
+  config.runtime.opencode.directory = workspaceAlignment.opencodeWorkspaceDir;
+  config.runtime.memory.workspaceDir = workspaceAlignment.memoryWorkspaceDir;
   config.ui.agentTypes = mergeAgentTypesWithLegacyAgents(config.ui.agentTypes, config.ui.agents);
   return config;
 }

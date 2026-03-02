@@ -10,6 +10,7 @@ import type { AgentTypeDefinition, WafflebotConfig } from "../config/schema";
 import { agentTypeDefinitionSchema } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
+import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
 type OpenCodeAgentConfigRecord = Record<string, unknown>;
 
@@ -108,7 +109,7 @@ function canonicalOpencodeConfigPath(baseDir: string) {
 }
 
 function resolveOpencodeConfigFile(config: WafflebotConfig, createIfMissing = true) {
-  const baseDir = config.runtime.opencode.directory?.trim() || process.cwd();
+  const baseDir = resolveOpencodeWorkspaceDir(config);
   const fallback = canonicalOpencodeConfigPath(baseDir);
   if (!createIfMissing) {
     return fallback;
@@ -121,7 +122,7 @@ function resolveOpencodeConfigFile(config: WafflebotConfig, createIfMissing = tr
 }
 
 export function getOpencodeAgentStorageInfo(config: WafflebotConfig = getConfigSnapshot().config): OpencodeAgentStorageInfo {
-  const directory = config.runtime.opencode.directory?.trim() || process.cwd();
+  const directory = resolveOpencodeWorkspaceDir(config);
   return {
     directory,
     configFilePath: resolveOpencodeConfigFile(config, false),
@@ -131,7 +132,7 @@ export function getOpencodeAgentStorageInfo(config: WafflebotConfig = getConfigS
 
 function listAgentSearchRoots(config: WafflebotConfig): string[] {
   const roots = new Set<string>();
-  const baseDir = config.runtime.opencode.directory?.trim() || process.cwd();
+  const baseDir = resolveOpencodeWorkspaceDir(config);
   roots.add(baseDir);
 
   // OpenCode scans .opencode directories walking up project + home.

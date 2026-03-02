@@ -12,7 +12,7 @@
       "promptTimeoutMs": 300000,
       "runWaitTimeoutMs": 180000,
       "childSessionHideAfterDays": 3,
-      "directory": null,
+      "directory": "./data/workspace",
       "bootstrap": {
         "enabled": true,
         "maxCharsPerFile": 20000,

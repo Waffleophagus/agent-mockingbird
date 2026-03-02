@@ -12,6 +12,7 @@ import {
 } from "../../db/repository";
 import { listOpencodeModelOptions } from "../../opencode/models";
 import { getRuntimeStartupInfo } from "../../runtime";
+import { resolveWorkspaceAlignment } from "../../workspace/resolve";
 
 function parseModelSelection(model: string, defaultProviderId: string) {
   const trimmed = model.trim();
@@ -109,6 +110,7 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
         const runtimeInfo = getRuntimeStartupInfo();
         const storage = getOpencodeAgentStorageInfo();
         const bootstrap = buildWorkspaceBootstrapPromptContext();
+        const workspaceAlignment = resolveWorkspaceAlignment(snapshot.config);
         return Response.json({
           configAuthority: {
             source: "wafflebot-config-json",
@@ -135,6 +137,12 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
                 originalLength: file.originalLength,
                 injectedLength: file.content.length,
               })),
+            },
+            workspace: {
+              aligned: workspaceAlignment.aligned,
+              opencodeDirectoryExplicit: workspaceAlignment.opencodeDirectoryExplicit,
+              opencodeDirectory: workspaceAlignment.opencodeWorkspaceDir,
+              memoryWorkspaceDir: workspaceAlignment.memoryWorkspaceDir,
             },
           },
         });
