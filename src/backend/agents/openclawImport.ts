@@ -19,6 +19,7 @@ import path from "node:path";
 import type { WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import { syncMemoryIndex } from "../memory/service";
+import { getBinaryDir } from "../paths";
 
 const EXCLUDED_DIR_NAMES = new Set([".git", "node_modules"]);
 const PREVIEW_TTL_MS = 15 * 60 * 1000;
@@ -112,7 +113,15 @@ interface OpenclawImportPreviewManifest {
 }
 
 function resolveWorkspaceDir(config: WafflebotConfig): string {
-  return config.runtime.opencode.directory?.trim() || process.cwd();
+  const opencodeDirectory = config.runtime.opencode.directory?.trim();
+  if (opencodeDirectory) {
+    return path.resolve(opencodeDirectory);
+  }
+  const memoryWorkspaceDir = config.runtime.memory.workspaceDir.trim();
+  if (path.isAbsolute(memoryWorkspaceDir)) {
+    return memoryWorkspaceDir;
+  }
+  return path.resolve(getBinaryDir(), memoryWorkspaceDir);
 }
 
 function importCacheRoot() {
