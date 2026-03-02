@@ -153,6 +153,8 @@ jobs:
             pkg.publishConfig = { registry: process.env.REGISTRY_URL };
             pkg.files = [
               "bin",
+              "runtime-assets",
+              ".agents",
               "src",
               "dist",
               "deploy",
