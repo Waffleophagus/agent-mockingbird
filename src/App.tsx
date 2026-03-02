@@ -956,7 +956,7 @@ export function App() {
       name: "New Agent Type",
       description: "Describe when to use this agent type.",
       prompt: "Describe how this agent type should behave.",
-      model: activeSession?.model ?? modelOptions[0]?.id ?? "opencode/kimi-k2.5-free",
+      model: activeSession?.model ?? modelOptions[0]?.id ?? "opencode/big-pickle",
       mode: "subagent",
       hidden: false,
       disable: false,

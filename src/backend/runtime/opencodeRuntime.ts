@@ -898,7 +898,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         userContent,
         "[/User Message]",
       ].join("\n");
-      const fingerprint = buildMemoryContextFingerprint(results);
+      const fingerprint = buildMemoryContextFingerprint(results as MemorySearchResult[]);
       const existing = this.memoryInjectionStateBySessionId.get(opencodeSessionId);
       const shouldInject = !existing || existing.forceReinject || existing.fingerprint !== fingerprint;
       if (shouldInject) {
