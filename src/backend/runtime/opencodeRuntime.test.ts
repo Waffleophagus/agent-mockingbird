@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { MemorySearchResult } from "../memory/types";
 
 const testRoot = mkdtempSync(path.join(tmpdir(), "wafflebot-runtime-test-"));
 const testDbPath = path.join(testRoot, "wafflebot.runtime.test.db");
@@ -156,6 +157,7 @@ type RuntimeCtor = new (input: {
   getEnabledSkills?: () => Array<string>;
   getEnabledMcps?: () => Array<string>;
   getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
+  searchMemoryFn?: (query: string, options?: { maxResults?: number; minScore?: number }) => Promise<MemorySearchResult[]>;
   enableEventSync?: boolean;
   enableSmallModelSync?: boolean;
   enableBackgroundSync?: boolean;
@@ -498,6 +500,7 @@ function createRuntimeWithClient(
     getEnabledSkills?: () => Array<string>;
     getEnabledMcps?: () => Array<string>;
     getConfiguredMcpServers?: () => Array<ConfiguredMcpServer>;
+    searchMemoryFn?: (query: string, options?: { maxResults?: number; minScore?: number }) => Promise<MemorySearchResult[]>;
     enableSmallModelSync?: boolean;
     enableBackgroundSync?: boolean;
     runtimeDirectory?: string | null;
@@ -530,6 +533,7 @@ function createRuntimeWithClient(
     getEnabledSkills: options?.getEnabledSkills,
     getEnabledMcps: options?.getEnabledMcps,
     getConfiguredMcpServers: options?.getConfiguredMcpServers,
+    searchMemoryFn: options?.searchMemoryFn,
     client: client as unknown,
     enableEventSync: false,
     enableSmallModelSync: options?.enableSmallModelSync ?? false,
@@ -798,6 +802,62 @@ describe("opencode runtime failover contract", () => {
     expect(promptCalls[1]?.hasMemoryContext).toBe(false);
     expect(promptCalls[2]?.hasMemoryContext).toBe(true);
     expect(promptCalls[1]?.sessionId).not.toBe(promptCalls[2]?.sessionId);
+  });
+
+  test("does not reinject memory context when only retrieval scores change", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+    });
+
+    const promptTexts: string[] = [];
+    let searchCallCount = 0;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptTexts.push(text);
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+      {
+        searchMemoryFn: async () => {
+          searchCallCount += 1;
+          const score = searchCallCount === 1 ? 0.92 : 0.18;
+          return [
+            {
+              id: "chunk-stable",
+              path: "MEMORY.md",
+              startLine: 1,
+              endLine: 4,
+              source: "memory",
+              score,
+              snippet: "Marker chunk remains stable while scores move.",
+              citation: "MEMORY.md#L1",
+            },
+          ];
+        },
+      },
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "Remember this marker" });
+      await runtime.sendUserMessage({ sessionId: "main", content: "Remember this marker" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(searchCallCount).toBe(2);
+    expect(promptTexts.length).toBe(2);
+    expect(promptTexts[0]?.includes("[Memory Context]")).toBe(true);
+    expect(promptTexts[1]?.includes("[Memory Context]")).toBe(false);
   });
 
   test("maps quota errors to RuntimeProviderQuotaError", async () => {

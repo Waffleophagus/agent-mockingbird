@@ -89,6 +89,8 @@ import {
   getManagedSkillsRootPath,
   normalizeSkillIds,
 } from "../skills/service";
+import { buildMemoryContextFingerprint } from "./memoryPromptDedup";
+import type { MemorySearchResult } from "../memory/types";
 
 type Listener = (event: RuntimeEvent) => void;
 type AssistantInfo = Extract<Message, { role: "assistant" }>;
@@ -124,6 +126,7 @@ interface OpencodeRuntimeOptions {
   enableEventSync?: boolean;
   enableSmallModelSync?: boolean;
   enableBackgroundSync?: boolean;
+  searchMemoryFn?: (query: string, options?: { maxResults?: number; minScore?: number }) => Promise<MemorySearchResult[]>;
 }
 
 const MODEL_MEMORY_TOOLS = new Set(["memory_search", "memory_get", "memory_remember"]);
@@ -869,7 +872,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
 
     try {
-      const results = await searchMemory(query);
+      const results = await this.searchMemory(query);
       if (!results.length) {
         this.clearMemoryInjectionState(opencodeSessionId);
         return {
@@ -895,17 +898,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         userContent,
         "[/User Message]",
       ].join("\n");
-      const fingerprint = stableSerialize(
-        results.map(result => ({
-          id: result.id,
-          path: result.path,
-          startLine: result.startLine,
-          endLine: result.endLine,
-          score: result.score,
-          citation: result.citation,
-          snippet: result.snippet,
-        })),
-      );
+      const fingerprint = buildMemoryContextFingerprint(results);
       const existing = this.memoryInjectionStateBySessionId.get(opencodeSessionId);
       const shouldInject = !existing || existing.forceReinject || existing.fingerprint !== fingerprint;
       if (shouldInject) {
@@ -957,6 +950,13 @@ export class OpencodeRuntime implements RuntimeEngine {
       fingerprint: "",
       forceReinject: true,
     });
+  }
+
+  private async searchMemory(query: string, options?: { maxResults?: number; minScore?: number }) {
+    if (this.options.searchMemoryFn) {
+      return this.options.searchMemoryFn(query, options);
+    }
+    return searchMemory(query, options);
   }
 
   private normalizePromptInputParts(content: string, parts?: RuntimeInputPart[]): RuntimeInputPart[] {
