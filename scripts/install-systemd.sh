@@ -49,6 +49,9 @@ chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}" "${DATA_DIR}"
 
 su -s /bin/bash -c "cd \"${APP_DIR}\" && bun install --frozen-lockfile" "${APP_USER}"
 su -s /bin/bash -c "cd \"${APP_DIR}\" && bun scripts/runtime-assets-sync.mjs --source \"${APP_DIR}/runtime-assets/workspace\" --target \"${APP_DIR}\" --state \"${DATA_DIR}/runtime-assets-state.json\" --mode install --non-interactive" "${APP_USER}"
+if [[ -f "${APP_DIR}/.opencode/package.json" ]]; then
+  su -s /bin/bash -c "cd \"${APP_DIR}/.opencode\" && bun install --frozen-lockfile" "${APP_USER}"
+fi
 
 render_unit() {
   local src="$1"

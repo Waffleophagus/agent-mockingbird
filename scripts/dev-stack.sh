@@ -103,6 +103,13 @@ echo "[stack] syncing runtime assets into ${DEV_WORKSPACE_DIR}"
     --non-interactive \
     --quiet
 )
+if [[ -f "${DEV_WORKSPACE_DIR}/.opencode/package.json" ]]; then
+  echo "[stack] installing workspace .opencode dependencies"
+  (
+    cd "${DEV_WORKSPACE_DIR}/.opencode"
+    bun install --frozen-lockfile >/dev/null
+  )
+fi
 echo "[stack] syncing runtime.opencode settings into wafflebot config (workspace: ${DEV_WORKSPACE_DIR})"
 (
   cd "${ROOT_DIR}"

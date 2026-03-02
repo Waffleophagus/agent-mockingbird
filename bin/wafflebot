@@ -232,6 +232,7 @@ function shell(command, args, options = {}) {
     encoding: "utf8",
     stdio: options.stdio ?? "pipe",
     env: options.env ?? process.env,
+    cwd: options.cwd,
   });
   return {
     code: result.status ?? 1,
@@ -1677,6 +1678,16 @@ async function installOrUpdate(args, mode) {
     }
   }
   runtimeAssets.fallbackUsed = runtimeAssetsSource.fallbackUsed;
+  const workspaceOpencodeDir = path.join(paths.workspaceDir, ".opencode");
+  const workspaceOpencodePackagePath = path.join(workspaceOpencodeDir, "package.json");
+  const workspaceOpencodeLockPath = path.join(workspaceOpencodeDir, "bun.lock");
+  if (fs.existsSync(workspaceOpencodePackagePath)) {
+    const installArgs = ["install"];
+    if (fs.existsSync(workspaceOpencodeLockPath)) {
+      installArgs.push("--frozen-lockfile");
+    }
+    must(bunBin, installArgs, { cwd: workspaceOpencodeDir });
+  }
   const wafflebotEntrypoint = resolveWafflebotServiceEntrypoint(wafflebotAppDir);
   if (!wafflebotEntrypoint) {
     throw new Error(
