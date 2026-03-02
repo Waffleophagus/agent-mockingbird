@@ -292,6 +292,50 @@ async function promptRuntimeAssetConflictDecision(conflict) {
   }
 }
 
+function prepareRuntimeAssetsSourceDir(wafflebotAppDir) {
+  const packagedRuntimeAssetsDir = path.join(wafflebotAppDir, "runtime-assets", "workspace");
+  if (fs.existsSync(packagedRuntimeAssetsDir)) {
+    return {
+      sourceDir: packagedRuntimeAssetsDir,
+      tempDir: null,
+      fallbackUsed: false,
+    };
+  }
+
+  const legacySkillsDir = path.join(wafflebotAppDir, ".agents", "skills");
+  if (!fs.existsSync(legacySkillsDir)) {
+    throw new Error(
+      `runtime assets missing in package: expected ${packagedRuntimeAssetsDir} (or legacy fallback ${legacySkillsDir})`,
+    );
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wafflebot-runtime-assets-"));
+  const tempSourceDir = path.join(tempDir, "workspace");
+  const tempSkillsDir = path.join(tempSourceDir, ".agents", "skills");
+  ensureDir(path.dirname(tempSkillsDir));
+  fs.cpSync(legacySkillsDir, tempSkillsDir, { recursive: true, force: true });
+  writeFile(
+    path.join(tempSourceDir, "AGENTS.md"),
+    [
+      "# Wafflebot Runtime Agent Guide",
+      "",
+      "This workspace was initialized from legacy packaged skills fallback.",
+      "Prefer configured skills in `.agents/skills` and follow direct user instructions.",
+      "",
+    ].join("\n"),
+  );
+  writeFile(
+    path.join(tempSourceDir, "MEMORY.md"),
+    ["# Memory Index", "", "Store durable notes in `memory/*.md`.", ""].join("\n"),
+  );
+
+  return {
+    sourceDir: tempSourceDir,
+    tempDir,
+    fallbackUsed: true,
+  };
+}
+
 async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
   const retries = typeof input.retries === "number" ? Math.max(1, input.retries) : 5;
   const delayMs = typeof input.delayMs === "number" ? Math.max(100, input.delayMs) : 750;
@@ -1584,16 +1628,24 @@ async function installOrUpdate(args, mode) {
       `wafflebot package directory missing: looked in ${paths.wafflebotAppDirGlobal} and ${paths.wafflebotAppDirLocal}`,
     );
   }
-  const runtimeAssetsSourceDir = path.join(wafflebotAppDir, "runtime-assets", "workspace");
+  const runtimeAssetsSource = prepareRuntimeAssetsSourceDir(wafflebotAppDir);
   const runtimeAssetsStatePath = path.join(paths.dataDir, "runtime-assets-state.json");
-  const runtimeAssets = await syncRuntimeWorkspaceAssets({
-    sourceWorkspaceDir: runtimeAssetsSourceDir,
-    targetWorkspaceDir: paths.workspaceDir,
-    stateFilePath: runtimeAssetsStatePath,
-    mode,
-    interactive: mode === "update" && !args.yes,
-    onConflict: promptRuntimeAssetConflictDecision,
-  });
+  let runtimeAssets;
+  try {
+    runtimeAssets = await syncRuntimeWorkspaceAssets({
+      sourceWorkspaceDir: runtimeAssetsSource.sourceDir,
+      targetWorkspaceDir: paths.workspaceDir,
+      stateFilePath: runtimeAssetsStatePath,
+      mode,
+      interactive: mode === "update" && !args.yes,
+      onConflict: promptRuntimeAssetConflictDecision,
+    });
+  } finally {
+    if (runtimeAssetsSource.tempDir) {
+      fs.rmSync(runtimeAssetsSource.tempDir, { recursive: true, force: true });
+    }
+  }
+  runtimeAssets.fallbackUsed = runtimeAssetsSource.fallbackUsed;
   const wafflebotEntrypoint = resolveWafflebotServiceEntrypoint(wafflebotAppDir);
   if (!wafflebotEntrypoint) {
     throw new Error(
@@ -1787,6 +1839,9 @@ function printResult(result, asJson) {
     if (result.runtimeAssets?.target) {
       console.log(`runtime-assets: source ${result.runtimeAssets.source}`);
       console.log(`runtime-assets: target ${result.runtimeAssets.target}`);
+      if (result.runtimeAssets.fallbackUsed) {
+        console.log("runtime-assets: using legacy package fallback source");
+      }
       console.log(
         `runtime-assets: copied=${result.runtimeAssets.copied}, overwritten=${result.runtimeAssets.overwritten}, unchanged=${result.runtimeAssets.unchanged}, keptLocal=${result.runtimeAssets.keptLocal}, conflicts=${result.runtimeAssets.conflicts}`,
       );
