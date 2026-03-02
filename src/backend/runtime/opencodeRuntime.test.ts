@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
 import type { MemorySearchResult } from "../memory/types";
 
 const testRoot = mkdtempSync(path.join(tmpdir(), "wafflebot-runtime-test-"));

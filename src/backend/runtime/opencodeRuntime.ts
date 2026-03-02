@@ -17,6 +17,7 @@ import {
   RuntimeSessionQueuedError,
   RuntimeSessionNotFoundError,
 } from "./errors";
+import { buildMemoryContextFingerprint } from "./memoryPromptDedup";
 import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
@@ -77,6 +78,7 @@ import {
   normalizeRuntimeMcpConfigMap,
 } from "../mcp/service";
 import { searchMemory } from "../memory/service";
+import type { MemorySearchResult } from "../memory/types";
 import {
   createOpencodeClient,
   createOpencodeClientFromConnection,
@@ -89,8 +91,6 @@ import {
   getManagedSkillsRootPath,
   normalizeSkillIds,
 } from "../skills/service";
-import { buildMemoryContextFingerprint } from "./memoryPromptDedup";
-import type { MemorySearchResult } from "../memory/types";
 
 type Listener = (event: RuntimeEvent) => void;
 type AssistantInfo = Extract<Message, { role: "assistant" }>;
