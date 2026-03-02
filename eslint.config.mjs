@@ -16,6 +16,8 @@ export default tseslint.config(
       "convex-backend/**",
       "rivet/**",
       "sandbox-agent/**",
+      "data/**",
+      "runtime-assets/**",
     ],
   },
   js.configs.recommended,
