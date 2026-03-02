@@ -17,7 +17,11 @@ import {
   RuntimeSessionQueuedError,
   RuntimeSessionNotFoundError,
 } from "./errors";
-import { buildMemoryContextFingerprint } from "./memoryPromptDedup";
+import {
+  buildMemoryContextFingerprint,
+  isWriteIntentMemoryQuery,
+  prepareMemoryInjectionResults,
+} from "./memoryPromptDedup";
 import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
@@ -870,9 +874,18 @@ export class OpencodeRuntime implements RuntimeEngine {
         memoryContextFingerprint: null,
       };
     }
+    if (currentMemoryConfig().toolMode === "hybrid" && isWriteIntentMemoryQuery(query)) {
+      return {
+        content: userContent,
+        freshSessionContent: userContent,
+        injectedContextResults: 0,
+        memoryContextFingerprint: null,
+      };
+    }
 
     try {
-      const results = await this.searchMemory(query);
+      const searchResults = await this.searchMemory(query);
+      const results = prepareMemoryInjectionResults(query, searchResults as MemorySearchResult[]);
       if (!results.length) {
         this.clearMemoryInjectionState(opencodeSessionId);
         return {
@@ -898,7 +911,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         userContent,
         "[/User Message]",
       ].join("\n");
-      const fingerprint = buildMemoryContextFingerprint(results as MemorySearchResult[]);
+      const fingerprint = buildMemoryContextFingerprint(results);
       const existing = this.memoryInjectionStateBySessionId.get(opencodeSessionId);
       const shouldInject = !existing || existing.forceReinject || existing.fingerprint !== fingerprint;
       if (shouldInject) {

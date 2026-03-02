@@ -845,8 +845,8 @@ describe("opencode runtime failover contract", () => {
     );
 
     try {
-      await runtime.sendUserMessage({ sessionId: "main", content: "Remember this marker" });
-      await runtime.sendUserMessage({ sessionId: "main", content: "Remember this marker" });
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable marker detail" });
+      await runtime.sendUserMessage({ sessionId: "main", content: "Durable marker detail" });
     } finally {
       updateRuntimeMemoryConfig({
         enabled: false,
@@ -859,6 +859,121 @@ describe("opencode runtime failover contract", () => {
     expect(promptTexts.length).toBe(2);
     expect(promptTexts[0]?.includes("[Memory Context]")).toBe(true);
     expect(promptTexts[1]?.includes("[Memory Context]")).toBe(false);
+  });
+
+  test("skips memory injection for write-intent remember turns in hybrid mode", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+    });
+
+    const promptTexts: string[] = [];
+    let searchCalls = 0;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptTexts.push(text);
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+      {
+        searchMemoryFn: async () => {
+          searchCalls += 1;
+          return [
+            {
+              id: "chunk-memory",
+              path: "memory/2026-03-02.md",
+              startLine: 1,
+              endLine: 4,
+              source: "memory",
+              score: 0.8,
+              snippet: "User has an Android phone.",
+              citation: "memory/2026-03-02.md#L1",
+            },
+          ];
+        },
+      },
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "also remember that I have an android phone" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(searchCalls).toBe(0);
+    expect(promptTexts.length).toBe(1);
+    expect(promptTexts[0]).toBe("also remember that I have an android phone");
+    expect(promptTexts[0]?.includes("[Memory Context]")).toBe(false);
+  });
+
+  test("filters low-signal boilerplate memory from injected context when unrelated to query", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+    });
+
+    const promptTexts: string[] = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptTexts.push(text);
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+      {
+        searchMemoryFn: async () => [
+          {
+            id: "chunk-index",
+            path: "MEMORY.md",
+            startLine: 1,
+            endLine: 4,
+            source: "memory",
+            score: 0.92,
+            snippet:
+              "# Memory Index\nThis file is part of the runtime workspace bundle.\nStore durable notes in `memory/*.md`.",
+            citation: "MEMORY.md#L1",
+          },
+          {
+            id: "chunk-pokemon",
+            path: "memory/2026-03-02.md",
+            startLine: 20,
+            endLine: 24,
+            source: "memory",
+            score: 0.51,
+            snippet: "User's favorite Pokemon is Vulpix.",
+            citation: "memory/2026-03-02.md#L20",
+          },
+        ],
+      },
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "what is my favorite pokemon?" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(promptTexts.length).toBe(1);
+    expect(promptTexts[0]?.includes("[Memory Context]")).toBe(true);
+    expect(promptTexts[0]?.includes("User's favorite Pokemon is Vulpix.")).toBe(true);
+    expect(promptTexts[0]?.includes("This file is part of the runtime workspace bundle.")).toBe(false);
   });
 
   test("maps quota errors to RuntimeProviderQuotaError", async () => {

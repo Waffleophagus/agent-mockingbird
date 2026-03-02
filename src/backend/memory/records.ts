@@ -7,6 +7,13 @@ const RECORD_HEADING_RE = /^###\s+\[memory:([a-zA-Z0-9_-]+)\].*$/m;
 const RECORD_BLOCK_RE =
   /###\s+\[memory:([a-zA-Z0-9_-]+)\][^\n]*\n```json\n([\s\S]*?)\n```\n([\s\S]*?)(?=\n###\s+\[memory:|$)/g;
 
+export interface ParsedMemoryRecordBlock {
+  recordId: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+}
+
 function normalizeList(values: string[] | undefined): string[] {
   if (!values?.length) {
     return [];
@@ -108,6 +115,32 @@ export function parseMemoryRecords(content: string): MemoryRecord[] {
   }
 
   return records;
+}
+
+export function parseMemoryRecordBlocks(content: string): ParsedMemoryRecordBlock[] {
+  const blocks: ParsedMemoryRecordBlock[] = [];
+  const normalized = content.replace(/\r\n/g, "\n");
+  let match: RegExpExecArray | null = RECORD_BLOCK_RE.exec(normalized);
+  while (match) {
+    const full = match[0] ?? "";
+    const recordId = match[1]?.trim();
+    const startOffset = match.index;
+    const endOffsetExclusive = startOffset + full.length;
+    if (!recordId || startOffset < 0 || !full.trim()) {
+      match = RECORD_BLOCK_RE.exec(normalized);
+      continue;
+    }
+    const startLine = normalized.slice(0, startOffset).split("\n").length;
+    const endLine = normalized.slice(0, Math.max(startOffset, endOffsetExclusive - 1)).split("\n").length;
+    blocks.push({
+      recordId,
+      startLine,
+      endLine,
+      text: full.trimEnd(),
+    });
+    match = RECORD_BLOCK_RE.exec(normalized);
+  }
+  return blocks;
 }
 
 export function extractRecordIdFromChunk(text: string): string | null {

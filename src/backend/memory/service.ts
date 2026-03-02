@@ -6,6 +6,7 @@ import {
   createMemoryRecord,
   extractRecordIdFromChunk,
   formatMemoryRecord,
+  parseMemoryRecordBlocks,
   parseMemoryRecords,
 } from "./records";
 import type {
@@ -532,13 +533,32 @@ async function indexMemoryFile(filePath: string, options?: { force?: boolean }) 
   }
 
   const memoryConfig = currentMemoryConfig();
-  const chunks = chunkMarkdown(content, memoryConfig.chunkTokens, memoryConfig.chunkOverlap).map(
-    chunk => ({
-      ...chunk,
-      id: buildChunkId(relPath, chunk),
-      path: relPath,
-    }),
-  );
+  const recordBlocks = parseMemoryRecordBlocks(content);
+  const chunks =
+    recordBlocks.length > 0
+      ? recordBlocks.map(block => {
+          const text = block.text;
+          const hash = hashText(text);
+          const chunk: MemoryChunk = {
+            id: "",
+            path: relPath,
+            startLine: block.startLine,
+            endLine: block.endLine,
+            text,
+            hash,
+          };
+          return {
+            ...chunk,
+            id: buildChunkId(relPath, chunk),
+          };
+        })
+      : chunkMarkdown(content, memoryConfig.chunkTokens, memoryConfig.chunkOverlap).map(
+          chunk => ({
+            ...chunk,
+            id: buildChunkId(relPath, chunk),
+            path: relPath,
+          }),
+        );
   const embeddings = await embedChunks(chunks);
   const updatedAt = nowMs();
 
