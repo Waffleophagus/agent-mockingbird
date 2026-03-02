@@ -165,6 +165,9 @@ Memory mode environment variables:
 - `WAFFLEBOT_MEMORY_MIN_SCORE` (default `0.25`)
 - `WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS` (default `10000`)
 - `WAFFLEBOT_MEMORY_TOOL_MODE` (`hybrid`, `inject_only`, `tool_only`; default `hybrid`)
+- `WAFFLEBOT_MEMORY_INJECTION_DEDUPE_ENABLED` (default `true`)
+- `WAFFLEBOT_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY` (default `true`)
+- `WAFFLEBOT_MEMORY_INJECTION_DEDUPE_MAX_TRACKED` (default `256`)
 
 OpenCode local memory tools:
 

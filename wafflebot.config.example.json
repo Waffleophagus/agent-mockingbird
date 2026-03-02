@@ -40,7 +40,10 @@
       "maxResults": 6,
       "minScore": 0.25,
       "syncCooldownMs": 10000,
-      "toolMode": "hybrid"
+      "toolMode": "hybrid",
+      "injectionDedupeEnabled": true,
+      "injectionDedupeFallbackRecallOnly": true,
+      "injectionDedupeMaxTracked": 256
     },
     "cron": {
       "defaultMaxAttempts": 3,

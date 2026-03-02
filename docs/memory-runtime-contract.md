@@ -21,7 +21,9 @@ This contract defines how OpenCode runtime memory is expected to behave in Waffl
   1. refresh index (cooldown-aware),
   2. gather text/vector candidates,
   3. apply ranking, recency boost, superseded penalty,
-  4. return citations (`path#line`) and clipped snippets.
+  4. apply prompt-injection dedupe/relevance filtering,
+  5. return citations (`path#line`) and clipped snippets.
+- Prompt injection dedupe tracks already-injected memory keys per session generation and resets on session compaction.
 
 ## Write Rules
 

@@ -10,6 +10,9 @@ export interface MemoryToolCallTrace {
 export interface MessageMemoryTrace {
   mode: "hybrid" | "inject_only" | "tool_only";
   injectedContextResults: number;
+  retrievedContextResults?: number;
+  suppressedAsAlreadyInContext?: number;
+  suppressedAsIrrelevant?: number;
   toolCalls: MemoryToolCallTrace[];
   createdAt: string;
 }

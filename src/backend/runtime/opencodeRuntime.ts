@@ -18,9 +18,11 @@ import {
   RuntimeSessionNotFoundError,
 } from "./errors";
 import {
+  analyzeMemoryInjectionResults,
   buildMemoryContextFingerprint,
+  isMemoryRecallIntentQuery,
   isWriteIntentMemoryQuery,
-  prepareMemoryInjectionResults,
+  memoryInjectionResultKey,
 } from "./memoryPromptDedup";
 import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "../../types/dashboard";
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
@@ -150,7 +152,13 @@ const AGENT_NAME_CACHE_TTL_MS = 5_000;
 const BUILTIN_SUBAGENT_IDS = new Set(["general", "explore"]);
 const BUILTIN_PRIMARY_AGENT_IDS = new Set(["build", "plan", "title", "summary", "compaction"]);
 type RuntimeHealthSnapshot = Omit<RuntimeHealthCheckResult, "fromCache">;
-type MemoryInjectionState = { fingerprint: string; forceReinject: boolean };
+type MemoryInjectionState = {
+  fingerprint: string;
+  forceReinject: boolean;
+  generation: number;
+  turn: number;
+  injectedKeysByGeneration: string[];
+};
 
 function shouldQueueWhenBusy(input: SendUserMessageInput): boolean {
   return input.metadata?.heartbeat !== true;
@@ -473,7 +481,12 @@ export class OpencodeRuntime implements RuntimeEngine {
       await this.syncSessionTitleFromOpencode(session.id, opencodeSessionId, session.title);
       this.startSessionTitlePolling(session.id, opencodeSessionId);
 
-      const trace = this.buildMessageMemoryTrace(assistantMessage.parts, promptInput.injectedContextResults);
+      const trace = this.buildMessageMemoryTrace(assistantMessage.parts, {
+        injectedContextResults: promptInput.injectedContextResults,
+        retrievedContextResults: promptInput.retrievedContextResults,
+        suppressedAsAlreadyInContext: promptInput.suppressedAsAlreadyInContext,
+        suppressedAsIrrelevant: promptInput.suppressedAsIrrelevant,
+      });
       const assistantParts = this.buildChatMessageParts(assistantMessage.parts);
       const assistantError = this.extractAssistantError(assistantMessage.info, assistantMessage.parts);
       if (assistantError) {
@@ -853,6 +866,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     content: string;
     freshSessionContent: string;
     injectedContextResults: number;
+    retrievedContextResults: number;
+    suppressedAsAlreadyInContext: number;
+    suppressedAsIrrelevant: number;
     memoryContextFingerprint: string | null;
   }> {
     if (currentMemoryConfig().toolMode === "tool_only") {
@@ -860,6 +876,9 @@ export class OpencodeRuntime implements RuntimeEngine {
         content: userContent,
         freshSessionContent: userContent,
         injectedContextResults: 0,
+        retrievedContextResults: 0,
+        suppressedAsAlreadyInContext: 0,
+        suppressedAsIrrelevant: 0,
         memoryContextFingerprint: null,
       };
     }
@@ -871,6 +890,9 @@ export class OpencodeRuntime implements RuntimeEngine {
         content: userContent,
         freshSessionContent: userContent,
         injectedContextResults: 0,
+        retrievedContextResults: 0,
+        suppressedAsAlreadyInContext: 0,
+        suppressedAsIrrelevant: 0,
         memoryContextFingerprint: null,
       };
     }
@@ -879,51 +901,122 @@ export class OpencodeRuntime implements RuntimeEngine {
         content: userContent,
         freshSessionContent: userContent,
         injectedContextResults: 0,
+        retrievedContextResults: 0,
+        suppressedAsAlreadyInContext: 0,
+        suppressedAsIrrelevant: 0,
         memoryContextFingerprint: null,
       };
     }
 
     try {
       const searchResults = await this.searchMemory(query);
-      const results = prepareMemoryInjectionResults(query, searchResults as MemorySearchResult[]);
-      if (!results.length) {
-        this.clearMemoryInjectionState(opencodeSessionId);
+      const analyzed = analyzeMemoryInjectionResults(query, searchResults as MemorySearchResult[]);
+      const relevantResults = analyzed.results;
+      if (!relevantResults.length) {
         return {
           content: userContent,
           freshSessionContent: userContent,
           injectedContextResults: 0,
+          retrievedContextResults: searchResults.length,
+          suppressedAsAlreadyInContext: 0,
+          suppressedAsIrrelevant: analyzed.filteredIrrelevantCount,
           memoryContextFingerprint: null,
         };
       }
-      const contextLines = results.map(
-        (result, index) =>
-          `${index + 1}. (${result.score.toFixed(3)}) ${result.citation}\n${result.snippet}`,
-      );
-      const contextBlock = contextLines.join("\n\n");
-      const wrappedText = [
-        "Use the memory context below only if relevant and non-contradictory to current user intent.",
-        "",
-        "[Memory Context]",
-        contextBlock,
-        "[/Memory Context]",
-        "",
-        "[User Message]",
-        userContent,
-        "[/User Message]",
-      ].join("\n");
-      const fingerprint = buildMemoryContextFingerprint(results);
-      const existing = this.memoryInjectionStateBySessionId.get(opencodeSessionId);
-      const shouldInject = !existing || existing.forceReinject || existing.fingerprint !== fingerprint;
+
+      const memoryConfig = currentMemoryConfig();
+      const dedupeEnabled = memoryConfig.injectionDedupeEnabled;
+      const dedupeRecallFallbackOnly = memoryConfig.injectionDedupeFallbackRecallOnly;
+      const isRecallIntent = isMemoryRecallIntentQuery(query);
+      const state = this.memoryInjectionStateBySessionId.get(opencodeSessionId) ?? {
+        fingerprint: "",
+        forceReinject: false,
+        generation: 0,
+        turn: 0,
+        injectedKeysByGeneration: [],
+      };
+      const alreadyInjected = new Set(state.injectedKeysByGeneration);
+      let suppressedAsAlreadyInContext = 0;
+      let candidateResults = [...relevantResults];
+      let recallFallbackApplied = false;
+      if (dedupeEnabled) {
+        candidateResults = relevantResults.filter(result => !alreadyInjected.has(memoryInjectionResultKey(result)));
+        suppressedAsAlreadyInContext = relevantResults.length - candidateResults.length;
+      }
+      if (!candidateResults.length && dedupeEnabled) {
+        const allowFallback = dedupeRecallFallbackOnly ? isRecallIntent : true;
+        if (allowFallback && relevantResults.length > 0) {
+          candidateResults = [relevantResults[0] as MemorySearchResult];
+          suppressedAsAlreadyInContext = Math.max(0, relevantResults.length - 1);
+          recallFallbackApplied = true;
+        }
+      }
+
+      const makeWrappedText = (results: MemorySearchResult[]) => {
+        const contextLines = results.map(
+          (result, index) =>
+            `${index + 1}. (${result.score.toFixed(3)}) ${result.citation}\n${result.snippet}`,
+        );
+        const contextBlock = contextLines.join("\n\n");
+        return [
+          "Use the memory context below only if relevant and non-contradictory to current user intent.",
+          "",
+          "[Memory Context]",
+          contextBlock,
+          "[/Memory Context]",
+          "",
+          "[User Message]",
+          userContent,
+          "[/User Message]",
+        ].join("\n");
+      };
+      const freshSessionWrappedText = makeWrappedText(relevantResults);
+      if (!candidateResults.length) {
+        this.setMemoryInjectionState(opencodeSessionId, {
+          ...state,
+          forceReinject: false,
+          turn: state.turn + 1,
+        });
+        return {
+          content: userContent,
+          freshSessionContent: freshSessionWrappedText,
+          injectedContextResults: 0,
+          retrievedContextResults: searchResults.length,
+          suppressedAsAlreadyInContext,
+          suppressedAsIrrelevant: analyzed.filteredIrrelevantCount,
+          memoryContextFingerprint: null,
+        };
+      }
+
+      const wrappedText = makeWrappedText(candidateResults);
+      const fingerprint = buildMemoryContextFingerprint(candidateResults);
+      const existing = state;
+      const shouldInject = recallFallbackApplied || !existing || existing.forceReinject || existing.fingerprint !== fingerprint;
       if (shouldInject) {
+        const maxTracked = Math.max(32, memoryConfig.injectionDedupeMaxTracked);
+        const injectedKeys = [...existing.injectedKeysByGeneration, ...candidateResults.map(memoryInjectionResultKey)];
+        const dedupedKeys = [...new Set(injectedKeys)];
         this.setMemoryInjectionState(opencodeSessionId, {
           fingerprint,
           forceReinject: false,
+          generation: existing.generation,
+          turn: existing.turn + 1,
+          injectedKeysByGeneration: dedupedKeys.slice(-maxTracked),
+        });
+      } else {
+        this.setMemoryInjectionState(opencodeSessionId, {
+          ...existing,
+          forceReinject: false,
+          turn: existing.turn + 1,
         });
       }
       return {
         content: shouldInject ? wrappedText : userContent,
-        freshSessionContent: wrappedText,
-        injectedContextResults: shouldInject ? results.length : 0,
+        freshSessionContent: freshSessionWrappedText,
+        injectedContextResults: shouldInject ? candidateResults.length : 0,
+        retrievedContextResults: searchResults.length,
+        suppressedAsAlreadyInContext,
+        suppressedAsIrrelevant: analyzed.filteredIrrelevantCount,
         memoryContextFingerprint: fingerprint,
       };
     } catch {
@@ -931,6 +1024,9 @@ export class OpencodeRuntime implements RuntimeEngine {
         content: userContent,
         freshSessionContent: userContent,
         injectedContextResults: 0,
+        retrievedContextResults: 0,
+        suppressedAsAlreadyInContext: 0,
+        suppressedAsIrrelevant: 0,
         memoryContextFingerprint: null,
       };
     }
@@ -956,12 +1052,17 @@ export class OpencodeRuntime implements RuntimeEngine {
       this.memoryInjectionStateBySessionId.set(normalized, {
         ...existing,
         forceReinject: true,
+        generation: existing.generation + 1,
+        injectedKeysByGeneration: [],
       });
       return;
     }
     this.memoryInjectionStateBySessionId.set(normalized, {
       fingerprint: "",
       forceReinject: true,
+      generation: 1,
+      turn: 0,
+      injectedKeysByGeneration: [],
     });
   }
 
@@ -2323,7 +2424,15 @@ export class OpencodeRuntime implements RuntimeEngine {
     return null;
   }
 
-  private buildMessageMemoryTrace(parts: Array<Part>, injectedContextResults: number): MessageMemoryTrace | null {
+  private buildMessageMemoryTrace(
+    parts: Array<Part>,
+    memoryStats: {
+      injectedContextResults: number;
+      retrievedContextResults: number;
+      suppressedAsAlreadyInContext: number;
+      suppressedAsIrrelevant: number;
+    },
+  ): MessageMemoryTrace | null {
     const toolCalls: MemoryToolCallTrace[] = [];
     for (const part of parts) {
       if (part.type !== "tool" || !MODEL_MEMORY_TOOLS.has(part.tool)) continue;
@@ -2341,13 +2450,16 @@ export class OpencodeRuntime implements RuntimeEngine {
       toolCalls.push(call);
     }
 
-    if (injectedContextResults <= 0 && toolCalls.length === 0) {
+    if (memoryStats.injectedContextResults <= 0 && toolCalls.length === 0) {
       return null;
     }
 
     return {
       mode: currentMemoryConfig().toolMode,
-      injectedContextResults,
+      injectedContextResults: memoryStats.injectedContextResults,
+      retrievedContextResults: memoryStats.retrievedContextResults,
+      suppressedAsAlreadyInContext: memoryStats.suppressedAsAlreadyInContext,
+      suppressedAsIrrelevant: memoryStats.suppressedAsIrrelevant,
       toolCalls,
       createdAt: new Date().toISOString(),
     };
@@ -2471,6 +2583,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         return { message, opencodeSessionId: sessionId };
       } catch (error) {
         if (getOpencodeErrorStatus(error) === 404) {
+          const previousSessionState = this.memoryInjectionStateBySessionId.get(sessionId);
           try {
             sessionId = await this.createOpencodeSession(input.localSessionId, input.localSessionTitle);
           } catch (createError) {
@@ -2481,6 +2594,13 @@ export class OpencodeRuntime implements RuntimeEngine {
               this.setMemoryInjectionState(sessionId, {
                 fingerprint: input.memoryContextFingerprint,
                 forceReinject: false,
+                generation: previousSessionState?.generation ?? 0,
+                turn: previousSessionState?.turn ?? 0,
+                injectedKeysByGeneration: [...(previousSessionState?.injectedKeysByGeneration ?? [])],
+              });
+            } else if (previousSessionState) {
+              this.setMemoryInjectionState(sessionId, {
+                ...previousSessionState,
               });
             }
             const retryParts = input.retryPartsOnSessionRecreate ?? input.parts;

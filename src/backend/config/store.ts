@@ -130,6 +130,18 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
   if (typeof memorySyncCooldownMs === "number") memoryPatch.syncCooldownMs = memorySyncCooldownMs;
   const memoryToolMode = readExplicitEnvString("WAFFLEBOT_MEMORY_TOOL_MODE");
   if (memoryToolMode) memoryPatch.toolMode = memoryToolMode;
+  const memoryInjectionDedupeEnabled = readExplicitEnvBoolean("WAFFLEBOT_MEMORY_INJECTION_DEDUPE_ENABLED");
+  if (typeof memoryInjectionDedupeEnabled === "boolean") memoryPatch.injectionDedupeEnabled = memoryInjectionDedupeEnabled;
+  const memoryInjectionDedupeFallbackRecallOnly = readExplicitEnvBoolean(
+    "WAFFLEBOT_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY",
+  );
+  if (typeof memoryInjectionDedupeFallbackRecallOnly === "boolean") {
+    memoryPatch.injectionDedupeFallbackRecallOnly = memoryInjectionDedupeFallbackRecallOnly;
+  }
+  const memoryInjectionDedupeMaxTracked = readExplicitEnvNumber("WAFFLEBOT_MEMORY_INJECTION_DEDUPE_MAX_TRACKED");
+  if (typeof memoryInjectionDedupeMaxTracked === "number") {
+    memoryPatch.injectionDedupeMaxTracked = memoryInjectionDedupeMaxTracked;
+  }
 
   if (!Object.keys(memoryPatch).length) {
     return {};
@@ -225,6 +237,9 @@ function buildLegacyBootstrappedConfig() {
         minScore: env.WAFFLEBOT_MEMORY_MIN_SCORE,
         syncCooldownMs: env.WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS,
         toolMode: env.WAFFLEBOT_MEMORY_TOOL_MODE,
+        injectionDedupeEnabled: env.WAFFLEBOT_MEMORY_INJECTION_DEDUPE_ENABLED,
+        injectionDedupeFallbackRecallOnly: env.WAFFLEBOT_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY,
+        injectionDedupeMaxTracked: env.WAFFLEBOT_MEMORY_INJECTION_DEDUPE_MAX_TRACKED,
       },
       cron: {
         defaultMaxAttempts: 3,

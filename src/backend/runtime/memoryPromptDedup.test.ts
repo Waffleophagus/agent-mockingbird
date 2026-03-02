@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  analyzeMemoryInjectionResults,
   buildMemoryContextFingerprint,
+  isMemoryRecallIntentQuery,
   isWriteIntentMemoryQuery,
+  memoryInjectionResultKey,
   prepareMemoryInjectionResults,
 } from "./memoryPromptDedup";
 import type { MemorySearchResult } from "../memory/types";
@@ -83,6 +86,54 @@ describe("prepareMemoryInjectionResults", () => {
     expect(results.length).toBe(1);
     expect(results[0]?.id).toBe("chunk-1");
   });
+
+  test("filters structured snippets that are irrelevant to non-recall queries", () => {
+    const structured = [
+      "### [memory:memory_abc123] 2026-03-02T20:41:01.037Z",
+      "```json",
+      '{"id":"memory_abc123"}',
+      "```",
+      "User has a daughter named Lucy Lee in the NICU.",
+    ].join("\n");
+    const results = prepareMemoryInjectionResults("pokemon evolution chart", [
+      result({ id: "chunk-1", score: 0.9, snippet: structured }),
+    ]);
+    expect(results.length).toBe(0);
+  });
+
+  test("keeps structured snippets for explicit recall-intent queries", () => {
+    const structured = [
+      "### [memory:memory_abc123] 2026-03-02T20:41:01.037Z",
+      "```json",
+      '{"id":"memory_abc123"}',
+      "```",
+      "User has a daughter named Lucy Lee in the NICU.",
+    ].join("\n");
+    const analyzed = analyzeMemoryInjectionResults("what do you remember about me?", [
+      result({ id: "chunk-1", score: 0.9, snippet: structured }),
+    ]);
+    expect(analyzed.results.length).toBe(1);
+    expect(analyzed.filteredIrrelevantCount).toBe(0);
+  });
+});
+
+describe("memoryInjectionResultKey", () => {
+  test("uses memory record id when present", () => {
+    const structured = [
+      "### [memory:memory_abc123] 2026-03-02T20:41:01.037Z",
+      "```json",
+      '{"id":"memory_abc123"}',
+      "```",
+      "User has a daughter named Lucy Lee in the NICU.",
+    ].join("\n");
+    expect(memoryInjectionResultKey(result({ id: "chunk-1", score: 0.8, snippet: structured }))).toBe("record:memory_abc123");
+  });
+
+  test("falls back to chunk id for unstructured snippets", () => {
+    expect(memoryInjectionResultKey(result({ id: "chunk-plain", score: 0.8, snippet: "plain snippet" }))).toBe(
+      "chunk:chunk-plain",
+    );
+  });
 });
 
 describe("isWriteIntentMemoryQuery", () => {
@@ -90,5 +141,13 @@ describe("isWriteIntentMemoryQuery", () => {
     expect(isWriteIntentMemoryQuery("also remember that I have an android phone")).toBe(true);
     expect(isWriteIntentMemoryQuery("please note that this is important")).toBe(true);
     expect(isWriteIntentMemoryQuery("what is my favorite pokemon?")).toBe(false);
+  });
+});
+
+describe("isMemoryRecallIntentQuery", () => {
+  test("detects recall-intent phrases", () => {
+    expect(isMemoryRecallIntentQuery("what do you remember about me?")).toBe(true);
+    expect(isMemoryRecallIntentQuery("remind me what you know from memory")).toBe(true);
+    expect(isMemoryRecallIntentQuery("what is my favorite pokemon?")).toBe(false);
   });
 });

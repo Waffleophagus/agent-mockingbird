@@ -553,6 +553,9 @@ function updateRuntimeMemoryConfig(
     embedProvider: "ollama" | "none";
     toolMode: "hybrid" | "inject_only" | "tool_only";
     minScore: number;
+    injectionDedupeEnabled: boolean;
+    injectionDedupeFallbackRecallOnly: boolean;
+    injectionDedupeMaxTracked: number;
   }>,
 ) {
   if (!existsSync(testConfigPath)) {
@@ -859,6 +862,160 @@ describe("opencode runtime failover contract", () => {
     expect(promptTexts.length).toBe(2);
     expect(promptTexts[0]?.includes("[Memory Context]")).toBe(true);
     expect(promptTexts[1]?.includes("[Memory Context]")).toBe(false);
+  });
+
+  test("suppresses already injected records when retrieval set expands", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+      injectionDedupeEnabled: true,
+      injectionDedupeFallbackRecallOnly: true,
+    });
+
+    const promptTexts: string[] = [];
+    let searchCallCount = 0;
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptTexts.push(text);
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+      {
+        searchMemoryFn: async () => {
+          searchCallCount += 1;
+          const recordA = [
+            "### [memory:memory_a] 2026-03-02T20:41:01.037Z",
+            "```json",
+            '{"id":"memory_a"}',
+            "```",
+            "Durable marker alpha detail.",
+          ].join("\n");
+          const recordB = [
+            "### [memory:memory_b] 2026-03-02T20:41:01.037Z",
+            "```json",
+            '{"id":"memory_b"}',
+            "```",
+            "Durable marker beta detail.",
+          ].join("\n");
+          if (searchCallCount === 1) {
+            return [
+              {
+                id: "chunk-a",
+                path: "memory/2026-03-02.md",
+                startLine: 1,
+                endLine: 5,
+                source: "memory",
+                score: 0.92,
+                snippet: recordA,
+                citation: "memory/2026-03-02.md#L1",
+              },
+            ];
+          }
+          return [
+            {
+              id: "chunk-a",
+              path: "memory/2026-03-02.md",
+              startLine: 1,
+              endLine: 5,
+              source: "memory",
+              score: 0.91,
+              snippet: recordA,
+              citation: "memory/2026-03-02.md#L1",
+            },
+            {
+              id: "chunk-b",
+              path: "memory/2026-03-02.md",
+              startLine: 7,
+              endLine: 11,
+              source: "memory",
+              score: 0.83,
+              snippet: recordB,
+              citation: "memory/2026-03-02.md#L7",
+            },
+          ];
+        },
+      },
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "durable marker status" });
+      await runtime.sendUserMessage({ sessionId: "main", content: "durable marker update" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(promptTexts.length).toBe(2);
+    expect(promptTexts[0]?.includes("memory:memory_a")).toBe(true);
+    expect(promptTexts[1]?.includes("memory:memory_a")).toBe(false);
+    expect(promptTexts[1]?.includes("memory:memory_b")).toBe(true);
+  });
+
+  test("allows recall-intent fallback when all relevant records were already injected", async () => {
+    updateRuntimeMemoryConfig({
+      enabled: true,
+      workspaceDir: testWorkspacePath,
+      embedProvider: "none",
+      toolMode: "hybrid",
+      minScore: 0,
+      injectionDedupeEnabled: true,
+      injectionDedupeFallbackRecallOnly: true,
+    });
+
+    const promptTexts: string[] = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => {
+          const text = request.body?.parts?.find((part) => part.type === "text")?.text ?? "";
+          promptTexts.push(text);
+          return assistantResponse(request.path.id, "OK");
+        },
+      }),
+      {
+        searchMemoryFn: async () => [
+          {
+            id: "chunk-a",
+            path: "memory/2026-03-02.md",
+            startLine: 1,
+            endLine: 5,
+            source: "memory",
+            score: 0.92,
+            snippet: [
+              "### [memory:memory_a] 2026-03-02T20:41:01.037Z",
+              "```json",
+              '{"id":"memory_a"}',
+              "```",
+              "Durable marker alpha detail.",
+            ].join("\n"),
+            citation: "memory/2026-03-02.md#L1",
+          },
+        ],
+      },
+    );
+
+    try {
+      await runtime.sendUserMessage({ sessionId: "main", content: "durable marker status" });
+      await runtime.sendUserMessage({ sessionId: "main", content: "what do you remember about me?" });
+    } finally {
+      updateRuntimeMemoryConfig({
+        enabled: false,
+        toolMode: "tool_only",
+        minScore: 0.25,
+      });
+    }
+
+    expect(promptTexts.length).toBe(2);
+    expect(promptTexts[0]?.includes("[Memory Context]")).toBe(true);
+    expect(promptTexts[1]?.includes("[Memory Context]")).toBe(true);
+    expect(promptTexts[1]?.includes("memory:memory_a")).toBe(true);
   });
 
   test("skips memory injection for write-intent remember turns in hybrid mode", async () => {

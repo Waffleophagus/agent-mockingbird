@@ -184,6 +184,9 @@ export const runtimeMemorySchema = z
     minScore: z.number().min(0).max(1).default(0.25),
     syncCooldownMs: z.number().int().min(0).default(10_000),
     toolMode: z.enum(["hybrid", "inject_only", "tool_only"]).default("hybrid"),
+    injectionDedupeEnabled: z.boolean().default(true),
+    injectionDedupeFallbackRecallOnly: z.boolean().default(true),
+    injectionDedupeMaxTracked: z.number().int().min(32).max(10_000).default(256),
   })
   .strict();
 
@@ -343,6 +346,9 @@ export const wafflebotConfigSchema = z
           minScore: 0.25,
           syncCooldownMs: 10_000,
           toolMode: "hybrid",
+          injectionDedupeEnabled: true,
+          injectionDedupeFallbackRecallOnly: true,
+          injectionDedupeMaxTracked: 256,
         }),
         cron: runtimeCronSchema.default({
           defaultMaxAttempts: 3,
