@@ -42,57 +42,6 @@ export interface OtherConfigResult {
   hash: string;
 }
 
-export interface OpenclawImportPreviewFile {
-  relativePath: string;
-  sourcePath: string;
-  targetPath: string;
-  sourceHash: string;
-  targetHash: string | null;
-  status: "new" | "identical" | "conflict";
-  sizeBytes: number;
-}
-
-export interface OpenclawImportPreviewResult {
-  previewId: string;
-  source: {
-    mode: "local" | "git";
-    resolvedDirectory: string;
-    url?: string;
-    requestedRef?: string;
-    resolvedRef?: string;
-    commit?: string;
-  };
-  targetDirectory: string;
-  discoveredCount: number;
-  filesNew: OpenclawImportPreviewFile[];
-  filesIdentical: OpenclawImportPreviewFile[];
-  filesConflicting: OpenclawImportPreviewFile[];
-  warnings: string[];
-  expiresAt: string;
-}
-
-export interface OpenclawImportApplyResult {
-  previewId: string;
-  sourceDirectory: string;
-  targetDirectory: string;
-  copied: Array<{ relativePath: string; sourcePath: string; targetPath: string }>;
-  skippedExisting: Array<{ relativePath: string; targetPath: string }>;
-  skippedIdentical: Array<{ relativePath: string; targetPath: string }>;
-  skippedRequested: Array<{ relativePath: string; targetPath: string }>;
-  failed: Array<{ relativePath: string; reason: string }>;
-  memorySync:
-    | { status: "disabled" }
-    | { status: "completed" }
-    | { status: "failed"; error: string };
-  summary: {
-    copied: number;
-    skippedExisting: number;
-    skippedIdentical: number;
-    skippedRequested: number;
-    failed: number;
-  };
-}
-
 function asErrorMessage(payload: unknown, fallback: string) {
   if (payload && typeof payload === "object" && typeof (payload as ApiErrorPayload).error === "string") {
     return (payload as ApiErrorPayload).error as string;
@@ -224,40 +173,6 @@ export async function importManagedSkill(input: {
     skills: payload.skills,
     hash: typeof payload.hash === "string" ? payload.hash : "",
   };
-}
-
-export async function previewOpenclawImport(input: {
-  source: { mode: "local"; path: string } | { mode: "git"; url: string; ref?: string };
-  targetDirectory?: string;
-}) {
-  const response = await fetch("/api/config/opencode/bootstrap/import-openclaw/preview", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const payload = await parseJson<{ preview?: OpenclawImportPreviewResult; error?: string }>(response);
-  if (!response.ok || !payload.preview) {
-    throw new Error(asErrorMessage(payload, "Failed to preview OpenClaw import"));
-  }
-  return payload.preview;
-}
-
-export async function applyOpenclawImport(input: {
-  previewId: string;
-  overwritePaths?: string[];
-  skipPaths?: string[];
-  runMemorySync?: boolean;
-}) {
-  const response = await fetch("/api/config/opencode/bootstrap/import-openclaw/apply", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const payload = await parseJson<{ applied?: OpenclawImportApplyResult; error?: string }>(response);
-  if (!response.ok || !payload.applied) {
-    throw new Error(asErrorMessage(payload, "Failed to apply OpenClaw import"));
-  }
-  return payload.applied;
 }
 
 export async function saveSkills(input: { skills: string[]; expectedHash?: string }) {

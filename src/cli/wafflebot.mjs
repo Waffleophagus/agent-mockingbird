@@ -45,14 +45,7 @@ function parseArgs(argv) {
     tag: DEFAULT_TAG,
     version: undefined,
     rootDir: DEFAULT_ROOT_DIR,
-    importGitUrl: undefined,
-    importPath: undefined,
-    importRef: undefined,
-    importTargetDir: undefined,
-    previewId: undefined,
-    overwritePaths: [],
-    skipPaths: [],
-    skipMemorySync: false,
+    legacyImportFlags: [],
   };
 
   const positionals = [];
@@ -91,10 +84,9 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--skip-memory-sync") {
-      args.skipMemorySync = true;
+      args.legacyImportFlags.push(arg);
       continue;
     }
-
     const next = argv[i + 1];
     if ((arg === "--registry-url" || arg === "--registry") && next) {
       args.registryUrl = next;
@@ -122,50 +114,47 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--git" && next) {
-      args.importGitUrl = next;
+      args.legacyImportFlags.push(arg, next);
       i += 1;
       continue;
     }
     if (arg === "--path" && next) {
-      args.importPath = path.resolve(next);
+      args.legacyImportFlags.push(arg, next);
       i += 1;
       continue;
     }
     if (arg === "--ref" && next) {
-      args.importRef = next;
+      args.legacyImportFlags.push(arg, next);
       i += 1;
       continue;
     }
     if (arg === "--target-dir" && next) {
-      args.importTargetDir = path.resolve(next);
+      args.legacyImportFlags.push(arg, next);
       i += 1;
       continue;
     }
     if (arg === "--preview-id" && next) {
-      args.previewId = next;
+      args.legacyImportFlags.push(arg, next);
       i += 1;
       continue;
     }
     if (arg === "--overwrite" && next) {
-      args.overwritePaths.push(next);
+      args.legacyImportFlags.push(arg, next);
       i += 1;
       continue;
     }
     if (arg === "--skip-path" && next) {
-      args.skipPaths.push(next);
+      args.legacyImportFlags.push(arg, next);
       i += 1;
       continue;
     }
-
     throw new Error(`Unknown argument: ${arg}`);
   }
 
   if (positionals.length > 0) {
     args.positionals = positionals;
-    if (positionals[0] === "import" && positionals[1] === "openclaw" && positionals[2] === "preview") {
-      args.command = "import-openclaw-preview";
-    } else if (positionals[0] === "import" && positionals[1] === "openclaw" && positionals[2] === "apply") {
-      args.command = "import-openclaw-apply";
+    if (positionals[0] === "import" && positionals[1] === "openclaw") {
+      args.command = "import-openclaw-legacy";
     } else {
       args.command = positionals[0];
     }
@@ -184,7 +173,7 @@ function normalizeRegistryUrl(url) {
 }
 
 function printHelp() {
-  console.log(`wafflebot\n\nUsage:\n  wafflebot <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n  wafflebot import openclaw preview (--git <url> [--ref <ref>] | --path <dir>) [--target-dir <dir>] [--json]\n  wafflebot import openclaw apply --preview-id <id> [--overwrite <path> ...] [--skip-path <path> ...] [--skip-memory-sync] [--json]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact wafflebot version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+  console.log(`wafflebot\n\nUsage:\n  wafflebot <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact wafflebot version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
 }
 
 function colorEnabled() {
@@ -902,30 +891,13 @@ async function runOnboardingCommand(args) {
   };
 }
 
-async function importOpenclawPreview(args) {
-  const hasGit = Boolean(args.importGitUrl);
-  const hasPath = Boolean(args.importPath);
-  if (hasGit === hasPath) {
-    throw new Error("Specify exactly one source: --git <url> or --path <dir>.");
-  }
-
-  const source = hasGit
-    ? {
-        mode: "git",
-        url: args.importGitUrl,
-        ref: args.importRef || undefined,
-      }
-    : {
-        mode: "local",
-        path: args.importPath,
-      };
-
-  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw/preview`, {
+async function migrateOpenclawWorkspace(input) {
+  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      source,
-      targetDirectory: args.importTargetDir || undefined,
+      source: input.source,
+      targetDirectory: input.targetDirectory || undefined,
     }),
   });
   let payload = {};
@@ -935,48 +907,30 @@ async function importOpenclawPreview(args) {
     payload = {};
   }
   if (!response.ok) {
-    const message =
-      typeof payload?.error === "string" ? payload.error : "Failed to preview OpenClaw import";
+    const message = typeof payload?.error === "string" ? payload.error : "Failed to migrate OpenClaw workspace";
     throw new Error(message);
   }
-
-  return {
-    mode: "import-openclaw-preview",
-    preview: payload.preview ?? {},
-  };
+  return payload.migration ?? {};
 }
 
-async function importOpenclawApply(args) {
-  const previewId = (args.previewId || "").trim();
-  if (!previewId) {
-    throw new Error("--preview-id is required.");
-  }
+async function fetchMemoryStatus() {
+  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/memory/status`, { method: "GET" });
+  if (!response.ok) return null;
+  const payload = await response.json();
+  return payload?.status ?? null;
+}
 
-  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw/apply`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      previewId,
-      overwritePaths: args.overwritePaths,
-      skipPaths: args.skipPaths,
-      runMemorySync: args.skipMemorySync ? false : true,
-    }),
-  });
-  let payload = {};
-  try {
-    payload = await response.json();
-  } catch {
-    payload = {};
-  }
+async function syncMemoryNow() {
+  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/memory/sync`, { method: "POST" });
   if (!response.ok) {
-    const message = typeof payload?.error === "string" ? payload.error : "Failed to apply OpenClaw import";
-    throw new Error(message);
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+    throw new Error(typeof payload?.error === "string" ? payload.error : "Memory sync failed");
   }
-
-  return {
-    mode: "import-openclaw-apply",
-    applied: payload.applied ?? {},
-  };
 }
 
 async function confirmInstall(args, paths, mode) {
@@ -1355,6 +1309,75 @@ async function promptSearchableStringChoice(input) {
   }
 }
 
+async function runOpenclawMigrationWizard() {
+  console.log("");
+  console.log(heading("OpenClaw migration"));
+
+  const sourceChoice = await promptSelect("Import source", [
+    { value: "git", label: "Clone from git repository" },
+    { value: "local", label: "Copy from local directory" },
+    { value: "skip", label: "Skip OpenClaw migration" },
+  ]);
+  if (sourceChoice.value === "skip") {
+    return { attempted: false, skipped: true, reason: "user-skip" };
+  }
+
+  let source;
+  if (sourceChoice.value === "git") {
+    const url = (await promptText("Git repository URL", "")).trim();
+    if (!url) {
+      return { attempted: false, skipped: true, reason: "missing-git-url" };
+    }
+    const ref = (await promptText("Git ref (optional)", "")).trim();
+    source = { mode: "git", url, ref: ref || undefined };
+  } else {
+    const sourcePath = (await promptText("OpenClaw workspace directory", "")).trim();
+    if (!sourcePath) {
+      return { attempted: false, skipped: true, reason: "missing-path" };
+    }
+    source = { mode: "local", path: path.resolve(sourcePath) };
+  }
+
+  const customTarget = await promptYesNo("Use a custom migration target directory?", false);
+  let targetDirectory;
+  if (customTarget) {
+    const entered = (await promptText("Target directory", "")).trim();
+    if (entered) {
+      targetDirectory = path.resolve(entered);
+    }
+  }
+
+  console.log(info("Running one-shot migration..."));
+  const migration = await migrateOpenclawWorkspace({
+    source,
+    targetDirectory,
+  });
+
+  let memorySync = { attempted: false, completed: false, reason: "memory-disabled" };
+  try {
+    const memoryStatus = await fetchMemoryStatus();
+    if (memoryStatus?.enabled) {
+      console.log(info("Memory is enabled; syncing memory index after migration..."));
+      await syncMemoryNow();
+      memorySync = { attempted: true, completed: true };
+    }
+  } catch (error) {
+    memorySync = {
+      attempted: true,
+      completed: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+    console.log(warn(`Post-migration memory sync failed: ${memorySync.reason}`));
+  }
+
+  return {
+    attempted: true,
+    skipped: false,
+    migration,
+    memorySync,
+  };
+}
+
 async function runInteractiveProviderOnboarding(input) {
   const { opencodeBin } = input;
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -1382,6 +1405,11 @@ async function runInteractiveProviderOnboarding(input) {
       hint: "Configure Ollama memory embedding settings only",
     },
     {
+      value: "openclaw-only",
+      label: "OpenClaw only",
+      hint: "Run OpenClaw workspace migration only",
+    },
+    {
       value: "skip",
       label: "Skip for now",
       hint: "You can rerun later with wafflebot status + dashboard settings",
@@ -1391,6 +1419,7 @@ async function runInteractiveProviderOnboarding(input) {
   if (pathChoice.value === "skip") {
     return { status: "skipped", reason: "user-skip" };
   }
+  const openclawOnly = pathChoice.value === "openclaw-only";
 
   let authAttempts = 0;
   let authSuccess = false;
@@ -1466,7 +1495,7 @@ async function runInteractiveProviderOnboarding(input) {
     }
   }
 
-  const allowModelSetup = pathChoice.value !== "memory-only";
+  const allowModelSetup = pathChoice.value !== "memory-only" && !openclawOnly;
   const setModelNow = allowModelSetup
     ? await promptYesNo("Set runtime default model now?", true)
     : false;
@@ -1506,7 +1535,10 @@ async function runInteractiveProviderOnboarding(input) {
     }
   }
 
-  const configureMemoryNow = await promptYesNo("Configure memory embedding model (Ollama) now?", true);
+  const configureMemoryNow =
+    !openclawOnly
+      ? await promptYesNo("Configure memory embedding model (Ollama) now?", true)
+      : false;
   let memoryEmbedding = null;
   if (configureMemoryNow) {
     const currentMemory = await fetchRuntimeMemoryConfig();
@@ -1610,6 +1642,24 @@ async function runInteractiveProviderOnboarding(input) {
     }
   }
 
+  let openclawMigration = null;
+  const runMigration =
+    openclawOnly ? true : await promptYesNo("Import an OpenClaw workspace now?", false);
+  if (runMigration) {
+    try {
+      openclawMigration = await runOpenclawMigrationWizard();
+    } catch (error) {
+      openclawMigration = {
+        attempted: true,
+        skipped: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      console.log(warn(`OpenClaw migration failed: ${openclawMigration.error}`));
+    }
+  } else {
+    openclawMigration = { attempted: false, skipped: true, reason: "user-skip" };
+  }
+
   return {
     status: "completed",
     flow: pathChoice.value,
@@ -1618,6 +1668,7 @@ async function runInteractiveProviderOnboarding(input) {
     authRefresh,
     selectedModel: selectedModel || null,
     memoryEmbedding,
+    openclawMigration,
   };
 }
 
@@ -2033,6 +2084,23 @@ function printResult(result, asJson) {
           }
         }
       }
+      if (result.onboarding.openclawMigration) {
+        const migration = result.onboarding.openclawMigration;
+        if (migration.attempted && !migration.skipped && migration.migration?.summary) {
+          console.log("openclaw migration: completed");
+          const summary = migration.migration.summary;
+          console.log(
+            `openclaw summary: discovered=${summary.discovered ?? 0}, copied=${summary.copied ?? 0}, merged=${summary.merged ?? 0}, skippedExisting=${summary.skippedExisting ?? 0}, skippedIdentical=${summary.skippedIdentical ?? 0}, skippedProtected=${summary.skippedProtected ?? 0}, failed=${summary.failed ?? 0}`,
+          );
+          if (migration.memorySync?.attempted) {
+            console.log(`openclaw memory sync: ${migration.memorySync.completed ? "completed" : "failed"}`);
+          }
+        } else if (migration.error) {
+          console.log(`openclaw migration: failed (${migration.error})`);
+        } else {
+          console.log(`openclaw migration: skipped (${migration.reason ?? "not-requested"})`);
+        }
+      }
       return;
     }
     if (result.onboarding?.status === "skipped") {
@@ -2045,39 +2113,6 @@ function printResult(result, asJson) {
     }
     console.log("onboard complete");
     return;
-  }
-
-  if (result.mode === "import-openclaw-preview") {
-    const preview = result.preview ?? {};
-    console.log("openclaw import preview");
-    console.log(`previewId: ${preview.previewId ?? ""}`);
-    console.log(`source: ${preview.source?.mode ?? "unknown"} ${preview.source?.resolvedDirectory ?? ""}`);
-    if (preview.source?.commit) {
-      console.log(`commit: ${preview.source.commit}`);
-    }
-    console.log(`target: ${preview.targetDirectory ?? ""}`);
-    console.log(`files: discovered=${preview.discoveredCount ?? 0}, new=${preview.filesNew?.length ?? 0}, identical=${preview.filesIdentical?.length ?? 0}, conflicting=${preview.filesConflicting?.length ?? 0}`);
-    if (Array.isArray(preview.warnings) && preview.warnings.length > 0) {
-      console.log(`warnings: ${preview.warnings.length}`);
-    }
-    return;
-  }
-
-  if (result.mode === "import-openclaw-apply") {
-    const applied = result.applied ?? {};
-    console.log("openclaw import apply");
-    console.log(`previewId: ${applied.previewId ?? ""}`);
-    console.log(`source: ${applied.sourceDirectory ?? ""}`);
-    console.log(`target: ${applied.targetDirectory ?? ""}`);
-    console.log(
-      `summary: copied=${applied.summary?.copied ?? 0}, skippedExisting=${applied.summary?.skippedExisting ?? 0}, skippedIdentical=${applied.summary?.skippedIdentical ?? 0}, skippedRequested=${applied.summary?.skippedRequested ?? 0}, failed=${applied.summary?.failed ?? 0}`,
-    );
-    if (applied.memorySync?.status) {
-      console.log(`memorySync: ${applied.memorySync.status}`);
-      if (applied.memorySync.status === "failed" && applied.memorySync.error) {
-        console.log(`memorySyncError: ${applied.memorySync.error}`);
-      }
-    }
   }
 }
 
@@ -2100,12 +2135,6 @@ function evaluateResult(result) {
     const stopped =
       result?.unitStates?.[UNIT_OPENCODE] !== "active" && result?.unitStates?.[UNIT_WAFFLEBOT] !== "active";
     return stopped ? 0 : 2;
-  }
-  if (result.mode === "import-openclaw-preview") {
-    return result?.preview?.previewId ? 0 : 2;
-  }
-  if (result.mode === "import-openclaw-apply") {
-    return Array.isArray(result?.applied?.failed) && result.applied.failed.length > 0 ? 2 : 0;
   }
   return 0;
 }
@@ -2147,16 +2176,8 @@ async function main() {
     result = await manageService(args, "stop");
   } else if (args.command === "uninstall") {
     result = await uninstall(args);
-  } else if (args.command === "import-openclaw-preview") {
-    if (args.dryRun) {
-      throw new Error("--dry-run is not applicable to `wafflebot import openclaw preview`.");
-    }
-    result = await importOpenclawPreview(args);
-  } else if (args.command === "import-openclaw-apply") {
-    if (args.dryRun) {
-      throw new Error("--dry-run is not applicable to `wafflebot import openclaw apply`.");
-    }
-    result = await importOpenclawApply(args);
+  } else if (args.command === "import-openclaw-legacy") {
+    throw new Error("`wafflebot import openclaw ...` is deprecated. Use `wafflebot onboard` and pick the OpenClaw flow.");
   } else {
     throw new Error(`Unknown command: ${args.command}`);
   }

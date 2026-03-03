@@ -1,5 +1,6 @@
+import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/client";
 import { spawnSync } from "node:child_process";
-import { randomUUID, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
@@ -16,82 +17,90 @@ import type { Stats } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+
 import type { WafflebotConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
-import { syncMemoryIndex } from "../memory/service";
+import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
 import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
-const EXCLUDED_DIR_NAMES = new Set([".git", "node_modules"]);
-const PREVIEW_TTL_MS = 15 * 60 * 1000;
+const EXCLUDED_DIR_NAMES = new Set([".git", "node_modules", ".next", "dist", "build", "coverage"]);
 const MAX_DISCOVERED_FILES = 5_000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_LLM_FILE_BYTES = 256 * 1024;
+const REFERENCE_SNIPPET_MAX_CHARS = 3_500;
+
+const INCLUDED_ROOT_PREFIXES = ["memory/", "scripts/", "cron/", "crons/", "skills/", ".agents/", ".agent/", ".opencode/"];
+const INCLUDED_ROOT_FILES = new Set(["AGENTS.md", "SOUL.md", "IDENTITY.md", "CLAUDE.md", "README.md"]);
+const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
+const TEXT_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".json",
+  ".jsonc",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".ini",
+  ".conf",
+  ".cfg",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".fish",
+  ".mjs",
+  ".cjs",
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".py",
+  ".rb",
+  ".go",
+  ".rs",
+  ".java",
+  ".kt",
+  ".swift",
+  ".sql",
+  ".xml",
+  ".html",
+  ".css",
+]);
+const PROTECTED_TARGET_PATHS = new Set([
+  ".opencode/opencode.jsonc",
+  ".opencode/package.json",
+  ".opencode/bun.lock",
+  ".opencode/bun.lockb",
+  ".opencode/node_modules",
+]);
+
+
+type OpenclawMergeChoice = {
+  decision: "merge" | "keep_target" | "keep_source";
+  mergedContent: string;
+  notes?: string;
+};
+
+type OpenclawLlmMerger = {
+  client: OpencodeClient;
+  sessionId: string;
+  model: {
+    providerId: string;
+    modelId: string;
+  };
+  timeoutMs: number;
+  openclawContext: string;
+  opencodeContext: string;
+};
 
 export type OpenclawImportSource =
   | { mode: "local"; path: string }
   | { mode: "git"; url: string; ref?: string };
 
-export interface OpenclawImportPreviewInput {
+export interface OpenclawMigrationInput {
   source: OpenclawImportSource;
   targetDirectory?: string;
   config?: WafflebotConfig;
-}
-
-export interface OpenclawImportPreviewFile {
-  relativePath: string;
-  sourcePath: string;
-  targetPath: string;
-  sourceHash: string;
-  targetHash: string | null;
-  status: "new" | "identical" | "conflict";
-  sizeBytes: number;
-}
-
-export interface OpenclawImportPreviewResult {
-  previewId: string;
-  source: {
-    mode: "local" | "git";
-    resolvedDirectory: string;
-    url?: string;
-    requestedRef?: string;
-    resolvedRef?: string;
-    commit?: string;
-  };
-  targetDirectory: string;
-  discoveredCount: number;
-  filesNew: OpenclawImportPreviewFile[];
-  filesIdentical: OpenclawImportPreviewFile[];
-  filesConflicting: OpenclawImportPreviewFile[];
-  warnings: string[];
-  expiresAt: string;
-}
-
-export interface OpenclawImportApplyInput {
-  previewId: string;
-  overwritePaths?: unknown;
-  skipPaths?: unknown;
-  runMemorySync?: boolean;
-}
-
-export interface OpenclawImportApplyResult {
-  previewId: string;
-  sourceDirectory: string;
-  targetDirectory: string;
-  copied: Array<{ relativePath: string; sourcePath: string; targetPath: string }>;
-  skippedExisting: Array<{ relativePath: string; targetPath: string }>;
-  skippedIdentical: Array<{ relativePath: string; targetPath: string }>;
-  skippedRequested: Array<{ relativePath: string; targetPath: string }>;
-  failed: Array<{ relativePath: string; reason: string }>;
-  memorySync:
-    | { status: "disabled" }
-    | { status: "completed" }
-    | { status: "failed"; error: string };
-  summary: {
-    copied: number;
-    skippedExisting: number;
-    skippedIdentical: number;
-    skippedRequested: number;
-    failed: number;
-  };
 }
 
 interface MaterializedImportSource {
@@ -103,13 +112,43 @@ interface MaterializedImportSource {
   commit?: string;
 }
 
-interface OpenclawImportPreviewManifest {
-  previewId: string;
-  createdAt: string;
-  expiresAt: string;
-  source: MaterializedImportSource;
+interface DiscoveredSourceFile {
+  relativePath: string;
+  sourcePath: string;
+  targetRelativePath: string;
+  sourceHash: string;
+  sizeBytes: number;
+}
+
+export interface OpenclawMigrationResult {
+  source: {
+    mode: "local" | "git";
+    resolvedDirectory: string;
+    url?: string;
+    requestedRef?: string;
+    resolvedRef?: string;
+    commit?: string;
+  };
   targetDirectory: string;
-  files: OpenclawImportPreviewFile[];
+  discoveredCount: number;
+  copied: Array<{ relativePath: string; sourcePath: string; targetPath: string }>;
+  merged: Array<{ relativePath: string; sourcePath: string; targetPath: string; strategy: "llm" | "deterministic" }>;
+  skippedExisting: Array<{ relativePath: string; targetPath: string }>;
+  skippedIdentical: Array<{ relativePath: string; targetPath: string }>;
+  skippedProtected: Array<{ relativePath: string; targetPath: string }>;
+  failed: Array<{ relativePath: string; reason: string }>;
+  warnings: string[];
+  summary: {
+    discovered: number;
+    copied: number;
+    merged: number;
+    mergedByLlm: number;
+    mergedDeterministic: number;
+    skippedExisting: number;
+    skippedIdentical: number;
+    skippedProtected: number;
+    failed: number;
+  };
 }
 
 function resolveWorkspaceDir(config: WafflebotConfig): string {
@@ -120,10 +159,6 @@ function importCacheRoot() {
   return path.join(os.tmpdir(), "wafflebot-openclaw-import");
 }
 
-function previewRootDir() {
-  return path.join(importCacheRoot(), "previews");
-}
-
 function gitCacheRootDir() {
   return path.join(importCacheRoot(), "git");
 }
@@ -132,13 +167,12 @@ function ensureDir(dirPath: string) {
   mkdirSync(dirPath, { recursive: true });
 }
 
-function isMarkdownFile(filePath: string) {
-  const lower = filePath.toLowerCase();
-  return lower.endsWith(".md") || lower.endsWith(".markdown");
-}
-
 function normalizeRelativePath(relPath: string) {
   return relPath.split(path.sep).join("/");
+}
+
+function normalizeCaseInsensitivePath(relPath: string) {
+  return normalizeRelativePath(relPath).toLowerCase();
 }
 
 function assertInsideRoot(root: string, candidate: string) {
@@ -182,18 +216,6 @@ function readTargetPathState(targetPath: string): TargetPathState {
     }
     throw error;
   }
-}
-
-function normalizeStringArray(input: unknown) {
-  if (!Array.isArray(input)) return new Set<string>();
-  const normalized = new Set<string>();
-  for (const entry of input) {
-    if (typeof entry !== "string") continue;
-    const trimmed = normalizeRelativePath(entry.trim());
-    if (!trimmed) continue;
-    normalized.add(trimmed);
-  }
-  return normalized;
 }
 
 function runGit(args: string[], cwd?: string) {
@@ -272,9 +294,31 @@ function materializeSource(source: OpenclawImportSource): MaterializedImportSour
   return source.mode === "git" ? materializeGitSource(source) : materializeLocalSource(source);
 }
 
-function discoverMarkdownFiles(sourceDirectory: string) {
+function shouldIncludePath(relativePath: string): boolean {
+  if (!relativePath || relativePath.startsWith("../")) return false;
+  const normalized = normalizeRelativePath(relativePath);
+  const baseName = path.basename(normalized);
+  if (INCLUDED_ROOT_FILES.has(baseName)) return true;
+  if (!normalized.includes("/") && isMarkdownPath(normalized)) return true;
+  return INCLUDED_ROOT_PREFIXES.some(prefix => normalized.startsWith(prefix));
+}
+
+function mapTargetRelativePath(relativePath: string): string {
+  const normalized = normalizeRelativePath(relativePath);
+  const lower = normalized.toLowerCase();
+
+  if (lower === "claude.md") {
+    return "AGENTS.md";
+  }
+  if (normalized.startsWith("skills/")) {
+    return `.agents/skills/${normalized.slice("skills/".length)}`;
+  }
+  return normalized;
+}
+
+function discoverMigrationFiles(sourceDirectory: string) {
   const warnings: string[] = [];
-  const files: Array<{ relativePath: string; sourcePath: string; sourceHash: string; sizeBytes: number }> = [];
+  const files: DiscoveredSourceFile[] = [];
 
   const walk = (dirPath: string) => {
     const entries = readdirSync(dirPath, { withFileTypes: true });
@@ -312,21 +356,23 @@ function discoverMarkdownFiles(sourceDirectory: string) {
       }
 
       if (!stats.isFile()) continue;
-      if (!isMarkdownFile(relativePath)) continue;
+      if (!shouldIncludePath(relativePath)) continue;
 
       if (stats.size > MAX_FILE_BYTES) {
-        warnings.push(`Skipped large markdown file ${relativePath} (${stats.size} bytes)`);
+        warnings.push(`Skipped large file ${relativePath} (${stats.size} bytes)`);
         continue;
       }
 
       if (files.length >= MAX_DISCOVERED_FILES) {
-        warnings.push(`Reached file limit (${MAX_DISCOVERED_FILES}); remaining markdown files were skipped`);
+        warnings.push(`Reached file limit (${MAX_DISCOVERED_FILES}); remaining files were skipped`);
         return;
       }
 
+      const targetRelativePath = mapTargetRelativePath(relativePath);
       files.push({
         relativePath,
         sourcePath: absolutePath,
+        targetRelativePath,
         sourceHash: hashFile(absolutePath),
         sizeBytes: stats.size,
       });
@@ -345,196 +391,409 @@ function resolveTargetDirectory(input: { targetDirectory?: string; config?: Waff
   return resolveWorkspaceDir(config);
 }
 
-function sweepExpiredPreviews(now = Date.now()) {
-  ensureDir(previewRootDir());
-  const entries = readdirSync(previewRootDir(), { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    const manifestPath = path.join(previewRootDir(), entry.name);
+function isMarkdownPath(filePath: string) {
+  return MARKDOWN_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+function isLikelyTextPath(filePath: string) {
+  const ext = path.extname(filePath).toLowerCase();
+  return TEXT_EXTENSIONS.has(ext) || ext === "";
+}
+
+function normalizeForSet(line: string) {
+  return line.trim().toLowerCase();
+}
+
+function sanitizeOpenclawSpecificLines(content: string) {
+  const lines = content.split(/\r?\n/);
+  const filtered = lines.filter(line => !/\bopenclaw\b/i.test(line));
+  return filtered.join("\n").trim();
+}
+
+function mergeMarkdownContent(targetContent: string, sourceContent: string) {
+  const targetTrimmed = targetContent.trim();
+  const importedSanitized = sanitizeOpenclawSpecificLines(sourceContent);
+  if (!importedSanitized) {
+    return targetTrimmed ? `${targetTrimmed}\n` : "";
+  }
+
+  const targetLines = targetTrimmed.split(/\r?\n/);
+  const existing = new Set(targetLines.map(normalizeForSet).filter(Boolean));
+  const sourceUniqueLines: string[] = [];
+  for (const line of importedSanitized.split(/\r?\n/)) {
+    const key = normalizeForSet(line);
+    if (!key || existing.has(key)) continue;
+    existing.add(key);
+    sourceUniqueLines.push(line);
+  }
+
+  if (sourceUniqueLines.length === 0) {
+    return targetTrimmed ? `${targetTrimmed}\n` : "";
+  }
+
+  const sections: string[] = [];
+  if (targetTrimmed) {
+    sections.push(targetTrimmed);
+  }
+  sections.push(["## Imported Workspace Notes", ...sourceUniqueLines].join("\n"));
+  return `${sections.join("\n\n")}\n`;
+}
+
+function clipForPrompt(text: string, limit = REFERENCE_SNIPPET_MAX_CHARS) {
+  const trimmed = text.trim();
+  if (trimmed.length <= limit) return trimmed;
+  const head = Math.floor(limit * 0.65);
+  const tail = Math.floor(limit * 0.35);
+  return `${trimmed.slice(0, head)}\n\n...[truncated ${trimmed.length - limit} chars]...\n\n${trimmed.slice(-tail)}`;
+}
+
+function readPromptReferenceIfExists(filePath: string) {
+  try {
+    if (!existsSync(filePath)) return "";
+    return clipForPrompt(readFileSync(filePath, "utf8"));
+  } catch {
+    return "";
+  }
+}
+
+function loadExternalReferenceContexts() {
+  const openclawAgents = readPromptReferenceIfExists("/tmp/openclaw/AGENTS.md");
+  const openclawReadme = readPromptReferenceIfExists("/tmp/openclaw/README.md");
+  const opencodeAgents = readPromptReferenceIfExists("/tmp/opencode-7vCebI/AGENTS.md");
+  const opencodeReadme = readPromptReferenceIfExists("/tmp/opencode-7vCebI/README.md");
+
+  const openclawContext = [
+    "# OpenClaw reference",
+    openclawAgents ? `## AGENTS.md\n${openclawAgents}` : "",
+    openclawReadme ? `## README.md\n${openclawReadme}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const opencodeContext = [
+    "# OpenCode/Waffle-style reference",
+    opencodeAgents ? `## AGENTS.md\n${opencodeAgents}` : "",
+    opencodeReadme ? `## README.md\n${opencodeReadme}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  return { openclawContext, opencodeContext };
+}
+
+function decodeTextFileIfPossible(filePath: string, maxBytes = MAX_LLM_FILE_BYTES): string | null {
+  const buffer = readFileSync(filePath);
+  if (buffer.length > maxBytes) return null;
+  for (let index = 0; index < buffer.length; index += 1) {
+    if (buffer[index] === 0) return null;
+  }
+  return buffer.toString("utf8");
+}
+
+function extractAssistantText(parts: Array<Part>) {
+  const text = parts
+    .filter((part): part is Extract<Part, { type: "text" }> => part.type === "text")
+    .map(part => part.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  return text || null;
+}
+
+function parseMergeChoice(text: string): OpenclawMergeChoice | null {
+  const candidates: string[] = [text];
+  const fenced = /```json\s*([\s\S]*?)```/i.exec(text);
+  if (fenced?.[1]) candidates.push(fenced[1]);
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(text.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
     try {
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as OpenclawImportPreviewManifest;
-      const expiresAt = Date.parse(manifest.expiresAt);
-      if (!Number.isFinite(expiresAt) || expiresAt <= now) {
-        rmSync(manifestPath, { force: true });
-      }
+      const parsed = JSON.parse(candidate) as Partial<OpenclawMergeChoice>;
+      if (typeof parsed?.mergedContent !== "string") continue;
+      const rawDecision = typeof parsed.decision === "string" ? parsed.decision.trim().toLowerCase() : "merge";
+      const decision = rawDecision === "keep_target" || rawDecision === "keep_source" ? rawDecision : "merge";
+      return {
+        decision,
+        mergedContent: parsed.mergedContent,
+        notes: typeof parsed.notes === "string" ? parsed.notes : undefined,
+      };
     } catch {
-      rmSync(manifestPath, { force: true });
+      // try next format
     }
   }
+  return null;
 }
 
-function writePreviewManifest(manifest: OpenclawImportPreviewManifest) {
-  ensureDir(previewRootDir());
-  const manifestPath = path.join(previewRootDir(), `${manifest.previewId}.json`);
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+function buildLlmMergePrompt(input: {
+  relativePath: string;
+  sourceContent: string;
+  targetContent: string;
+  openclawContext: string;
+  opencodeContext: string;
+}) {
+  return [
+    "You are migrating an OpenClaw workspace file into a Wafflebot/OpenCode workspace.",
+    "Return ONLY valid JSON with this exact shape:",
+    '{"decision":"merge|keep_target|keep_source","mergedContent":"...","notes":"optional"}',
+    "Rules:",
+    "1) Remove or rewrite OpenClaw-specific instructions, names, and references.",
+    "2) Keep existing Wafflebot/OpenCode-specific instructions from target when there is conflict.",
+    "3) Preserve useful non-platform-specific content from source.",
+    "4) Output full final file in mergedContent (no markdown fences).",
+    "5) Prefer merge unless source is clearly incompatible.",
+    "",
+    `Target path: ${input.relativePath}`,
+    "",
+    input.openclawContext ? `Reference context (OpenClaw):\n${input.openclawContext}` : "",
+    input.opencodeContext ? `Reference context (OpenCode/Waffle):\n${input.opencodeContext}` : "",
+    "",
+    `Current target file:\n\n${clipForPrompt(input.targetContent, 10_000)}`,
+    "",
+    `Incoming source file:\n\n${clipForPrompt(input.sourceContent, 10_000)}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
-function readPreviewManifest(previewId: string): OpenclawImportPreviewManifest {
-  if (!previewId.trim()) {
-    throw new Error("previewId is required");
+async function createLlmMerger(config: WafflebotConfig, warnings: string[]): Promise<OpenclawLlmMerger | null> {
+  if (process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test") {
+    return null;
   }
-  const manifestPath = path.join(previewRootDir(), `${previewId.trim()}.json`);
-  if (!existsSync(manifestPath)) {
-    throw new Error(`previewId not found: ${previewId}`);
-  }
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as OpenclawImportPreviewManifest;
-  const expiresAt = Date.parse(manifest.expiresAt);
-  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-    rmSync(manifestPath, { force: true });
-    throw new Error(`previewId expired: ${previewId}`);
-  }
-  return manifest;
-}
-
-export function previewOpenclawImport(input: OpenclawImportPreviewInput): OpenclawImportPreviewResult {
-  sweepExpiredPreviews();
-
-  const source = materializeSource(input.source);
-  const targetDirectory = resolveTargetDirectory(input);
-  ensureDir(targetDirectory);
-
-  const discovered = discoverMarkdownFiles(source.resolvedDirectory);
-  const filesNew: OpenclawImportPreviewFile[] = [];
-  const filesIdentical: OpenclawImportPreviewFile[] = [];
-  const filesConflicting: OpenclawImportPreviewFile[] = [];
-
-  for (const file of discovered.files) {
-    const targetPath = path.join(targetDirectory, file.relativePath);
-    const targetState = readTargetPathState(targetPath);
-    const targetHash = targetState.kind === "file" ? targetState.hash : null;
-    const status: OpenclawImportPreviewFile["status"] =
-      targetState.kind === "missing" ? "new" : targetHash === file.sourceHash ? "identical" : "conflict";
-
-    const previewFile: OpenclawImportPreviewFile = {
-      relativePath: file.relativePath,
-      sourcePath: file.sourcePath,
-      targetPath,
-      sourceHash: file.sourceHash,
-      targetHash,
-      status,
-      sizeBytes: file.sizeBytes,
-    };
-
-    if (status === "new") filesNew.push(previewFile);
-    if (status === "identical") filesIdentical.push(previewFile);
-    if (status === "conflict") filesConflicting.push(previewFile);
+  if (process.env.WAFFLEBOT_DISABLE_OPENCLAW_LLM_MERGE === "1") {
+    warnings.push("LLM merge disabled via WAFFLEBOT_DISABLE_OPENCLAW_LLM_MERGE=1");
+    return null;
   }
 
-  const previewId = randomUUID();
-  const createdAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS).toISOString();
-  writePreviewManifest({
-    previewId,
-    createdAt,
-    expiresAt,
-    source,
-    targetDirectory,
-    files: [...filesNew, ...filesIdentical, ...filesConflicting],
+  const providerId = config.runtime.opencode.providerId.trim();
+  const modelId = config.runtime.opencode.modelId.trim();
+  if (!providerId || !modelId) {
+    warnings.push("LLM merge unavailable: runtime.opencode provider/model is not configured");
+    return null;
+  }
+
+  const timeoutMs = Math.max(2_000, Math.min(config.runtime.opencode.timeoutMs, 20_000));
+  const client = createOpencodeClientFromConnection({
+    baseUrl: config.runtime.opencode.baseUrl,
+    directory: config.runtime.opencode.directory,
   });
 
-  return {
-    previewId,
-    source,
-    targetDirectory,
-    discoveredCount: discovered.files.length,
-    filesNew,
-    filesIdentical,
-    filesConflicting,
-    warnings: discovered.warnings,
-    expiresAt,
-  };
+  try {
+    const session = unwrapSdkData<Session>(
+      await client.session.create({
+        body: { title: "wafflebot-openclaw-merge" },
+        responseStyle: "data",
+        throwOnError: true,
+        signal: AbortSignal.timeout(timeoutMs),
+      }),
+    );
+    const references = loadExternalReferenceContexts();
+    return {
+      client,
+      sessionId: session.id,
+      model: { providerId, modelId },
+      timeoutMs,
+      openclawContext: references.openclawContext,
+      opencodeContext: references.opencodeContext,
+    };
+  } catch (error) {
+    warnings.push(`LLM merge unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
-export async function applyOpenclawImport(input: OpenclawImportApplyInput): Promise<OpenclawImportApplyResult> {
-  sweepExpiredPreviews();
+async function tryLlmMergeConflict(input: {
+  merger: OpenclawLlmMerger;
+  relativePath: string;
+  sourceContent: string;
+  targetContent: string;
+}): Promise<OpenclawMergeChoice | null> {
+  const prompt = buildLlmMergePrompt({
+    relativePath: input.relativePath,
+    sourceContent: input.sourceContent,
+    targetContent: input.targetContent,
+    openclawContext: input.merger.openclawContext,
+    opencodeContext: input.merger.opencodeContext,
+  });
 
-  const manifest = readPreviewManifest(input.previewId);
-  const overwritePaths = normalizeStringArray(input.overwritePaths);
-  const skipPaths = normalizeStringArray(input.skipPaths);
+  const response = unwrapSdkData<{ info: Message; parts: Array<Part> }>(
+    await input.merger.client.session.prompt({
+      path: { id: input.merger.sessionId },
+      body: {
+        model: {
+          providerID: input.merger.model.providerId,
+          modelID: input.merger.model.modelId,
+        },
+        parts: [{ type: "text", text: prompt }],
+      },
+      responseStyle: "data",
+      throwOnError: true,
+      signal: AbortSignal.timeout(input.merger.timeoutMs),
+    }),
+  );
 
-  const copied: OpenclawImportApplyResult["copied"] = [];
-  const skippedExisting: OpenclawImportApplyResult["skippedExisting"] = [];
-  const skippedIdentical: OpenclawImportApplyResult["skippedIdentical"] = [];
-  const skippedRequested: OpenclawImportApplyResult["skippedRequested"] = [];
-  const failed: OpenclawImportApplyResult["failed"] = [];
+  if (response.info.role !== "assistant") {
+    throw new Error(`unexpected merge role: ${response.info.role}`);
+  }
 
-  for (const file of manifest.files) {
-    if (skipPaths.has(file.relativePath)) {
-      skippedRequested.push({ relativePath: file.relativePath, targetPath: file.targetPath });
+  const text = extractAssistantText(response.parts);
+  if (!text) {
+    throw new Error("merge response did not include assistant text");
+  }
+  return parseMergeChoice(text);
+}
+
+export async function migrateOpenclawWorkspace(input: OpenclawMigrationInput): Promise<OpenclawMigrationResult> {
+  const source = materializeSource(input.source);
+  const config = input.config ?? getConfigSnapshot().config;
+  const targetDirectory = resolveTargetDirectory({ targetDirectory: input.targetDirectory, config });
+  ensureDir(targetDirectory);
+
+  const discovered = discoverMigrationFiles(source.resolvedDirectory);
+  const copied: OpenclawMigrationResult["copied"] = [];
+  const merged: OpenclawMigrationResult["merged"] = [];
+  const skippedExisting: OpenclawMigrationResult["skippedExisting"] = [];
+  const skippedIdentical: OpenclawMigrationResult["skippedIdentical"] = [];
+  const skippedProtected: OpenclawMigrationResult["skippedProtected"] = [];
+  const failed: OpenclawMigrationResult["failed"] = [];
+  const warnings = [...discovered.warnings];
+
+  let llmMerger: OpenclawLlmMerger | null | undefined = undefined;
+
+  for (const file of discovered.files) {
+    const targetPath = path.join(targetDirectory, file.targetRelativePath);
+    const protectedMatch = [...PROTECTED_TARGET_PATHS].find(protectedPath => {
+      const normalizedTarget = normalizeCaseInsensitivePath(file.targetRelativePath);
+      const normalizedProtected = normalizeCaseInsensitivePath(protectedPath);
+      return normalizedTarget === normalizedProtected || normalizedTarget.startsWith(`${normalizedProtected}/`);
+    });
+    if (protectedMatch) {
+      skippedProtected.push({ relativePath: file.targetRelativePath, targetPath });
       continue;
     }
-    try {
-      if (!existsSync(file.sourcePath)) {
-        failed.push({ relativePath: file.relativePath, reason: `source file no longer exists: ${file.sourcePath}` });
-        continue;
-      }
-      const currentHash = hashFile(file.sourcePath);
-      if (currentHash !== file.sourceHash) {
-        failed.push({ relativePath: file.relativePath, reason: "source file changed after preview; rerun preview" });
-        continue;
-      }
 
-      const targetState = readTargetPathState(file.targetPath);
-      if (targetState.kind === "file" && targetState.hash === file.sourceHash) {
-        skippedIdentical.push({ relativePath: file.relativePath, targetPath: file.targetPath });
-        continue;
-      }
-      if (targetState.kind !== "missing" && !overwritePaths.has(file.relativePath)) {
-        skippedExisting.push({ relativePath: file.relativePath, targetPath: file.targetPath });
+    try {
+      const targetState = readTargetPathState(targetPath);
+      if (targetState.kind === "missing") {
+        ensureDir(path.dirname(targetPath));
+        copyFileSync(file.sourcePath, targetPath);
+        copied.push({ relativePath: file.targetRelativePath, sourcePath: file.sourcePath, targetPath });
         continue;
       }
       if (targetState.kind === "non-file") {
         failed.push({
-          relativePath: file.relativePath,
-          reason: `cannot overwrite ${targetState.fileType} target: ${file.targetPath}`,
+          relativePath: file.targetRelativePath,
+          reason: `cannot write over ${targetState.fileType} target: ${targetPath}`,
         });
         continue;
       }
+      if (targetState.hash === file.sourceHash) {
+        skippedIdentical.push({ relativePath: file.targetRelativePath, targetPath });
+        continue;
+      }
 
-      ensureDir(path.dirname(file.targetPath));
-      copyFileSync(file.sourcePath, file.targetPath);
-      copied.push({
-        relativePath: file.relativePath,
-        sourcePath: file.sourcePath,
-        targetPath: file.targetPath,
-      });
+      const sourceText =
+        file.sizeBytes <= MAX_LLM_FILE_BYTES && isLikelyTextPath(file.sourcePath)
+          ? decodeTextFileIfPossible(file.sourcePath)
+          : null;
+      const targetText =
+        isLikelyTextPath(targetPath) && statSync(targetPath).size <= MAX_LLM_FILE_BYTES
+          ? decodeTextFileIfPossible(targetPath)
+          : null;
+
+      if (sourceText !== null && targetText !== null) {
+        if (typeof llmMerger === "undefined") {
+          llmMerger = await createLlmMerger(config, warnings);
+        }
+
+        if (llmMerger) {
+          try {
+            const choice = await tryLlmMergeConflict({
+              merger: llmMerger,
+              relativePath: file.targetRelativePath,
+              sourceContent: sourceText,
+              targetContent: targetText,
+            });
+            if (choice) {
+              if (choice.decision === "keep_target") {
+                skippedExisting.push({ relativePath: file.targetRelativePath, targetPath });
+                continue;
+              }
+              if (choice.decision === "keep_source") {
+                ensureDir(path.dirname(targetPath));
+                copyFileSync(file.sourcePath, targetPath);
+                merged.push({ relativePath: file.targetRelativePath, sourcePath: file.sourcePath, targetPath, strategy: "llm" });
+                continue;
+              }
+              const normalizedContent = choice.mergedContent.endsWith("\n")
+                ? choice.mergedContent
+                : `${choice.mergedContent}\n`;
+              const mergedHash = createHash("sha256").update(normalizedContent).digest("hex");
+              if (mergedHash === targetState.hash) {
+                skippedIdentical.push({ relativePath: file.targetRelativePath, targetPath });
+                continue;
+              }
+              writeFileSync(targetPath, normalizedContent, "utf8");
+              merged.push({ relativePath: file.targetRelativePath, sourcePath: file.sourcePath, targetPath, strategy: "llm" });
+              continue;
+            }
+            warnings.push(`LLM merge returned invalid JSON for ${file.targetRelativePath}; applying fallback strategy`);
+          } catch (error) {
+            warnings.push(
+              `LLM merge failed for ${file.targetRelativePath}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
+
+      if (isMarkdownPath(file.sourcePath) || isMarkdownPath(targetPath)) {
+        const targetContent = readFileSync(targetPath, "utf8");
+        const sourceContent = readFileSync(file.sourcePath, "utf8");
+        const mergedContent = mergeMarkdownContent(targetContent, sourceContent);
+        const mergedHash = createHash("sha256").update(mergedContent).digest("hex");
+        if (mergedHash === targetState.hash) {
+          skippedIdentical.push({ relativePath: file.targetRelativePath, targetPath });
+          continue;
+        }
+        writeFileSync(targetPath, mergedContent, "utf8");
+        merged.push({ relativePath: file.targetRelativePath, sourcePath: file.sourcePath, targetPath, strategy: "deterministic" });
+        continue;
+      }
+
+      skippedExisting.push({ relativePath: file.targetRelativePath, targetPath });
     } catch (error) {
       failed.push({
-        relativePath: file.relativePath,
+        relativePath: file.targetRelativePath,
         reason: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
-  let memorySync: OpenclawImportApplyResult["memorySync"] = { status: "disabled" };
-  const shouldSync = input.runMemorySync !== false;
-  if (shouldSync) {
-    try {
-      await syncMemoryIndex();
-      memorySync = { status: "completed" };
-    } catch (error) {
-      memorySync = {
-        status: "failed",
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
+  const mergedByLlm = merged.filter(entry => entry.strategy === "llm").length;
+  const mergedDeterministic = merged.length - mergedByLlm;
 
   return {
-    previewId: manifest.previewId,
-    sourceDirectory: manifest.source.resolvedDirectory,
-    targetDirectory: manifest.targetDirectory,
+    source,
+    targetDirectory,
+    discoveredCount: discovered.files.length,
     copied,
+    merged,
     skippedExisting,
     skippedIdentical,
-    skippedRequested,
+    skippedProtected,
     failed,
-    memorySync,
+    warnings,
     summary: {
+      discovered: discovered.files.length,
       copied: copied.length,
+      merged: merged.length,
+      mergedByLlm,
+      mergedDeterministic,
       skippedExisting: skippedExisting.length,
       skippedIdentical: skippedIdentical.length,
-      skippedRequested: skippedRequested.length,
+      skippedProtected: skippedProtected.length,
       failed: failed.length,
     },
   };

@@ -1,7 +1,6 @@
 import { z } from "zod";
 
-import { importOpenclawBootstrapFromDirectory } from "../../agents/bootstrapContext";
-import { applyOpenclawImport, previewOpenclawImport } from "../../agents/openclawImport";
+import { migrateOpenclawWorkspace } from "../../agents/openclawImport";
 import {
   getOpencodeAgentStorageInfo,
   listOpencodeAgentTypes,
@@ -295,28 +294,7 @@ async function importManagedSkill(eventStream: RuntimeEventStream, req: Request)
   }
 }
 
-async function importOpenclawBootstrap(req: Request) {
-  const body = (await req.json()) as Record<string, unknown>;
-  const sourceDirectory =
-    typeof body.sourceDirectory === "string" ? body.sourceDirectory.trim() : "";
-  if (!sourceDirectory) {
-    return Response.json({ error: "sourceDirectory is required" }, { status: 400 });
-  }
-  const overwrite = body.overwrite === true;
-  try {
-    const imported = importOpenclawBootstrapFromDirectory({
-      sourceDirectory,
-      overwrite,
-      files: body.files,
-    });
-    return Response.json({ imported });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to import OpenClaw workspace files";
-    return Response.json({ error: message }, { status: 400 });
-  }
-}
-
-const openclawImportPreviewSchema = z.object({
+const openclawImportSchema = z.object({
   source: z.discriminatedUnion("mode", [
     z.object({
       mode: z.literal("local"),
@@ -331,79 +309,47 @@ const openclawImportPreviewSchema = z.object({
   targetDirectory: z.string().optional(),
 });
 
-const openclawImportApplySchema = z.object({
-  previewId: z.string().min(1),
-  overwritePaths: z.array(z.string()).optional(),
-  skipPaths: z.array(z.string()).optional(),
-  runMemorySync: z.boolean().optional(),
-});
+async function importOpenclawBootstrap(req: Request) {
+  const body = (await req.json()) as Record<string, unknown>;
+  let source: { mode: "local"; path: string } | { mode: "git"; url: string; ref?: string };
+  let targetDirectory: string | undefined;
 
-async function previewOpenclawBootstrapImport(req: Request) {
-  const body = (await req.json()) as unknown;
-  const parsed = openclawImportPreviewSchema.safeParse(body);
-  if (!parsed.success) {
-    return Response.json(
-      {
-        error: "Invalid preview request",
-        issues: parsed.error.issues.map(issue => ({
-          path: issue.path.join("."),
-          message: issue.message,
-        })),
-      },
-      { status: 400 },
-    );
+  if (body.source && typeof body.source === "object") {
+    const parsed = openclawImportSchema.safeParse(body);
+    if (!parsed.success) {
+      return Response.json(
+        {
+          error: "Invalid import request",
+          issues: parsed.error.issues.map(issue => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        },
+        { status: 400 },
+      );
+    }
+    source = parsed.data.source;
+    targetDirectory = parsed.data.targetDirectory;
+  } else {
+    const sourceDirectory = typeof body.sourceDirectory === "string" ? body.sourceDirectory.trim() : "";
+    if (!sourceDirectory) {
+      return Response.json({ error: "source.path or sourceDirectory is required" }, { status: 400 });
+    }
+    source = { mode: "local", path: sourceDirectory };
   }
 
   try {
-    const preview = previewOpenclawImport({
+    const migration = await migrateOpenclawWorkspace({
       source:
-        parsed.data.source.mode === "local"
-          ? {
-              mode: "local",
-              path: parsed.data.source.path,
-            }
-          : {
-              mode: "git",
-              url: parsed.data.source.url,
-              ref: parsed.data.source.ref,
-            },
-      targetDirectory: parsed.data.targetDirectory,
+        source.mode === "local"
+          ? { mode: "local", path: source.path }
+          : { mode: "git", url: source.url, ref: source.ref },
+      targetDirectory,
     });
-    return Response.json({ preview });
+    return Response.json({ migration });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to build OpenClaw import preview";
+    const message = error instanceof Error ? error.message : "Failed to import OpenClaw workspace files";
     return Response.json({ error: message }, { status: 422 });
-  }
-}
-
-async function applyOpenclawBootstrapImport(req: Request) {
-  const body = (await req.json()) as unknown;
-  const parsed = openclawImportApplySchema.safeParse(body);
-  if (!parsed.success) {
-    return Response.json(
-      {
-        error: "Invalid apply request",
-        issues: parsed.error.issues.map(issue => ({
-          path: issue.path.join("."),
-          message: issue.message,
-        })),
-      },
-      { status: 400 },
-    );
-  }
-
-  try {
-    const applied = await applyOpenclawImport({
-      previewId: parsed.data.previewId,
-      overwritePaths: parsed.data.overwritePaths,
-      skipPaths: parsed.data.skipPaths,
-      runMemorySync: parsed.data.runMemorySync,
-    });
-    return Response.json({ applied });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to apply OpenClaw import";
-    const status = message.includes("expired") || message.includes("not found") ? 409 : 422;
-    return Response.json({ error: message }, { status });
   }
 }
 
@@ -535,14 +481,6 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
 
     "/api/config/opencode/bootstrap/import-openclaw": {
       POST: async (req: Request) => importOpenclawBootstrap(req),
-    },
-
-    "/api/config/opencode/bootstrap/import-openclaw/preview": {
-      POST: async (req: Request) => previewOpenclawBootstrapImport(req),
-    },
-
-    "/api/config/opencode/bootstrap/import-openclaw/apply": {
-      POST: async (req: Request) => applyOpenclawBootstrapImport(req),
     },
 
     "/api/config/mcps": {

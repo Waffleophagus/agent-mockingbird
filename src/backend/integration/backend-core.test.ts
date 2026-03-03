@@ -776,7 +776,7 @@ describe("config routes", () => {
     expect(payload.details?.rejectedPaths?.some(path => path.startsWith("runtime.smokeTest"))).toBe(true);
   });
 
-  test("POST /api/config/opencode/bootstrap/import-openclaw preview/apply imports recursive markdown", async () => {
+  test("POST /api/config/opencode/bootstrap/import-openclaw migrates workspace content in one step", async () => {
     const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
 
     const sourceDir = path.join(testRoot, "openclaw-source");
@@ -790,11 +790,11 @@ describe("config routes", () => {
     writeFileSync(path.join(sourceDir, "README.txt"), "not markdown", "utf8");
     writeFileSync(path.join(targetDir, "AGENTS.md"), "# Agents\n- existing\n", "utf8");
 
-    const previewRoute = routes["/api/config/opencode/bootstrap/import-openclaw/preview"] as {
+    const importRoute = routes["/api/config/opencode/bootstrap/import-openclaw"] as {
       POST: (req: Request) => Promise<Response>;
     };
-    const previewResponse = await previewRoute.POST(
-      new Request("http://localhost/api/config/opencode/bootstrap/import-openclaw/preview", {
+    const importResponse = await importRoute.POST(
+      new Request("http://localhost/api/config/opencode/bootstrap/import-openclaw", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -806,49 +806,20 @@ describe("config routes", () => {
         }),
       }),
     );
-    expect(previewResponse.status).toBe(200);
-    const previewPayload = (await previewResponse.json()) as {
-      preview?: {
-        previewId?: string;
-        filesNew?: Array<{ relativePath?: string }>;
-        filesConflicting?: Array<{ relativePath?: string }>;
+    expect(importResponse.status).toBe(200);
+    const importPayload = (await importResponse.json()) as {
+      migration?: {
+        copied?: Array<{ relativePath?: string }>;
+        merged?: Array<{ relativePath?: string }>;
       };
     };
-    expect(typeof previewPayload.preview?.previewId).toBe("string");
-    expect(previewPayload.preview?.filesNew?.some(file => file.relativePath === "memory/notes.md")).toBe(true);
-    expect(previewPayload.preview?.filesConflicting?.some(file => file.relativePath === "AGENTS.md")).toBe(
-      true,
-    );
-
-    const applyRoute = routes["/api/config/opencode/bootstrap/import-openclaw/apply"] as {
-      POST: (req: Request) => Promise<Response>;
-    };
-    const applyResponse = await applyRoute.POST(
-      new Request("http://localhost/api/config/opencode/bootstrap/import-openclaw/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          previewId: previewPayload.preview?.previewId,
-          overwritePaths: ["AGENTS.md"],
-        }),
-      }),
-    );
-    expect(applyResponse.status).toBe(200);
-    const applyPayload = (await applyResponse.json()) as {
-      applied?: {
-        summary?: { copied?: number };
-        memorySync?: { status?: string };
-      };
-    };
-    expect(applyPayload.applied?.summary?.copied).toBe(2);
-    const memorySyncStatus = applyPayload.applied?.memorySync?.status;
-    expect(typeof memorySyncStatus).toBe("string");
-    expect(["completed", "failed"]).toContain(memorySyncStatus as string);
-    expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toContain("imported");
+    expect(importPayload.migration?.copied?.some(file => file.relativePath === "memory/notes.md")).toBe(true);
+    expect(importPayload.migration?.merged?.some(file => file.relativePath === "AGENTS.md")).toBe(true);
+    expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toContain("existing");
     expect(readFileSync(path.join(targetDir, "memory", "notes.md"), "utf8")).toContain("hello");
   });
 
-  test("POST /api/config/opencode/bootstrap/import-openclaw preview/apply defaults target to workspace", async () => {
+  test("POST /api/config/opencode/bootstrap/import-openclaw defaults target to workspace", async () => {
     const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
 
     const sourceDir = path.join(testRoot, "openclaw-source-default-target");
@@ -856,11 +827,11 @@ describe("config routes", () => {
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(path.join(sourceDir, "IMPORT_TEST.md"), "# Imported default target\n", "utf8");
 
-    const previewRoute = routes["/api/config/opencode/bootstrap/import-openclaw/preview"] as {
+    const importRoute = routes["/api/config/opencode/bootstrap/import-openclaw"] as {
       POST: (req: Request) => Promise<Response>;
     };
-    const previewResponse = await previewRoute.POST(
-      new Request("http://localhost/api/config/opencode/bootstrap/import-openclaw/preview", {
+    const importResponse = await importRoute.POST(
+      new Request("http://localhost/api/config/opencode/bootstrap/import-openclaw", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -871,30 +842,13 @@ describe("config routes", () => {
         }),
       }),
     );
-    expect(previewResponse.status).toBe(200);
-    const previewPayload = (await previewResponse.json()) as {
-      preview?: {
-        previewId?: string;
+    expect(importResponse.status).toBe(200);
+    const importPayload = (await importResponse.json()) as {
+      migration?: {
         targetDirectory?: string;
       };
     };
-    expect(typeof previewPayload.preview?.previewId).toBe("string");
-    expect(previewPayload.preview?.targetDirectory).toBe(testWorkspacePath);
-
-    const applyRoute = routes["/api/config/opencode/bootstrap/import-openclaw/apply"] as {
-      POST: (req: Request) => Promise<Response>;
-    };
-    const applyResponse = await applyRoute.POST(
-      new Request("http://localhost/api/config/opencode/bootstrap/import-openclaw/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          previewId: previewPayload.preview?.previewId,
-          runMemorySync: false,
-        }),
-      }),
-    );
-    expect(applyResponse.status).toBe(200);
+    expect(importPayload.migration?.targetDirectory).toBe(testWorkspacePath);
     expect(readFileSync(path.join(testWorkspacePath, "IMPORT_TEST.md"), "utf8")).toContain("Imported default target");
   });
 });

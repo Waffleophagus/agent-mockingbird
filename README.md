@@ -251,27 +251,20 @@ Behavior:
 - `IDENTITY.md` is parsed for metadata (name/emoji/avatar/theme/creature/vibe) and returned via `GET /api/runtime/info`.
 - Selected agent prompt text can also be mirrored into runtime system prompts with `runtime.opencode.bootstrap.includeAgentPrompt=true`.
 
-OpenClaw import helpers:
-
-- `POST /api/config/opencode/bootstrap/import-openclaw/preview`
+- `POST /api/config/opencode/bootstrap/import-openclaw`
   - Body:
     - Local source: `{ "source": { "mode": "local", "path": "/path/to/openclaw/workspace" } }`
     - Git source: `{ "source": { "mode": "git", "url": "git@github.com:you/openclaw-memory.git", "ref": "main" } }`
-  - Response includes `previewId`, discovered files, and conflict/new/identical breakdown.
-- `POST /api/config/opencode/bootstrap/import-openclaw/apply`
-  - Body: `{ "previewId": "<id-from-preview>", "overwritePaths": ["AGENTS.md","memory/notes.md"], "runMemorySync": true }`
-  - Applies selected conflicts/new files and runs memory sync by default.
+  - Optional: `targetDirectory`
+  - Performs one-shot migration (copy new files, merge markdown conflicts, preserve protected Wafflebot runtime files).
 
-CLI:
+CLI migration UX is now integrated into `wafflebot onboard`:
 
-- `wafflebot import openclaw preview --path /path/to/openclaw/workspace`
-- `wafflebot import openclaw preview --git git@github.com:you/openclaw-memory.git --ref main`
-- `wafflebot import openclaw apply --preview-id <id> --overwrite AGENTS.md --overwrite memory/notes.md`
-
-Legacy compatibility helper remains available:
-
-- `POST /api/config/opencode/bootstrap/import-openclaw`
-- Body: `{ "sourceDirectory": "/path/to/openclaw/workspace", "overwrite": false, "files": ["AGENTS.md","SOUL.md","IDENTITY.md"] }`
+- Choose onboarding path: `quickstart`, `model-only`, `memory-only`, `openclaw-only`, or `skip`.
+- OpenClaw migration runs through an onboarding wizard (git clone or local folder source).
+- Conflict files go through a model-assisted merge pass via OpenCode (with deterministic fallback), using OpenClaw/OpenCode reference context.
+- If memory is enabled, onboarding runs memory sync after successful migration.
+- Legacy `wafflebot import openclaw ...` commands are removed.
 
 If OpenCode UI/TUI looks different from Wafflebot:
 
@@ -361,7 +354,7 @@ wafflebot uninstall
 - Onboarding model selection is searchable + paginated (works with providers that expose large model catalogs).
 - During onboarding, provider-auth changes trigger a transparent `opencode.service` refresh before model selection, so newly added providers/models show up immediately.
 - Onboarding can now configure memory embeddings for Ollama: set the Ollama URL, discover `/api/tags` models live, then select an embedding model with searchable pagination.
-- `wafflebot onboard` supports a memory-only path if you just want to configure Ollama embedding settings later.
+- `wafflebot onboard` supports `memory-only` and `openclaw-only` paths for focused setup.
 
 Compatibility alias remains available:
 

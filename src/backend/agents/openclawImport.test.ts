@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { applyOpenclawImport, previewOpenclawImport } from "./openclawImport";
+import { migrateOpenclawWorkspace } from "./openclawImport";
 
 const testRoots: string[] = [];
 
@@ -23,60 +23,52 @@ function makePaths() {
   return { sourceDir, targetDir };
 }
 
-test("preview reports conflict when destination path exists as a directory", () => {
+test("migrate copies supported workspace files and maps skills into .agents/skills", async () => {
   const { sourceDir, targetDir } = makePaths();
-  writeFileSync(path.join(sourceDir, "doc.md"), "# doc\n", "utf8");
-  mkdirSync(path.join(targetDir, "doc.md"), { recursive: true });
+  mkdirSync(path.join(sourceDir, "skills", "my-skill"), { recursive: true });
+  mkdirSync(path.join(sourceDir, "scripts"), { recursive: true });
+  writeFileSync(path.join(sourceDir, "AGENTS.md"), "# Imported Agents\n", "utf8");
+  writeFileSync(path.join(sourceDir, "skills", "my-skill", "SKILL.md"), "# Skill\n", "utf8");
+  writeFileSync(path.join(sourceDir, "scripts", "sync.sh"), "#!/usr/bin/env bash\n", "utf8");
 
-  const preview = previewOpenclawImport({
+  const migrated = await migrateOpenclawWorkspace({
     source: { mode: "local", path: sourceDir },
     targetDirectory: targetDir,
   });
 
-  expect(preview.filesConflicting).toHaveLength(1);
-  expect(preview.filesConflicting[0]?.relativePath).toBe("doc.md");
-  expect(preview.filesConflicting[0]?.targetHash).toBeNull();
+  expect(migrated.summary.copied).toBe(3);
+  expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toContain("Imported Agents");
+  expect(readFileSync(path.join(targetDir, ".agents", "skills", "my-skill", "SKILL.md"), "utf8")).toContain("Skill");
+  expect(readFileSync(path.join(targetDir, "scripts", "sync.sh"), "utf8")).toContain("usr/bin/env bash");
 });
 
-test("apply re-checks destination state and skips newly-created targets unless overwrite is requested", async () => {
+test("migrate merges markdown conflicts while removing openclaw-specific lines", async () => {
   const { sourceDir, targetDir } = makePaths();
-  writeFileSync(path.join(sourceDir, "doc.md"), "# imported\n", "utf8");
+  writeFileSync(path.join(sourceDir, "AGENTS.md"), "# OpenClaw Instructions\nUse OpenClaw auth\nGeneral rule\n", "utf8");
+  writeFileSync(path.join(targetDir, "AGENTS.md"), "# Wafflebot Instructions\nKeep this\n", "utf8");
 
-  const preview = previewOpenclawImport({
+  const migrated = await migrateOpenclawWorkspace({
     source: { mode: "local", path: sourceDir },
     targetDirectory: targetDir,
   });
-  writeFileSync(path.join(targetDir, "doc.md"), "# newer target\n", "utf8");
 
-  const applied = await applyOpenclawImport({
-    previewId: preview.previewId,
-    runMemorySync: false,
-  });
-
-  expect(applied.summary.copied).toBe(0);
-  expect(applied.summary.skippedExisting).toBe(1);
-  expect(applied.skippedExisting[0]?.relativePath).toBe("doc.md");
-  expect(readFileSync(path.join(targetDir, "doc.md"), "utf8")).toContain("newer target");
+  expect(migrated.summary.merged).toBe(1);
+  const merged = readFileSync(path.join(targetDir, "AGENTS.md"), "utf8");
+  expect(merged).toContain("Wafflebot Instructions");
+  expect(merged).toContain("General rule");
+  expect(merged.toLowerCase()).not.toContain("openclaw");
 });
 
-test("apply allows overwrite for targets created after preview when explicitly requested", async () => {
+test("migrate skips protected .opencode paths", async () => {
   const { sourceDir, targetDir } = makePaths();
-  writeFileSync(path.join(sourceDir, "doc.md"), "# imported\n", "utf8");
+  mkdirSync(path.join(sourceDir, ".opencode"), { recursive: true });
+  writeFileSync(path.join(sourceDir, ".opencode", "opencode.jsonc"), "{}\n", "utf8");
 
-  const preview = previewOpenclawImport({
+  const migrated = await migrateOpenclawWorkspace({
     source: { mode: "local", path: sourceDir },
     targetDirectory: targetDir,
   });
-  writeFileSync(path.join(targetDir, "doc.md"), "# newer target\n", "utf8");
 
-  const applied = await applyOpenclawImport({
-    previewId: preview.previewId,
-    overwritePaths: ["doc.md"],
-    runMemorySync: false,
-  });
-
-  expect(applied.summary.copied).toBe(1);
-  expect(applied.summary.skippedExisting).toBe(0);
-  expect(applied.summary.failed).toBe(0);
-  expect(readFileSync(path.join(targetDir, "doc.md"), "utf8")).toContain("imported");
+  expect(migrated.summary.skippedProtected).toBe(1);
+  expect(migrated.summary.copied).toBe(0);
 });
