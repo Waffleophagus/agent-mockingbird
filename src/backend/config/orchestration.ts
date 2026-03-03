@@ -1,5 +1,5 @@
 import type { WafflebotConfig } from "./schema";
-import { applyConfigPatch, getConfigSnapshot, type ApplyConfigResult } from "./service";
+import { getConfigSnapshot } from "./service";
 import {
   connectRuntimeMcp,
   disconnectRuntimeMcp,
@@ -11,10 +11,14 @@ import {
   startRuntimeMcpAuth,
 } from "../mcp/service";
 import {
+  disposeOpencodeSkillInstance,
+  getDisabledSkillsRootPath,
   getManagedSkillsRootPath,
-  listRuntimeSkills,
+  listManagedSkillCatalog,
   normalizeSkillId,
   removeManagedSkill,
+  reconcileManagedSkillEnabledSet,
+  setManagedSkillEnabled,
   writeManagedSkill,
 } from "../skills/service";
 
@@ -38,7 +42,7 @@ export interface RuntimeMcpActionResult {
 }
 
 export interface RuntimeSkillCatalogResult {
-  status: 200 | 502;
+  status: 200;
   payload: {
     skills: Array<{
       id: string;
@@ -49,9 +53,16 @@ export interface RuntimeSkillCatalogResult {
       managed: boolean;
     }>;
     enabled: string[];
+    disabled: string[];
+    invalid: Array<{
+      id?: string;
+      location: string;
+      reason: string;
+    }>;
     hash: string;
+    revision: string;
     managedPath: string;
-    error?: string;
+    disabledPath: string;
   };
 }
 
@@ -102,30 +113,20 @@ export async function runRuntimeMcpActionForCurrentConfig(
 
 export async function loadRuntimeSkillCatalog(): Promise<RuntimeSkillCatalogResult> {
   const snapshot = getConfigSnapshot();
-  try {
-    const skills = await listRuntimeSkills(snapshot.config, snapshot.config.ui.skills);
-    return {
-      status: 200,
-      payload: {
-        skills,
-        enabled: snapshot.config.ui.skills,
-        hash: snapshot.hash,
-        managedPath: getManagedSkillsRootPath(snapshot.config.runtime.opencode.directory),
-      },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load runtime skills";
-    return {
-      status: 502,
-      payload: {
-        skills: [],
-        enabled: snapshot.config.ui.skills,
-        hash: snapshot.hash,
-        managedPath: getManagedSkillsRootPath(snapshot.config.runtime.opencode.directory),
-        error: message,
-      },
-    };
-  }
+  const catalog = listManagedSkillCatalog(snapshot.config.runtime.opencode.directory);
+  return {
+    status: 200,
+    payload: {
+      skills: catalog.skills,
+      enabled: catalog.enabled,
+      disabled: catalog.disabled,
+      invalid: catalog.invalid,
+      hash: catalog.revision,
+      revision: catalog.revision,
+      managedPath: catalog.enabledPath,
+      disabledPath: catalog.disabledPath,
+    },
+  };
 }
 
 export async function loadRuntimeMcpCatalog(): Promise<RuntimeMcpCatalogResult> {
@@ -166,10 +167,10 @@ export async function importManagedSkillWithConfigUpdate(input: {
   content: string;
   enable: boolean;
   expectedHash?: string;
-  runSmokeTest: boolean;
 }): Promise<{
   imported: { id: string; filePath: string };
-  result: ApplyConfigResult;
+  skills: string[];
+  hash: string;
 }> {
   const id = normalizeSkillId(input.rawId);
   const trimmedContent = input.content.trim();
@@ -180,34 +181,31 @@ export async function importManagedSkillWithConfigUpdate(input: {
   let created = false;
   try {
     const current = getConfigSnapshot();
+    const before = listManagedSkillCatalog(current.config.runtime.opencode.directory);
+    if (input.expectedHash && input.expectedHash !== before.revision && input.expectedHash !== current.hash) {
+      throw new Error("Skill catalog has changed; refresh and retry");
+    }
     const writeResult = writeManagedSkill({
       id,
       content: trimmedContent,
       overwrite: false,
       workspaceDir: current.config.runtime.opencode.directory,
+      enabled: true,
     });
     created = writeResult.created;
-    const enabledSkills = new Set(current.config.ui.skills);
-    if (input.enable) {
-      enabledSkills.add(id);
+    if (!input.enable) {
+      setManagedSkillEnabled(id, false, current.config.runtime.opencode.directory);
     }
-
-    const result = await applyConfigPatch({
-      patch: {
-        ui: {
-          skills: [...enabledSkills],
-        },
-      },
-      expectedHash: input.expectedHash,
-      runSmokeTest: input.runSmokeTest,
-    });
+    await disposeOpencodeSkillInstance(current.config);
+    const next = listManagedSkillCatalog(current.config.runtime.opencode.directory);
 
     return {
       imported: {
         id,
         filePath: writeResult.filePath,
       },
-      result,
+      skills: next.enabled,
+      hash: next.revision,
     };
   } catch (error) {
     if (created) {
@@ -216,4 +214,30 @@ export async function importManagedSkillWithConfigUpdate(input: {
     }
     throw error;
   }
+}
+
+export async function setEnabledSkillsFromCatalog(input: {
+  skills: string[];
+  expectedHash?: string;
+}): Promise<{ skills: string[]; hash: string }> {
+  const current = getConfigSnapshot();
+  const before = listManagedSkillCatalog(current.config.runtime.opencode.directory);
+  if (input.expectedHash && input.expectedHash !== before.revision && input.expectedHash !== current.hash) {
+    throw new Error("Skill catalog has changed; refresh and retry");
+  }
+  reconcileManagedSkillEnabledSet(input.skills, current.config.runtime.opencode.directory);
+  await disposeOpencodeSkillInstance(current.config);
+  const next = listManagedSkillCatalog(current.config.runtime.opencode.directory);
+  return { skills: next.enabled, hash: next.revision };
+}
+
+export function getEnabledSkillsFromCatalog() {
+  const current = getConfigSnapshot();
+  const catalog = listManagedSkillCatalog(current.config.runtime.opencode.directory);
+  return {
+    skills: catalog.enabled,
+    hash: catalog.revision,
+    managedPath: getManagedSkillsRootPath(current.config.runtime.opencode.directory),
+    disabledPath: getDisabledSkillsRootPath(current.config.runtime.opencode.directory),
+  };
 }

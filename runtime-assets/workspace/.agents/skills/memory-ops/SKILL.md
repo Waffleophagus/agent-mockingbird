@@ -1,57 +1,89 @@
+---
+name: memory-ops
+description: Use Wafflebot memory effectively for persistent context across sessions.
+---
+
 # memory-ops
 
-Operate and troubleshoot Wafflebot memory for OpenCode runtime.
+Use Wafflebot memory effectively for persistent context across sessions.
 
-## Use When
+## Memory Tools
 
-- memory retrieval quality drops,
-- writes are rejected unexpectedly,
-- indexing/provider configuration changes,
-- post-import validation is required.
+| Tool | Purpose |
+|------|---------|
+| `memory_search` | Find relevant prior context by semantic query |
+| `memory_get` | Read specific memory file by path |
+| `memory_remember` | Persist a durable fact, decision, or context |
 
-## Playbook
+## Workflow
 
-1. Baseline health
+### 1. Always Search First
 
-```bash
-bun run memory:status
-bun run memory:activity 20
+Before making decisions or asking clarifying questions, search memory:
+
+```
+memory_search(query="project architecture decisions", maxResults=5)
+memory_search(query="user preferences for tests", maxResults=3)
 ```
 
-2. Refresh index
+Use broad queries first, then narrow if needed. `minScore` defaults to 0.0 — increase to 0.5+ for stricter relevance.
 
-```bash
-bun run memory:sync
+### 2. Validate with Get
+
+Memory files live in `MEMORY.md` or `memory/*.md`. Use `memory_get` to read full context around a snippet:
+
+```
+memory_get(path="memory/decisions.md", from=1, lines=50)
 ```
 
-3. Force rebuild if needed
+### 3. Persist What Matters
 
-```bash
-bun run memory:reindex
+Use `memory_remember` for durable information that should survive session boundaries:
+
+**Good candidates:**
+- Project-level decisions and rationale
+- User preferences and constraints
+- Recurring patterns or conventions discovered
+- Critical context about third-party integrations
+
+**Parameters:**
+
+| Param | Purpose | Example |
+|-------|---------|---------|
+| `content` | The fact/decision to remember | "Use Bun, not Node.js" |
+| `topic` | Category for organization | "conventions", "decisions" |
+| `entities` | Related identifiers | ["bun", "runtime"] |
+| `confidence` | Certainty level 0-1 | 0.9 for verified facts |
+| `source` | Who provided this | "user", "assistant", "system" |
+| `supersedes` | IDs of outdated memories to replace | ["mem_abc123"] |
+
+### 4. Supersede, Don't Duplicate
+
+When information changes, include `supersedes` to link the replacement:
+
+```
+memory_remember(
+  content="Testing framework: bun test (switched from vitest)",
+  topic="conventions",
+  supersedes=["mem_old_testing_config"]
+)
 ```
 
-4. Validate retrieval and integrity
+## Memory Modes
 
-```bash
-bun run memory:search "<known marker>"
-bun run memory:lint
-```
+Runtime config `runtime.memory.mode` controls behavior:
 
-## Troubleshooting
+| Mode | Behavior |
+|------|----------|
+| `hybrid` | Prompt context + tools available (default) |
+| `inject_only` | Prompt context only, tools disabled |
+| `tool_only` | Tools only, no prompt injection |
 
-- `Memory is disabled`:
-  - enable `runtime.memory.enabled`.
-- Embedding failures:
-  - verify provider/model/base URL and endpoint health.
-- Duplicate write rejection:
-  - expected for identical active content; write replacement with `supersedes` where appropriate.
+Adjust usage accordingly — in `inject_only`, rely on existing memories in prompt context.
 
-## API Fallback
+## Anti-Patterns
 
-If CLI is unavailable, use:
-
-- `GET /api/memory/status`
-- `POST /api/memory/sync`
-- `POST /api/memory/reindex`
-- `GET /api/memory/activity?limit=20`
-- `POST /api/memory/retrieve`
+- **Don't** memorize ephemeral state (current task progress, temp files)
+- **Don't** write memories for information already in code/docs
+- **Don't** create redundant memories — search first, then supersede
+- **Don't** use low confidence (<0.5) for critical decisions

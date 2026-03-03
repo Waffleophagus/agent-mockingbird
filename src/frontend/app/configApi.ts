@@ -4,6 +4,7 @@ import type {
   AgentTypeDefinition,
   ConfiguredMcpServer,
   RuntimeMcp,
+  RuntimeSkillIssue,
   RuntimeSkill,
 } from "@/types/dashboard";
 
@@ -14,7 +15,12 @@ interface ApiErrorPayload {
 export interface SkillCatalogResult {
   skills: RuntimeSkill[];
   enabled: string[];
+  disabled: string[];
+  invalid: RuntimeSkillIssue[];
   hash: string;
+  revision: string;
+  managedPath: string;
+  disabledPath: string;
 }
 
 export interface McpCatalogResult {
@@ -103,7 +109,12 @@ export async function fetchSkillCatalog() {
   const payload = await parseJson<{
     skills?: RuntimeSkill[];
     enabled?: string[];
+    disabled?: string[];
+    invalid?: RuntimeSkillIssue[];
     hash?: string;
+    revision?: string;
+    managedPath?: string;
+    disabledPath?: string;
     error?: string;
   }>(response);
   if (!response.ok) {
@@ -112,7 +123,12 @@ export async function fetchSkillCatalog() {
   return {
     skills: Array.isArray(payload.skills) ? payload.skills : [],
     enabled: Array.isArray(payload.enabled) ? payload.enabled : [],
+    disabled: Array.isArray(payload.disabled) ? payload.disabled : [],
+    invalid: Array.isArray(payload.invalid) ? payload.invalid : [],
     hash: typeof payload.hash === "string" ? payload.hash : "",
+    revision: typeof payload.revision === "string" ? payload.revision : "",
+    managedPath: typeof payload.managedPath === "string" ? payload.managedPath : "",
+    disabledPath: typeof payload.disabledPath === "string" ? payload.disabledPath : "",
   } satisfies SkillCatalogResult;
 }
 

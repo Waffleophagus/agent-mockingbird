@@ -343,13 +343,13 @@ async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
 
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
-      const configResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config`, { method: "GET" });
-      if (!configResponse.ok) {
-        throw new Error(`GET /api/config failed (${configResponse.status})`);
+      const skillsResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/skills`, { method: "GET" });
+      if (!skillsResponse.ok) {
+        throw new Error(`GET /api/config/skills failed (${skillsResponse.status})`);
       }
-      const payload = await configResponse.json();
-      const currentSkills = Array.isArray(payload?.config?.ui?.skills)
-        ? payload.config.ui.skills.filter((value) => typeof value === "string" && value.trim().length > 0)
+      const payload = await skillsResponse.json();
+      const currentSkills = Array.isArray(payload?.skills)
+        ? payload.skills.filter((value) => typeof value === "string" && value.trim().length > 0)
         : [];
       if (currentSkills.length > 0) {
         return {
@@ -360,37 +360,49 @@ async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
         };
       }
 
-      const expectedHash = typeof payload?.hash === "string" ? payload.hash.trim() : "";
-      if (!expectedHash) {
-        throw new Error("Config hash missing from /api/config response");
+      const catalogResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/skills/catalog`, { method: "GET" });
+      if (!catalogResponse.ok) {
+        throw new Error(`GET /api/config/skills/catalog failed (${catalogResponse.status})`);
+      }
+      const catalogPayload = await catalogResponse.json();
+      const availableSkillIds = Array.isArray(catalogPayload?.skills)
+        ? catalogPayload.skills
+            .map((skill) => (skill && typeof skill.id === "string" ? skill.id.trim() : ""))
+            .filter((value) => value.length > 0)
+        : [];
+      const defaultsToEnable = DEFAULT_ENABLED_SKILLS.filter((id) => availableSkillIds.includes(id));
+      if (defaultsToEnable.length === 0) {
+        return {
+          attempted: true,
+          updated: false,
+          reason: "no default runtime skills available in catalog",
+          skills: [],
+        };
       }
 
-      const patchResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/patch-safe`, {
-        method: "POST",
+      const expectedHash = typeof payload?.hash === "string" ? payload.hash.trim() : "";
+
+      const updateResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/skills`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patch: {
-            ui: {
-              skills: DEFAULT_ENABLED_SKILLS,
-            },
-          },
-          expectedHash,
-          runSmokeTest: true,
+          skills: defaultsToEnable,
+          expectedHash: expectedHash || undefined,
         }),
       });
 
-      const patchPayload = await patchResponse.json().catch(() => ({}));
-      if (!patchResponse.ok) {
+      const updatePayload = await updateResponse.json().catch(() => ({}));
+      if (!updateResponse.ok) {
         const message =
-          typeof patchPayload?.error === "string"
-            ? patchPayload.error
-            : `POST /api/config/patch-safe failed (${patchResponse.status})`;
+          typeof updatePayload?.error === "string"
+            ? updatePayload.error
+            : `PUT /api/config/skills failed (${updateResponse.status})`;
         throw new Error(message);
       }
 
-      const nextSkills = Array.isArray(patchPayload?.snapshot?.config?.ui?.skills)
-        ? patchPayload.snapshot.config.ui.skills
-        : DEFAULT_ENABLED_SKILLS;
+      const nextSkills = Array.isArray(updatePayload?.skills)
+        ? updatePayload.skills
+        : defaultsToEnable;
       return {
         attempted: true,
         updated: true,
@@ -633,7 +645,7 @@ function removeOpencodeShim(paths) {
 }
 
 function unitContents(paths, bunBin, opencodeBin, wafflebotAppDir, wafflebotEntrypoint) {
-  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Wafflebot (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=WAFFLEBOT_PORT=3001\nEnvironment=WAFFLEBOT_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Wafflebot (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=WAFFLEBOT_PORT=3001\nEnvironment=WAFFLEBOT_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   const wafflebot = `[Unit]\nDescription=Wafflebot API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${wafflebotAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=WAFFLEBOT_CONFIG_PATH=${path.join(paths.dataDir, "wafflebot.config.json")}\nEnvironment=WAFFLEBOT_DB_PATH=${path.join(paths.dataDir, "wafflebot.db")}\nEnvironment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=WAFFLEBOT_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nExecStart=${bunBin} ${wafflebotEntrypoint}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 

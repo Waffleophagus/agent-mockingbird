@@ -15,6 +15,7 @@ import { getConfig as getManagedConfig } from "../config/service";
 import { clearCronTables } from "../cron/storage";
 import { DEFAULT_SESSIONS } from "../defaults";
 import { clearRunTables } from "../run/storage";
+import { listManagedSkillCatalog } from "../skills/service";
 
 type RuntimeEventSource = "api" | "runtime" | "scheduler" | "system";
 
@@ -786,12 +787,13 @@ export function recordHeartbeat(source: RuntimeEventSource, online = true, creat
 
 export function getConfig() {
   const managedConfig = getManagedConfig();
+  const catalog = listManagedSkillCatalog(managedConfig.runtime.opencode.directory);
   const agents =
     managedConfig.ui.agents.length > 0
       ? managedConfig.ui.agents
       : managedConfig.ui.agentTypes.map(toLegacySpecialistAgent);
   return {
-    skills: managedConfig.ui.skills,
+    skills: catalog.enabled,
     mcps: managedConfig.ui.mcps,
     agents,
   };

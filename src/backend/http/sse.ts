@@ -42,6 +42,8 @@ function toSseEventName(event: RuntimeEvent): string {
       return "config-error";
     case "config.update.rolled_back":
       return "config-rollback";
+    case "skills.catalog.updated":
+      return "skills-catalog-updated";
     case "channel.signal.status.updated":
       return "signal-status";
     case "channel.signal.pairing.requested":

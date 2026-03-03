@@ -2,6 +2,7 @@ import { OpencodeRuntime } from "./opencodeRuntime";
 import { getConfigSnapshot } from "../config/service";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { getOpencodeConnectionInfo } from "../opencode/client";
+import { listManagedSkillCatalog } from "../skills/service";
 
 let runtimeInstance: RuntimeEngine | null = null;
 
@@ -26,7 +27,7 @@ export function createRuntime(): RuntimeEngine {
     defaultModelId: config.runtime.opencode.modelId,
     fallbackModelRefs: config.runtime.opencode.fallbackModels,
     getRuntimeConfig: () => getConfigSnapshot().config.runtime.opencode,
-    getEnabledSkills: () => getConfigSnapshot().config.ui.skills,
+    getEnabledSkills: () => listManagedSkillCatalog(getConfigSnapshot().config.runtime.opencode.directory).enabled,
     getEnabledMcps: () => getConfigSnapshot().config.ui.mcps,
     getConfiguredMcpServers: () => getConfigSnapshot().config.ui.mcpServers,
   });

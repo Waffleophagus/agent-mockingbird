@@ -64,6 +64,7 @@ import type {
   SessionRunStatusSnapshot,
   SessionSummary,
   RuntimeMcp,
+  RuntimeSkillIssue,
   RuntimeSkill,
   UsageSnapshot,
 } from "@/types/dashboard";
@@ -126,6 +127,11 @@ export function App() {
   const [opencodePersistenceMode, setOpencodePersistenceMode] = useState("");
   const [skillsDraft, setSkillsDraft] = useState("");
   const [availableSkills, setAvailableSkills] = useState<RuntimeSkill[]>([]);
+  const [disabledSkills, setDisabledSkills] = useState<string[]>([]);
+  const [invalidSkills, setInvalidSkills] = useState<RuntimeSkillIssue[]>([]);
+  const [skillsCatalogHash, setSkillsCatalogHash] = useState("");
+  const [skillsManagedPath, setSkillsManagedPath] = useState("");
+  const [skillsDisabledPath, setSkillsDisabledPath] = useState("");
   const [availableMcps, setAvailableMcps] = useState<RuntimeMcp[]>([]);
   const [mcpServers, setMcpServers] = useState<ConfiguredMcpServer[]>([]);
   const [mcpsDraft, setMcpsDraft] = useState("");
@@ -257,6 +263,11 @@ export function App() {
     setMemoryStatus,
     setMemoryActivity,
     setAvailableSkills,
+    setDisabledSkills,
+    setInvalidSkills,
+    setSkillsCatalogHash,
+    setSkillsManagedPath,
+    setSkillsDisabledPath,
     setAvailableMcps,
     setAgentConfigHash,
     setOpencodeDirectory,
@@ -748,7 +759,11 @@ export function App() {
       const payload = await fetchSkillCatalog();
       setAvailableSkills(payload.skills);
       setSkillsDraft(payload.enabled.join("\n"));
-      if (payload.hash) setConfigHash(payload.hash);
+      setDisabledSkills(payload.disabled);
+      setInvalidSkills(payload.invalid);
+      setSkillsCatalogHash(payload.hash || payload.revision);
+      setSkillsManagedPath(payload.managedPath);
+      setSkillsDisabledPath(payload.disabledPath);
     } catch (error) {
       setSkillCatalogError(error instanceof Error ? error.message : "Failed to load runtime skills");
     } finally {
@@ -836,13 +851,13 @@ export function App() {
       const payload = await importManagedSkill({
         id,
         content,
-        expectedHash: configHash || undefined,
+        expectedHash: skillsCatalogHash || undefined,
         enable: true,
       });
       setImportSkillId("");
       setImportSkillContent("");
       setSkillsDraft(payload.skills.join("\n"));
-      if (payload.hash) setConfigHash(payload.hash);
+      if (payload.hash) setSkillsCatalogHash(payload.hash);
       await refreshSkillCatalog();
     } catch (error) {
       setSkillsError(error instanceof Error ? error.message : "Failed to import skill");
@@ -991,10 +1006,10 @@ export function App() {
     try {
       const payload = await saveSkills({
         skills: configuredSkills,
-        expectedHash: configHash || undefined,
+        expectedHash: skillsCatalogHash || undefined,
       });
       setSkillsDraft(payload.skills.join("\n"));
-      setConfigHash(payload.hash || configHash);
+      setSkillsCatalogHash(payload.hash || skillsCatalogHash);
       await refreshSkillCatalog();
     } catch (error) {
       setSkillsError(error instanceof Error ? error.message : "Failed to save skills");
@@ -1543,6 +1558,10 @@ export function App() {
             configuredSkillSet={configuredSkillSet}
             toggleSkillEnabled={toggleSkillEnabled}
             configuredUnavailableSkills={configuredUnavailableSkills}
+            disabledSkills={disabledSkills}
+            invalidSkills={invalidSkills}
+            skillsManagedPath={skillsManagedPath}
+            skillsDisabledPath={skillsDisabledPath}
             requestRemoveSkill={requestRemoveSkill}
             refreshSkillCatalog={refreshSkillCatalog}
             saveSkillsConfig={saveSkillsConfig}

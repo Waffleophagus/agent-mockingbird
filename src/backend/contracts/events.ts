@@ -107,6 +107,11 @@ export interface ConfigRolledBackPayload {
 }
 export type ConfigRolledBackEvent = RuntimeEventBase<"config.update.rolled_back", ConfigRolledBackPayload>;
 
+export interface SkillsCatalogUpdatedPayload {
+  revision: string;
+}
+export type SkillsCatalogUpdatedEvent = RuntimeEventBase<"skills.catalog.updated", SkillsCatalogUpdatedPayload>;
+
 export interface SignalChannelStatusPayload {
   connected: boolean;
   baseUrl: string;
@@ -165,6 +170,7 @@ export type RuntimeEvent =
   | ConfigUpdatedEvent
   | ConfigUpdateFailedEvent
   | ConfigRolledBackEvent
+  | SkillsCatalogUpdatedEvent
   | SignalChannelStatusUpdatedEvent
   | SignalPairingRequestedEvent
   | SignalMessageReceivedEvent
@@ -265,6 +271,13 @@ export function createConfigRolledBackEvent(
   source: RuntimeEventSource,
 ): ConfigRolledBackEvent {
   return baseRuntimeEvent("config.update.rolled_back", payload, source);
+}
+
+export function createSkillsCatalogUpdatedEvent(
+  payload: SkillsCatalogUpdatedPayload,
+  source: RuntimeEventSource,
+): SkillsCatalogUpdatedEvent {
+  return baseRuntimeEvent("skills.catalog.updated", payload, source);
 }
 
 export function createSignalChannelStatusUpdatedEvent(

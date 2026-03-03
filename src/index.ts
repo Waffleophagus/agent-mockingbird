@@ -19,6 +19,7 @@ import { initializeMemory } from "./backend/memory/service";
 import { initLaneQueue, getLaneQueue } from "./backend/queue/service";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
+import { startSkillsCatalogWatcher } from "./backend/skills/watcher";
 import index from "./index.html";
 
 ensureSeedData();
@@ -64,6 +65,7 @@ const eventStream = createRuntimeEventStream({
   getHeartbeatSnapshot,
   getUsageSnapshot,
 });
+const stopSkillsCatalogWatcher = startSkillsCatalogWatcher({ eventStream });
 
 if (env.NODE_ENV === "production" && !runtimeInfo.opencode.directoryConfigured) {
   console.warn(
@@ -115,6 +117,7 @@ const server = serve({
 
 const shutdown = () => {
   clearInterval(heartbeatTimer);
+  stopSkillsCatalogWatcher();
   cronService.stop();
   runService.stop();
   signalService.stop();

@@ -1,10 +1,10 @@
-import { Plus, SlidersHorizontal, Trash2, Wrench } from "lucide-react";
+import { AlertTriangle, Plus, SlidersHorizontal, Trash2, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import type { RuntimeSkill } from "@/types/dashboard";
+import type { RuntimeSkill, RuntimeSkillIssue } from "@/types/dashboard";
 
 interface SkillsPageProps {
   skillInput: string;
@@ -13,6 +13,10 @@ interface SkillsPageProps {
   loadingSkillCatalog: boolean;
   availableSkills: RuntimeSkill[];
   configuredSkillSet: Set<string>;
+  disabledSkills: string[];
+  invalidSkills: RuntimeSkillIssue[];
+  skillsManagedPath: string;
+  skillsDisabledPath: string;
   toggleSkillEnabled: (skillId: string) => void;
   configuredUnavailableSkills: string[];
   requestRemoveSkill: (skillId: string) => void;
@@ -40,6 +44,10 @@ export function SkillsPage(props: SkillsPageProps) {
     loadingSkillCatalog,
     availableSkills,
     configuredSkillSet,
+    disabledSkills,
+    invalidSkills,
+    skillsManagedPath,
+    skillsDisabledPath,
     toggleSkillEnabled,
     configuredUnavailableSkills,
     requestRemoveSkill,
@@ -70,6 +78,12 @@ export function SkillsPage(props: SkillsPageProps) {
           <CardDescription>Toggle which OpenCode skills are exposed to runtime sessions.</CardDescription>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+          {(skillsManagedPath || skillsDisabledPath) && (
+            <div className="rounded-md border border-border bg-muted/70 p-3 text-[11px] text-muted-foreground">
+              {skillsManagedPath && <p>Enabled root: {skillsManagedPath}</p>}
+              {skillsDisabledPath && <p>Disabled root: {skillsDisabledPath}</p>}
+            </div>
+          )}
           <div className="flex gap-2">
             <Input
               value={skillInput}
@@ -121,6 +135,31 @@ export function SkillsPage(props: SkillsPageProps) {
               );
             })}
           </div>
+
+          {disabledSkills.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Disabled on disk</p>
+              <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
+                {disabledSkills.join(", ")}
+              </div>
+            </div>
+          )}
+
+          {invalidSkills.length > 0 && (
+            <div className="space-y-2">
+              <p className="flex items-center gap-2 text-xs uppercase tracking-wide text-amber-600">
+                <AlertTriangle className="size-3.5" />
+                Invalid Skills
+              </p>
+              {invalidSkills.map(issue => (
+                <div key={`${issue.id ?? "unknown"}:${issue.location}`} className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                  <p className="text-xs font-medium text-amber-700">{issue.id || "Unknown skill"}</p>
+                  <p className="text-xs text-amber-700/90">{issue.reason}</p>
+                  <p className="truncate text-[11px] text-amber-700/80">{issue.location}</p>
+                </div>
+              ))}
+            </div>
+          )}
 
           {configuredUnavailableSkills.length > 0 && (
             <div className="space-y-2">

@@ -32,6 +32,7 @@ import type {
   MemoryWriteEvent,
   ModelOption,
   RuntimeMcp,
+  RuntimeSkillIssue,
   RuntimeSkill,
   SessionCompactedSnapshot,
   SessionRunErrorSnapshot,
@@ -68,6 +69,11 @@ interface UseDashboardBootstrapInput {
   setMemoryStatus: Dispatch<SetStateAction<MemoryStatusSnapshot | null>>;
   setMemoryActivity: Dispatch<SetStateAction<MemoryWriteEvent[]>>;
   setAvailableSkills: Dispatch<SetStateAction<RuntimeSkill[]>>;
+  setDisabledSkills: Dispatch<SetStateAction<string[]>>;
+  setInvalidSkills: Dispatch<SetStateAction<RuntimeSkillIssue[]>>;
+  setSkillsCatalogHash: Dispatch<SetStateAction<string>>;
+  setSkillsManagedPath: Dispatch<SetStateAction<string>>;
+  setSkillsDisabledPath: Dispatch<SetStateAction<string>>;
   setAvailableMcps: Dispatch<SetStateAction<RuntimeMcp[]>>;
   setAgentConfigHash: Dispatch<SetStateAction<string>>;
   setOpencodeDirectory: Dispatch<SetStateAction<string>>;
@@ -229,7 +235,12 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
         const skillsCatalogPayload = (await skillsCatalogResponse.json()) as {
           skills?: RuntimeSkill[];
           enabled?: string[];
+          disabled?: string[];
+          invalid?: RuntimeSkillIssue[];
           hash?: string;
+          revision?: string;
+          managedPath?: string;
+          disabledPath?: string;
           error?: string;
         };
         const mcpsCatalogPayload = (await mcpsCatalogResponse.json()) as {
@@ -254,6 +265,21 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
         input.setMemoryStatus(memoryStatusPayload.status ?? null);
         input.setMemoryActivity(memoryActivityPayload.events ?? []);
         input.setAvailableSkills(Array.isArray(skillsCatalogPayload.skills) ? skillsCatalogPayload.skills : []);
+        input.setDisabledSkills(Array.isArray(skillsCatalogPayload.disabled) ? skillsCatalogPayload.disabled : []);
+        input.setInvalidSkills(Array.isArray(skillsCatalogPayload.invalid) ? skillsCatalogPayload.invalid : []);
+        input.setSkillsCatalogHash(
+          typeof skillsCatalogPayload.hash === "string" && skillsCatalogPayload.hash
+            ? skillsCatalogPayload.hash
+            : typeof skillsCatalogPayload.revision === "string"
+              ? skillsCatalogPayload.revision
+              : "",
+        );
+        input.setSkillsManagedPath(
+          typeof skillsCatalogPayload.managedPath === "string" ? skillsCatalogPayload.managedPath : "",
+        );
+        input.setSkillsDisabledPath(
+          typeof skillsCatalogPayload.disabledPath === "string" ? skillsCatalogPayload.disabledPath : "",
+        );
         input.setAvailableMcps(Array.isArray(mcpsCatalogPayload.mcps) ? mcpsCatalogPayload.mcps : []);
         if (Array.isArray(opencodeAgentsPayload.agentTypes)) {
           const normalized = opencodeAgentsPayload.agentTypes.map(normalizeAgentTypeDraft);
@@ -780,6 +806,45 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
               : "",
           );
           input.setConfigHash(typeof payload.hash === "string" ? payload.hash : "");
+        } catch {
+          return;
+        }
+      })();
+    });
+
+    events.addEventListener("skills-catalog-updated", () => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/config/skills/catalog");
+          const payload = (await response.json()) as {
+            skills?: RuntimeSkill[];
+            enabled?: string[];
+            disabled?: string[];
+            invalid?: RuntimeSkillIssue[];
+            hash?: string;
+            revision?: string;
+            managedPath?: string;
+            disabledPath?: string;
+            error?: string;
+          };
+          if (!response.ok) {
+            input.setSkillCatalogError(payload.error ?? "Failed to load runtime skills");
+            return;
+          }
+          input.setAvailableSkills(Array.isArray(payload.skills) ? payload.skills : []);
+          input.setSkillsDraft(Array.isArray(payload.enabled) ? payload.enabled.join("\n") : "");
+          input.setDisabledSkills(Array.isArray(payload.disabled) ? payload.disabled : []);
+          input.setInvalidSkills(Array.isArray(payload.invalid) ? payload.invalid : []);
+          input.setSkillsCatalogHash(
+            typeof payload.hash === "string" && payload.hash
+              ? payload.hash
+              : typeof payload.revision === "string"
+                ? payload.revision
+                : "",
+          );
+          input.setSkillsManagedPath(typeof payload.managedPath === "string" ? payload.managedPath : "");
+          input.setSkillsDisabledPath(typeof payload.disabledPath === "string" ? payload.disabledPath : "");
+          input.setSkillCatalogError("");
         } catch {
           return;
         }

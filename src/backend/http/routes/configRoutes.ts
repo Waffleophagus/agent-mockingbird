@@ -9,10 +9,12 @@ import {
   validateOpencodeAgentPatch,
 } from "../../agents/opencodeConfig";
 import {
+  getEnabledSkillsFromCatalog,
   importManagedSkillWithConfigUpdate,
   loadRuntimeMcpCatalog,
   loadRuntimeSkillCatalog,
   runRuntimeMcpActionForCurrentConfig,
+  setEnabledSkillsFromCatalog,
 } from "../../config/orchestration";
 import { configuredMcpServerSchema } from "../../config/schema";
 import {
@@ -28,6 +30,7 @@ import {
   createConfigRolledBackEvent,
   createConfigUpdateFailedEvent,
   createConfigUpdatedEvent,
+  createSkillsCatalogUpdatedEvent,
 } from "../../contracts/events";
 import {
   normalizeMcpIds,
@@ -36,8 +39,6 @@ import {
 } from "../../mcp/service";
 import { parseStringListBody } from "../parsers";
 import type { RuntimeEventStream } from "../sse";
-
-type ConfigStringListField = "skills" | "mcps";
 
 function toErrorResponse(error: unknown) {
   if (error instanceof ConfigApplyError) {
@@ -155,32 +156,8 @@ async function respondWithConfigMutation(
   }
 }
 
-async function applyStringListUpdate(
-  eventStream: RuntimeEventStream,
-  req: Request,
-  field: ConfigStringListField,
-) {
-  const body = (await req.json()) as Record<string, unknown>;
-  const values = parseStringListBody(body, field);
-  if (!values) {
-    return Response.json({ error: `${field} must be a string array` }, { status: 400 });
-  }
-
-  return respondWithConfigMutation(
-    eventStream,
-    () =>
-      applyConfigPatch({
-        patch: { ui: { [field]: values } },
-        expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-        runSmokeTest: true,
-      }),
-    result =>
-      Response.json({
-        [field]: result.snapshot.config.ui[field],
-        hash: result.snapshot.hash,
-        smokeTest: result.smokeTest,
-      }),
-  );
+function publishSkillsCatalogUpdated(eventStream: RuntimeEventStream, revision: string) {
+  eventStream.publish(createSkillsCatalogUpdatedEvent({ revision }, "api"));
 }
 
 async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Request) {
@@ -286,7 +263,6 @@ async function importManagedSkill(eventStream: RuntimeEventStream, req: Request)
   const rawId = typeof body.id === "string" ? body.id : "";
   const content = typeof body.content === "string" ? body.content : "";
   const enable = typeof body.enable === "boolean" ? body.enable : true;
-  const runSmokeTest = typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true;
 
   try {
     const imported = await importManagedSkillWithConfigUpdate({
@@ -294,20 +270,21 @@ async function importManagedSkill(eventStream: RuntimeEventStream, req: Request)
       content,
       enable,
       expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-      runSmokeTest,
     });
-    publishConfigUpdatedEvent(eventStream, imported.result);
+    publishSkillsCatalogUpdated(eventStream, imported.hash);
 
     return Response.json({
       imported: {
         id: imported.imported.id,
         filePath: imported.imported.filePath,
       },
-      skills: imported.result.snapshot.config.ui.skills,
-      hash: imported.result.snapshot.hash,
-      smokeTest: imported.result.smokeTest,
+      skills: imported.skills,
+      hash: imported.hash,
     });
   } catch (error) {
+    if (error instanceof Error && error.message.includes("catalog has changed")) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
     if (error instanceof Error && error.message.includes("already exists")) {
       return Response.json({ error: error.message }, { status: 409 });
     }
@@ -515,10 +492,34 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
 
     "/api/config/skills": {
       GET: () => {
-        const snapshot = getConfigSnapshot();
-        return Response.json({ skills: snapshot.config.ui.skills, hash: snapshot.hash });
+        const current = getEnabledSkillsFromCatalog();
+        return Response.json({
+          skills: current.skills,
+          hash: current.hash,
+          managedPath: current.managedPath,
+          disabledPath: current.disabledPath,
+        });
       },
-      PUT: async (req: Request) => applyStringListUpdate(eventStream, req, "skills"),
+      PUT: async (req: Request) => {
+        const body = (await req.json()) as Record<string, unknown>;
+        const values = parseStringListBody(body, "skills");
+        if (!values) {
+          return Response.json({ error: "skills must be a string array" }, { status: 400 });
+        }
+        try {
+          const result = await setEnabledSkillsFromCatalog({
+            skills: values,
+            expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+          });
+          publishSkillsCatalogUpdated(eventStream, result.hash);
+          return Response.json(result);
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("catalog has changed")) {
+            return Response.json({ error: error.message }, { status: 409 });
+          }
+          return Response.json({ error: error instanceof Error ? error.message : "Failed to update skills" }, { status: 500 });
+        }
+      },
     },
 
     "/api/config/skills/catalog": {

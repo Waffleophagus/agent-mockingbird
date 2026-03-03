@@ -105,6 +105,12 @@ export interface RuntimeSkill {
   managed: boolean;
 }
 
+export interface RuntimeSkillIssue {
+  id?: string;
+  location: string;
+  reason: string;
+}
+
 export type RuntimeMcpStatus =
   | "connected"
   | "disabled"
@@ -261,4 +267,5 @@ export type DashboardEvent =
   | { event: "session-status"; payload: SessionRunStatusSnapshot }
   | { event: "session-compacted"; payload: SessionCompactedSnapshot }
   | { event: "session-error"; payload: SessionRunErrorSnapshot }
-  | { event: "background-run"; payload: BackgroundRunSnapshot };
+  | { event: "background-run"; payload: BackgroundRunSnapshot }
+  | { event: "skills-catalog-updated"; payload: { revision: string } };
