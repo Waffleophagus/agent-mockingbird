@@ -66,7 +66,9 @@ import {
   listInFlightBackgroundRuns,
   listRecentBackgroundRuns,
   listRuntimeSessionBindings,
+  getUsageSnapshot,
   getLocalSessionIdByRuntimeBinding,
+  recordUsageDelta,
   getRuntimeSessionBinding,
   getSessionById,
   setBackgroundRunStatus,
@@ -203,6 +205,18 @@ function stableSerialize(value: unknown): string {
 
 function currentMemoryConfig() {
   return getConfigSnapshot().config.runtime.memory;
+}
+
+function normalizeUsageDelta(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  return Math.round(value);
+}
+
+function normalizeCostDelta(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  return value;
 }
 
 export class OpencodeRuntime implements RuntimeEngine {
@@ -1917,7 +1931,27 @@ export class OpencodeRuntime implements RuntimeEngine {
       messages: imported,
       touchedAt: now,
     });
-    if (!synced || synced.inserted.length === 0) return;
+    if (!synced) return;
+
+    const entriesById = new Map(messages.map(entry => [entry.info.id, entry] as const));
+    for (const message of synced.inserted) {
+      if (message.role !== "assistant") continue;
+      const entry = entriesById.get(message.id);
+      if (!entry || entry.info.role !== "assistant") continue;
+
+      recordUsageDelta({
+        id: `assistant-message:${entry.info.id}`,
+        sessionId: localSessionId,
+        requestCountDelta: 1,
+        inputTokensDelta: normalizeUsageDelta(entry.info.tokens?.input),
+        outputTokensDelta: normalizeUsageDelta(entry.info.tokens?.output),
+        estimatedCostUsdDelta: normalizeCostDelta(entry.info.cost),
+        source: "runtime",
+        createdAt: entry.info.time?.completed ?? entry.info.time?.created ?? now,
+      });
+    }
+
+    if (synced.inserted.length === 0) return;
 
     for (const message of synced.inserted) {
       this.emit(
@@ -1931,6 +1965,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       );
     }
     this.emit(createSessionStateUpdatedEvent(synced.session, "runtime"));
+    this.emit(createUsageUpdatedEvent(getUsageSnapshot(), "runtime"));
   }
 
   private async syncMessageById(input: {

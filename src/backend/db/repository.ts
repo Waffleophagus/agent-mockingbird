@@ -718,6 +718,7 @@ export function getUsageSnapshot(): UsageSnapshot {
 }
 
 export function recordUsageDelta(input: {
+  id?: string;
   sessionId?: string;
   requestCountDelta: number;
   inputTokensDelta: number;
@@ -730,7 +731,7 @@ export function recordUsageDelta(input: {
   sqlite
     .query(
       `
-      INSERT INTO usage_events (
+      INSERT OR IGNORE INTO usage_events (
         id, session_id, request_count_delta, input_tokens_delta,
         output_tokens_delta, estimated_cost_usd_delta_micros, source, created_at
       )
@@ -738,7 +739,7 @@ export function recordUsageDelta(input: {
     `,
     )
     .run(
-      crypto.randomUUID(),
+      input.id ?? crypto.randomUUID(),
       input.sessionId ?? null,
       input.requestCountDelta,
       input.inputTokensDelta,
@@ -1815,6 +1816,7 @@ export function appendChatExchange(input: {
       .run(input.sessionId, eventAt);
 
     recordUsageDelta({
+      id: `assistant-message:${assistantMessage.id}`,
       sessionId: input.sessionId,
       requestCountDelta: input.usage.requestCountDelta,
       inputTokensDelta: input.usage.inputTokensDelta,
