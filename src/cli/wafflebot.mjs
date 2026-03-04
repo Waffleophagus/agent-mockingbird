@@ -1057,23 +1057,13 @@ async function restartOpencodeServiceForAuthRefresh() {
   };
 }
 
-async function fetchRuntimeProviderOptions() {
-  const models = await fetchRuntimeModelOptions();
-  const providers = new Map();
-  for (const model of models) {
-    const providerId = model.providerId?.trim() || (model.id.includes("/") ? model.id.split("/")[0] : "");
-    if (!providerId) continue;
-    const current = providers.get(providerId) ?? { providerId, count: 0 };
-    current.count += 1;
-    providers.set(providerId, current);
+function isValidHttpUrl(value) {
+  try {
+    const parsed = new globalThis.URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
   }
-  return [...providers.values()]
-    .sort((a, b) => a.providerId.localeCompare(b.providerId))
-    .map(provider => ({
-      value: provider.providerId,
-      label: provider.providerId,
-      hint: `${provider.count} discovered model${provider.count === 1 ? "" : "s"}`,
-    }));
 }
 
 function modelOptionSearchText(option) {
@@ -1429,7 +1419,6 @@ async function runInteractiveProviderOnboarding(input) {
     console.log(heading("Provider auth"));
     console.log(info("Current OpenCode credentials:"));
     shell(opencodeBin, ["auth", "list"], { stdio: "inherit" });
-    const discoveredProviders = await fetchRuntimeProviderOptions();
 
     while (true) {
       const selection = await promptSelect(
@@ -1440,11 +1429,10 @@ async function runInteractiveProviderOnboarding(input) {
             label: "OpenCode interactive provider picker (recommended)",
             hint: "Lets OpenCode show supported providers directly",
           },
-          ...discoveredProviders,
           {
-            value: "__manual__",
-            label: "Enter provider slug manually",
-            hint: "Use when provider is not in the discovered list",
+            value: "__manual_url__",
+            label: "Enter provider auth URL manually",
+            hint: "Use when provider requires a custom auth endpoint URL",
           },
           {
             value: "__done__",
@@ -1460,18 +1448,23 @@ async function runInteractiveProviderOnboarding(input) {
       if (selection.value === "__picker__") {
         authAttempts += 1;
         result = shell(opencodeBin, ["auth", "login"], { stdio: "inherit" });
-      } else if (selection.value === "__manual__") {
-        const provider = (await promptText("Provider slug", "")).trim();
-        if (!provider) {
-          const continueChoice = await promptYesNo("No slug provided. Continue auth flow?", true);
+      } else if (selection.value === "__manual_url__") {
+        const providerUrl = (await promptText("Provider auth URL", "")).trim();
+        if (!providerUrl) {
+          const continueChoice = await promptYesNo("No URL provided. Continue auth flow?", true);
+          if (!continueChoice) break;
+          continue;
+        }
+        if (!isValidHttpUrl(providerUrl)) {
+          console.log(warn("Invalid URL. Enter a full http(s) URL, for example https://example.com."));
+          const continueChoice = await promptYesNo("Continue auth flow?", true);
           if (!continueChoice) break;
           continue;
         }
         authAttempts += 1;
-        result = shell(opencodeBin, ["auth", "login", provider], { stdio: "inherit" });
+        result = shell(opencodeBin, ["auth", "login", providerUrl], { stdio: "inherit" });
       } else {
-        authAttempts += 1;
-        result = shell(opencodeBin, ["auth", "login", selection.value], { stdio: "inherit" });
+        continue;
       }
 
       if (result.code === 0) {
