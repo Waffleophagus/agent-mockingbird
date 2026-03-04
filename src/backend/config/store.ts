@@ -267,6 +267,7 @@ function buildLegacyBootstrappedConfig() {
         defaultMaxAttempts: 3,
         defaultRetryBackoffMs: 30_000,
         retryBackoffCapMs: 3_600_000,
+        conditionalModuleTimeoutMs: 30_000,
       },
       queue: {
         enabled: true,

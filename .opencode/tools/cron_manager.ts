@@ -29,6 +29,7 @@ const runModeSchema = z.enum(["background", "conditional_agent", "agent"]);
 const payloadSchema = z.record(z.string(), z.unknown());
 
 const jobCreateSchema = z.object({
+  id: z.string().min(1).optional(),
   name: z.string().min(1),
   enabled: z.boolean().optional(),
   scheduleKind: scheduleKindSchema,
@@ -38,6 +39,8 @@ const jobCreateSchema = z.object({
   timezone: z.string().min(1).nullable().optional(),
   runMode: runModeSchema,
   handlerKey: z.string().min(1).nullable().optional(),
+  conditionModulePath: z.string().min(1).nullable().optional(),
+  conditionDescription: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
   agentModelOverride: z.string().min(1).nullable().optional(),
   maxAttempts: z.number().int().positive().optional(),
@@ -55,6 +58,8 @@ const jobPatchSchema = z.object({
   timezone: z.string().min(1).nullable().optional(),
   runMode: runModeSchema.optional(),
   handlerKey: z.string().min(1).nullable().optional(),
+  conditionModulePath: z.string().min(1).nullable().optional(),
+  conditionDescription: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
   agentModelOverride: z.string().min(1).nullable().optional(),
   maxAttempts: z.number().int().positive().optional(),
@@ -68,7 +73,11 @@ const argsSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("health") }),
   z.object({ action: z.literal("get_job"), jobId: z.string().min(1) }),
   z.object({ action: z.literal("create_job"), job: jobCreateSchema }),
+  z.object({ action: z.literal("upsert_job"), job: jobCreateSchema }),
   z.object({ action: z.literal("update_job"), jobId: z.string().min(1), patch: jobPatchSchema }),
+  z.object({ action: z.literal("enable_job"), jobId: z.string().min(1) }),
+  z.object({ action: z.literal("disable_job"), jobId: z.string().min(1) }),
+  z.object({ action: z.literal("describe_contract") }),
   z.object({ action: z.literal("delete_job"), jobId: z.string().min(1) }),
   z.object({ action: z.literal("run_job_now"), jobId: z.string().min(1) }),
   z.object({
@@ -88,7 +97,11 @@ export default tool({
       "health",
       "get_job",
       "create_job",
+      "upsert_job",
       "update_job",
+      "enable_job",
+      "disable_job",
+      "describe_contract",
       "delete_job",
       "run_job_now",
       "list_instances",
@@ -107,7 +120,11 @@ export default tool({
       | "health"
       | "get_job"
       | "create_job"
+      | "upsert_job"
       | "update_job"
+      | "enable_job"
+      | "disable_job"
+      | "describe_contract"
       | "delete_job"
       | "run_job_now"
       | "list_instances"

@@ -16,6 +16,8 @@ export interface CronJobDefinition {
   timezone: string | null;
   runMode: CronRunMode;
   handlerKey: string | null;
+  conditionModulePath: string | null;
+  conditionDescription: string | null;
   agentPromptTemplate: string | null;
   agentModelOverride: string | null;
   maxAttempts: number;
@@ -30,6 +32,7 @@ export interface CronJobInstance {
   id: string;
   jobDefinitionId: string;
   scheduledFor: string;
+  agentInvoked: boolean;
   state: CronJobState;
   attempt: number;
   nextAttemptAt: string | null;
@@ -75,6 +78,7 @@ export interface CronHealthSnapshot {
 }
 
 export interface CronJobCreateInput {
+  id?: string;
   name: string;
   enabled?: boolean;
   scheduleKind: CronScheduleKind;
@@ -84,6 +88,8 @@ export interface CronJobCreateInput {
   timezone?: string | null;
   runMode: CronRunMode;
   handlerKey?: string | null;
+  conditionModulePath?: string | null;
+  conditionDescription?: string | null;
   agentPromptTemplate?: string | null;
   agentModelOverride?: string | null;
   maxAttempts?: number;
@@ -101,6 +107,8 @@ export interface CronJobPatchInput {
   timezone?: string | null;
   runMode?: CronRunMode;
   handlerKey?: string | null;
+  conditionModulePath?: string | null;
+  conditionDescription?: string | null;
   agentPromptTemplate?: string | null;
   agentModelOverride?: string | null;
   maxAttempts?: number;
@@ -128,3 +136,14 @@ export interface CronHandlerResult {
 }
 
 export type CronHandler = (ctx: CronHandlerContext) => Promise<CronHandlerResult> | CronHandlerResult;
+
+export interface CronConditionalModuleContext {
+  nowMs: number;
+  payload: Record<string, unknown>;
+  job: CronJobDefinition;
+  instance: CronJobInstance;
+}
+
+export type CronConditionalModule = (
+  ctx: CronConditionalModuleContext,
+) => Promise<CronHandlerResult> | CronHandlerResult;

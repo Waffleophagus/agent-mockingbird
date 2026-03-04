@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCompactTimestamp, relativeFromIso } from "@/frontend/app/chatHelpers";
 import {
+  setCronJobEnabled,
   fetchCronHandlers,
   fetchCronHealth,
   fetchCronInstances,
@@ -20,6 +21,7 @@ import {
 } from "@/frontend/app/cronApi";
 
 type CronPageTab = "jobs" | "instances";
+type ConditionalAgentFilter = "all" | "invoked" | "not_invoked";
 
 function formatSchedule(job: CronJobDefinition): string {
   if (job.scheduleKind === "every" && job.everyMs) {
@@ -65,7 +67,29 @@ export function CronPage(props: CronPageProps) {
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [steps, setSteps] = useState<CronJobStep[]>([]);
   const [instanceFilterJobId, setInstanceFilterJobId] = useState<string>("");
+  const [conditionalAgentFilter, setConditionalAgentFilter] = useState<ConditionalAgentFilter>("all");
+  const [jobToggleBusyById, setJobToggleBusyById] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
+
+  async function toggleJobEnabled(job: CronJobDefinition) {
+    const nextEnabled = !job.enabled;
+    setJobToggleBusyById(current => ({ ...current, [job.id]: true }));
+    setError("");
+    try {
+      const updated = await setCronJobEnabled(job.id, nextEnabled);
+      setJobs(current => current.map(item => (item.id === updated.id ? updated : item)));
+      const healthData = await fetchCronHealth();
+      setHealth(healthData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update cron job");
+    } finally {
+      setJobToggleBusyById(current => {
+        const next = { ...current };
+        delete next[job.id];
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +162,13 @@ export function CronPage(props: CronPageProps) {
   }, [selectedInstanceId]);
 
   const jobById = new Map(jobs.map(job => [job.id, job]));
+  const visibleInstances = instances.filter(instance => {
+    if (conditionalAgentFilter === "all") return true;
+    const job = jobById.get(instance.jobDefinitionId);
+    if (!job || job.runMode !== "conditional_agent") return false;
+    if (conditionalAgentFilter === "invoked") return instance.agentInvoked;
+    return !instance.agentInvoked;
+  });
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
@@ -245,6 +276,16 @@ export function CronPage(props: CronPageProps) {
                       <Button
                         type="button"
                         size="sm"
+                        variant={job.enabled ? "outline" : "default"}
+                        className="h-7 px-2 text-[10px]"
+                        disabled={jobToggleBusyById[job.id] === true}
+                        onClick={() => void toggleJobEnabled(job)}
+                      >
+                        {jobToggleBusyById[job.id] ? "..." : job.enabled ? "Disable" : "Enable"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
                         variant="ghost"
                         className="h-7 w-7 p-0"
                         onClick={() => requestRemoveCronJob(job.id)}
@@ -257,6 +298,9 @@ export function CronPage(props: CronPageProps) {
                       <Badge variant="outline">{job.runMode}</Badge>
                       {job.handlerKey && (
                         <span className="truncate text-[10px]">{job.handlerKey}</span>
+                      )}
+                      {job.conditionModulePath && (
+                        <span className="truncate text-[10px]">{job.conditionModulePath}</span>
                       )}
                     </div>
                     {Object.keys(job.payload).length > 0 && (
@@ -281,9 +325,21 @@ export function CronPage(props: CronPageProps) {
                   <div key={job.id} className="space-y-2 rounded-md border border-border bg-muted/50 p-3">
                     <div className="flex items-center justify-between">
                       <h3 className="font-medium">{job.name}</h3>
-                      <Badge variant={job.enabled ? "success" : "outline"}>
-                        {job.enabled ? "enabled" : "disabled"}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={job.enabled ? "success" : "outline"}>
+                          {job.enabled ? "enabled" : "disabled"}
+                        </Badge>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={job.enabled ? "outline" : "default"}
+                          className="h-7 px-2 text-[10px]"
+                          disabled={jobToggleBusyById[job.id] === true}
+                          onClick={() => void toggleJobEnabled(job)}
+                        >
+                          {jobToggleBusyById[job.id] ? "..." : job.enabled ? "Disable" : "Enable"}
+                        </Button>
+                      </div>
                     </div>
                     <div className="grid gap-1 text-xs">
                       <div>
@@ -303,6 +359,17 @@ export function CronPage(props: CronPageProps) {
                       {job.handlerKey && (
                         <div>
                           <span className="text-muted-foreground">Handler:</span> {job.handlerKey}
+                        </div>
+                      )}
+                      {job.conditionModulePath && (
+                        <div>
+                          <span className="text-muted-foreground">Condition module:</span> {job.conditionModulePath}
+                        </div>
+                      )}
+                      {job.conditionDescription && (
+                        <div>
+                          <span className="text-muted-foreground">Condition summary:</span>{" "}
+                          {job.conditionDescription}
                         </div>
                       )}
                       {job.agentPromptTemplate && (
@@ -350,28 +417,39 @@ export function CronPage(props: CronPageProps) {
                 <CardTitle>Run Instances</CardTitle>
                 <CardDescription>View recent cron job executions and their status.</CardDescription>
               </div>
-              <select
-                value={instanceFilterJobId}
-                onChange={event => setInstanceFilterJobId(event.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="">All jobs</option>
-                {jobs.map(job => (
-                  <option key={job.id} value={job.id}>
-                    {job.name}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={instanceFilterJobId}
+                  onChange={event => setInstanceFilterJobId(event.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">All jobs</option>
+                  {jobs.map(job => (
+                    <option key={job.id} value={job.id}>
+                      {job.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={conditionalAgentFilter}
+                  onChange={event => setConditionalAgentFilter(event.target.value as ConditionalAgentFilter)}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="all">All outcomes</option>
+                  <option value="invoked">Conditional: agent invoked</option>
+                  <option value="not_invoked">Conditional: no agent invoke</option>
+                </select>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-4">
-              {instances.length === 0 && (
+              {visibleInstances.length === 0 && (
                 <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
                   No instances found.
                 </p>
               )}
-              {instances.map(instance => {
+              {visibleInstances.map(instance => {
                 const job = jobById.get(instance.jobDefinitionId);
                 return (
                   <div
@@ -405,6 +483,12 @@ export function CronPage(props: CronPageProps) {
                         <span className="text-muted-foreground">Attempt:</span> {instance.attempt}/
                         {job?.maxAttempts ?? "?"}
                       </div>
+                      {job?.runMode === "conditional_agent" && (
+                        <div>
+                          <span className="text-muted-foreground">Agent invoked:</span>{" "}
+                          {instance.agentInvoked ? "yes" : "no"}
+                        </div>
+                      )}
                       {instance.resultSummary && (
                         <div>
                           <span className="text-muted-foreground">Result:</span> {instance.resultSummary}

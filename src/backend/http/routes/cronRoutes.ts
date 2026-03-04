@@ -154,11 +154,38 @@ export function createCronRoutes(cronService: CronService) {
                 { ok: true, action: command.action, job: await cronService.createJob(command.job) },
                 { status: 201 },
               );
+            case "upsert_job": {
+              const upserted = await cronService.upsertJob(command.job);
+              return Response.json({
+                ok: true,
+                action: command.action,
+                created: upserted.created,
+                job: upserted.job,
+              });
+            }
             case "update_job":
               return Response.json({
                 ok: true,
                 action: command.action,
                 job: await cronService.updateJob(command.jobId, command.patch),
+              });
+            case "enable_job":
+              return Response.json({
+                ok: true,
+                action: command.action,
+                job: await cronService.updateJob(command.jobId, { enabled: true }),
+              });
+            case "disable_job":
+              return Response.json({
+                ok: true,
+                action: command.action,
+                job: await cronService.updateJob(command.jobId, { enabled: false }),
+              });
+            case "describe_contract":
+              return Response.json({
+                ok: true,
+                action: command.action,
+                contract: cronService.describeContract(),
               });
             case "delete_job":
               return Response.json({

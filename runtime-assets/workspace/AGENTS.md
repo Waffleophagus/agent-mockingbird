@@ -18,6 +18,17 @@ Use workspace skills from `.agents/skills` when relevant:
 - `memory-ops` for memory status/sync/reindex/retrieval validation.
 - `cron-manager` for cron job lifecycle operations.
 
+## Cron Behavior
+
+When using cron tools:
+
+1. Start with `cron_manager` `action: "describe_contract"` for current mode requirements.
+2. Prefer `action: "upsert_job"` with explicit `job.id` for idempotent job management.
+3. For `conditional_agent`, use `conditionModulePath` (workspace module file) and include `conditionDescription` for the Job Details summary. Do not use `handlerKey`.
+4. Use `agentPromptTemplate` as optional fallback prompt; per-run overrides can come from `invokeAgent.prompt`.
+5. Use `run_job_now` + `list_instances` + `list_steps` to validate behavior after create/update.
+6. Use `disable_job` to pause without deleting, and `enable_job` to resume.
+
 ## Memory Behavior
 
 Durable memory lives in workspace markdown (`MEMORY.md` and `memory/*.md`).

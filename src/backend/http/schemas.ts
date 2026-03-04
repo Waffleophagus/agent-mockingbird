@@ -5,6 +5,7 @@ const cronRunModeSchema = z.enum(["background", "conditional_agent", "agent"]);
 const cronPayloadSchema = z.record(z.string(), z.unknown());
 
 const cronJobCreateSchema = z.object({
+  id: z.string().min(1).optional(),
   name: z.string().min(1),
   enabled: z.boolean().optional(),
   scheduleKind: cronScheduleKindSchema,
@@ -14,6 +15,8 @@ const cronJobCreateSchema = z.object({
   timezone: z.string().min(1).nullable().optional(),
   runMode: cronRunModeSchema,
   handlerKey: z.string().min(1).nullable().optional(),
+  conditionModulePath: z.string().min(1).nullable().optional(),
+  conditionDescription: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
   agentModelOverride: z.string().min(1).nullable().optional(),
   maxAttempts: z.coerce.number().int().positive().optional(),
@@ -31,6 +34,8 @@ const cronJobPatchSchema = z.object({
   timezone: z.string().min(1).nullable().optional(),
   runMode: cronRunModeSchema.optional(),
   handlerKey: z.string().min(1).nullable().optional(),
+  conditionModulePath: z.string().min(1).nullable().optional(),
+  conditionDescription: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
   agentModelOverride: z.string().min(1).nullable().optional(),
   maxAttempts: z.coerce.number().int().positive().optional(),
@@ -44,7 +49,11 @@ const cronManageSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("health") }),
   z.object({ action: z.literal("get_job"), jobId: z.string().min(1) }),
   z.object({ action: z.literal("create_job"), job: cronJobCreateSchema }),
+  z.object({ action: z.literal("upsert_job"), job: cronJobCreateSchema }),
   z.object({ action: z.literal("update_job"), jobId: z.string().min(1), patch: cronJobPatchSchema }),
+  z.object({ action: z.literal("enable_job"), jobId: z.string().min(1) }),
+  z.object({ action: z.literal("disable_job"), jobId: z.string().min(1) }),
+  z.object({ action: z.literal("describe_contract") }),
   z.object({ action: z.literal("delete_job"), jobId: z.string().min(1) }),
   z.object({ action: z.literal("run_job_now"), jobId: z.string().min(1) }),
   z.object({

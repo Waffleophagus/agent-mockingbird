@@ -1,5 +1,10 @@
 import { sqlite } from "../db/client";
 
+function tableHasColumn(tableName: string, columnName: string): boolean {
+  const columns = sqlite.query(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: unknown }>;
+  return columns.some(column => column.name === columnName);
+}
+
 export function ensureCronTables() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS cron_job_definitions (
@@ -13,6 +18,8 @@ export function ensureCronTables() {
       timezone TEXT,
       run_mode TEXT NOT NULL CHECK (run_mode IN ('background', 'conditional_agent', 'agent')),
       handler_key TEXT,
+      condition_module_path TEXT,
+      condition_description TEXT,
       agent_prompt_template TEXT,
       agent_model_override TEXT,
       max_attempts INTEGER NOT NULL DEFAULT 3,
@@ -64,6 +71,13 @@ export function ensureCronTables() {
     CREATE INDEX IF NOT EXISTS cron_job_steps_instance_idx
       ON cron_job_steps(job_instance_id, created_at ASC);
   `);
+
+  if (!tableHasColumn("cron_job_definitions", "condition_module_path")) {
+    sqlite.exec("ALTER TABLE cron_job_definitions ADD COLUMN condition_module_path TEXT");
+  }
+  if (!tableHasColumn("cron_job_definitions", "condition_description")) {
+    sqlite.exec("ALTER TABLE cron_job_definitions ADD COLUMN condition_description TEXT");
+  }
 }
 
 export function clearCronTables() {

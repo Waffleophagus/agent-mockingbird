@@ -70,7 +70,8 @@
     "cron": {
       "defaultMaxAttempts": 3,
       "defaultRetryBackoffMs": 30000,
-      "retryBackoffCapMs": 3600000
+      "retryBackoffCapMs": 3600000,
+      "conditionalModuleTimeoutMs": 30000
     },
     "channels": {
       "signal": {

@@ -31,19 +31,10 @@ export async function syncHeartbeatJob(
     return;
   }
 
-  if (existingJob) {
-    await cronService.updateJob(jobId, {
-      everyMs,
-      payload: {
-        agentId,
-        sessionId: MAIN_SESSION_ID,
-      },
-    });
-    return;
-  }
-
-  await cronService.createJob({
+  await cronService.upsertJob({
+    id: jobId,
     name: `Heartbeat: ${agentId}`,
+    enabled: true,
     scheduleKind: "every",
     everyMs,
     runMode: "background",

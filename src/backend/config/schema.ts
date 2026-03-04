@@ -241,6 +241,7 @@ export const runtimeCronSchema = z
     defaultMaxAttempts: z.number().int().min(1).default(3),
     defaultRetryBackoffMs: z.number().int().min(1_000).default(30_000),
     retryBackoffCapMs: z.number().int().min(1_000).default(3_600_000),
+    conditionalModuleTimeoutMs: z.number().int().min(1_000).max(300_000).default(30_000),
   })
   .strict();
 
@@ -422,6 +423,7 @@ export const wafflebotConfigSchema = z
           defaultMaxAttempts: 3,
           defaultRetryBackoffMs: 30_000,
           retryBackoffCapMs: 3_600_000,
+          conditionalModuleTimeoutMs: 30_000,
         }),
         queue: runtimeQueueSchema.default({
           enabled: true,

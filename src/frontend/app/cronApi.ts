@@ -40,6 +40,11 @@ interface DeleteJobResponse {
   error?: string;
 }
 
+interface UpdateJobResponse {
+  job: CronJobDefinition;
+  error?: string;
+}
+
 export async function fetchCronJobs(): Promise<CronJobDefinition[]> {
   const response = await fetch("/api/cron/jobs");
   const payload = (await response.json()) as CronJobsResponse;
@@ -67,6 +72,19 @@ export async function deleteCronJob(jobId: string): Promise<boolean> {
     throw new Error(payload.error ?? "Failed to delete cron job");
   }
   return payload.removed;
+}
+
+export async function setCronJobEnabled(jobId: string, enabled: boolean): Promise<CronJobDefinition> {
+  const response = await fetch(`/api/cron/jobs/${encodeURIComponent(jobId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  const payload = (await response.json()) as UpdateJobResponse;
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Failed to update cron job");
+  }
+  return payload.job;
 }
 
 export async function fetchCronInstances(

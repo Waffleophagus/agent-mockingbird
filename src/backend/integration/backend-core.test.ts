@@ -144,17 +144,22 @@ interface RuntimeStub {
 
 interface CronJobDefinitionLite {
   id: string;
+  name?: string;
+  everyMs?: number | null;
 }
 
 interface CronJobInstanceLite {
   id: string;
+  agentInvoked?: boolean;
   state: "queued" | "leased" | "running" | "completed" | "failed" | "dead";
   attempt: number;
 }
 
 interface CronServiceInstance {
   createJob: (input: {
+    id?: string;
     name: string;
+    enabled?: boolean;
     scheduleKind: "at" | "every" | "cron";
     scheduleExpr?: string | null;
     everyMs?: number | null;
@@ -162,13 +167,35 @@ interface CronServiceInstance {
     timezone?: string | null;
     runMode: "background" | "agent" | "conditional_agent";
     handlerKey?: string | null;
+    conditionModulePath?: string | null;
     agentPromptTemplate?: string | null;
     maxAttempts?: number;
     retryBackoffMs?: number;
     payload?: Record<string, unknown>;
   }) => Promise<CronJobDefinitionLite>;
+  upsertJob: (input: {
+    id: string;
+    name: string;
+    enabled?: boolean;
+    scheduleKind: "at" | "every" | "cron";
+    scheduleExpr?: string | null;
+    everyMs?: number | null;
+    atIso?: string | null;
+    timezone?: string | null;
+    runMode: "background" | "agent" | "conditional_agent";
+    handlerKey?: string | null;
+    conditionModulePath?: string | null;
+    agentPromptTemplate?: string | null;
+    maxAttempts?: number;
+    retryBackoffMs?: number;
+    payload?: Record<string, unknown>;
+  }) => Promise<{ created: boolean; job: CronJobDefinitionLite }>;
+  updateJob: (jobId: string, patch: { enabled?: boolean }) => Promise<{ enabled: boolean }>;
+  getJob: (jobId: string) => Promise<{ enabled: boolean } | null>;
   runJobNow: (jobId: string) => Promise<{ queued: boolean; instanceId: string | null }>;
+  listJobs: () => Promise<CronJobDefinitionLite[]>;
   listInstances: (input?: { jobId?: string; limit?: number }) => Promise<CronJobInstanceLite[]>;
+  listSteps: (instanceId: string) => Promise<Array<{ stepKind: string; status: string }>>;
 }
 
 type CronServiceCtor = new (runtime: RuntimeStub) => CronServiceInstance;
@@ -1368,17 +1395,18 @@ describe("cron validation and retries", () => {
         everyMs: 5_000,
         runMode: "conditional_agent",
       }),
-    ).rejects.toThrow("runMode=conditional_agent requires handlerKey");
+    ).rejects.toThrow("runMode=conditional_agent requires conditionModulePath");
 
     await expect(
       cronService.createJob({
-        name: "invalid-conditional-prompt",
+        name: "invalid-conditional-handler",
         scheduleKind: "every",
         everyMs: 5_000,
         runMode: "conditional_agent",
         handlerKey: "memory.maintenance",
+        conditionModulePath: "cron/check-stock.ts",
       }),
-    ).rejects.toThrow("runMode=conditional_agent requires agentPromptTemplate");
+    ).rejects.toThrow("runMode=conditional_agent does not allow handlerKey");
   });
 
   test("failed agent jobs transition from failed to dead after maxAttempts", async () => {
@@ -1416,6 +1444,152 @@ describe("cron validation and retries", () => {
     instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
     expect(instances[0]?.state).toBe("dead");
     expect(instances[0]?.attempt).toBe(2);
+  });
+
+  test("conditional_agent module can decide to invoke the agent with per-run context", async () => {
+    const captured: Array<{ content: string; sessionId: string }> = [];
+    const runtime = createRuntimeStub(async input => {
+      captured.push({ content: input.content, sessionId: input.sessionId });
+      return {
+        sessionId: input.sessionId,
+        messages: [{ id: "assistant-1", role: "assistant", content: "noted", at: new Date().toISOString() }],
+      };
+    });
+    const cronService = new CronService(runtime);
+
+    mkdirSync(path.join(testWorkspacePath, "cron"), { recursive: true });
+    writeFileSync(
+      path.join(testWorkspacePath, "cron", "stock-alert.ts"),
+      [
+        "export default async function run(ctx) {",
+        "  return {",
+        "    status: 'ok',",
+        "    summary: 'movement detected',",
+        "    invokeAgent: {",
+        "      shouldInvoke: true,",
+        "      prompt: 'Stock {{symbol}} moved {{movePct}}% in {{windowMin}}m',",
+        "      context: { symbol: ctx.payload.symbol, movePct: ctx.payload.movePct, windowMin: 10 },",
+        "    },",
+        "  };",
+        "}",
+      ].join("\n"),
+    );
+
+    const job = await cronService.createJob({
+      name: "stock-alert",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "conditional_agent",
+      conditionModulePath: "cron/stock-alert.ts",
+      payload: {
+        sessionId: "main",
+        symbol: "AAPL",
+        movePct: 3.4,
+      },
+    });
+
+    const queued = await cronService.runJobNow(job.id);
+    expect(queued.queued).toBe(true);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    const instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
+    expect(instances[0]?.state).toBe("completed");
+    expect(instances[0]?.agentInvoked).toBe(true);
+    expect(captured.length).toBe(1);
+    expect(captured[0]?.content).toContain("Stock AAPL moved 3.4% in 10m");
+    expect(captured[0]?.sessionId).toBe("main");
+
+    const instanceId = instances[0]?.id;
+    if (!instanceId) return;
+    const steps = await cronService.listSteps(instanceId);
+    expect(steps.some(step => step.stepKind === "conditional_agent" && step.status === "completed")).toBe(true);
+    expect(steps.some(step => step.stepKind === "agent" && step.status === "completed")).toBe(true);
+  });
+
+  test("upsertJob is idempotent for stable cron IDs", async () => {
+    const runtime = createRuntimeStub(async () => ({ sessionId: "main", messages: [] }));
+    const cronService = new CronService(runtime);
+
+    const first = await cronService.upsertJob({
+      id: "stable-stock-alert",
+      name: "stable-stock-alert",
+      scheduleKind: "every",
+      everyMs: 5_000,
+      runMode: "agent",
+      agentPromptTemplate: "Check status",
+    });
+    const second = await cronService.upsertJob({
+      id: "stable-stock-alert",
+      name: "stable-stock-alert-updated",
+      scheduleKind: "every",
+      everyMs: 15_000,
+      runMode: "agent",
+      agentPromptTemplate: "Check status",
+    });
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+
+    const jobs = await cronService.listJobs();
+    const matching = jobs.filter(job => job.id === "stable-stock-alert");
+    expect(matching.length).toBe(1);
+    expect(matching[0]?.name).toBe("stable-stock-alert-updated");
+    expect(matching[0]?.everyMs).toBe(15_000);
+  });
+
+  test("conditional_agent instance reports agentInvoked=false when no escalation occurs", async () => {
+    const runtime = createRuntimeStub(async () => ({ sessionId: "main", messages: [] }));
+    const cronService = new CronService(runtime);
+
+    mkdirSync(path.join(testWorkspacePath, "cron"), { recursive: true });
+    writeFileSync(
+      path.join(testWorkspacePath, "cron", "no-invoke.ts"),
+      [
+        "export default async function run() {",
+        "  return { status: 'ok', summary: 'no escalation', invokeAgent: { shouldInvoke: false } };",
+        "}",
+      ].join("\n"),
+    );
+
+    const job = await cronService.createJob({
+      name: "no-invoke",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "conditional_agent",
+      conditionModulePath: "cron/no-invoke.ts",
+      payload: { sessionId: "main" },
+    });
+
+    const queued = await cronService.runJobNow(job.id);
+    expect(queued.queued).toBe(true);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    const instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
+    expect(instances[0]?.state).toBe("completed");
+    expect(instances[0]?.agentInvoked).toBe(false);
+  });
+
+  test("jobs can be disabled and re-enabled without deletion", async () => {
+    const runtime = createRuntimeStub(async () => ({ sessionId: "main", messages: [] }));
+    const cronService = new CronService(runtime);
+
+    const job = await cronService.createJob({
+      name: "toggle-me",
+      scheduleKind: "every",
+      everyMs: 5_000,
+      runMode: "agent",
+      agentPromptTemplate: "noop",
+      enabled: true,
+    });
+
+    const disabled = await cronService.updateJob(job.id, { enabled: false });
+    expect(disabled.enabled).toBe(false);
+
+    const enabled = await cronService.updateJob(job.id, { enabled: true });
+    expect(enabled.enabled).toBe(true);
+
+    const fetched = await cronService.getJob(job.id);
+    expect(fetched?.enabled).toBe(true);
   });
 });
 
