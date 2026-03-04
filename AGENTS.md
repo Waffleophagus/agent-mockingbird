@@ -1,3 +1,5 @@
+THIS IS A NON-PRODUCTION APP Do not assume we need to make migrations or support old systems if we're doing large scale refactors. Assume we can make breaking changes as long as this is here, as there are no users other than me, the author, testing it. And all my tests get wiped when done. If we are making a newer better system, no need to support the old one at all.
+
 
 Default to using Bun instead of Node.js.
 
