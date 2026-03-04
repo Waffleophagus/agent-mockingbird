@@ -1409,6 +1409,8 @@ async function runInteractiveProviderOnboarding(input) {
   if (pathChoice.value === "skip") {
     return { status: "skipped", reason: "user-skip" };
   }
+  const modelOnly = pathChoice.value === "model-only";
+  const memoryOnly = pathChoice.value === "memory-only";
   const openclawOnly = pathChoice.value === "openclaw-only";
 
   let authAttempts = 0;
@@ -1488,9 +1490,9 @@ async function runInteractiveProviderOnboarding(input) {
     }
   }
 
-  const allowModelSetup = pathChoice.value !== "memory-only" && !openclawOnly;
+  const allowModelSetup = !memoryOnly && !openclawOnly;
   const setModelNow = allowModelSetup
-    ? await promptYesNo("Set runtime default model now?", true)
+    ? (modelOnly ? true : await promptYesNo("Set runtime default model now?", true))
     : false;
   let selectedModel = "";
   if (setModelNow) {
@@ -1528,10 +1530,11 @@ async function runInteractiveProviderOnboarding(input) {
     }
   }
 
-  const configureMemoryNow =
-    !openclawOnly
+  const configureMemoryNow = memoryOnly
+    ? true
+    : (!modelOnly && !openclawOnly
       ? await promptYesNo("Configure memory embedding model (Ollama) now?", true)
-      : false;
+      : false);
   let memoryEmbedding = null;
   if (configureMemoryNow) {
     const currentMemory = await fetchRuntimeMemoryConfig();
@@ -1636,8 +1639,11 @@ async function runInteractiveProviderOnboarding(input) {
   }
 
   let openclawMigration = null;
-  const runMigration =
-    openclawOnly ? true : await promptYesNo("Import an OpenClaw workspace now?", false);
+  const runMigration = openclawOnly
+    ? true
+    : (!modelOnly && !memoryOnly
+      ? await promptYesNo("Import an OpenClaw workspace now?", false)
+      : false);
   if (runMigration) {
     try {
       openclawMigration = await runOpenclawMigrationWizard();
@@ -1650,7 +1656,11 @@ async function runInteractiveProviderOnboarding(input) {
       console.log(warn(`OpenClaw migration failed: ${openclawMigration.error}`));
     }
   } else {
-    openclawMigration = { attempted: false, skipped: true, reason: "user-skip" };
+    openclawMigration = {
+      attempted: false,
+      skipped: true,
+      reason: modelOnly || memoryOnly ? "flow-skip" : "user-skip",
+    };
   }
 
   return {
