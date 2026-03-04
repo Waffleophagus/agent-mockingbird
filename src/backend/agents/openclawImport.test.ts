@@ -42,7 +42,7 @@ test("migrate copies supported workspace files and maps skills into .agents/skil
   expect(readFileSync(path.join(targetDir, "scripts", "sync.sh"), "utf8")).toContain("usr/bin/env bash");
 });
 
-test("migrate merges markdown conflicts while removing openclaw-specific lines", async () => {
+test("migrate keeps existing AGENTS.md when smart merge is unavailable", async () => {
   const { sourceDir, targetDir } = makePaths();
   writeFileSync(path.join(sourceDir, "AGENTS.md"), "# OpenClaw Instructions\nUse OpenClaw auth\nGeneral rule\n", "utf8");
   writeFileSync(path.join(targetDir, "AGENTS.md"), "# Wafflebot Instructions\nKeep this\n", "utf8");
@@ -52,11 +52,70 @@ test("migrate merges markdown conflicts while removing openclaw-specific lines",
     targetDirectory: targetDir,
   });
 
-  expect(migrated.summary.merged).toBe(1);
-  const merged = readFileSync(path.join(targetDir, "AGENTS.md"), "utf8");
-  expect(merged).toContain("Wafflebot Instructions");
-  expect(merged).toContain("General rule");
-  expect(merged.toLowerCase()).not.toContain("openclaw");
+  expect(migrated.summary.merged).toBe(0);
+  expect(migrated.summary.skippedExisting).toBe(1);
+  expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toBe("# Wafflebot Instructions\nKeep this\n");
+});
+
+test("migrate maps CLAUDE.md into AGENTS.md when source AGENTS.md is absent", async () => {
+  const { sourceDir, targetDir } = makePaths();
+  writeFileSync(path.join(sourceDir, "CLAUDE.md"), "# CLAUDE\nConverted guidance\n", "utf8");
+
+  const migrated = await migrateOpenclawWorkspace({
+    source: { mode: "local", path: sourceDir },
+    targetDirectory: targetDir,
+  });
+
+  expect(migrated.summary.copied).toBe(1);
+  expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toContain("Converted guidance");
+  expect(migrated.warnings.some(line => line.includes("Mapped CLAUDE.md to AGENTS.md"))).toBe(true);
+});
+
+test("migrate does not map CLAUDE.md when source AGENTS.md exists", async () => {
+  const { sourceDir, targetDir } = makePaths();
+  writeFileSync(path.join(sourceDir, "AGENTS.md"), "# Agents source\n", "utf8");
+  writeFileSync(path.join(sourceDir, "CLAUDE.md"), "# Claude source\n", "utf8");
+
+  await migrateOpenclawWorkspace({
+    source: { mode: "local", path: sourceDir },
+    targetDirectory: targetDir,
+  });
+
+  expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toContain("Agents source");
+  expect(readFileSync(path.join(targetDir, "CLAUDE.md"), "utf8")).toContain("Claude source");
+});
+
+test("migrate copies missing memory day files wholesale", async () => {
+  const { sourceDir, targetDir } = makePaths();
+  mkdirSync(path.join(sourceDir, "memory"), { recursive: true });
+  writeFileSync(path.join(sourceDir, "memory", "2026-03-04.md"), "# Memory\nCurrent events and notes\n", "utf8");
+
+  const migrated = await migrateOpenclawWorkspace({
+    source: { mode: "local", path: sourceDir },
+    targetDirectory: targetDir,
+  });
+
+  expect(migrated.summary.copied).toBe(1);
+  expect(readFileSync(path.join(targetDir, "memory", "2026-03-04.md"), "utf8")).toBe(
+    "# Memory\nCurrent events and notes\n",
+  );
+});
+
+test("migrate keeps existing non-AGENTS conflicts instead of line-merging", async () => {
+  const { sourceDir, targetDir } = makePaths();
+  mkdirSync(path.join(sourceDir, "memory"), { recursive: true });
+  mkdirSync(path.join(targetDir, "memory"), { recursive: true });
+  writeFileSync(path.join(sourceDir, "memory", "notes.md"), "# Source\nnew note\n", "utf8");
+  writeFileSync(path.join(targetDir, "memory", "notes.md"), "# Target\nexisting note\n", "utf8");
+
+  const migrated = await migrateOpenclawWorkspace({
+    source: { mode: "local", path: sourceDir },
+    targetDirectory: targetDir,
+  });
+
+  expect(migrated.summary.merged).toBe(0);
+  expect(migrated.summary.skippedExisting).toBe(1);
+  expect(readFileSync(path.join(targetDir, "memory", "notes.md"), "utf8")).toBe("# Target\nexisting note\n");
 });
 
 test("migrate skips protected .opencode paths", async () => {

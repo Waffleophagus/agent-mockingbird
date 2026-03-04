@@ -256,13 +256,18 @@ Behavior:
     - Local source: `{ "source": { "mode": "local", "path": "/path/to/openclaw/workspace" } }`
     - Git source: `{ "source": { "mode": "git", "url": "git@github.com:you/openclaw-memory.git", "ref": "main" } }`
   - Optional: `targetDirectory`
-  - Performs one-shot migration (copy new files, merge markdown conflicts, preserve protected Wafflebot runtime files).
+  - Performs one-shot migration with conflict rules:
+    - Missing target path: copy source file wholesale.
+    - Existing target path: keep target by default.
+    - `AGENTS.md` conflicts: attempt model-assisted rewrite/merge; if unavailable/invalid, keep target.
+    - Compatibility bridge: if source has no `AGENTS.md` but has `CLAUDE.md`, importer maps `CLAUDE.md -> AGENTS.md` during migration.
+  - Preserves protected Wafflebot runtime files and triggers a memory index sync after import.
 
 CLI migration UX is now integrated into `wafflebot onboard`:
 
 - Choose onboarding path: `quickstart`, `model-only`, `memory-only`, `openclaw-only`, or `skip`.
 - OpenClaw migration runs through an onboarding wizard (git clone or local folder source).
-- Conflict files go through a model-assisted merge pass via OpenCode (with deterministic fallback), using OpenClaw/OpenCode reference context.
+- `AGENTS.md` conflicts go through a model-assisted rewrite/merge pass via OpenCode; on failure, existing target content is kept.
 - If memory is enabled, onboarding runs memory sync after successful migration.
 - Legacy `wafflebot import openclaw ...` commands are removed.
 

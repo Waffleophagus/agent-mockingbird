@@ -36,6 +36,7 @@ import {
   resolveConfiguredMcpIds,
   resolveConfiguredMcpServers,
 } from "../../mcp/service";
+import { syncMemoryIndex } from "../../memory/service";
 import { parseStringListBody } from "../parsers";
 import type { RuntimeEventStream } from "../sse";
 
@@ -346,7 +347,22 @@ async function importOpenclawBootstrap(req: Request) {
           : { mode: "git", url: source.url, ref: source.ref },
       targetDirectory,
     });
-    return Response.json({ migration });
+    let memorySync: { attempted: boolean; completed: boolean; error?: string | null } = {
+      attempted: false,
+      completed: false,
+      error: null,
+    };
+    try {
+      await syncMemoryIndex();
+      memorySync = { attempted: true, completed: true, error: null };
+    } catch (error) {
+      memorySync = {
+        attempted: true,
+        completed: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    return Response.json({ migration, memorySync });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to import OpenClaw workspace files";
     return Response.json({ error: message }, { status: 422 });

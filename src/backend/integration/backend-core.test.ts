@@ -838,12 +838,17 @@ describe("config routes", () => {
       migration?: {
         copied?: Array<{ relativePath?: string }>;
         merged?: Array<{ relativePath?: string }>;
+        skippedExisting?: Array<{ relativePath?: string }>;
       };
+      memorySync?: { attempted?: boolean; completed?: boolean; error?: string | null };
     };
     expect(importPayload.migration?.copied?.some(file => file.relativePath === "memory/notes.md")).toBe(true);
-    expect(importPayload.migration?.merged?.some(file => file.relativePath === "AGENTS.md")).toBe(true);
+    expect(importPayload.migration?.merged?.some(file => file.relativePath === "AGENTS.md")).toBe(false);
+    expect(importPayload.migration?.skippedExisting?.some(file => file.relativePath === "AGENTS.md")).toBe(true);
     expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toContain("existing");
     expect(readFileSync(path.join(targetDir, "memory", "notes.md"), "utf8")).toContain("hello");
+    expect(importPayload.memorySync?.attempted).toBe(true);
+    expect(importPayload.memorySync?.completed).toBe(true);
   });
 
   test("POST /api/config/opencode/bootstrap/import-openclaw defaults target to workspace", async () => {
