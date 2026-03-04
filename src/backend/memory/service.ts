@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import { lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { buildConceptExpandedQueries } from "./conceptExpansion";
+import { blendRrfAndRerank, hasStrongBm25Signal, reciprocalRankFusion } from "./qmdPort";
 import {
   createMemoryRecord,
   extractRecordIdFromChunk,
@@ -9,8 +11,6 @@ import {
   parseMemoryRecordBlocks,
   parseMemoryRecords,
 } from "./records";
-import { buildConceptExpandedQueries } from "./conceptExpansion";
-import { blendRrfAndRerank, hasStrongBm25Signal, reciprocalRankFusion } from "./qmdPort";
 import { ensureSqliteVecLoaded, getSqliteVecState } from "./sqliteVec";
 import type {
   MemoryChunk,
