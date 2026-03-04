@@ -45,12 +45,16 @@ memory_search(query="daughter name")
 memory_search(query="Lucy Lee")
 memory_search(query="wife Tiffany")
 memory_search(query="who is my daughter Lucy")
+
+# broader adjacent lookup (portfolio -> metals/silver)
+memory_search(query="portfolio allocation metals silver")
+memory_search(query="investments including precious metals")
 ```
 
 If zero results:
 
-1. Retry with exact names (`Lucy Lee`, `Tiffany`).
-2. Retry with relation words (`daughter`, `wife`, `spouse`, `child`).
+1. Retry with exact entities (`Lucy Lee`, `Tiffany`, `silver`).
+2. Retry with relation/domain words (`daughter`, `wife`, `spouse`, `child`, `portfolio`, `metals`).
 3. Lower threshold once (`minScore=0.2`) for recall probe.
 4. If still empty, confirm memory was actually written and indexed.
 
@@ -109,7 +113,7 @@ Adjust usage accordingly — in `inject_only`, rely on existing memories in prom
 
 ## Anti-Patterns
 
-- **Don't** use only abstract terms like "family", "personal", "life" as first query
+- **Don't** use only abstract terms as your only query; follow with specific entities/adjacent terms
 - **Don't** memorize ephemeral state (current task progress, temp files)
 - **Don't** write memories for information already in code/docs
 - **Don't** create redundant memories — search first, then supersede

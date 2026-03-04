@@ -9,7 +9,8 @@ import {
   parseMemoryRecordBlocks,
   parseMemoryRecords,
 } from "./records";
-import { blendRrfAndRerank, hasStrongBm25Signal, reciprocalRankFusion, type ExpandedQuery } from "./qmdPort";
+import { buildConceptExpandedQueries } from "./conceptExpansion";
+import { blendRrfAndRerank, hasStrongBm25Signal, reciprocalRankFusion } from "./qmdPort";
 import { ensureSqliteVecLoaded, getSqliteVecState } from "./sqliteVec";
 import type {
   MemoryChunk,
@@ -1458,43 +1459,6 @@ function toRankedResults(scores: Map<string, number>, limit: number) {
     .slice(0, limit);
 }
 
-function buildFamilyExpansion(query: string): string[] {
-  const normalized = query.toLowerCase();
-  const terms = new Set<string>();
-  if (normalized.includes("family") || normalized.includes("relative")) {
-    terms.add("spouse wife husband partner");
-    terms.add("daughter son child children");
-    terms.add("parent parents mother father");
-    terms.add("siblings sister brother");
-  }
-  if (normalized.includes("daughter") || normalized.includes("child")) {
-    terms.add("daughter child children");
-  }
-  if (normalized.includes("wife") || normalized.includes("spouse") || normalized.includes("partner")) {
-    terms.add("wife spouse partner husband");
-  }
-  return [...terms];
-}
-
-function expandMemoryQuery(query: string): ExpandedQuery[] {
-  const expanded: ExpandedQuery[] = [];
-  const seen = new Set<string>([query.trim().toLowerCase()]);
-  const familyVariants = buildFamilyExpansion(query);
-  for (const variant of familyVariants) {
-    const key = variant.trim().toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    expanded.push({ type: "lex", text: variant });
-    expanded.push({ type: "vec", text: `${query} ${variant}`.trim() });
-  }
-  const hyde = `Information about ${query}`.trim();
-  const hydeKey = hyde.toLowerCase();
-  if (!seen.has(hydeKey)) {
-    expanded.push({ type: "hyde", text: hyde });
-  }
-  return expanded;
-}
-
 function searchTextCandidates(query: string, candidateLimit: number) {
   const ftsQuery = buildFtsQuery(query);
   if (!ftsQuery) return new Map<string, number>();
@@ -1606,6 +1570,8 @@ function mapCandidatesToResults(candidates: SearchCandidate[]): MemorySearchResu
 export interface MemorySearchDebug {
   engine: "legacy" | "qmd_hybrid";
   strongSignalSkippedExpansion: boolean;
+  matchedConceptPacks: string[];
+  semanticRescues: number;
   expansionQueries: Array<{ type: string; text: string }>;
   rankedLists: Array<{ name: string; count: number }>;
 }
@@ -1615,22 +1581,51 @@ function applyFinalFiltering(
   normalizedQuery: string,
   minScore: number,
   maxResults: number,
+  options?: {
+    expandedTokens?: string[];
+    semanticRescueEnabled?: boolean;
+    semanticRescueMinVectorScore?: number;
+    semanticRescueMaxResults?: number;
+  },
 ) {
   const queryTokens = collectQueryTokens(normalizedQuery);
+  const expandedTokens = new Set((options?.expandedTokens ?? []).map(token => token.toLowerCase()));
+  const allowedTokens = new Set<string>([...queryTokens, ...expandedTokens]);
   const recallIntent = isMemoryRecallIntentQuery(normalizedQuery);
   const memoryManagementQuery = isMemoryManagementQuery(normalizedQuery);
+  const semanticRescueEnabled = options?.semanticRescueEnabled === true;
+  const semanticRescueMinVectorScore = Math.max(0, Math.min(1, options?.semanticRescueMinVectorScore ?? 0));
+  const semanticRescueMaxResults = Math.max(0, options?.semanticRescueMaxResults ?? 0);
 
-  const filtered = candidates
+  const baseFiltered = candidates
     .filter(candidate => {
       if (!recallIntent && !memoryManagementQuery && isLikelyBoilerplateIndexCandidate(candidate)) {
         return false;
       }
-      if (recallIntent) return true;
-      return hasLexicalSignal(candidate, queryTokens);
+      return candidate.score >= minScore;
     })
-    .filter(candidate => candidate.score >= minScore);
+    .sort((a, b) => b.score - a.score);
 
-  return mmrRerank(filtered, maxResults);
+  if (recallIntent) {
+    return { candidates: mmrRerank(baseFiltered, maxResults), semanticRescues: 0 };
+  }
+
+  const lexical = baseFiltered.filter(candidate => hasLexicalSignal(candidate, allowedTokens));
+  if (!semanticRescueEnabled || semanticRescueMaxResults <= 0) {
+    return { candidates: mmrRerank(lexical, maxResults), semanticRescues: 0 };
+  }
+
+  const lexicalIds = new Set(lexical.map(candidate => candidate.id));
+  const rescued = baseFiltered
+    .filter(candidate => !lexicalIds.has(candidate.id))
+    .filter(candidate => candidate.vectorScore >= semanticRescueMinVectorScore)
+    .sort((a, b) => b.vectorScore - a.vectorScore)
+    .slice(0, semanticRescueMaxResults);
+  const merged = [...lexical, ...rescued];
+  return {
+    candidates: mmrRerank(merged, maxResults),
+    semanticRescues: rescued.length,
+  };
 }
 
 function loadSearchCandidates(
@@ -1692,12 +1687,16 @@ function runLegacySearch(
     const candidates = loadSearchCandidates(candidateIds, textScores, vectorScores);
     applyRecencyBoost(candidates);
     applyRecordStateAdjustments(candidates);
-    const filtered = applyFinalFiltering(candidates, normalizedQuery, minScore, maxResults);
+    const filtered = applyFinalFiltering(candidates, normalizedQuery, minScore, maxResults, {
+      semanticRescueEnabled: false,
+    });
     return {
-      results: mapCandidatesToResults(filtered),
+      results: mapCandidatesToResults(filtered.candidates),
       debug: {
         engine: "legacy",
         strongSignalSkippedExpansion: false,
+        matchedConceptPacks: [],
+        semanticRescues: 0,
         expansionQueries: [] as Array<{ type: string; text: string }>,
         rankedLists: [] as Array<{ name: string; count: number }>,
       },
@@ -1732,7 +1731,14 @@ async function runQmdHybridSearch(
     minGap: retrieval.strongSignalMinGap,
   });
 
-  const expandedQueries = hasStrongSignal || !retrieval.expansionEnabled ? [] : expandMemoryQuery(normalizedQuery);
+  const conceptExpansion = hasStrongSignal
+    ? { expandedQueries: [], expandedTokens: [], matchedConceptPacks: [] }
+    : buildConceptExpandedQueries(normalizedQuery, {
+        enabled: retrieval.expansionEnabled && retrieval.conceptExpansionEnabled,
+        maxPacks: retrieval.conceptExpansionMaxPacks,
+        maxTerms: retrieval.conceptExpansionMaxTerms,
+      });
+  const expandedQueries = conceptExpansion.expandedQueries;
   const rankedLists: Array<{ name: string; list: Array<{ id: string; score: number }> }> = [];
   const textScoreById = new Map(initialFtsScores);
   const vectorScoreById = new Map<string, number>();
@@ -1806,12 +1812,19 @@ async function runQmdHybridSearch(
     }
   }
 
-  const filtered = applyFinalFiltering(candidates, normalizedQuery, minScore, maxResults);
+  const filtered = applyFinalFiltering(candidates, normalizedQuery, minScore, maxResults, {
+    expandedTokens: conceptExpansion.expandedTokens,
+    semanticRescueEnabled: retrieval.semanticRescueEnabled,
+    semanticRescueMinVectorScore: retrieval.semanticRescueMinVectorScore,
+    semanticRescueMaxResults: retrieval.semanticRescueMaxResults,
+  });
   return {
-    results: mapCandidatesToResults(filtered),
+    results: mapCandidatesToResults(filtered.candidates),
     debug: {
       engine: "qmd_hybrid",
       strongSignalSkippedExpansion: hasStrongSignal,
+      matchedConceptPacks: conceptExpansion.matchedConceptPacks,
+      semanticRescues: filtered.semanticRescues,
       expansionQueries: expandedQueries,
       rankedLists: rankedLists.map(item => ({ name: item.name, count: item.list.length })),
     },
@@ -1829,6 +1842,8 @@ export async function searchMemoryDetailed(
       debug: {
         engine: memoryConfig.retrieval.engine,
         strongSignalSkippedExpansion: false,
+        matchedConceptPacks: [],
+        semanticRescues: 0,
         expansionQueries: [],
         rankedLists: [],
       },
@@ -1841,6 +1856,8 @@ export async function searchMemoryDetailed(
       debug: {
         engine: memoryConfig.retrieval.engine,
         strongSignalSkippedExpansion: false,
+        matchedConceptPacks: [],
+        semanticRescues: 0,
         expansionQueries: [],
         rankedLists: [],
       },

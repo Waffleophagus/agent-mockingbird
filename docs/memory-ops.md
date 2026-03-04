@@ -70,6 +70,12 @@ bun run memory:migrate-format
 - `runtime.memory.retrieval.engine`: `qmd_hybrid`
 - `runtime.memory.retrieval.strongSignalMinScore`: `0.85`
 - `runtime.memory.retrieval.strongSignalMinGap`: `0.15`
+- `runtime.memory.retrieval.conceptExpansionEnabled`: `true`
+- `runtime.memory.retrieval.conceptExpansionMaxPacks`: `3`
+- `runtime.memory.retrieval.conceptExpansionMaxTerms`: `10`
+- `runtime.memory.retrieval.semanticRescueEnabled`: `true`
+- `runtime.memory.retrieval.semanticRescueMinVectorScore`: `0.75`
+- `runtime.memory.retrieval.semanticRescueMaxResults`: `2`
 
 ## Failure Handling
 

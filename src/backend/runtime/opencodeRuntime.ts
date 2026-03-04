@@ -1240,6 +1240,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         "- Use memory_search when a request likely depends on prior durable context.",
         "- Prefer one search call first; then use memory_get only for the top 1-2 cited records before relying on details.",
         "- For people/relationships, use concrete terms (for example: daughter, spouse, partner, child, parent, names) instead of only generic words.",
+        "- For broad domains (for example: portfolio), run one adjacent-term refinement (for example: metals, silver, bonds, allocation) if the first search misses.",
         "- Skip memory tool calls for clearly self-contained tasks.",
         "- If the first memory_search misses, do one refined query with entity/relationship terms before concluding no memory exists.",
         "- Use memory_remember when new context could be useful later.",
