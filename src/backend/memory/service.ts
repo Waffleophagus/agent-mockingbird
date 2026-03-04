@@ -9,6 +9,8 @@ import {
   parseMemoryRecordBlocks,
   parseMemoryRecords,
 } from "./records";
+import { blendRrfAndRerank, hasStrongBm25Signal, reciprocalRankFusion, type ExpandedQuery } from "./qmdPort";
+import { ensureSqliteVecLoaded, getSqliteVecState } from "./sqliteVec";
 import type {
   MemoryChunk,
   MemoryLintReport,
@@ -51,6 +53,7 @@ interface MemoryFtsRow {
 
 interface MemoryRecordRow {
   id: string;
+  confidence: number;
   superseded_by: string | null;
 }
 
@@ -83,6 +86,7 @@ interface SearchCandidate {
 }
 
 const MEMORY_META_KEY = "memory_index_meta_v1";
+const MEMORY_VEC_META_KEY = "memory_vec_meta_v1";
 const SOURCE = "memory";
 const SNIPPET_MAX_CHARS = 700;
 const DEFAULT_CANDIDATE_LIMIT = 48;
@@ -90,6 +94,80 @@ const MMR_LAMBDA = 0.75;
 const VECTOR_PREFILTER_MIN = 200;
 const VECTOR_PREFILTER_MAX = 800;
 const SQLITE_IN_BIND_LIMIT = 900;
+const MEMORY_VEC_TABLE = "memory_chunks_vec";
+const SEARCH_TOKEN_RE = /[a-z0-9]{3,}/g;
+const RECALL_INTENT_RE = /\b(?:what\s+do\s+you\s+remember|remind\s+me|recall|from\s+memory|what\s+do\s+you\s+know\s+about\s+me)\b/i;
+const MEMORY_MANAGEMENT_RE = /\b(?:memory|remember|recall|note|save)\b/i;
+const STOPWORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "against",
+  "also",
+  "and",
+  "any",
+  "are",
+  "because",
+  "been",
+  "being",
+  "between",
+  "both",
+  "but",
+  "can",
+  "could",
+  "did",
+  "does",
+  "doing",
+  "dont",
+  "each",
+  "few",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "here",
+  "how",
+  "into",
+  "its",
+  "just",
+  "more",
+  "most",
+  "not",
+  "now",
+  "off",
+  "our",
+  "out",
+  "over",
+  "same",
+  "should",
+  "some",
+  "such",
+  "than",
+  "that",
+  "the",
+  "their",
+  "them",
+  "then",
+  "there",
+  "these",
+  "they",
+  "this",
+  "those",
+  "through",
+  "under",
+  "until",
+  "very",
+  "want",
+  "what",
+  "when",
+  "where",
+  "which",
+  "while",
+  "with",
+  "would",
+  "your",
+]);
 
 let schemaReady = false;
 let lastSyncMs = 0;
@@ -112,6 +190,13 @@ function resolveWorkspaceDir() {
 
 function normalizeRelPath(absPath: string) {
   return path.relative(resolveWorkspaceDir(), absPath).replaceAll(path.sep, "/");
+}
+
+function sqliteTableExists(name: string) {
+  const row = sqlite
+    .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1")
+    .get(name) as { name: string } | null;
+  return Boolean(row?.name);
 }
 
 function isMemoryPath(relPath: string) {
@@ -159,6 +244,54 @@ function cosineSimilarity(a: number[], b: number[]) {
 function clipSnippet(text: string, maxChars = SNIPPET_MAX_CHARS) {
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars).trimEnd()}…`;
+}
+
+function collectQueryTokens(text: string) {
+  const matched = text.toLowerCase().match(SEARCH_TOKEN_RE) ?? [];
+  return new Set(matched.filter(token => !STOPWORDS.has(token)));
+}
+
+function normalizeSnippetFromChunk(text: string) {
+  const structured = text.match(/^(###\s+\[memory:[^\n]+\])\n(?:meta:[^\n]*\n)?\n?([\s\S]*)$/i);
+  if (!structured) {
+    return clipSnippet(text);
+  }
+  const heading = structured[1]?.trim();
+  const body = structured[2]?.trim();
+  if (!heading || !body) {
+    return clipSnippet(text);
+  }
+  return clipSnippet(`${heading}\n${body}`);
+}
+
+function isMemoryRecallIntentQuery(query: string) {
+  return RECALL_INTENT_RE.test(query);
+}
+
+function isMemoryManagementQuery(query: string) {
+  return MEMORY_MANAGEMENT_RE.test(query);
+}
+
+function hasLexicalSignal(candidate: SearchCandidate, queryTokens: Set<string>) {
+  if (!queryTokens.size) return true;
+  const candidateTokens = collectQueryTokens(`${candidate.path}\n${candidate.text}`);
+  let overlap = 0;
+  for (const token of queryTokens) {
+    if (!candidateTokens.has(token)) continue;
+    overlap += 1;
+    if (overlap >= 2) return true;
+  }
+  return overlap >= 1 && candidate.score >= 0.55;
+}
+
+function isLikelyBoilerplateIndexCandidate(candidate: SearchCandidate) {
+  if (candidate.path.toLowerCase() !== "memory.md") return false;
+  const text = candidate.text.toLowerCase();
+  return (
+    text.includes("memory index") ||
+    text.includes("store durable notes") ||
+    text.includes("memory/*.md")
+  );
 }
 
 function normalizeRecordInput(input: MemoryRecordInput): MemoryRecordInput {
@@ -307,8 +440,107 @@ async function ensureWorkspaceScaffold() {
   }
 }
 
+function memoryIndexMeta() {
+  if (!sqliteTableExists("memory_meta")) return null;
+  const row = sqlite
+    .query("SELECT value_json FROM memory_meta WHERE key = ?1")
+    .get(MEMORY_META_KEY) as { value_json: string } | null;
+  if (!row?.value_json) return null;
+  try {
+    return JSON.parse(row.value_json) as {
+      provider?: string;
+      model?: string;
+      chunkTokens?: number;
+      chunkOverlap?: number;
+      indexedAt?: number;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function memoryVecMeta() {
+  if (!sqliteTableExists("memory_meta")) return null;
+  const row = sqlite
+    .query("SELECT value_json FROM memory_meta WHERE key = ?1")
+    .get(MEMORY_VEC_META_KEY) as { value_json: string } | null;
+  if (!row?.value_json) return null;
+  try {
+    return JSON.parse(row.value_json) as {
+      enabled?: boolean;
+      dims?: number;
+      model?: string;
+      provider?: string;
+      updatedAt?: number;
+      error?: string | null;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function vecTableInfo() {
+  return sqlite
+    .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1")
+    .get(MEMORY_VEC_TABLE) as { sql: string } | null;
+}
+
+function vecTableExists() {
+  return Boolean(vecTableInfo());
+}
+
+function vecTableDimensions() {
+  const info = vecTableInfo();
+  if (!info?.sql) return null;
+  const match = info.sql.match(/float\[(\d+)\]/);
+  if (!match?.[1]) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function recreateVecTableForDimensions(dims: number) {
+  sqlite.exec(`DROP TABLE IF EXISTS ${MEMORY_VEC_TABLE}`);
+  sqlite.exec(
+    `CREATE VIRTUAL TABLE ${MEMORY_VEC_TABLE} USING vec0(chunk_id TEXT PRIMARY KEY, embedding float[${dims}] distance_metric=cosine)`,
+  );
+}
+
+function ensureVecTableForDimensions(dims: number) {
+  if (!Number.isFinite(dims) || dims <= 0) return false;
+  const existingDims = vecTableDimensions();
+  if (existingDims === dims && vecTableExists()) {
+    return false;
+  }
+  recreateVecTableForDimensions(dims);
+  return true;
+}
+
+function deleteVecRowsByChunkIds(chunkIds: string[]) {
+  if (!chunkIds.length || !vecTableExists()) return;
+  const batches: string[][] = [];
+  for (let index = 0; index < chunkIds.length; index += SQLITE_IN_BIND_LIMIT) {
+    batches.push(chunkIds.slice(index, index + SQLITE_IN_BIND_LIMIT));
+  }
+  for (const batch of batches) {
+    if (!batch.length) continue;
+    sqlite
+      .query(`DELETE FROM ${MEMORY_VEC_TABLE} WHERE chunk_id IN (${batch.map(() => "?").join(", ")})`)
+      .run(...batch);
+  }
+}
+
+function upsertVecRows(rows: Array<{ chunkId: string; embedding: number[] }>) {
+  if (!rows.length || !vecTableExists()) return;
+  const insert = sqlite.query(`INSERT OR REPLACE INTO ${MEMORY_VEC_TABLE} (chunk_id, embedding) VALUES (?1, ?2)`);
+  for (const row of rows) {
+    if (!row.embedding.length) continue;
+    insert.run(row.chunkId, new Float32Array(row.embedding));
+  }
+}
+
 async function ensureSchema() {
   if (schemaReady) return;
+  await ensureSqliteVecLoaded(sqlite);
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS memory_meta (
       key TEXT PRIMARY KEY,
@@ -560,9 +792,32 @@ async function indexMemoryFile(filePath: string, options?: { force?: boolean }) 
           }),
         );
   const embeddings = await embedChunks(chunks);
+  const vecState = getSqliteVecState();
+  const retrievalConfig = memoryConfig.retrieval;
+  const sqliteVecWriteEnabled = retrievalConfig.vectorBackend === "sqlite_vec" && vecState.available;
+  const vecRows = chunks
+    .map((chunk, index) => ({ chunkId: chunk.id, embedding: embeddings[index] ?? [] }))
+    .filter(row => row.embedding.length > 0);
+  const vecDims = vecRows[0]?.embedding.length ?? 0;
+  if (sqliteVecWriteEnabled && vecDims > 0) {
+    ensureVecTableForDimensions(vecDims);
+  }
   const updatedAt = nowMs();
 
   const tx = sqlite.transaction(() => {
+    const existingChunkRows = sqlite
+      .query(
+        `
+        SELECT id
+        FROM memory_chunks
+        WHERE path = ?1
+      `,
+      )
+      .all(relPath) as Array<{ id: string }>;
+    if (sqliteVecWriteEnabled && existingChunkRows.length) {
+      deleteVecRowsByChunkIds(existingChunkRows.map(row => row.id));
+    }
+
     sqlite.query("DELETE FROM memory_chunks_fts WHERE path = ?1").run(relPath);
     sqlite.query("DELETE FROM memory_chunks WHERE path = ?1").run(relPath);
     sqlite.query("DELETE FROM memory_records WHERE path = ?1").run(relPath);
@@ -594,6 +849,9 @@ async function indexMemoryFile(filePath: string, options?: { force?: boolean }) 
         updatedAt,
       );
       insertFts.run(chunk.text, chunk.id, relPath, chunk.startLine, chunk.endLine, updatedAt);
+    }
+    if (sqliteVecWriteEnabled) {
+      upsertVecRows(vecRows);
     }
 
     const records = parseMemoryRecords(content);
@@ -666,6 +924,16 @@ async function pruneStaleFiles(activePaths: Set<string>) {
   const tx = sqlite.transaction(() => {
     for (const stale of staleRows) {
       if (activePaths.has(stale.path)) continue;
+      const chunkRows = sqlite
+        .query(
+          `
+          SELECT id
+          FROM memory_chunks
+          WHERE path = ?1
+        `,
+        )
+        .all(stale.path) as Array<{ id: string }>;
+      deleteVecRowsByChunkIds(chunkRows.map(row => row.id));
       sqlite.query("DELETE FROM memory_files WHERE path = ?1").run(stale.path);
       sqlite.query("DELETE FROM memory_chunks WHERE path = ?1").run(stale.path);
       sqlite.query("DELETE FROM memory_chunks_fts WHERE path = ?1").run(stale.path);
@@ -679,16 +947,27 @@ async function runSync(force = false) {
   const memoryConfig = currentMemoryConfig();
   await ensureWorkspaceScaffold();
   await ensureSchema();
+  const priorMeta = memoryIndexMeta();
+  const embeddingModelChanged =
+    priorMeta?.provider !== memoryConfig.embedProvider || priorMeta?.model !== memoryConfig.embedModel;
+  const effectiveForce = force || embeddingModelChanged;
+
+  if (effectiveForce && vecTableExists()) {
+    sqlite.exec(`DELETE FROM ${MEMORY_VEC_TABLE}`);
+  }
+
   const files = await listMemoryFiles();
   const activePaths = new Set<string>();
   for (const filePath of files) {
     const relPath = normalizeRelPath(filePath);
     if (!isMemoryPath(relPath)) continue;
     activePaths.add(relPath);
-    await indexMemoryFile(filePath, { force });
+    await indexMemoryFile(filePath, { force: effectiveForce });
   }
   await pruneStaleFiles(activePaths);
   const indexedAt = nowMs();
+  const vecState = getSqliteVecState();
+  const vecDims = vecTableDimensions();
   sqlite
     .query(
       `
@@ -705,6 +984,29 @@ async function runSync(force = false) {
         chunkTokens: memoryConfig.chunkTokens,
         chunkOverlap: memoryConfig.chunkOverlap,
         indexedAt,
+      }),
+    );
+  const vecRowCount = vecTableExists()
+    ? ((sqlite.query(`SELECT COUNT(*) as count FROM ${MEMORY_VEC_TABLE}`).get() as { count: number }).count ?? 0)
+    : 0;
+  sqlite
+    .query(
+      `
+      INSERT INTO memory_meta (key, value_json)
+      VALUES (?1, ?2)
+      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+    `,
+    )
+    .run(
+      MEMORY_VEC_META_KEY,
+      JSON.stringify({
+        enabled: memoryConfig.retrieval.vectorBackend === "sqlite_vec",
+        provider: memoryConfig.embedProvider,
+        model: memoryConfig.embedModel,
+        dims: vecDims,
+        count: vecRowCount,
+        error: vecState.error,
+        updatedAt: indexedAt,
       }),
     );
   lastSyncMs = indexedAt;
@@ -993,6 +1295,7 @@ export async function rememberMemory(
 }
 
 function parseUpdatedAtFromMeta(): number | null {
+  if (!sqliteTableExists("memory_meta")) return null;
   const row = sqlite
     .query("SELECT value_json FROM memory_meta WHERE key = ?1")
     .get(MEMORY_META_KEY) as { value_json: string } | null;
@@ -1020,30 +1323,122 @@ function selectRecentChunkIds(limit: number): string[] {
   return rows.map(row => row.id);
 }
 
-function searchVectorCandidates(queryVector: number[], candidateLimit: number, seedChunkIds: string[] = []) {
+function resolveVectorBackend() {
+  const memoryConfig = currentMemoryConfig();
+  const configured = memoryConfig.retrieval.vectorBackend;
+  const fallback = memoryConfig.retrieval.vectorUnavailableFallback;
+  const vecState = getSqliteVecState();
+  if (configured === "disabled") {
+    return {
+      configured,
+      active: "disabled" as const,
+      available: false,
+      error: null as string | null,
+    };
+  }
+  if (configured === "legacy_json") {
+    return {
+      configured,
+      active: "legacy_json" as const,
+      available: true,
+      error: null as string | null,
+    };
+  }
+  if (vecState.available) {
+    return {
+      configured,
+      active: "sqlite_vec" as const,
+      available: true,
+      error: null as string | null,
+    };
+  }
+  if (fallback === "legacy_json") {
+    return {
+      configured,
+      active: "legacy_json" as const,
+      available: false,
+      error: vecState.error,
+    };
+  }
+  return {
+    configured,
+    active: "disabled" as const,
+    available: false,
+    error: vecState.error,
+  };
+}
+
+function searchVectorCandidates(
+  queryVector: number[],
+  candidateLimit: number,
+  seedChunkIds: string[] = [],
+  options?: { exhaustive?: boolean },
+) {
   if (!queryVector.length) return new Map<string, number>();
+  const backend = resolveVectorBackend();
+  const memoryConfig = currentMemoryConfig();
+  if (backend.active === "disabled") return new Map<string, number>();
+  const hasVecTable = vecTableExists();
+  const useLegacyFallback =
+    backend.active === "sqlite_vec" && !hasVecTable && memoryConfig.retrieval.vectorUnavailableFallback === "legacy_json";
+  if (backend.active === "sqlite_vec" && hasVecTable) {
+    const probeLimit = Math.max(1, memoryConfig.retrieval.vectorProbeLimit);
+    const configuredK = Math.max(1, memoryConfig.retrieval.vectorK);
+    const queryK = Math.max(1, Math.max(candidateLimit, probeLimit, configuredK));
+    const rows = sqlite
+      .query(
+        `
+      SELECT chunk_id, distance
+      FROM ${MEMORY_VEC_TABLE}
+      WHERE embedding MATCH ?1
+        AND k = ?2
+    `,
+      )
+      .all(new Float32Array(queryVector), queryK) as Array<{ chunk_id: string; distance: number }>;
+    if (!rows.length) return new Map<string, number>();
+    const scored = rows
+      .map(row => ({
+        id: row.chunk_id,
+        score: Math.max(0, 1 / (1 + Math.max(0, Number(row.distance ?? 0)))),
+      }))
+      .filter(row => Number.isFinite(row.score) && row.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, candidateLimit);
+    return new Map(scored.map(row => [row.id, row.score]));
+  }
+  if (backend.active === "sqlite_vec" && !useLegacyFallback) {
+    return new Map<string, number>();
+  }
 
-  const prefilterLimit = Math.max(
-    VECTOR_PREFILTER_MIN,
-    Math.min(VECTOR_PREFILTER_MAX, candidateLimit * 12),
-  );
-  const prefilterIds = [...new Set([...seedChunkIds, ...selectRecentChunkIds(prefilterLimit)])].slice(
-    0,
-    SQLITE_IN_BIND_LIMIT,
-  );
-  if (!prefilterIds.length) return new Map<string, number>();
+  const exhaustive = options?.exhaustive === true;
+  const prefilterLimit = Math.max(VECTOR_PREFILTER_MIN, Math.min(VECTOR_PREFILTER_MAX, candidateLimit * 12));
+  const prefilterIds = exhaustive
+    ? []
+    : [...new Set([...seedChunkIds, ...selectRecentChunkIds(prefilterLimit)])].slice(0, SQLITE_IN_BIND_LIMIT);
 
-  const placeholders = prefilterIds.map(() => "?").join(", ");
-  const rows = sqlite
-    .query(
-      `
+  const rows = exhaustive
+    ? (sqlite
+        .query(
+          `
       SELECT id, embedding_json
       FROM memory_chunks
       WHERE embedding_json IS NOT NULL
-        AND id IN (${placeholders})
     `,
-    )
-    .all(...prefilterIds) as Array<{ id: string; embedding_json: string }>;
+        )
+        .all() as Array<{ id: string; embedding_json: string }>)
+    : prefilterIds.length
+      ? (sqlite
+          .query(
+            `
+      SELECT id, embedding_json
+      FROM memory_chunks
+      WHERE embedding_json IS NOT NULL
+        AND id IN (${prefilterIds.map(() => "?").join(", ")})
+    `,
+          )
+          .all(...prefilterIds) as Array<{ id: string; embedding_json: string }>)
+      : [];
+  if (!rows.length) return new Map<string, number>();
 
   const scored = rows
     .map(row => ({
@@ -1054,6 +1449,50 @@ function searchVectorCandidates(queryVector: number[], candidateLimit: number, s
     .sort((a, b) => b.score - a.score)
     .slice(0, candidateLimit);
   return new Map(scored.map(row => [row.id, row.score]));
+}
+
+function toRankedResults(scores: Map<string, number>, limit: number) {
+  return [...scores.entries()]
+    .map(([id, score]) => ({ id, score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+function buildFamilyExpansion(query: string): string[] {
+  const normalized = query.toLowerCase();
+  const terms = new Set<string>();
+  if (normalized.includes("family") || normalized.includes("relative")) {
+    terms.add("spouse wife husband partner");
+    terms.add("daughter son child children");
+    terms.add("parent parents mother father");
+    terms.add("siblings sister brother");
+  }
+  if (normalized.includes("daughter") || normalized.includes("child")) {
+    terms.add("daughter child children");
+  }
+  if (normalized.includes("wife") || normalized.includes("spouse") || normalized.includes("partner")) {
+    terms.add("wife spouse partner husband");
+  }
+  return [...terms];
+}
+
+function expandMemoryQuery(query: string): ExpandedQuery[] {
+  const expanded: ExpandedQuery[] = [];
+  const seen = new Set<string>([query.trim().toLowerCase()]);
+  const familyVariants = buildFamilyExpansion(query);
+  for (const variant of familyVariants) {
+    const key = variant.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    expanded.push({ type: "lex", text: variant });
+    expanded.push({ type: "vec", text: `${query} ${variant}`.trim() });
+  }
+  const hyde = `Information about ${query}`.trim();
+  const hydeKey = hyde.toLowerCase();
+  if (!seen.has(hydeKey)) {
+    expanded.push({ type: "hyde", text: hyde });
+  }
+  return expanded;
 }
 
 function searchTextCandidates(query: string, candidateLimit: number) {
@@ -1078,23 +1517,28 @@ function searchTextCandidates(query: string, candidateLimit: number) {
   return scores;
 }
 
-function applySupersededPenalty(candidates: SearchCandidate[]) {
+function applyRecordStateAdjustments(candidates: SearchCandidate[]) {
   const recordIds = [...new Set(candidates.map(candidate => candidate.recordId).filter((id): id is string => Boolean(id)))];
   if (!recordIds.length) return;
   const placeholders = recordIds.map(() => "?").join(", ");
   const rows = sqlite
     .query(
       `
-      SELECT id, superseded_by
+      SELECT id, confidence, superseded_by
       FROM memory_records
       WHERE id IN (${placeholders})
     `,
     )
     .all(...recordIds) as MemoryRecordRow[];
-  const superseded = new Set(rows.filter(row => row.superseded_by).map(row => row.id));
+  const rowById = new Map(rows.map(row => [row.id, row]));
   for (const candidate of candidates) {
-    if (candidate.recordId && superseded.has(candidate.recordId)) {
-      candidate.score = Math.max(0, candidate.score - 0.15);
+    if (!candidate.recordId) continue;
+    const row = rowById.get(candidate.recordId);
+    if (!row) continue;
+    const confidence = Math.max(0, Math.min(1, Number.isFinite(row.confidence) ? row.confidence : 0.75));
+    candidate.score *= 0.85 + 0.3 * confidence;
+    if (row.superseded_by) {
+      candidate.score = Math.max(0, candidate.score - 0.25);
     }
   }
 }
@@ -1104,7 +1548,7 @@ function applyRecencyBoost(candidates: SearchCandidate[]) {
   for (const candidate of candidates) {
     const ageDays = Math.max(0, (current - candidate.updatedAt) / (24 * 60 * 60 * 1000));
     const recency = 1 / (1 + ageDays / 14);
-    candidate.score += recency * 0.15;
+    candidate.score += recency * 0.08;
   }
 }
 
@@ -1146,35 +1590,56 @@ function mmrRerank(candidates: SearchCandidate[], maxResults: number) {
   return selected;
 }
 
-export async function searchMemory(query: string, options?: { maxResults?: number; minScore?: number }) {
-  const memoryConfig = currentMemoryConfig();
-  if (!memoryConfig.enabled) {
-    return [] as MemorySearchResult[];
-  }
-  const normalizedQuery = query.trim();
-  if (!normalizedQuery) {
-    return [] as MemorySearchResult[];
-  }
+function mapCandidatesToResults(candidates: SearchCandidate[]): MemorySearchResult[] {
+  return candidates.map(candidate => ({
+    id: candidate.id,
+    path: candidate.path,
+    startLine: candidate.startLine,
+    endLine: candidate.endLine,
+    source: "memory",
+    score: Number(candidate.score.toFixed(4)),
+    snippet: normalizeSnippetFromChunk(candidate.text),
+    citation: `${candidate.path}#L${candidate.startLine}`,
+  }));
+}
 
-  await ensureFreshIndex();
+export interface MemorySearchDebug {
+  engine: "legacy" | "qmd_hybrid";
+  strongSignalSkippedExpansion: boolean;
+  expansionQueries: Array<{ type: string; text: string }>;
+  rankedLists: Array<{ name: string; count: number }>;
+}
 
-  const maxResults = Math.max(1, options?.maxResults ?? memoryConfig.maxResults);
-  const minScore = Math.max(0, Math.min(1, options?.minScore ?? memoryConfig.minScore));
-  const candidateLimit = Math.max(maxResults * 6, DEFAULT_CANDIDATE_LIMIT);
+function applyFinalFiltering(
+  candidates: SearchCandidate[],
+  normalizedQuery: string,
+  minScore: number,
+  maxResults: number,
+) {
+  const queryTokens = collectQueryTokens(normalizedQuery);
+  const recallIntent = isMemoryRecallIntentQuery(normalizedQuery);
+  const memoryManagementQuery = isMemoryManagementQuery(normalizedQuery);
 
-  let queryVector: number[] = [];
-  try {
-    const vectors = await embedTexts([normalizedQuery]);
-    queryVector = vectors[0] ?? [];
-  } catch {
-    queryVector = [];
-  }
+  const filtered = candidates
+    .filter(candidate => {
+      if (!recallIntent && !memoryManagementQuery && isLikelyBoilerplateIndexCandidate(candidate)) {
+        return false;
+      }
+      if (recallIntent) return true;
+      return hasLexicalSignal(candidate, queryTokens);
+    })
+    .filter(candidate => candidate.score >= minScore);
 
-  const textScores = searchTextCandidates(normalizedQuery, candidateLimit);
-  const vectorScores = searchVectorCandidates(queryVector, candidateLimit, [...textScores.keys()]);
-  const candidateIds = [...new Set([...vectorScores.keys(), ...textScores.keys()])];
-  if (!candidateIds.length) return [] as MemorySearchResult[];
+  return mmrRerank(filtered, maxResults);
+}
 
+function loadSearchCandidates(
+  candidateIds: string[],
+  textScores: Map<string, number>,
+  vectorScores: Map<string, number>,
+  baseScoreById?: Map<string, number>,
+) {
+  if (!candidateIds.length) return [] as SearchCandidate[];
   const placeholders = candidateIds.map(() => "?").join(", ");
   const chunkRows = sqlite
     .query(
@@ -1186,10 +1651,10 @@ export async function searchMemory(query: string, options?: { maxResults?: numbe
     )
     .all(...candidateIds) as MemoryChunkRow[];
 
-  const candidates: SearchCandidate[] = chunkRows.map(row => {
+  return chunkRows.map(row => {
     const vectorScore = vectorScores.get(row.id) ?? 0;
     const textScore = textScores.get(row.id) ?? 0;
-    const hybrid = 0.72 * vectorScore + 0.28 * textScore;
+    const fallbackHybrid = 0.72 * vectorScore + 0.28 * textScore;
     const embedding = parseEmbedding(row.embedding_json);
     return {
       id: row.id,
@@ -1200,28 +1665,201 @@ export async function searchMemory(query: string, options?: { maxResults?: numbe
       embedding: embedding.length ? embedding : null,
       vectorScore,
       textScore,
-      score: hybrid,
+      score: baseScoreById?.get(row.id) ?? fallbackHybrid,
       updatedAt: row.updated_at,
       recordId: extractRecordIdFromChunk(row.text),
     };
   });
+}
 
+function runLegacySearch(
+  normalizedQuery: string,
+  maxResults: number,
+  minScore: number,
+): Promise<{ results: MemorySearchResult[]; debug: MemorySearchDebug }> {
+  const candidateLimit = Math.max(maxResults * 6, DEFAULT_CANDIDATE_LIMIT);
+  return (async () => {
+    let queryVector: number[] = [];
+    try {
+      const vectors = await embedTexts([normalizedQuery]);
+      queryVector = vectors[0] ?? [];
+    } catch {
+      queryVector = [];
+    }
+    const textScores = searchTextCandidates(normalizedQuery, candidateLimit);
+    const vectorScores = searchVectorCandidates(queryVector, candidateLimit, [...textScores.keys()]);
+    const candidateIds = [...new Set([...vectorScores.keys(), ...textScores.keys()])];
+    const candidates = loadSearchCandidates(candidateIds, textScores, vectorScores);
+    applyRecencyBoost(candidates);
+    applyRecordStateAdjustments(candidates);
+    const filtered = applyFinalFiltering(candidates, normalizedQuery, minScore, maxResults);
+    return {
+      results: mapCandidatesToResults(filtered),
+      debug: {
+        engine: "legacy",
+        strongSignalSkippedExpansion: false,
+        expansionQueries: [] as Array<{ type: string; text: string }>,
+        rankedLists: [] as Array<{ name: string; count: number }>,
+      },
+    };
+  })();
+}
+
+function rerankScoreFromOverlap(candidate: SearchCandidate, queryTokens: Set<string>) {
+  if (!queryTokens.size) return candidate.score;
+  const candidateTokens = collectQueryTokens(candidate.text);
+  let overlap = 0;
+  for (const token of queryTokens) {
+    if (candidateTokens.has(token)) overlap += 1;
+  }
+  const overlapScore = overlap / Math.max(1, queryTokens.size);
+  return Math.max(overlapScore, candidate.textScore, candidate.vectorScore);
+}
+
+async function runQmdHybridSearch(
+  normalizedQuery: string,
+  maxResults: number,
+  minScore: number,
+): Promise<{ results: MemorySearchResult[]; debug: MemorySearchDebug }> {
+  const memoryConfig = currentMemoryConfig();
+  const retrieval = memoryConfig.retrieval;
+  const candidateLimit = Math.max(maxResults * 6, retrieval.candidateLimit);
+
+  const initialFtsScores = searchTextCandidates(normalizedQuery, 20);
+  const initialFts = toRankedResults(initialFtsScores, 20);
+  const hasStrongSignal = hasStrongBm25Signal(initialFts, {
+    minScore: retrieval.strongSignalMinScore,
+    minGap: retrieval.strongSignalMinGap,
+  });
+
+  const expandedQueries = hasStrongSignal || !retrieval.expansionEnabled ? [] : expandMemoryQuery(normalizedQuery);
+  const rankedLists: Array<{ name: string; list: Array<{ id: string; score: number }> }> = [];
+  const textScoreById = new Map(initialFtsScores);
+  const vectorScoreById = new Map<string, number>();
+
+  if (initialFts.length) {
+    rankedLists.push({ name: "fts:original", list: initialFts });
+  }
+
+  const vectorQueries = [{ type: "vec", text: normalizedQuery }, ...expandedQueries.filter(q => q.type !== "lex")];
+  const vectorTexts = vectorQueries.map(entry => entry.text);
+  let queryVectors: number[][] = [];
+  try {
+    queryVectors = vectorTexts.length ? await embedTexts(vectorTexts) : [];
+  } catch {
+    queryVectors = [];
+  }
+
+  const exhaustiveVector = initialFts.length === 0;
+  for (let index = 0; index < vectorQueries.length; index += 1) {
+    const queryEntry = vectorQueries[index];
+    const vector = queryVectors[index] ?? [];
+    const scores = searchVectorCandidates(vector, 20, [...initialFtsScores.keys()], { exhaustive: exhaustiveVector });
+    if (!scores.size) continue;
+    for (const [id, score] of scores.entries()) {
+      const existing = vectorScoreById.get(id) ?? 0;
+      if (score > existing) vectorScoreById.set(id, score);
+    }
+    rankedLists.push({
+      name: `${queryEntry?.type ?? "vec"}:${index === 0 ? "original" : "expanded"}`,
+      list: toRankedResults(scores, 20),
+    });
+  }
+
+  for (const expansion of expandedQueries) {
+    if (expansion.type !== "lex") continue;
+    const lexScores = searchTextCandidates(expansion.text, 20);
+    if (!lexScores.size) continue;
+    for (const [id, score] of lexScores.entries()) {
+      const existing = textScoreById.get(id) ?? 0;
+      if (score > existing) textScoreById.set(id, score);
+    }
+    rankedLists.push({
+      name: "fts:lex-expanded",
+      list: toRankedResults(lexScores, 20),
+    });
+  }
+
+  const fused = reciprocalRankFusion(
+    rankedLists.map(item => item.list),
+    rankedLists.map((_, index) => (index < 2 ? 2 : 1)),
+    retrieval.rrfK,
+  );
+
+  const candidateIds = fused.slice(0, candidateLimit).map(entry => entry.id);
+  const baseScoreById = new Map(fused.map(entry => [entry.id, entry.score]));
+  const candidates = loadSearchCandidates(candidateIds, textScoreById, vectorScoreById, baseScoreById);
   applyRecencyBoost(candidates);
-  applySupersededPenalty(candidates);
+  applyRecordStateAdjustments(candidates);
 
-  const filtered = candidates.filter(candidate => candidate.score >= minScore);
-  const reranked = mmrRerank(filtered, maxResults);
+  if (retrieval.rerankEnabled && candidates.length) {
+    const queryTokens = collectQueryTokens(normalizedQuery);
+    const rankById = new Map(candidateIds.map((id, index) => [id, index + 1]));
+    const rerankLimit = Math.max(1, Math.min(candidates.length, retrieval.rerankTopN));
+    const sorted = [...candidates].sort((a, b) => b.score - a.score);
+    for (let index = 0; index < rerankLimit; index += 1) {
+      const candidate = sorted[index];
+      if (!candidate) continue;
+      const rerankScore = rerankScoreFromOverlap(candidate, queryTokens);
+      const rank = rankById.get(candidate.id) ?? index + 1;
+      candidate.score = blendRrfAndRerank(rank, rerankScore);
+    }
+  }
 
-  return reranked.map(candidate => ({
-    id: candidate.id,
-    path: candidate.path,
-    startLine: candidate.startLine,
-    endLine: candidate.endLine,
-    source: "memory",
-    score: Number(candidate.score.toFixed(4)),
-    snippet: clipSnippet(candidate.text),
-    citation: `${candidate.path}#L${candidate.startLine}`,
-  }));
+  const filtered = applyFinalFiltering(candidates, normalizedQuery, minScore, maxResults);
+  return {
+    results: mapCandidatesToResults(filtered),
+    debug: {
+      engine: "qmd_hybrid",
+      strongSignalSkippedExpansion: hasStrongSignal,
+      expansionQueries: expandedQueries,
+      rankedLists: rankedLists.map(item => ({ name: item.name, count: item.list.length })),
+    },
+  };
+}
+
+export async function searchMemoryDetailed(
+  query: string,
+  options?: { maxResults?: number; minScore?: number },
+): Promise<{ results: MemorySearchResult[]; debug: MemorySearchDebug }> {
+  const memoryConfig = currentMemoryConfig();
+  if (!memoryConfig.enabled) {
+    return {
+      results: [] as MemorySearchResult[],
+      debug: {
+        engine: memoryConfig.retrieval.engine,
+        strongSignalSkippedExpansion: false,
+        expansionQueries: [],
+        rankedLists: [],
+      },
+    };
+  }
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) {
+    return {
+      results: [] as MemorySearchResult[],
+      debug: {
+        engine: memoryConfig.retrieval.engine,
+        strongSignalSkippedExpansion: false,
+        expansionQueries: [],
+        rankedLists: [],
+      },
+    };
+  }
+
+  await ensureFreshIndex();
+
+  const maxResults = Math.max(1, options?.maxResults ?? memoryConfig.maxResults);
+  const minScore = Math.max(0, Math.min(1, options?.minScore ?? memoryConfig.minScore));
+  if (memoryConfig.retrieval.engine === "legacy") {
+    return runLegacySearch(normalizedQuery, maxResults, minScore);
+  }
+  return runQmdHybridSearch(normalizedQuery, maxResults, minScore);
+}
+
+export async function searchMemory(query: string, options?: { maxResults?: number; minScore?: number }) {
+  const detailed = await searchMemoryDetailed(query, options);
+  return detailed.results;
 }
 
 export async function readMemoryFileSlice(input: { relPath: string; from?: number; lines?: number }) {
@@ -1292,12 +1930,19 @@ export async function appendStructuredMemory(input: MemoryRecordInput): Promise<
 export async function getMemoryStatus(): Promise<MemoryStatus> {
   const memoryConfig = currentMemoryConfig();
   if (!memoryConfig.enabled) {
+    const vectorBackend = resolveVectorBackend();
     return {
       enabled: false,
       workspaceDir: resolveWorkspaceDir(),
       provider: memoryConfig.embedProvider,
       model: memoryConfig.embedModel,
       toolMode: memoryConfig.toolMode,
+      vectorBackendConfigured: memoryConfig.retrieval.vectorBackend,
+      vectorBackendActive: vectorBackend.active,
+      vectorAvailable: vectorBackend.available,
+      vectorDims: null,
+      vectorIndexedChunks: 0,
+      vectorLastError: vectorBackend.error,
       files: 0,
       chunks: 0,
       records: 0,
@@ -1307,6 +1952,12 @@ export async function getMemoryStatus(): Promise<MemoryStatus> {
   }
 
   await ensureSchema();
+  const vectorBackend = resolveVectorBackend();
+  const vecMeta = memoryVecMeta();
+  const vecDims = vecTableDimensions();
+  const vecCount = vecTableExists()
+    ? ((sqlite.query(`SELECT COUNT(*) as count FROM ${MEMORY_VEC_TABLE}`).get() as { count: number }).count ?? 0)
+    : 0;
   const files = sqlite.query("SELECT COUNT(*) as count FROM memory_files").get() as { count: number };
   const chunks = sqlite.query("SELECT COUNT(*) as count FROM memory_chunks").get() as { count: number };
   const records = sqlite.query("SELECT COUNT(*) as count FROM memory_records").get() as { count: number };
@@ -1321,6 +1972,12 @@ export async function getMemoryStatus(): Promise<MemoryStatus> {
     provider: memoryConfig.embedProvider,
     model: memoryConfig.embedModel,
     toolMode: memoryConfig.toolMode,
+    vectorBackendConfigured: memoryConfig.retrieval.vectorBackend,
+    vectorBackendActive: vectorBackend.active,
+    vectorAvailable: vectorBackend.available,
+    vectorDims: vecDims ?? vecMeta?.dims ?? null,
+    vectorIndexedChunks: vecCount,
+    vectorLastError: vectorBackend.error ?? vecMeta?.error ?? null,
     files: files.count,
     chunks: chunks.count,
     records: records.count,

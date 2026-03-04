@@ -40,6 +40,7 @@ bun run memory:reindex
 ```bash
 bun run memory:activity 20
 bun run memory:lint
+bun run memory:migrate-format
 ```
 
 ## API Equivalents
@@ -61,6 +62,15 @@ bun run memory:lint
   - file/index mismatch is suspected,
   - retrieval quality regressed after significant workspace updates.
 
+## Recommended Baseline Knobs
+
+- `runtime.memory.toolMode`: `tool_only`
+- `runtime.memory.maxResults`: `4`
+- `runtime.memory.minScore`: `0.35`
+- `runtime.memory.retrieval.engine`: `qmd_hybrid`
+- `runtime.memory.retrieval.strongSignalMinScore`: `0.85`
+- `runtime.memory.retrieval.strongSignalMinGap`: `0.15`
+
 ## Failure Handling
 
 - `Memory is disabled.`
@@ -69,6 +79,7 @@ bun run memory:lint
   - Verify `runtime.memory.ollamaBaseUrl`, provider/model availability, and network reachability.
 - Empty retrieval despite expected content
   - Run `reindex`, then test with `memory:search`.
+  - Use `memory:search --debug "<query>"` to inspect retrieval legs and expansion behavior.
 - Duplicate write rejections
   - Expected behavior; check `memory_write_events`/`memory:activity` and write with supersession intent when replacing data.
 

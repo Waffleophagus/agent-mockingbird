@@ -11,6 +11,7 @@ This contract defines how OpenCode runtime memory is expected to behave in Waffl
 
 ## Tool Modes
 
+- Default mode is `tool_only`.
 - `hybrid`: prompt memory injection and memory tool policy are active.
 - `inject_only`: prompt memory injection only.
 - `tool_only`: no prompt injection; retrieval/writes via tools only.
@@ -19,17 +20,18 @@ This contract defines how OpenCode runtime memory is expected to behave in Waffl
 
 - Query flow:
   1. refresh index (cooldown-aware),
-  2. gather text/vector candidates,
-  3. apply ranking, recency boost, superseded penalty,
-  4. apply prompt-injection dedupe/relevance filtering,
-  5. return citations (`path#line`) and clipped snippets.
+  2. run BM25 probe and skip expansion when strong signal thresholds are met,
+  3. optionally expand typed queries (`lex|vec|hyde`) and route `lex->FTS`, `vec/hyde->vector`,
+  4. fuse result lists with reciprocal rank fusion (RRF), then apply recency and record-state weighting,
+  5. blend rank/rerank signals, apply relevance filtering, and return citations (`path#line`) with clipped snippets.
 - Prompt injection dedupe tracks already-injected memory keys per session generation and resets on session compaction.
+- Retrieval defaults are controlled by `runtime.memory.retrieval.*` and can fall back to `legacy` mode.
 
 ## Write Rules
 
 - Empty content is rejected.
 - Duplicate active records are rejected.
-- Accepted writes append structured memory blocks under `memory/YYYY-MM-DD.md` and are indexed.
+- Accepted writes append compact structured markdown blocks under `memory/YYYY-MM-DD.md` and are indexed.
 - Every write attempt is logged in memory activity.
 
 ## Interfaces
@@ -37,3 +39,4 @@ This contract defines how OpenCode runtime memory is expected to behave in Waffl
 - Memory API routes under `/api/memory/*`.
 - OpenCode tool wrappers under `.opencode/tools/memory_*.ts`.
 - Operator CLI via `bun run memory:*` scripts.
+- Retrieval debug can be requested via `POST /api/memory/retrieve` with `{ "debug": true }`.

@@ -1237,8 +1237,11 @@ export class OpencodeRuntime implements RuntimeEngine {
       lines.push("");
       lines.push(
         "Memory policy:",
-        "- Use memory_search first for questions that may depend on earlier context.",
-        "- Use memory_get to inspect cited records before relying on them.",
+        "- Use memory_search when a request likely depends on prior durable context.",
+        "- Prefer one search call first; then use memory_get only for the top 1-2 cited records before relying on details.",
+        "- For people/relationships, use concrete terms (for example: daughter, spouse, partner, child, parent, names) instead of only generic words.",
+        "- Skip memory tool calls for clearly self-contained tasks.",
+        "- If the first memory_search misses, do one refined query with entity/relationship terms before concluding no memory exists.",
         "- Use memory_remember when new context could be useful later.",
         "- Prefer supersedes when replacing older memory records.",
       );

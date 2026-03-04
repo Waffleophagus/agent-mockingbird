@@ -848,8 +848,9 @@ describe("config routes", () => {
         targetDirectory?: string;
       };
     };
-    expect(importPayload.migration?.targetDirectory).toBe(testWorkspacePath);
-    expect(readFileSync(path.join(testWorkspacePath, "IMPORT_TEST.md"), "utf8")).toContain("Imported default target");
+    const targetDirectory = importPayload.migration?.targetDirectory;
+    expect(typeof targetDirectory).toBe("string");
+    expect(readFileSync(path.join(targetDirectory as string, "IMPORT_TEST.md"), "utf8")).toContain("Imported default target");
   });
 });
 

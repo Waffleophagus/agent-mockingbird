@@ -27,12 +27,14 @@ export default tool({
     query: tool.schema.string().min(1).describe("Natural language memory query"),
     maxResults: tool.schema.number().int().min(1).max(20).optional(),
     minScore: tool.schema.number().min(0).max(1).optional(),
+    debug: tool.schema.boolean().optional().describe("Include retrieval debug details."),
   },
-  async execute(args: { query: string; maxResults?: number; minScore?: number }) {
+  async execute(args: { query: string; maxResults?: number; minScore?: number; debug?: boolean }) {
     const payload = await postJson("/api/memory/retrieve", {
       query: args.query,
       maxResults: args.maxResults,
       minScore: args.minScore,
+      debug: args.debug,
     });
     const results = Array.isArray(payload.results) ? payload.results : [];
     return JSON.stringify({
@@ -40,6 +42,7 @@ export default tool({
       query: args.query,
       count: results.length,
       results,
+      debug: args.debug ? payload.debug : undefined,
     });
   },
 });

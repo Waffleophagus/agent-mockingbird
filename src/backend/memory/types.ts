@@ -46,6 +46,12 @@ export interface MemoryStatus {
   provider: string;
   model: string;
   toolMode: MemoryToolMode;
+  vectorBackendConfigured: string;
+  vectorBackendActive: string;
+  vectorAvailable: boolean;
+  vectorDims: number | null;
+  vectorIndexedChunks: number;
+  vectorLastError: string | null;
   files: number;
   chunks: number;
   records: number;

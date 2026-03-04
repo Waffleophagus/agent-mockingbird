@@ -26,7 +26,33 @@ memory_search(query="project architecture decisions", maxResults=5)
 memory_search(query="user preferences for tests", maxResults=3)
 ```
 
-Use broad queries first, then narrow if needed. `minScore` defaults to 0.0 — increase to 0.5+ for stricter relevance.
+Use semantically specific queries first, then broaden carefully. Current runtime defaults are `maxResults=4` and `minScore=0.35`.
+
+#### Query steering (important)
+
+- Prefer concrete entities over vague categories.
+- Include relationship terms the memory likely contains.
+- Try 2-4 reformulations before concluding "not found".
+
+Examples:
+
+```
+# weak (often misses lexical filter)
+memory_search(query="family")
+
+# stronger
+memory_search(query="daughter name")
+memory_search(query="Lucy Lee")
+memory_search(query="wife Tiffany")
+memory_search(query="who is my daughter Lucy")
+```
+
+If zero results:
+
+1. Retry with exact names (`Lucy Lee`, `Tiffany`).
+2. Retry with relation words (`daughter`, `wife`, `spouse`, `child`).
+3. Lower threshold once (`minScore=0.2`) for recall probe.
+4. If still empty, confirm memory was actually written and indexed.
 
 ### 2. Validate with Get
 
@@ -71,18 +97,19 @@ memory_remember(
 
 ## Memory Modes
 
-Runtime config `runtime.memory.mode` controls behavior:
+Runtime config `runtime.memory.toolMode` controls behavior:
 
 | Mode | Behavior |
 |------|----------|
-| `hybrid` | Prompt context + tools available (default) |
+| `hybrid` | Prompt context + tools available |
 | `inject_only` | Prompt context only, tools disabled |
-| `tool_only` | Tools only, no prompt injection |
+| `tool_only` | Tools only, no prompt injection (default) |
 
 Adjust usage accordingly — in `inject_only`, rely on existing memories in prompt context.
 
 ## Anti-Patterns
 
+- **Don't** use only abstract terms like "family", "personal", "life" as first query
 - **Don't** memorize ephemeral state (current task progress, temp files)
 - **Don't** write memories for information already in code/docs
 - **Don't** create redundant memories — search first, then supersede

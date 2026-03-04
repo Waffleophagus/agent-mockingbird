@@ -3,6 +3,7 @@ import {
   listMemoryWriteEvents,
   readMemoryFileSlice,
   rememberMemory,
+  searchMemoryDetailed,
   searchMemory,
   syncMemoryIndex,
   validateMemoryRememberInput,
@@ -62,17 +63,22 @@ export function createMemoryRoutes() {
 
     "/api/memory/retrieve": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as { query?: string; maxResults?: number; minScore?: number };
+        const body = (await req.json()) as { query?: string; maxResults?: number; minScore?: number; debug?: boolean };
         const query = body.query?.trim();
         if (!query) {
           return Response.json({ error: "query is required" }, { status: 400 });
         }
         try {
-          const results = await searchMemory(query, {
+          const options = {
             maxResults: typeof body.maxResults === "number" ? body.maxResults : undefined,
             minScore: typeof body.minScore === "number" ? body.minScore : undefined,
-          });
-          return Response.json({ results });
+          };
+          if (body.debug) {
+            const detailed = await searchMemoryDetailed(query, options);
+            return Response.json({ results: detailed.results, debug: detailed.debug });
+          }
+          const results = await searchMemory(query, options);
+          return Response.json({ results, debug: undefined });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Memory retrieve failed";
           return Response.json({ error: message }, { status: 502 });

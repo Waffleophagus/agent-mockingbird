@@ -5,6 +5,8 @@ import type { MemoryRecord, MemoryRecordInput } from "./types";
 const RECORD_PREFIX = "memory";
 const RECORD_HEADING_RE = /^###\s+\[memory:([a-zA-Z0-9_-]+)\].*$/m;
 const RECORD_BLOCK_RE =
+  /###\s+\[memory:([a-zA-Z0-9_-]+)\]\s+([^\n]+)\n(?:meta:\s*([^\n]*)\n)?(?:\n)?([\s\S]*?)(?=\n###\s+\[memory:|$)/g;
+const LEGACY_RECORD_BLOCK_RE =
   /###\s+\[memory:([a-zA-Z0-9_-]+)\][^\n]*\n```json\n([\s\S]*?)\n```\n([\s\S]*?)(?=\n###\s+\[memory:|$)/g;
 
 export interface ParsedMemoryRecordBlock {
@@ -32,6 +34,61 @@ function normalizeContent(content: string): string {
   return content.trim().replace(/\r\n/g, "\n");
 }
 
+function parseMetaLine(metaLine: string | undefined): Partial<MemoryRecordInput> {
+  if (!metaLine) return {};
+  const parsed: Partial<MemoryRecordInput> = {};
+  const entries = metaLine
+    .split(";")
+    .map(item => item.trim())
+    .filter(Boolean);
+
+  for (const entry of entries) {
+    const delimiter = entry.indexOf("=");
+    if (delimiter <= 0) continue;
+    const key = entry.slice(0, delimiter).trim().toLowerCase();
+    const value = entry.slice(delimiter + 1).trim();
+    if (!value) continue;
+    if (key === "source") {
+      if (value === "user" || value === "assistant" || value === "system") {
+        parsed.source = value;
+      }
+      continue;
+    }
+    if (key === "confidence") {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        parsed.confidence = clampConfidence(numeric);
+      }
+      continue;
+    }
+    if (key === "entities") {
+      parsed.entities = normalizeList(value.split(","));
+      continue;
+    }
+    if (key === "supersedes") {
+      parsed.supersedes = normalizeList(value.split(","));
+    }
+  }
+  return parsed;
+}
+
+function buildMetaLine(record: MemoryRecord): string {
+  const parts = [`source=${record.source}`];
+  const confidence = clampConfidence(record.confidence);
+  const entities = normalizeList(record.entities);
+  const supersedes = normalizeList(record.supersedes);
+  if (confidence !== 1) {
+    parts.push(`confidence=${Number(confidence.toFixed(4))}`);
+  }
+  if (entities.length > 0) {
+    parts.push(`entities=${entities.join(", ")}`);
+  }
+  if (supersedes.length > 0) {
+    parts.push(`supersedes=${supersedes.join(",")}`);
+  }
+  return `meta: ${parts.join("; ")}`;
+}
+
 export function createMemoryRecord(input: MemoryRecordInput): MemoryRecord {
   const createdAt = new Date().toISOString();
   const id = `${RECORD_PREFIX}_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
@@ -47,24 +104,10 @@ export function createMemoryRecord(input: MemoryRecordInput): MemoryRecord {
 }
 
 export function formatMemoryRecord(record: MemoryRecord): string {
-  const meta = JSON.stringify(
-    {
-      id: record.id,
-      source: record.source,
-      confidence: clampConfidence(record.confidence),
-      entities: normalizeList(record.entities),
-      supersedes: normalizeList(record.supersedes),
-      recordedAt: record.recordedAt,
-    },
-    null,
-    2,
-  );
-
   return [
     `### [memory:${record.id}] ${record.recordedAt}`,
-    "```json",
-    meta,
-    "```",
+    buildMetaLine(record),
+    "",
     record.content,
     "",
   ].join("\n");
@@ -82,34 +125,24 @@ export function parseMemoryRecords(content: string): MemoryRecord[] {
   let match: RegExpExecArray | null = RECORD_BLOCK_RE.exec(normalized);
   while (match) {
     const parsedId = match[1]?.trim();
-    const metaRaw = match[2]?.trim();
-    const bodyRaw = match[3]?.trim() ?? "";
-    if (!parsedId || !metaRaw) {
+    const recordedAt = match[2]?.trim();
+    const metaRaw = match[3]?.trim();
+    const bodyRaw = match[4]?.trim() ?? "";
+    if (!parsedId || !recordedAt) {
       match = RECORD_BLOCK_RE.exec(normalized);
       continue;
     }
 
-    try {
-      const metadata = JSON.parse(metaRaw) as Partial<MemoryRecord>;
-      const id = typeof metadata.id === "string" && metadata.id.trim() ? metadata.id.trim() : parsedId;
-      const source = metadata.source ?? "system";
-      const recordedAt =
-        typeof metadata.recordedAt === "string" && metadata.recordedAt.trim()
-          ? metadata.recordedAt.trim()
-          : new Date().toISOString();
-
-      records.push({
-        id,
-        source,
-        recordedAt,
-        content: bodyRaw,
-        entities: normalizeList(metadata.entities),
-        supersedes: normalizeList(metadata.supersedes),
-        confidence: clampConfidence(metadata.confidence),
-      });
-    } catch {
-      // ignore malformed metadata blocks
-    }
+    const metadata = parseMetaLine(metaRaw);
+    records.push({
+      id: parsedId,
+      source: metadata.source ?? "system",
+      recordedAt,
+      content: bodyRaw,
+      entities: normalizeList(metadata.entities),
+      supersedes: normalizeList(metadata.supersedes),
+      confidence: clampConfidence(metadata.confidence),
+    });
 
     match = RECORD_BLOCK_RE.exec(normalized);
   }
@@ -150,4 +183,52 @@ export function extractRecordIdFromChunk(text: string): string | null {
     return null;
   }
   return rawId;
+}
+
+export function migrateLegacyMemoryMarkdownToV2(content: string): { content: string; migrated: number } {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const migrated: string[] = [];
+  let migratedCount = 0;
+  let match: RegExpExecArray | null = LEGACY_RECORD_BLOCK_RE.exec(normalized);
+  while (match) {
+    const parsedId = match[1]?.trim();
+    const metaRaw = match[2]?.trim();
+    const bodyRaw = match[3]?.trim() ?? "";
+    if (!parsedId || !metaRaw) {
+      match = LEGACY_RECORD_BLOCK_RE.exec(normalized);
+      continue;
+    }
+
+    try {
+      const metadata = JSON.parse(metaRaw) as Partial<MemoryRecord>;
+      const source = metadata.source ?? "system";
+      const recordedAt =
+        typeof metadata.recordedAt === "string" && metadata.recordedAt.trim()
+          ? metadata.recordedAt.trim()
+          : new Date().toISOString();
+      const record: MemoryRecord = {
+        id: parsedId,
+        source: source === "user" || source === "assistant" || source === "system" ? source : "system",
+        recordedAt,
+        content: bodyRaw,
+        entities: normalizeList(metadata.entities),
+        supersedes: normalizeList(metadata.supersedes),
+        confidence: clampConfidence(metadata.confidence),
+      };
+      migrated.push(formatMemoryRecord(record).trimEnd());
+      migratedCount += 1;
+    } catch {
+      // ignore malformed legacy records
+    }
+
+    match = LEGACY_RECORD_BLOCK_RE.exec(normalized);
+  }
+
+  if (migratedCount === 0) {
+    return { content: normalized, migrated: 0 };
+  }
+  return {
+    content: `${migrated.join("\n\n")}\n`,
+    migrated: migratedCount,
+  };
 }

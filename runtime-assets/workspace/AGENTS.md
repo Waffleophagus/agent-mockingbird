@@ -27,6 +27,8 @@ When memory tools are available:
 1. Use `memory_search` first.
 2. Validate details with `memory_get` before relying on them.
 3. Persist durable facts/decisions with `memory_remember`.
+4. For people/relationship recall, start with concrete terms (for example: daughter, spouse, partner, child, parent, names) instead of only broad words.
+5. When search misses, reformulate once using concrete entities/relationship words before concluding no memory exists.
 
 Respect runtime memory mode:
 

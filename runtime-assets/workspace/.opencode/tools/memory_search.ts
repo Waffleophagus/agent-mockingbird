@@ -21,25 +21,50 @@ async function postJson(pathname: string, body: unknown) {
   return payload;
 }
 
+function toPreview(snippet: string) {
+  const compact = snippet
+    .replace(/^###\s+\[memory:[^\n]+\]\n?/i, "")
+    .replace(/^meta:[^\n]*\n?/i, "")
+    .trim();
+  if (compact.length <= 280) return compact;
+  return `${compact.slice(0, 280).trimEnd()}...`;
+}
+
 export default tool({
   description: "Search memory for relevant prior context.",
   args: {
     query: tool.schema.string().min(1).describe("Natural language memory query"),
     maxResults: tool.schema.number().int().min(1).max(20).optional(),
     minScore: tool.schema.number().min(0).max(1).optional(),
+    debug: tool.schema.boolean().optional().describe("Include retrieval debug details."),
   },
-  async execute(args: { query: string; maxResults?: number; minScore?: number }) {
+  async execute(args: { query: string; maxResults?: number; minScore?: number; debug?: boolean }) {
     const payload = await postJson("/api/memory/retrieve", {
       query: args.query,
       maxResults: args.maxResults,
       minScore: args.minScore,
+      debug: args.debug,
     });
     const results = Array.isArray(payload.results) ? payload.results : [];
+    const compactResults = results.map((result: any) => {
+      const snippet = typeof result?.snippet === "string" ? result.snippet : "";
+      return {
+        id: result?.id,
+        score: result?.score,
+        citation: result?.citation,
+        path: result?.path,
+        startLine: result?.startLine,
+        endLine: result?.endLine,
+        preview: toPreview(snippet),
+        snippet: toPreview(snippet),
+      };
+    });
     return JSON.stringify({
       ok: true,
       query: args.query,
-      count: results.length,
-      results,
+      count: compactResults.length,
+      results: compactResults,
+      debug: args.debug ? payload.debug : undefined,
     });
   },
 });
