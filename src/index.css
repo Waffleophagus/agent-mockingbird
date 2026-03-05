@@ -269,19 +269,27 @@ body {
 }
 
 .oc-child-list {
-  border-left: 1px solid var(--border-weak-base);
-  padding-left: 9px;
+  border-left: 1px solid color-mix(in srgb, var(--border-weak-base) 75%, transparent);
+  padding-left: 8px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 
 .oc-child-row {
   border: 1px solid color-mix(in srgb, var(--border-weak-base) 85%, transparent);
   border-radius: 7px;
   padding: 6px 7px;
-  background: transparent;
+  background: color-mix(in srgb, var(--surface-panel) 35%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.oc-child-row[data-active="true"] {
+  border-color: color-mix(in srgb, var(--border-selected) 75%, var(--border-weak-base));
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
 }
 
 .oc-child-row:hover {
@@ -294,10 +302,15 @@ body {
 }
 
 .oc-child-actions {
-  margin-top: 4px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+}
+
+.oc-child-steer-input {
+  flex: 1;
+  min-width: 120px;
 }
 
 .oc-session-center {
@@ -350,6 +363,7 @@ body {
 
 .oc-model-picker {
   position: relative;
+  z-index: 40;
 }
 
 .oc-model-picker-trigger {
@@ -370,7 +384,7 @@ body {
   position: absolute;
   top: 25px;
   left: 0;
-  z-index: 60;
+  z-index: 140;
   width: 300px;
   max-width: 90vw;
   border: 1px solid var(--border-weak-base);
@@ -696,14 +710,14 @@ body {
   margin: 0 auto 8px;
   margin-top: -0.875rem;
   position: relative;
-  z-index: 0;
+  z-index: 20;
   min-height: 32px;
   border: 1px solid var(--border-weak-base);
   border-top-left-radius: 0;
   border-top-right-radius: 0;
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
-  overflow: clip;
+  overflow: visible;
   background-color: var(--background-base);
   padding: 20px 10px 8px;
   display: flex;

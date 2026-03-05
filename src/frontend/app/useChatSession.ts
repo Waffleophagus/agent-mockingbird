@@ -362,8 +362,6 @@ export function useChatSession(input: UseChatSessionInput) {
     requestId?: string;
     retry?: boolean;
   }) {
-    if (input.activeSendRef.current) return;
-
     const requestId = payloadInput.requestId ?? crypto.randomUUID();
     setChatControlError("");
     input.setRunErrorsBySession(current => {
@@ -510,8 +508,6 @@ export function useChatSession(input: UseChatSessionInput) {
   }
 
   function retryFailedRequest(requestId: string) {
-    if (input.activeSendRef.current) return;
-
     for (const [sessionId, messages] of Object.entries(input.messagesBySession)) {
       const failedMessage = messages.find(message => {
         if (message.uiMeta?.type !== "assistant-pending") return false;
@@ -589,7 +585,6 @@ export function useChatSession(input: UseChatSessionInput) {
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (input.activeSendRef.current) return;
 
     const content = input.draftMessage.trim();
     const attachments = input.draftAttachments;
@@ -615,10 +610,12 @@ export function useChatSession(input: UseChatSessionInput) {
       content ||
       `[Sent ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}]`;
 
+    const sessionId = input.activeSession.id;
     input.setDraftMessage("");
     input.setDraftAttachments([]);
+
     await submitChatRequest({
-      sessionId: input.activeSession.id,
+      sessionId,
       content: optimisticContent,
       parts,
     });
@@ -665,8 +662,6 @@ export function useChatSession(input: UseChatSessionInput) {
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
-    if (input.activeSendRef.current) return;
-
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       input.composerFormRef.current?.requestSubmit();

@@ -38,7 +38,7 @@ export function ComposerDock(props: ComposerDockProps) {
             <div key={attachment.id} className="oc-attachment-chip">
               <span className="max-w-40 truncate">{attachment.filename ?? attachment.mime}</span>
               <span className="text-muted-foreground">{Math.ceil(attachment.size / 1024)}KB</span>
-              <button type="button" onClick={() => removeComposerAttachment(attachment.id)} disabled={isSending} aria-label="Remove attachment">
+              <button type="button" onClick={() => removeComposerAttachment(attachment.id)} aria-label="Remove attachment">
                 <X className="size-3.5" />
               </button>
             </div>
@@ -50,15 +50,14 @@ export function ComposerDock(props: ComposerDockProps) {
         onChange={event => setDraftMessage(event.target.value)}
         onKeyDown={handleComposerKeyDown}
         onPaste={event => { void handleComposerPaste(event); }}
-        placeholder={isSending ? "Waiting for response..." : "Ask anything..."}
-        disabled={isSending}
+        placeholder={isSending ? "Agent is running. Send to queue your next message..." : "Ask anything..."}
         className="oc-composer-input"
       />
       <div className="oc-composer-actions">
         <p className="text-xs text-muted-foreground">Enter to send, Shift+Enter for newline.</p>
-        <Button type="submit" size="sm" disabled={isSending || (!draftMessage.trim() && draftAttachments.length === 0)}>
+        <Button type="submit" size="sm" disabled={!draftMessage.trim() && draftAttachments.length === 0}>
           <Send className="size-4" />
-          {isSending ? "Sending..." : "Send"}
+          {isSending ? "Queue" : "Send"}
         </Button>
       </div>
     </form>

@@ -134,9 +134,12 @@ function nextRunEventSeq(runId: string) {
 }
 
 export class RunService {
-  private loopInFlight = false;
+  private dispatchInFlight = false;
   private recoveredPendingRuns = false;
   private listeners = new Set<RunEventListener>();
+  private activeRunIds = new Set<string>();
+  private activeSessionIds = new Set<string>();
+  private readonly maxConcurrentRuns = 8;
 
   constructor(private runtime: RuntimeEngine) {
     ensureRunTables();
@@ -309,37 +312,70 @@ export class RunService {
   }
 
   private async kick() {
-    if (this.loopInFlight) return;
-    this.loopInFlight = true;
+    if (this.dispatchInFlight) return;
+    this.dispatchInFlight = true;
     try {
       while (true) {
-        const claimed = this.claimNextQueuedRun();
+        if (this.activeRunIds.size >= this.maxConcurrentRuns) break;
+        const claimed = this.claimNextQueuedRun(this.activeSessionIds);
         if (!claimed) break;
-        await this.executeRun(claimed);
+        this.activeRunIds.add(claimed.id);
+        this.activeSessionIds.add(claimed.session_id);
+        void this.executeRun(claimed)
+          .catch(() => {
+            // executeRun persists failures; dispatch loop only needs cleanup.
+          })
+          .finally(() => {
+            this.activeRunIds.delete(claimed.id);
+            this.activeSessionIds.delete(claimed.session_id);
+            void this.kick();
+          });
       }
     } finally {
-      this.loopInFlight = false;
-      if (this.hasQueuedRuns()) {
+      this.dispatchInFlight = false;
+      if (this.hasRunnableQueuedRuns()) {
         void this.kick();
       }
     }
   }
 
-  private hasQueuedRuns() {
+  private hasRunnableQueuedRuns() {
+    if (this.activeRunIds.size >= this.maxConcurrentRuns) return false;
+    if (this.activeSessionIds.size === 0) {
+      const row = sqlite
+        .query(
+          `
+          SELECT COUNT(*) as count
+          FROM agent_runs
+          WHERE state = 'queued'
+        `,
+        )
+        .get() as { count: number };
+      return row.count > 0;
+    }
+
+    const excludedSessionIds = [...this.activeSessionIds];
+    const placeholders = excludedSessionIds.map((_, index) => `?${index + 1}`).join(", ");
     const row = sqlite
       .query(
         `
         SELECT COUNT(*) as count
         FROM agent_runs
         WHERE state = 'queued'
+          AND session_id NOT IN (${placeholders})
       `,
       )
-      .get() as { count: number };
+      .get(...excludedSessionIds) as { count: number };
     return row.count > 0;
   }
 
-  private claimNextQueuedRun(): AgentRunRow | null {
+  private claimNextQueuedRun(excludedSessionIds: Set<string>): AgentRunRow | null {
     ensureRunTables();
+    const excluded = [...excludedSessionIds];
+    const notInClause =
+      excluded.length > 0
+        ? `AND session_id NOT IN (${excluded.map((_, index) => `?${index + 1}`).join(", ")})`
+        : "";
     const tx = sqlite.transaction(() => {
       const next = sqlite
         .query(
@@ -347,11 +383,12 @@ export class RunService {
           SELECT *
           FROM agent_runs
           WHERE state = 'queued'
+          ${notInClause}
           ORDER BY created_at ASC
           LIMIT 1
         `,
         )
-        .get() as AgentRunRow | null;
+        .get(...excluded) as AgentRunRow | null;
       if (!next) return null;
 
       const claimedAt = nowMs();

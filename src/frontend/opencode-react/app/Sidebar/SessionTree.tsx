@@ -175,8 +175,8 @@ export function SessionTree(props: SessionTreeProps) {
                                         onChange={event =>
                                           setBackgroundSteerDraftByRun(current => ({ ...current, [childRun.runId]: event.target.value }))
                                         }
-                                        placeholder="Nudge"
-                                        className="h-7 text-[11px]"
+                                        placeholder="Steer child run..."
+                                        className="h-7 text-[11px] oc-child-steer-input"
                                         disabled={busyAction === "abort"}
                                       />
                                       <Button
@@ -186,7 +186,7 @@ export function SessionTree(props: SessionTreeProps) {
                                         onClick={() => void steerBackgroundRun(childRun.runId)}
                                         disabled={!nudgeDraft.trim()}
                                       >
-                                        Nudge
+                                        Send
                                       </Button>
                                     </>
                                   )}

@@ -168,7 +168,6 @@ export function SessionScreenApp() {
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const previousActiveSessionIdRef = useRef("");
-  const isSending = activeSend !== null;
   const {
     abortBackgroundRun,
     backgroundActionBusyByRun,
@@ -557,12 +556,12 @@ export function SessionScreenApp() {
       setIsUserScrolledUp(false);
       setHasNewMessages(false);
     } else if (!isUserScrolledUp) {
-      container.scrollTo({ top: container.scrollHeight, behavior: isSending ? "auto" : "smooth" });
+      container.scrollTo({ top: container.scrollHeight, behavior: isActiveSessionRunning ? "auto" : "smooth" });
     } else if (activeMessages.length > 0) {
       setHasNewMessages(true);
     }
     previousActiveSessionIdRef.current = activeSessionId;
-  }, [activeSessionId, activeMessages, loadingMessages, isSending, isUserScrolledUp]);
+  }, [activeSessionId, activeMessages, loadingMessages, isActiveSessionRunning, isUserScrolledUp]);
 
   function scrollToBottom() {
     const container = chatScrollRef.current;
@@ -875,7 +874,7 @@ export function SessionScreenApp() {
     isCreatingSession,
     isModelPickerOpen,
     isSavingModel,
-    isSending,
+    isSending: isActiveSessionRunning,
     isUserScrolledUp,
     latestBackgroundRunByChildSessionId,
     loading,

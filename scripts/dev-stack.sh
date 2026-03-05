@@ -13,7 +13,7 @@ DEV_WORKSPACE_DIR="${WAFFLEBOT_MEMORY_WORKSPACE_DIR:-${ROOT_DIR}/data/workspace}
 DEV_CONFIG_PATH="${WAFFLEBOT_CONFIG_PATH:-${ROOT_DIR}/data/wafflebot.dev-stack.config.json}"
 DEV_RUNTIME_ASSETS_STATE_PATH="${WAFFLEBOT_RUNTIME_ASSETS_STATE_PATH:-${ROOT_DIR}/data/runtime-assets-state.dev-stack.json}"
 DEV_DB_PATH="${WAFFLEBOT_DB_PATH:-${ROOT_DIR}/data/wafflebot.db}"
-DEV_RESET_RUNTIME_BINDINGS="${WAFFLEBOT_DEV_RESET_BINDINGS:-1}"
+DEV_RESET_RUNTIME_BINDINGS="${WAFFLEBOT_DEV_RESET_BINDINGS:-0}"
 
 if ! command -v bun >/dev/null 2>&1; then
   echo "bun is required but not found in PATH."
