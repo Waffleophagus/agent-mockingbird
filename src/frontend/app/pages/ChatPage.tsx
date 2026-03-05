@@ -294,7 +294,44 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
             <h2 className="oc-session-title">{activeSession?.title ?? "Main"}</h2>
             <p className="oc-session-subtitle">Model {activeSession?.model ?? "-"}</p>
           </div>
-          <div className="oc-session-controls">
+        </header>
+
+        {(modelError || activeRunStatusHint || activeSessionRunError || backgroundRunsError || chatControlError || activeSessionCompactedAt) && (
+          <div className="oc-session-meta-errors">
+            {modelError && <p className="text-xs text-destructive">{modelError}</p>}
+            {activeRunStatusHint && <p className="text-xs text-muted-foreground">{activeRunStatusHint}</p>}
+            {activeSessionRunError && <p className="text-xs text-destructive">{activeSessionRunError}</p>}
+            {backgroundRunsError && <p className="text-xs text-destructive">{backgroundRunsError}</p>}
+            {chatControlError && <p className="text-xs text-destructive">{chatControlError}</p>}
+            {activeSessionCompactedAt && <p className="text-xs text-muted-foreground">Last compacted {formatTimestampSummary(activeSessionCompactedAt)}</p>}
+          </div>
+        )}
+
+        <MessageTimeline
+          messages={visibleMessages}
+          chatScrollRef={chatScrollRef}
+          hasNewMessages={hasNewMessages}
+          isUserScrolledUp={isUserScrolledUp}
+          scrollToBottom={scrollToBottom}
+          loadingMessages={loadingMessages}
+          showThinkingDetails={showThinkingDetails}
+          showToolCallDetails={showToolCallDetails}
+          retryFailedRequest={retryFailedRequest}
+        />
+
+        <ComposerDock
+          composerFormRef={composerFormRef}
+          sendMessage={sendMessage}
+          isSending={isSending}
+          draftMessage={draftMessage}
+          setDraftMessage={setDraftMessage}
+          draftAttachments={draftAttachments}
+          removeComposerAttachment={removeComposerAttachment}
+          handleComposerKeyDown={handleComposerKeyDown}
+          handleComposerPaste={handleComposerPaste}
+        />
+        <div className="oc-composer-footer">
+          <div className="oc-composer-footer-controls">
             <div className="oc-model-picker" ref={modelPickerRef}>
               <button
                 type="button"
@@ -306,7 +343,7 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
                 <ChevronsUpDown className="size-4" />
               </button>
               {isModelPickerOpen && (
-                <div className="oc-model-picker-menu">
+                <div className="oc-model-picker-menu oc-model-picker-menu-up">
                   <Input
                     ref={modelSearchInputRef}
                     value={modelQuery}
@@ -348,8 +385,6 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
             <button type="button" className="oc-inline-btn" data-active={showToolCallDetails} onClick={() => setShowToolCallDetails(v => !v)}>
               <Wrench className="size-3.5" /> Tools
             </button>
-          </div>
-          <div className="oc-session-quick-actions">
             <button type="button" className="oc-inline-btn" onClick={requestAbortRun} disabled={!canAbortActiveSession}>
               <CircleSlash className="size-3.5" /> {isAborting ? "Aborting..." : "Abort"}
             </button>
@@ -369,43 +404,9 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
             >
               <Scissors className="size-3.5" /> {isCompacting ? "Compacting..." : "Compact"}
             </button>
+            <span className="oc-composer-agent-label">Wafflebot</span>
           </div>
-        </header>
-
-        {(modelError || activeRunStatusHint || activeSessionRunError || backgroundRunsError || chatControlError || activeSessionCompactedAt) && (
-          <div className="oc-session-meta-errors">
-            {modelError && <p className="text-xs text-destructive">{modelError}</p>}
-            {activeRunStatusHint && <p className="text-xs text-muted-foreground">{activeRunStatusHint}</p>}
-            {activeSessionRunError && <p className="text-xs text-destructive">{activeSessionRunError}</p>}
-            {backgroundRunsError && <p className="text-xs text-destructive">{backgroundRunsError}</p>}
-            {chatControlError && <p className="text-xs text-destructive">{chatControlError}</p>}
-            {activeSessionCompactedAt && <p className="text-xs text-muted-foreground">Last compacted {formatTimestampSummary(activeSessionCompactedAt)}</p>}
-          </div>
-        )}
-
-        <MessageTimeline
-          messages={visibleMessages}
-          chatScrollRef={chatScrollRef}
-          hasNewMessages={hasNewMessages}
-          isUserScrolledUp={isUserScrolledUp}
-          scrollToBottom={scrollToBottom}
-          loadingMessages={loadingMessages}
-          showThinkingDetails={showThinkingDetails}
-          showToolCallDetails={showToolCallDetails}
-          retryFailedRequest={retryFailedRequest}
-        />
-
-        <ComposerDock
-          composerFormRef={composerFormRef}
-          sendMessage={sendMessage}
-          isSending={isSending}
-          draftMessage={draftMessage}
-          setDraftMessage={setDraftMessage}
-          draftAttachments={draftAttachments}
-          removeComposerAttachment={removeComposerAttachment}
-          handleComposerKeyDown={handleComposerKeyDown}
-          handleComposerPaste={handleComposerPaste}
-        />
+        </div>
       </section>
 
       {flyoutOpen && (
