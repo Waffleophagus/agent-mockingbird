@@ -1701,6 +1701,69 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
+  test("toSseFrame maps prompt events to prompt SSE names", () => {
+    const permissionRequested = toSseFrame({
+      id: "evt-perm-req-1",
+      type: "session.permission.requested",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        id: "perm-1",
+        sessionId: "main",
+        permission: "Read",
+        patterns: ["/tmp/*"],
+        metadata: {},
+        always: [],
+      },
+    });
+    expect(permissionRequested).toContain("event: permission-requested");
+
+    const permissionResolved = toSseFrame({
+      id: "evt-perm-res-1",
+      type: "session.permission.resolved",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        sessionId: "main",
+        requestId: "perm-1",
+        reply: "once",
+      },
+    });
+    expect(permissionResolved).toContain("event: permission-resolved");
+
+    const questionRequested = toSseFrame({
+      id: "evt-question-req-1",
+      type: "session.question.requested",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        id: "question-1",
+        sessionId: "main",
+        questions: [
+          {
+            question: "Pick one",
+            header: "pick",
+            options: [{ label: "A", description: "A option" }],
+          },
+        ],
+      },
+    });
+    expect(questionRequested).toContain("event: question-requested");
+
+    const questionResolved = toSseFrame({
+      id: "evt-question-res-1",
+      type: "session.question.resolved",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        sessionId: "main",
+        requestId: "question-1",
+        outcome: "replied",
+      },
+    });
+    expect(questionResolved).toContain("event: question-resolved");
+  });
+
   test("events stream emits initial heartbeat and usage snapshots", async () => {
     const eventStream = createRuntimeEventStream({
       getHeartbeatSnapshot: repository.getHeartbeatSnapshot,

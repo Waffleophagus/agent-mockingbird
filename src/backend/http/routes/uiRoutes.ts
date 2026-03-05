@@ -8,6 +8,7 @@ import {
   listSessions,
 } from "../../db/repository";
 import { listOpencodeModelOptions } from "../../opencode/models";
+import { listPendingPrompts } from "../../prompts/service";
 
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -64,6 +65,10 @@ export function createUiRoutes(runtime: RuntimeEngine) {
         const usage = getUsageSnapshot();
         const heartbeat = getHeartbeatSnapshot();
         const modelsPayload = await listOpencodeModelOptions().catch(() => []);
+        const pendingPrompts = await listPendingPrompts().catch(() => ({
+          pendingPermissions: [],
+          pendingQuestions: [],
+        }));
         const backgroundRuns = runtime.listBackgroundRuns
           ? await runtime.listBackgroundRuns({ parentSessionId: activeSessionId || undefined, limit: 250 }).catch(() => [])
           : [];
@@ -77,6 +82,8 @@ export function createUiRoutes(runtime: RuntimeEngine) {
           usage,
           heartbeat,
           models: modelsPayload,
+          pendingPermissions: pendingPrompts.pendingPermissions,
+          pendingQuestions: pendingPrompts.pendingQuestions,
           backgroundRuns,
           workspaceBootstrap: {
             mode: workspaceBootstrap.mode,

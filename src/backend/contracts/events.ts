@@ -66,6 +66,62 @@ export interface SessionRunErrorPayload {
 }
 export type SessionRunErrorEvent = RuntimeEventBase<"session.run.error", SessionRunErrorPayload>;
 
+export interface SessionPermissionRequestPayload {
+  id: string;
+  sessionId: string;
+  permission: string;
+  patterns: string[];
+  metadata: Record<string, unknown>;
+  always: string[];
+}
+export type SessionPermissionRequestedEvent = RuntimeEventBase<
+  "session.permission.requested",
+  SessionPermissionRequestPayload
+>;
+
+export interface SessionPermissionResolvedPayload {
+  sessionId: string;
+  requestId: string;
+  reply: "once" | "always" | "reject";
+}
+export type SessionPermissionResolvedEvent = RuntimeEventBase<
+  "session.permission.resolved",
+  SessionPermissionResolvedPayload
+>;
+
+export interface SessionQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface SessionQuestionInfo {
+  question: string;
+  header: string;
+  options: SessionQuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface SessionQuestionRequestPayload {
+  id: string;
+  sessionId: string;
+  questions: SessionQuestionInfo[];
+}
+export type SessionQuestionRequestedEvent = RuntimeEventBase<
+  "session.question.requested",
+  SessionQuestionRequestPayload
+>;
+
+export interface SessionQuestionResolvedPayload {
+  sessionId: string;
+  requestId: string;
+  outcome: "replied" | "rejected";
+}
+export type SessionQuestionResolvedEvent = RuntimeEventBase<
+  "session.question.resolved",
+  SessionQuestionResolvedPayload
+>;
+
 export interface BackgroundRunUpdatedPayload {
   runId: string;
   parentSessionId: string;
@@ -166,6 +222,10 @@ export type RuntimeEvent =
   | SessionRunStatusUpdatedEvent
   | SessionCompactedEvent
   | SessionRunErrorEvent
+  | SessionPermissionRequestedEvent
+  | SessionPermissionResolvedEvent
+  | SessionQuestionRequestedEvent
+  | SessionQuestionResolvedEvent
   | BackgroundRunUpdatedEvent
   | ConfigUpdatedEvent
   | ConfigUpdateFailedEvent
@@ -243,6 +303,34 @@ export function createSessionRunErrorEvent(
   source: RuntimeEventSource,
 ): SessionRunErrorEvent {
   return baseRuntimeEvent("session.run.error", payload, source);
+}
+
+export function createSessionPermissionRequestedEvent(
+  payload: SessionPermissionRequestPayload,
+  source: RuntimeEventSource,
+): SessionPermissionRequestedEvent {
+  return baseRuntimeEvent("session.permission.requested", payload, source);
+}
+
+export function createSessionPermissionResolvedEvent(
+  payload: SessionPermissionResolvedPayload,
+  source: RuntimeEventSource,
+): SessionPermissionResolvedEvent {
+  return baseRuntimeEvent("session.permission.resolved", payload, source);
+}
+
+export function createSessionQuestionRequestedEvent(
+  payload: SessionQuestionRequestPayload,
+  source: RuntimeEventSource,
+): SessionQuestionRequestedEvent {
+  return baseRuntimeEvent("session.question.requested", payload, source);
+}
+
+export function createSessionQuestionResolvedEvent(
+  payload: SessionQuestionResolvedPayload,
+  source: RuntimeEventSource,
+): SessionQuestionResolvedEvent {
+  return baseRuntimeEvent("session.question.resolved", payload, source);
 }
 
 export function createBackgroundRunUpdatedEvent(

@@ -32,6 +32,8 @@ import type {
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
+  PermissionPromptRequest,
+  QuestionPromptRequest,
   SessionRunStatusSnapshot,
   SessionSummary,
   UsageSnapshot,
@@ -58,6 +60,39 @@ function formatTimestampSummary(iso: string): string {
   const compact = formatCompactTimestamp(iso);
   if (!compact) return relativeFromIso(iso);
   return `${compact} · ${relativeFromIso(iso)}`;
+}
+
+function sortPromptRequests<T extends { id: string }>(items: T[]) {
+  return [...items].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function collectPromptScopeSessionIds(input: {
+  rootSessionId: string;
+  childSessionsByParentSessionId: Record<string, SessionSummary[]>;
+}) {
+  const root = input.rootSessionId.trim();
+  if (!root) return [];
+  const ids: string[] = [root];
+  const seen = new Set(ids);
+  for (const id of ids) {
+    const children = input.childSessionsByParentSessionId[id] ?? [];
+    for (const child of children) {
+      if (seen.has(child.id)) continue;
+      seen.add(child.id);
+      ids.push(child.id);
+    }
+  }
+  return ids;
+}
+
+function parseErrorMessage(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const message = (payload as { error?: unknown }).error;
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+  }
+  return fallback;
 }
 
 export function SessionScreenApp() {
@@ -101,6 +136,14 @@ export function SessionScreenApp() {
   const [isSyncingRuntimeDefaultModel, setIsSyncingRuntimeDefaultModel] = useState(false);
   const [runStatusBySession, setRunStatusBySession] = useState<Record<string, SessionRunStatusSnapshot>>({});
   const [runErrorsBySession, setRunErrorsBySession] = useState<Record<string, string>>({});
+  const [pendingPermissionsBySession, setPendingPermissionsBySession] = useState<
+    Record<string, PermissionPromptRequest[]>
+  >({});
+  const [pendingQuestionsBySession, setPendingQuestionsBySession] = useState<
+    Record<string, QuestionPromptRequest[]>
+  >({});
+  const [promptBusyRequestId, setPromptBusyRequestId] = useState("");
+  const [promptError, setPromptError] = useState("");
   const [compactedAtBySession, setCompactedAtBySession] = useState<Record<string, string>>({});
   const [backgroundRunsBySession, setBackgroundRunsBySession] = useState<Record<string, BackgroundRunSnapshot[]>>({});
   const [activeConfigPanelTab, setActiveConfigPanelTab] = useState<ConfigPanelTab>("usage");
@@ -174,6 +217,8 @@ export function SessionScreenApp() {
     setChildSessionHideAfterDays,
     setRuntimeDefaultModel,
     setBackgroundRunsBySession,
+    setPendingPermissionsBySession,
+    setPendingQuestionsBySession,
     setMemoryError,
     setStreamStatus,
     setMessagesBySession,
@@ -195,6 +240,8 @@ export function SessionScreenApp() {
     setBackgroundSteerDraftByRun,
     setBackgroundActionBusyByRun,
     setFocusedBackgroundRunId,
+    setPendingPermissionsBySession,
+    setPendingQuestionsBySession,
     setRunWaitTimeoutMs,
     setChildSessionHideAfterDays,
     setRuntimeDefaultModel,
@@ -378,6 +425,33 @@ export function SessionScreenApp() {
           activeSessionRunStatus.nextAt ? ` · next ${formatTimestampSummary(activeSessionRunStatus.nextAt)}` : ""
         }`
       : "";
+  const promptScopeSessionIds = useMemo(
+    () =>
+      collectPromptScopeSessionIds({
+        rootSessionId: activeSessionId,
+        childSessionsByParentSessionId,
+      }),
+    [activeSessionId, childSessionsByParentSessionId],
+  );
+  const scopedPendingPermissions = useMemo(() => {
+    const list: PermissionPromptRequest[] = [];
+    for (const sessionId of promptScopeSessionIds) {
+      const items = pendingPermissionsBySession[sessionId] ?? [];
+      list.push(...items);
+    }
+    return sortPromptRequests(list);
+  }, [pendingPermissionsBySession, promptScopeSessionIds]);
+  const scopedPendingQuestions = useMemo(() => {
+    const list: QuestionPromptRequest[] = [];
+    for (const sessionId of promptScopeSessionIds) {
+      const items = pendingQuestionsBySession[sessionId] ?? [];
+      list.push(...items);
+    }
+    return sortPromptRequests(list);
+  }, [pendingQuestionsBySession, promptScopeSessionIds]);
+  const activePermissionRequest = scopedPendingPermissions[0];
+  const activeQuestionRequest = activePermissionRequest ? undefined : scopedPendingQuestions[0];
+  const promptBlocked = Boolean(activePermissionRequest || activeQuestionRequest);
   const availableModels = useMemo(() => {
     const byId = new Map(modelOptions.map(option => [option.id, option]));
     if (activeSession?.model && !byId.has(activeSession.model)) {
@@ -417,6 +491,20 @@ export function SessionScreenApp() {
   useEffect(() => {
     setIsModelPickerOpen(false);
     setModelQuery("");
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!promptBusyRequestId) return;
+    const requestStillPending =
+      scopedPendingPermissions.some(item => item.id === promptBusyRequestId) ||
+      scopedPendingQuestions.some(item => item.id === promptBusyRequestId);
+    if (!requestStillPending) {
+      setPromptBusyRequestId("");
+    }
+  }, [promptBusyRequestId, scopedPendingPermissions, scopedPendingQuestions]);
+
+  useEffect(() => {
+    setPromptError("");
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -644,6 +732,102 @@ export function SessionScreenApp() {
     }
   }
 
+  async function replyPermissionPrompt(input: {
+    requestId: string;
+    sessionId: string;
+    reply: "once" | "always" | "reject";
+  }) {
+    if (!input.requestId.trim()) return;
+    setPromptBusyRequestId(input.requestId);
+    setPromptError("");
+    try {
+      const response = await fetch(`/api/ui/prompts/permission/${encodeURIComponent(input.requestId)}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reply: input.reply }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(parseErrorMessage(payload, "Failed to reply to permission request"));
+      }
+      setPendingPermissionsBySession(current => {
+        const existing = current[input.sessionId] ?? [];
+        const nextList = existing.filter(item => item.id !== input.requestId);
+        if (nextList.length === existing.length) return current;
+        return {
+          ...current,
+          [input.sessionId]: nextList,
+        };
+      });
+    } catch (error) {
+      setPromptError(error instanceof Error ? error.message : "Failed to reply to permission request");
+    } finally {
+      setPromptBusyRequestId(current => (current === input.requestId ? "" : current));
+    }
+  }
+
+  async function replyQuestionPrompt(input: {
+    requestId: string;
+    sessionId: string;
+    answers: Array<Array<string>>;
+  }) {
+    if (!input.requestId.trim()) return;
+    setPromptBusyRequestId(input.requestId);
+    setPromptError("");
+    try {
+      const response = await fetch(`/api/ui/prompts/question/${encodeURIComponent(input.requestId)}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers: input.answers }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(parseErrorMessage(payload, "Failed to reply to question request"));
+      }
+      setPendingQuestionsBySession(current => {
+        const existing = current[input.sessionId] ?? [];
+        const nextList = existing.filter(item => item.id !== input.requestId);
+        if (nextList.length === existing.length) return current;
+        return {
+          ...current,
+          [input.sessionId]: nextList,
+        };
+      });
+    } catch (error) {
+      setPromptError(error instanceof Error ? error.message : "Failed to reply to question request");
+    } finally {
+      setPromptBusyRequestId(current => (current === input.requestId ? "" : current));
+    }
+  }
+
+  async function rejectQuestionPrompt(input: { requestId: string; sessionId: string }) {
+    if (!input.requestId.trim()) return;
+    setPromptBusyRequestId(input.requestId);
+    setPromptError("");
+    try {
+      const response = await fetch(`/api/ui/prompts/question/${encodeURIComponent(input.requestId)}/reject`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(parseErrorMessage(payload, "Failed to reject question request"));
+      }
+      setPendingQuestionsBySession(current => {
+        const existing = current[input.sessionId] ?? [];
+        const nextList = existing.filter(item => item.id !== input.requestId);
+        if (nextList.length === existing.length) return current;
+        return {
+          ...current,
+          [input.sessionId]: nextList,
+        };
+      });
+    } catch (error) {
+      setPromptError(error instanceof Error ? error.message : "Failed to reject question request");
+    } finally {
+      setPromptBusyRequestId(current => (current === input.requestId ? "" : current));
+    }
+  }
+
   const chatPageModel: ChatPageModel = {
     activeBackgroundInFlightCount,
     activeBackgroundRuns,
@@ -718,6 +902,17 @@ export function SessionScreenApp() {
     selectModelFromPicker,
     selectedModelLabel,
     runtimeDefaultModel,
+    promptBlocked,
+    activePermissionRequest,
+    activeQuestionRequest,
+    promptBusyRequestId,
+    promptError,
+    onPermissionPromptReply: (requestId, sessionId, reply) =>
+      replyPermissionPrompt({ requestId, sessionId, reply }),
+    onQuestionPromptReply: (requestId, sessionId, answers) =>
+      replyQuestionPrompt({ requestId, sessionId, answers }),
+    onQuestionPromptReject: (requestId, sessionId) =>
+      rejectQuestionPrompt({ requestId, sessionId }),
     sessionMatchesRuntimeDefault,
     sendMessage,
     sessionError,

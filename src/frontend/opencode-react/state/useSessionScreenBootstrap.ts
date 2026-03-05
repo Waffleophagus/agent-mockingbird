@@ -16,6 +16,8 @@ import type {
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
+  PermissionPromptRequest,
+  QuestionPromptRequest,
   SessionSummary,
   UsageSnapshot,
 } from "@/types/dashboard";
@@ -36,6 +38,8 @@ interface UseSessionScreenBootstrapInput {
   setMemoryActivity: Dispatch<SetStateAction<MemoryWriteEvent[]>>;
   setMemoryError: Dispatch<SetStateAction<string>>;
   setBackgroundRunsBySession: Dispatch<SetStateAction<Record<string, BackgroundRunSnapshot[]>>>;
+  setPendingPermissionsBySession: Dispatch<SetStateAction<Record<string, PermissionPromptRequest[]>>>;
+  setPendingQuestionsBySession: Dispatch<SetStateAction<Record<string, QuestionPromptRequest[]>>>;
   setRunWaitTimeoutMs: Dispatch<SetStateAction<number>>;
   setChildSessionHideAfterDays: Dispatch<SetStateAction<number>>;
   setRuntimeDefaultModel: Dispatch<SetStateAction<string>>;
@@ -89,6 +93,32 @@ export function useSessionScreenBootstrap(input: UseSessionScreenBootstrapInput)
             input.loadedBackgroundSessionsRef.current.add(run.parentSessionId);
           }
         }
+
+        input.setPendingPermissionsBySession(() => {
+          const grouped: Record<string, PermissionPromptRequest[]> = {};
+          for (const item of payload.pendingPermissions ?? []) {
+            if (!item?.id || !item?.sessionId) continue;
+            if (!grouped[item.sessionId]) grouped[item.sessionId] = [];
+            grouped[item.sessionId]?.push(item);
+          }
+          for (const list of Object.values(grouped)) {
+            list.sort((left, right) => left.id.localeCompare(right.id));
+          }
+          return grouped;
+        });
+
+        input.setPendingQuestionsBySession(() => {
+          const grouped: Record<string, QuestionPromptRequest[]> = {};
+          for (const item of payload.pendingQuestions ?? []) {
+            if (!item?.id || !item?.sessionId) continue;
+            if (!grouped[item.sessionId]) grouped[item.sessionId] = [];
+            grouped[item.sessionId]?.push(item);
+          }
+          for (const list of Object.values(grouped)) {
+            list.sort((left, right) => left.id.localeCompare(right.id));
+          }
+          return grouped;
+        });
 
         input.setLoading(false);
 

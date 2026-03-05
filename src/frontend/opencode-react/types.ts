@@ -1,5 +1,14 @@
 import type { ChatPageModel } from "@/frontend/app/pages/ChatPage";
-import type { BackgroundRunSnapshot, ChatMessage, HeartbeatSnapshot, ModelOption, SessionSummary, UsageSnapshot } from "@/types/dashboard";
+import type {
+  BackgroundRunSnapshot,
+  ChatMessage,
+  HeartbeatSnapshot,
+  ModelOption,
+  PermissionPromptRequest,
+  QuestionPromptRequest,
+  SessionSummary,
+  UsageSnapshot,
+} from "@/types/dashboard";
 
 export type SessionScreenFlyoutTab = "review" | "context";
 
@@ -33,6 +42,8 @@ export interface SessionScreenBootstrapResponse {
   heartbeat: HeartbeatSnapshot;
   models: ModelOption[];
   backgroundRuns: BackgroundRunSnapshot[];
+  pendingPermissions?: PermissionPromptRequest[];
+  pendingQuestions?: QuestionPromptRequest[];
   workspaceBootstrap?: {
     mode?: string;
     identity?: string;

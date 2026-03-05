@@ -21,6 +21,8 @@ import type { LocalChatMessage } from "@/frontend/app/chatHelpers";
 import { cn } from "@/frontend/app/dashboardUtils";
 import type { ComposerAttachment } from "@/frontend/app/useChatSession";
 import { ComposerDock } from "@/frontend/opencode-react/app/Composer/ComposerDock";
+import { PermissionPromptDock } from "@/frontend/opencode-react/app/Composer/PermissionPromptDock";
+import { QuestionPromptDock } from "@/frontend/opencode-react/app/Composer/QuestionPromptDock";
 import { RightFlyout } from "@/frontend/opencode-react/app/Flyout/RightFlyout";
 import { SessionTree } from "@/frontend/opencode-react/app/Sidebar/SessionTree";
 import { MessageTimeline } from "@/frontend/opencode-react/app/Timeline/MessageTimeline";
@@ -30,6 +32,8 @@ import type {
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
+  PermissionPromptRequest,
+  QuestionPromptRequest,
   SessionSummary,
   UsageSnapshot,
 } from "@/types/dashboard";
@@ -102,6 +106,18 @@ export interface ChatPageModel {
   memoryError: string;
   memoryStatus: MemoryStatusSnapshot | null;
   modelError: string;
+  promptBlocked: boolean;
+  activePermissionRequest?: PermissionPromptRequest;
+  activeQuestionRequest?: QuestionPromptRequest;
+  promptBusyRequestId: string;
+  promptError: string;
+  onPermissionPromptReply: (
+    requestId: string,
+    sessionId: string,
+    reply: "once" | "always" | "reject",
+  ) => Promise<void>;
+  onQuestionPromptReply: (requestId: string, sessionId: string, answers: Array<Array<string>>) => Promise<void>;
+  onQuestionPromptReject: (requestId: string, sessionId: string) => Promise<void>;
   modelPickerRef: RefObject<HTMLDivElement | null>;
   modelQuery: string;
   modelSearchInputRef: RefObject<HTMLInputElement | null>;
@@ -201,6 +217,14 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
     memoryError,
     memoryStatus,
     modelError,
+    promptBlocked,
+    activePermissionRequest,
+    activeQuestionRequest,
+    promptBusyRequestId,
+    promptError,
+    onPermissionPromptReply,
+    onQuestionPromptReply,
+    onQuestionPromptReject,
     modelPickerRef,
     modelQuery,
     modelSearchInputRef,
@@ -297,9 +321,16 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
           </div>
         </header>
 
-        {(modelError || activeRunStatusHint || activeSessionRunError || backgroundRunsError || chatControlError || activeSessionCompactedAt) && (
+        {(modelError ||
+          promptError ||
+          activeRunStatusHint ||
+          activeSessionRunError ||
+          backgroundRunsError ||
+          chatControlError ||
+          activeSessionCompactedAt) && (
           <div className="oc-session-meta-errors">
             {modelError && <p className="text-xs text-destructive">{modelError}</p>}
+            {promptError && <p className="text-xs text-destructive">{promptError}</p>}
             {activeRunStatusHint && <p className="text-xs text-muted-foreground">{activeRunStatusHint}</p>}
             {activeSessionRunError && <p className="text-xs text-destructive">{activeSessionRunError}</p>}
             {backgroundRunsError && <p className="text-xs text-destructive">{backgroundRunsError}</p>}
@@ -320,93 +351,110 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
           retryFailedRequest={retryFailedRequest}
         />
 
-        <ComposerDock
-          composerFormRef={composerFormRef}
-          sendMessage={sendMessage}
-          isSending={isSending}
-          draftMessage={draftMessage}
-          setDraftMessage={setDraftMessage}
-          draftAttachments={draftAttachments}
-          removeComposerAttachment={removeComposerAttachment}
-          handleComposerKeyDown={handleComposerKeyDown}
-          handleComposerPaste={handleComposerPaste}
-        />
-        <div className="oc-composer-footer">
-          <div className="oc-composer-footer-controls">
-            <div className="oc-model-picker" ref={modelPickerRef}>
-              <button
-                type="button"
-                className="oc-model-picker-trigger"
-                onClick={() => setIsModelPickerOpen(v => !v)}
-                disabled={!activeSession || isSavingModel || availableModels.length === 0}
-              >
-                <span className="truncate">{selectedModelLabel}</span>
-                <ChevronsUpDown className="size-4" />
-              </button>
-              {isModelPickerOpen && (
-                <div className="oc-model-picker-menu oc-model-picker-menu-up">
-                  <Input
-                    ref={modelSearchInputRef}
-                    value={modelQuery}
-                    onChange={event => setModelQuery(event.target.value)}
-                    onKeyDown={handleModelSearchKeyDown}
-                    placeholder="Search model"
-                    className="h-8"
-                  />
-                  <div className="oc-model-picker-list">
-                    {filteredModelOptions.map((option, index) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => void selectModelFromPicker(option.id)}
-                        className={cn("oc-model-option", index === focusedModelIndex && "oc-model-option-active")}
-                      >
-                        <p className="truncate">{option.label}</p>
-                        <p className="truncate text-xs text-muted-foreground">{option.id}</p>
-                      </button>
-                    ))}
-                  </div>
+        {activePermissionRequest ? (
+          <PermissionPromptDock
+            request={activePermissionRequest}
+            isBusy={promptBusyRequestId === activePermissionRequest.id}
+            onReply={reply => onPermissionPromptReply(activePermissionRequest.id, activePermissionRequest.sessionId, reply)}
+          />
+        ) : activeQuestionRequest ? (
+          <QuestionPromptDock
+            request={activeQuestionRequest}
+            isBusy={promptBusyRequestId === activeQuestionRequest.id}
+            onReply={answers => onQuestionPromptReply(activeQuestionRequest.id, activeQuestionRequest.sessionId, answers)}
+            onDismiss={() => onQuestionPromptReject(activeQuestionRequest.id, activeQuestionRequest.sessionId)}
+          />
+        ) : (
+          <>
+            <ComposerDock
+              composerFormRef={composerFormRef}
+              sendMessage={sendMessage}
+              isSending={isSending}
+              draftMessage={draftMessage}
+              setDraftMessage={setDraftMessage}
+              draftAttachments={draftAttachments}
+              removeComposerAttachment={removeComposerAttachment}
+              handleComposerKeyDown={handleComposerKeyDown}
+              handleComposerPaste={handleComposerPaste}
+            />
+            <div className="oc-composer-footer">
+              <div className="oc-composer-footer-controls">
+                <div className="oc-model-picker" ref={modelPickerRef}>
+                  <button
+                    type="button"
+                    className="oc-model-picker-trigger"
+                    onClick={() => setIsModelPickerOpen(v => !v)}
+                    disabled={!activeSession || isSavingModel || availableModels.length === 0}
+                  >
+                    <span className="truncate">{selectedModelLabel}</span>
+                    <ChevronsUpDown className="size-4" />
+                  </button>
+                  {isModelPickerOpen && (
+                    <div className="oc-model-picker-menu oc-model-picker-menu-up">
+                      <Input
+                        ref={modelSearchInputRef}
+                        value={modelQuery}
+                        onChange={event => setModelQuery(event.target.value)}
+                        onKeyDown={handleModelSearchKeyDown}
+                        placeholder="Search model"
+                        className="h-8"
+                      />
+                      <div className="oc-model-picker-list">
+                        {filteredModelOptions.map((option, index) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => void selectModelFromPicker(option.id)}
+                            className={cn("oc-model-option", index === focusedModelIndex && "oc-model-option-active")}
+                          >
+                            <p className="truncate">{option.label}</p>
+                            <p className="truncate text-xs text-muted-foreground">{option.id}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+                <span className="oc-status-pill" data-status={sessionMatchesRuntimeDefault ? "active" : "warning"}>
+                  default {sessionMatchesRuntimeDefault ? "synced" : "drift"}
+                </span>
+                {!sessionMatchesRuntimeDefault && (
+                  <button type="button" className="oc-inline-btn" onClick={() => void syncRuntimeDefaultToActiveModel()} disabled={isSyncingRuntimeDefaultModel}>
+                    <RefreshCcw className="size-3.5" />
+                    Sync
+                  </button>
+                )}
+                <span className="oc-status-pill" data-status={activeRunStatusLabel === "idle" ? "active" : "idle"}>run {activeRunStatusLabel}</span>
+                <span className="oc-status-pill" data-status={activeBackgroundInFlightCount > 0 ? "warning" : "idle"}>bg {activeBackgroundInFlightCount}</span>
+                <button type="button" className="oc-inline-btn" data-active={showThinkingDetails} onClick={() => setShowThinkingDetails(v => !v)}>
+                  <Brain className="size-3.5" /> Thinking
+                </button>
+                <button type="button" className="oc-inline-btn" data-active={showToolCallDetails} onClick={() => setShowToolCallDetails(v => !v)}>
+                  <Wrench className="size-3.5" /> Tools
+                </button>
+                <button type="button" className="oc-inline-btn" onClick={requestAbortRun} disabled={!canAbortActiveSession}>
+                  <CircleSlash className="size-3.5" /> {isAborting ? "Aborting..." : "Abort"}
+                </button>
+                <button
+                  type="button"
+                  className="oc-inline-btn"
+                  onClick={() => activeSession && void refreshBackgroundRunsForSession(activeSession.id)}
+                  disabled={!activeSession || loadingBackgroundRuns}
+                >
+                  <RefreshCcw className="size-3.5" /> Refresh
+                </button>
+                <button
+                  type="button"
+                  className="oc-inline-btn"
+                  onClick={() => activeSession && void compactSession(activeSession.id)}
+                  disabled={!activeSession || isCompacting || isActiveSessionRunning}
+                >
+                  <Scissors className="size-3.5" /> {isCompacting ? "Compacting..." : "Compact"}
+                </button>
+              </div>
             </div>
-            <span className="oc-status-pill" data-status={sessionMatchesRuntimeDefault ? "active" : "warning"}>
-              default {sessionMatchesRuntimeDefault ? "synced" : "drift"}
-            </span>
-            {!sessionMatchesRuntimeDefault && (
-              <button type="button" className="oc-inline-btn" onClick={() => void syncRuntimeDefaultToActiveModel()} disabled={isSyncingRuntimeDefaultModel}>
-                <RefreshCcw className="size-3.5" />
-                Sync
-              </button>
-            )}
-            <span className="oc-status-pill" data-status={activeRunStatusLabel === "idle" ? "active" : "idle"}>run {activeRunStatusLabel}</span>
-            <span className="oc-status-pill" data-status={activeBackgroundInFlightCount > 0 ? "warning" : "idle"}>bg {activeBackgroundInFlightCount}</span>
-            <button type="button" className="oc-inline-btn" data-active={showThinkingDetails} onClick={() => setShowThinkingDetails(v => !v)}>
-              <Brain className="size-3.5" /> Thinking
-            </button>
-            <button type="button" className="oc-inline-btn" data-active={showToolCallDetails} onClick={() => setShowToolCallDetails(v => !v)}>
-              <Wrench className="size-3.5" /> Tools
-            </button>
-            <button type="button" className="oc-inline-btn" onClick={requestAbortRun} disabled={!canAbortActiveSession}>
-              <CircleSlash className="size-3.5" /> {isAborting ? "Aborting..." : "Abort"}
-            </button>
-            <button
-              type="button"
-              className="oc-inline-btn"
-              onClick={() => activeSession && void refreshBackgroundRunsForSession(activeSession.id)}
-              disabled={!activeSession || loadingBackgroundRuns}
-            >
-              <RefreshCcw className="size-3.5" /> Refresh
-            </button>
-            <button
-              type="button"
-              className="oc-inline-btn"
-              onClick={() => activeSession && void compactSession(activeSession.id)}
-              disabled={!activeSession || isCompacting || isActiveSessionRunning}
-            >
-              <Scissors className="size-3.5" /> {isCompacting ? "Compacting..." : "Compact"}
-            </button>
-          </div>
-        </div>
+          </>
+        )}
       </section>
 
       {flyoutOpen && (

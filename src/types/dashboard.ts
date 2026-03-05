@@ -180,6 +180,46 @@ export interface SessionRunErrorSnapshot {
   message: string;
 }
 
+export interface PermissionPromptRequest {
+  id: string;
+  sessionId: string;
+  permission: string;
+  patterns: string[];
+  metadata: Record<string, unknown>;
+  always: string[];
+}
+
+export interface PermissionPromptResolved {
+  sessionId: string;
+  requestId: string;
+  reply: "once" | "always" | "reject";
+}
+
+export interface QuestionPromptOption {
+  label: string;
+  description: string;
+}
+
+export interface QuestionPromptInfo {
+  question: string;
+  header: string;
+  options: QuestionPromptOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface QuestionPromptRequest {
+  id: string;
+  sessionId: string;
+  questions: QuestionPromptInfo[];
+}
+
+export interface QuestionPromptResolved {
+  sessionId: string;
+  requestId: string;
+  outcome: "replied" | "rejected";
+}
+
 export interface SessionMessageDeltaSnapshot {
   sessionId: string;
   messageId: string;
@@ -267,5 +307,9 @@ export type DashboardEvent =
   | { event: "session-status"; payload: SessionRunStatusSnapshot }
   | { event: "session-compacted"; payload: SessionCompactedSnapshot }
   | { event: "session-error"; payload: SessionRunErrorSnapshot }
+  | { event: "permission-requested"; payload: PermissionPromptRequest }
+  | { event: "permission-resolved"; payload: PermissionPromptResolved }
+  | { event: "question-requested"; payload: QuestionPromptRequest }
+  | { event: "question-resolved"; payload: QuestionPromptResolved }
   | { event: "background-run"; payload: BackgroundRunSnapshot }
   | { event: "skills-catalog-updated"; payload: { revision: string } };

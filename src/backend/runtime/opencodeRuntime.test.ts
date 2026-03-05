@@ -2078,6 +2078,120 @@ describe("opencode runtime failover contract", () => {
     expect(deltaEvent).toBeTruthy();
   });
 
+  test("permission/question events map to runtime prompt events", async () => {
+    const events: Array<unknown> = [];
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+      }),
+    );
+    runtime.subscribe(event => {
+      events.push(event);
+    });
+
+    await runtime.sendUserMessage({
+      sessionId: "main",
+      content: "Start run",
+    });
+    events.length = 0;
+
+    const handleOpencodeEvent = (runtime as unknown as { handleOpencodeEvent: (event: unknown) => void }).handleOpencodeEvent;
+    handleOpencodeEvent.call(runtime, {
+      type: "permission.asked",
+      properties: {
+        id: "perm-1",
+        sessionID: "ses-1",
+        permission: "Read",
+        patterns: ["/tmp/*"],
+        metadata: {},
+        always: [],
+      },
+    });
+    handleOpencodeEvent.call(runtime, {
+      type: "permission.replied",
+      properties: {
+        sessionID: "ses-1",
+        requestID: "perm-1",
+        reply: "once",
+      },
+    });
+    handleOpencodeEvent.call(runtime, {
+      type: "question.asked",
+      properties: {
+        id: "question-1",
+        sessionID: "ses-1",
+        questions: [
+          {
+            question: "Pick one",
+            header: "pick",
+            options: [{ label: "A", description: "Option A" }],
+          },
+        ],
+      },
+    });
+    handleOpencodeEvent.call(runtime, {
+      type: "question.replied",
+      properties: {
+        sessionID: "ses-1",
+        requestID: "question-1",
+      },
+    });
+    handleOpencodeEvent.call(runtime, {
+      type: "question.rejected",
+      properties: {
+        sessionID: "ses-1",
+        requestID: "question-2",
+      },
+    });
+
+    const permissionRequested = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as { type?: string; payload?: { id?: string; sessionId?: string } };
+      return record.type === "session.permission.requested" && record.payload?.id === "perm-1" && record.payload?.sessionId === "main";
+    });
+    expect(permissionRequested).toBeTruthy();
+
+    const permissionResolved = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as { type?: string; payload?: { requestId?: string; reply?: string } };
+      return record.type === "session.permission.resolved" && record.payload?.requestId === "perm-1" && record.payload?.reply === "once";
+    });
+    expect(permissionResolved).toBeTruthy();
+
+    const questionRequested = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as {
+        type?: string;
+        payload?: {
+          id?: string;
+          sessionId?: string;
+          questions?: Array<{ question?: string }>;
+        };
+      };
+      return (
+        record.type === "session.question.requested" &&
+        record.payload?.id === "question-1" &&
+        record.payload?.sessionId === "main" &&
+        record.payload.questions?.[0]?.question === "Pick one"
+      );
+    });
+    expect(questionRequested).toBeTruthy();
+
+    const questionReplied = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as { type?: string; payload?: { requestId?: string; outcome?: string } };
+      return record.type === "session.question.resolved" && record.payload?.requestId === "question-1" && record.payload?.outcome === "replied";
+    });
+    expect(questionReplied).toBeTruthy();
+
+    const questionRejected = events.find(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as { type?: string; payload?: { requestId?: string; outcome?: string } };
+      return record.type === "session.question.resolved" && record.payload?.requestId === "question-2" && record.payload?.outcome === "rejected";
+    });
+    expect(questionRejected).toBeTruthy();
+  });
+
   test("streamed message metadata caches evict oldest entries when over limit", () => {
     const runtime = createRuntimeWithClient(
       createMockClient({

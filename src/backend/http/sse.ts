@@ -34,6 +34,14 @@ function toSseEventName(event: RuntimeEvent): string {
       return "session-compacted";
     case "session.run.error":
       return "session-error";
+    case "session.permission.requested":
+      return "permission-requested";
+    case "session.permission.resolved":
+      return "permission-resolved";
+    case "session.question.requested":
+      return "question-requested";
+    case "session.question.resolved":
+      return "question-resolved";
     case "background.run.updated":
       return "background-run";
     case "config.updated":

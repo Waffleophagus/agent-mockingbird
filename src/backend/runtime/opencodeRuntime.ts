@@ -35,6 +35,10 @@ import {
   createSessionMessageCreatedEvent,
   createSessionMessageDeltaEvent,
   createSessionMessagePartUpdatedEvent,
+  createSessionPermissionRequestedEvent,
+  createSessionPermissionResolvedEvent,
+  createSessionQuestionRequestedEvent,
+  createSessionQuestionResolvedEvent,
   createSessionRunErrorEvent,
   createSessionRunStatusUpdatedEvent,
   createSessionStateUpdatedEvent,
@@ -114,7 +118,63 @@ type OpencodeMessagePartDeltaEvent = {
     delta: string;
   };
 };
-type OpencodeRuntimeEvent = OpencodeEvent | OpencodeMessagePartDeltaEvent;
+type OpencodePermissionAskedEvent = {
+  type: "permission.asked";
+  properties: {
+    id: string;
+    sessionID: string;
+    permission: string;
+    patterns: string[];
+    metadata: Record<string, unknown>;
+    always: string[];
+  };
+};
+type OpencodePermissionRepliedEvent = {
+  type: "permission.replied";
+  properties: {
+    sessionID: string;
+    requestID?: string;
+    reply?: "once" | "always" | "reject";
+    permissionID?: string;
+    response?: string;
+  };
+};
+type OpencodeQuestionAskedEvent = {
+  type: "question.asked";
+  properties: {
+    id: string;
+    sessionID: string;
+    questions: Array<{
+      question: string;
+      header: string;
+      options: Array<{ label: string; description: string }>;
+      multiple?: boolean;
+      custom?: boolean;
+    }>;
+  };
+};
+type OpencodeQuestionRepliedEvent = {
+  type: "question.replied";
+  properties: {
+    sessionID: string;
+    requestID: string;
+  };
+};
+type OpencodeQuestionRejectedEvent = {
+  type: "question.rejected";
+  properties: {
+    sessionID: string;
+    requestID: string;
+  };
+};
+type OpencodeRuntimeEvent =
+  | OpencodeEvent
+  | OpencodeMessagePartDeltaEvent
+  | OpencodePermissionAskedEvent
+  | OpencodePermissionRepliedEvent
+  | OpencodeQuestionAskedEvent
+  | OpencodeQuestionRepliedEvent
+  | OpencodeQuestionRejectedEvent;
 type ResolvedModel = { providerId: string; modelId: string };
 type RuntimeOpencodeConfig = WafflebotConfig["runtime"]["opencode"];
 type RuntimeAgentCatalog = {
@@ -1233,6 +1293,13 @@ export class OpencodeRuntime implements RuntimeEngine {
       "- Keep runSmokeTest enabled unless explicitly instructed otherwise.",
     );
 
+    lines.push("");
+    lines.push(
+      "Interaction policy:",
+      "- If the user asks for an interactive multiple-choice question, use the question UI/tool instead of plain text.",
+      "- Keep option labels short and descriptions concise.",
+    );
+
     if (memoryConfig.enabled && memoryConfig.toolMode !== "inject_only") {
       lines.push("");
       lines.push(
@@ -1405,6 +1472,21 @@ export class OpencodeRuntime implements RuntimeEngine {
         return;
       case "session.error":
         this.handleSessionErrorEvent(event);
+        return;
+      case "permission.asked":
+        this.handlePermissionAskedEvent(event);
+        return;
+      case "permission.replied":
+        this.handlePermissionRepliedEvent(event);
+        return;
+      case "question.asked":
+        this.handleQuestionAskedEvent(event);
+        return;
+      case "question.replied":
+        this.handleQuestionResolvedEvent(event, "replied");
+        return;
+      case "question.rejected":
+        this.handleQuestionResolvedEvent(event, "rejected");
         return;
       default:
         return;
@@ -1668,6 +1750,103 @@ export class OpencodeRuntime implements RuntimeEngine {
           sessionId: localSessionId,
           name: normalized.name,
           message: normalized.message,
+        },
+        "runtime",
+      ),
+    );
+  }
+
+  private handlePermissionAskedEvent(event: OpencodePermissionAskedEvent) {
+    const externalSessionId = event.properties.sessionID.trim();
+    if (!externalSessionId) return;
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, externalSessionId);
+    if (!localSessionId) return;
+
+    this.emit(
+      createSessionPermissionRequestedEvent(
+        {
+          id: event.properties.id,
+          sessionId: localSessionId,
+          permission: event.properties.permission,
+          patterns: Array.isArray(event.properties.patterns) ? event.properties.patterns : [],
+          metadata:
+            event.properties.metadata && typeof event.properties.metadata === "object"
+              ? event.properties.metadata
+              : {},
+          always: Array.isArray(event.properties.always) ? event.properties.always : [],
+        },
+        "runtime",
+      ),
+    );
+  }
+
+  private handlePermissionRepliedEvent(event: OpencodePermissionRepliedEvent) {
+    const externalSessionId = event.properties.sessionID.trim();
+    if (!externalSessionId) return;
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, externalSessionId);
+    if (!localSessionId) return;
+    const requestId = event.properties.requestID ?? event.properties.permissionID ?? "";
+    if (!requestId.trim()) return;
+    const rawReply = (event.properties.reply ?? event.properties.response ?? "").trim();
+    const reply = rawReply === "once" || rawReply === "always" || rawReply === "reject" ? rawReply : "once";
+
+    this.emit(
+      createSessionPermissionResolvedEvent(
+        {
+          sessionId: localSessionId,
+          requestId,
+          reply,
+        },
+        "runtime",
+      ),
+    );
+  }
+
+  private handleQuestionAskedEvent(event: OpencodeQuestionAskedEvent) {
+    const externalSessionId = event.properties.sessionID.trim();
+    if (!externalSessionId) return;
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, externalSessionId);
+    if (!localSessionId) return;
+
+    const questions = Array.isArray(event.properties.questions) ? event.properties.questions : [];
+    this.emit(
+      createSessionQuestionRequestedEvent(
+        {
+          id: event.properties.id,
+          sessionId: localSessionId,
+          questions: questions.map(question => ({
+            question: question.question,
+            header: question.header,
+            options: Array.isArray(question.options)
+              ? question.options.map(option => ({
+                  label: option.label,
+                  description: option.description,
+                }))
+              : [],
+            multiple: question.multiple === true ? true : undefined,
+            custom: question.custom === false ? false : true,
+          })),
+        },
+        "runtime",
+      ),
+    );
+  }
+
+  private handleQuestionResolvedEvent(
+    event: OpencodeQuestionRepliedEvent | OpencodeQuestionRejectedEvent,
+    outcome: "replied" | "rejected",
+  ) {
+    const externalSessionId = event.properties.sessionID.trim();
+    if (!externalSessionId) return;
+    const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, externalSessionId);
+    if (!localSessionId) return;
+
+    this.emit(
+      createSessionQuestionResolvedEvent(
+        {
+          sessionId: localSessionId,
+          requestId: event.properties.requestID,
+          outcome,
         },
         "runtime",
       ),

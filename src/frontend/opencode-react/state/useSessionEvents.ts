@@ -16,6 +16,8 @@ import type {
   ChatMessagePart,
   MemoryStatusSnapshot,
   MemoryWriteEvent,
+  PermissionPromptRequest,
+  QuestionPromptRequest,
   SessionCompactedSnapshot,
   SessionRunErrorSnapshot,
   SessionRunStatusSnapshot,
@@ -46,6 +48,8 @@ interface UseSessionEventsInput {
   setBackgroundSteerDraftByRun: Dispatch<SetStateAction<Record<string, string>>>;
   setBackgroundActionBusyByRun: Dispatch<SetStateAction<Record<string, "steer" | "abort">>>;
   setFocusedBackgroundRunId: Dispatch<SetStateAction<string>>;
+  setPendingPermissionsBySession: Dispatch<SetStateAction<Record<string, PermissionPromptRequest[]>>>;
+  setPendingQuestionsBySession: Dispatch<SetStateAction<Record<string, QuestionPromptRequest[]>>>;
   setRunWaitTimeoutMs: Dispatch<SetStateAction<number>>;
   setChildSessionHideAfterDays: Dispatch<SetStateAction<number>>;
   setRuntimeDefaultModel: Dispatch<SetStateAction<string>>;
@@ -504,6 +508,80 @@ export function useSessionEvents(input: UseSessionEventsInput) {
           }),
         }));
       }
+    });
+
+    events.addEventListener("permission-requested", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as PermissionPromptRequest;
+      if (!payload?.id || !payload?.sessionId) return;
+      input.setPendingPermissionsBySession(current => {
+        const existing = current[payload.sessionId] ?? [];
+        const index = existing.findIndex(item => item.id === payload.id);
+        const nextList =
+          index === -1
+            ? [...existing, payload].sort((left, right) => left.id.localeCompare(right.id))
+            : existing.map(item => (item.id === payload.id ? payload : item));
+        return {
+          ...current,
+          [payload.sessionId]: nextList,
+        };
+      });
+    });
+
+    events.addEventListener("permission-resolved", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as {
+        sessionId?: string;
+        requestId?: string;
+      };
+      if (!payload?.sessionId || !payload?.requestId) return;
+      const sessionId = payload.sessionId;
+      const requestId = payload.requestId;
+      input.setPendingPermissionsBySession(current => {
+        const existing = current[sessionId] ?? [];
+        if (existing.length === 0) return current;
+        const nextList = existing.filter(item => item.id !== requestId);
+        if (nextList.length === existing.length) return current;
+        return {
+          ...current,
+          [sessionId]: nextList,
+        };
+      });
+    });
+
+    events.addEventListener("question-requested", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as QuestionPromptRequest;
+      if (!payload?.id || !payload?.sessionId) return;
+      input.setPendingQuestionsBySession(current => {
+        const existing = current[payload.sessionId] ?? [];
+        const index = existing.findIndex(item => item.id === payload.id);
+        const nextList =
+          index === -1
+            ? [...existing, payload].sort((left, right) => left.id.localeCompare(right.id))
+            : existing.map(item => (item.id === payload.id ? payload : item));
+        return {
+          ...current,
+          [payload.sessionId]: nextList,
+        };
+      });
+    });
+
+    events.addEventListener("question-resolved", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as {
+        sessionId?: string;
+        requestId?: string;
+      };
+      if (!payload?.sessionId || !payload?.requestId) return;
+      const sessionId = payload.sessionId;
+      const requestId = payload.requestId;
+      input.setPendingQuestionsBySession(current => {
+        const existing = current[sessionId] ?? [];
+        if (existing.length === 0) return current;
+        const nextList = existing.filter(item => item.id !== requestId);
+        if (nextList.length === existing.length) return current;
+        return {
+          ...current,
+          [sessionId]: nextList,
+        };
+      });
     });
 
     events.addEventListener("background-run", event => {
