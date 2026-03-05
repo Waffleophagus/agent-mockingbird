@@ -8,6 +8,7 @@ import { createMemoryRoutes } from "./memoryRoutes";
 import { createQueueRoutes } from "./queueRoutes";
 import { createRunRoutes } from "./runRoutes";
 import { createSignalRoutes } from "./signalRoutes";
+import { createUiRoutes } from "./uiRoutes";
 import type { SignalChannelService } from "../../channels/signal/service";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import type { CronService } from "../../cron/service";
@@ -32,5 +33,6 @@ export function createApiRoutes(input: {
     ...createQueueRoutes(),
     ...createEventRoutes(input.eventStream),
     ...createSignalRoutes(input.signalService),
+    ...createUiRoutes(input.runtime),
   };
 }

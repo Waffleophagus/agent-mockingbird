@@ -36,9 +36,21 @@ bun run start
 Code quality:
 
 ```bash
+bun run test
 bun run lint
 bun run typecheck
 ```
+
+`bun run test` is intentionally scoped to `src` so local `opencode/` clone tests are not included.
+
+Local Opencode UI source (required for current frontend styling/assets):
+
+```bash
+git clone https://github.com/anomalyco/opencode.git opencode
+bash scripts/pull-opencode.sh
+```
+
+`opencode/` is intentionally gitignored in this repo.
 
 Database migrations (Drizzle + SQLite):
 
