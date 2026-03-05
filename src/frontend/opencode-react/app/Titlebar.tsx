@@ -20,9 +20,9 @@ export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
       <div className="oc-global-titlebar-left">
         <Button
           type="button"
-          variant="ghost"
+          variant="outline"
           size="sm"
-          className="oc-titlebar-icon"
+          className="oc-titlebar-action oc-panel-toggle"
           data-active={sidebarOpen}
           aria-label="Toggle sidebar"
           onClick={toggleSidebar}

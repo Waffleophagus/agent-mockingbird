@@ -62,6 +62,11 @@
   --ring: var(--border-selected);
 }
 
+html,
+body {
+  height: 100%;
+}
+
 * {
   border-color: var(--border);
 }
@@ -71,21 +76,23 @@ body {
   font-family: var(--font-sans);
   background: var(--background-base);
   color: var(--foreground);
+  overflow: hidden;
 }
 
 #root {
-  min-height: 100vh;
+  height: 100%;
 }
 
 .oc-app {
-  min-height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .oc-global-titlebar {
-  height: 40px;
-  padding: 0 8px;
+  height: 44px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--border-weak-base);
   background: color-mix(in srgb, var(--background-base) 96%, black 4%);
   display: grid;
@@ -98,20 +105,7 @@ body {
 .oc-global-titlebar-right {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-
-.oc-titlebar-icon {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  color: var(--icon-weak);
-}
-
-.oc-titlebar-icon[data-active="true"] {
-  color: var(--text-strong);
-  border: 1px solid var(--border-selected);
-  border-radius: 6px;
+  gap: 6px;
 }
 
 .oc-global-titlebar-center {
@@ -156,14 +150,14 @@ body {
 
 .oc-pane-header {
   border-bottom: 1px solid var(--border-weak-base);
-  padding: 8px 7px 7px;
+  padding: 10px 9px 9px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .oc-pane-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-strong);
 }
@@ -175,13 +169,13 @@ body {
 }
 
 .oc-inline-btn {
-  height: 21px;
+  height: 24px;
   border: 1px solid var(--border-weak-base);
   border-radius: 5px;
   padding: 0 6px;
   background: var(--surface-panel);
   color: var(--text-base);
-  font-size: 11px;
+  font-size: 12px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -202,8 +196,8 @@ body {
 }
 
 .oc-session-search {
-  height: 22px;
-  font-size: 11px;
+  height: 26px;
+  font-size: 12px;
   border-radius: 5px;
   background: var(--surface-panel);
 }
@@ -212,20 +206,20 @@ body {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 6px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .oc-session-row {
   border: 1px solid color-mix(in srgb, var(--border-weak-base) 85%, transparent);
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
-  padding: 5px 6px;
+  padding: 7px 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
 }
 
@@ -253,7 +247,7 @@ body {
 }
 
 .oc-session-row-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-strong);
 }
@@ -261,7 +255,7 @@ body {
 .oc-session-row-meta,
 .oc-child-row-meta {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-weaker);
 }
 
@@ -269,22 +263,22 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-weaker);
 }
 
 .oc-child-list {
   border-left: 1px solid var(--border-weak-base);
-  padding-left: 7px;
+  padding-left: 9px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
 }
 
 .oc-child-row {
   border: 1px solid color-mix(in srgb, var(--border-weak-base) 85%, transparent);
-  border-radius: 6px;
-  padding: 4px 5px;
+  border-radius: 7px;
+  padding: 6px 7px;
   background: transparent;
   transition: border-color 120ms ease, background-color 120ms ease;
 }
@@ -294,7 +288,7 @@ body {
 }
 
 .oc-child-row-title {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-base);
 }
 
@@ -316,21 +310,21 @@ body {
 }
 
 .oc-session-header {
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border-weak-base);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
 }
 
 .oc-session-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .oc-session-subtitle {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-weaker);
 }
 
@@ -343,14 +337,14 @@ body {
 .oc-session-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
 .oc-session-quick-actions {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
 .oc-model-picker {
@@ -363,12 +357,12 @@ body {
   justify-content: space-between;
   gap: 8px;
   min-width: 210px;
-  height: 22px;
+  height: 26px;
   border: 1px solid var(--border-weak-base);
   border-radius: 5px;
   background: var(--surface-panel);
-  padding: 0 6px;
-  font-size: 11px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .oc-model-picker-menu {
@@ -409,7 +403,7 @@ body {
 }
 
 .oc-session-meta-errors {
-  padding: 6px 12px 0;
+  padding: 8px 14px 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -419,27 +413,27 @@ body {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 8px 12px 10px;
+  padding: 12px 16px 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
 }
 
 .oc-turn-block {
   width: min(760px, 100%);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
   animation: oc-fade-up 180ms ease both;
 }
 
 .oc-subturn {
   max-width: 96%;
   border: 1px solid var(--border-weak-base);
-  border-radius: 7px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 82%, black 18%);
-  padding: 6px 9px;
+  padding: 8px 11px;
 }
 
 .oc-subturn-head {
@@ -447,7 +441,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   color: var(--text-weaker);
 }
@@ -455,8 +449,8 @@ body {
 .oc-message {
   max-width: 96%;
   border: 1px solid var(--border-weak-base);
-  border-radius: 7px;
-  padding: 6px 9px;
+  border-radius: 8px;
+  padding: 8px 11px;
   background: var(--surface-panel);
 }
 
@@ -478,7 +472,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   color: var(--text-weaker);
 }
@@ -497,15 +491,15 @@ body {
   background: var(--surface-interactive-base);
   color: var(--text-on-interactive-base);
   padding: 3px 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .oc-composer {
   border-top: 1px solid var(--border-weak-base);
-  padding: 7px 10px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .oc-composer > * {
@@ -524,19 +518,20 @@ body {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border-weak-base);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface-raised-base);
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 4px 9px;
+  font-size: 12px;
 }
 
 .oc-composer-input {
-  min-height: 48px;
+  min-height: 56px;
   max-height: 150px;
   resize: vertical;
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface-panel);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .oc-composer-actions {
@@ -573,9 +568,9 @@ body {
 .oc-flyout-tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   border-bottom: 1px solid var(--border-weak-base);
-  padding: 6px 8px;
+  padding: 8px 10px;
 }
 
 .oc-flyout-tabs > button {
@@ -583,8 +578,8 @@ body {
   border-radius: 6px;
   background: transparent;
   color: var(--text-weak);
-  font-size: 10px;
-  padding: 2px 8px;
+  font-size: 11px;
+  padding: 3px 9px;
   transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
 }
 
@@ -597,10 +592,10 @@ body {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 8px 8px 12px;
+  padding: 10px 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   animation: oc-fade-up 180ms ease both;
 }
 
@@ -616,21 +611,21 @@ body {
 .oc-context-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 3px 10px;
+  gap: 5px 12px;
   border: 1px solid color-mix(in srgb, var(--border-weak-base) 75%, transparent);
-  border-radius: 6px;
-  padding: 6px;
+  border-radius: 7px;
+  padding: 8px;
 }
 
 .oc-context-label {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--text-weaker);
 }
 
 .oc-context-value {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-base);
   text-align: right;
   overflow: hidden;
@@ -640,16 +635,16 @@ body {
 
 .oc-context-section {
   border: 1px solid color-mix(in srgb, var(--border-weak-base) 75%, transparent);
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  padding: 6px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
 }
 
 .oc-context-title {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-weaker);
@@ -677,7 +672,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-weak);
 }
 
@@ -689,10 +684,10 @@ body {
 }
 
 .oc-background-input {
-  min-height: 52px;
+  min-height: 58px;
   background: color-mix(in srgb, var(--surface-base) 85%, transparent);
-  border-radius: 6px;
-  font-size: 11px;
+  border-radius: 7px;
+  font-size: 12px;
 }
 
 .oc-background-actions {
@@ -702,9 +697,9 @@ body {
 
 .oc-background-run {
   border: 1px solid color-mix(in srgb, var(--border-weak-base) 75%, transparent);
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  padding: 5px;
+  padding: 7px;
 }
 
 .oc-dot {
@@ -736,9 +731,9 @@ body {
 
 .oc-status-pill {
   border: 1px solid var(--border-weak-base);
-  border-radius: 6px;
-  padding: 1px 5px;
-  font-size: 8px;
+  border-radius: 7px;
+  padding: 2px 6px;
+  font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-weaker);
@@ -766,7 +761,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
 }
 
@@ -780,21 +775,23 @@ body {
 }
 
 .oc-titlebar-action {
-  height: 24px;
-  padding: 0 6px;
-  font-size: 11px;
-  border-radius: 5px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 6px;
   background: var(--surface-panel);
   transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
 }
 
 .oc-panel-toggle {
-  width: 24px;
+  width: 28px;
   padding: 0;
 }
 
 .oc-panel-toggle[data-active="true"] {
-  border-color: var(--border-selected);
+  border-color: color-mix(in srgb, var(--border-selected) 34%, var(--border-weak-base));
+  background: color-mix(in srgb, var(--surface-raised-base) 70%, transparent);
+  color: var(--text-strong);
 }
 
 .oc-titlebar-action:hover:not(:disabled) {
@@ -814,7 +811,7 @@ body {
 
 .chat-markdown {
   margin-top: 0.15rem;
-  line-height: 1.62;
+  line-height: 1.72;
   font-size: 14px;
 }
 
@@ -902,7 +899,7 @@ body {
   border: 0;
   background: transparent;
   padding: 0;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
 }
 
 .chat-markdown blockquote {
