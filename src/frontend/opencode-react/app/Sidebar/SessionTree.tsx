@@ -1,13 +1,12 @@
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCompactTimestamp, relativeFromIso } from "@/frontend/app/chatHelpers";
 import { isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
 import type { BackgroundRunSnapshot, SessionSummary } from "@/types/dashboard";
 
-function formatTimestampSummary(iso: string): string {
+function formatTimestampSummary(iso: string) {
   const compact = formatCompactTimestamp(iso);
   if (!compact) return relativeFromIso(iso);
   return `${compact} · ${relativeFromIso(iso)}`;
@@ -51,9 +50,6 @@ export interface SessionTreeProps {
 export function SessionTree(props: SessionTreeProps) {
   const {
     activeSessionId,
-    backgroundActionBusyByRun,
-    backgroundSteerDraftByRun,
-    childSessionHideAfterDays,
     childSessionSearchMatchBySessionId,
     childSessionSearchQuery,
     childSessionVisibilityByParentSessionId,
@@ -70,26 +66,25 @@ export function SessionTree(props: SessionTreeProps) {
     sessionError,
     sessionSearchNeedle,
     setActiveSessionId,
-    setBackgroundSteerDraftByRun,
     setChildSessionSearchQuery,
     setShowAllChildren,
     showAllChildren,
-    steerBackgroundRun,
     toggleSessionGroup,
     totalHiddenChildSessionsByAge,
     totalInFlightBackgroundRuns,
     totalSessionSearchMatches,
+    childSessionHideAfterDays,
   } = props;
 
   return (
     <aside className="oc-session-sidebar">
       <div className="oc-session-list-pane">
-        <div className="oc-pane-header">
-          <p className="oc-pane-title">Sessions</p>
-          <div className="oc-session-toolbar">
-            <button type="button" className="oc-inline-btn" onClick={() => void refreshInFlightBackgroundRuns()}>
-              runs {totalInFlightBackgroundRuns}
-            </button>
+        <div className="oc-pane-header oc-pane-header-drawer">
+          <div className="oc-drawer-title-row">
+            <div>
+              <p className="oc-pane-title">Sessions</p>
+              <p className="oc-pane-subtitle">Focused shell by default, navigation on demand.</p>
+            </div>
             <button type="button" className="oc-inline-btn" onClick={createNewSession} disabled={isCreatingSession}>
               <Plus className="size-3" />
               {isCreatingSession ? "Creating..." : "New"}
@@ -101,14 +96,17 @@ export function SessionTree(props: SessionTreeProps) {
             placeholder="Search threads..."
             className="oc-session-search"
           />
-          {sessionSearchNeedle && (
-            <p className="text-[11px] text-muted-foreground">{totalSessionSearchMatches} matches</p>
-          )}
-          <button type="button" className="oc-link-btn" onClick={() => setShowAllChildren(v => !v)}>
-            {showAllChildren
-              ? "Hide old children"
-              : `Show all children${totalHiddenChildSessionsByAge > 0 ? ` (${totalHiddenChildSessionsByAge} hidden)` : ""}`}
-          </button>
+          <div className="oc-session-toolbar oc-session-toolbar-compact">
+            <button type="button" className="oc-inline-btn" onClick={() => void refreshInFlightBackgroundRuns()}>
+              runs {totalInFlightBackgroundRuns}
+            </button>
+            <button type="button" className="oc-link-btn" onClick={() => setShowAllChildren(v => !v)}>
+              {showAllChildren
+                ? "Hide old children"
+                : `Show all children${totalHiddenChildSessionsByAge > 0 ? ` (${totalHiddenChildSessionsByAge} hidden)` : ""}`}
+            </button>
+          </div>
+          {sessionSearchNeedle && <p className="text-[11px] text-muted-foreground">{totalSessionSearchMatches} matches</p>}
           {sessionError && <p className="text-xs text-destructive">{sessionError}</p>}
         </div>
 
@@ -119,18 +117,11 @@ export function SessionTree(props: SessionTreeProps) {
             const visibleChildren = childSessionVisibilityByParentSessionId.visible[session.id] ?? [];
             const hiddenChildrenByAge = childSessionVisibilityByParentSessionId.hiddenByAgeCount[session.id] ?? 0;
             const expanded = Boolean(expandedSessionGroupsById[session.id]);
-            const parentSearchMatch = sessionSearchNeedle
-              ? parentSessionSearchMatchBySessionId.get(session.id) === true
-              : false;
+            const parentSearchMatch = sessionSearchNeedle ? parentSessionSearchMatchBySessionId.get(session.id) === true : false;
             const inFlightRuns = inFlightBackgroundRunsBySession[session.id] ?? [];
 
             return (
-              <article
-                key={session.id}
-                className="oc-session-row"
-                data-active={activeSessionId === session.id}
-                data-search-match={parentSearchMatch}
-              >
+              <article key={session.id} className="oc-session-row" data-active={activeSessionId === session.id} data-search-match={parentSearchMatch}>
                 <button type="button" className="oc-session-row-main" onClick={() => setActiveSessionId(session.id)}>
                   <div className="oc-session-row-top">
                     <p className="oc-session-row-title">{session.title}</p>
@@ -146,53 +137,32 @@ export function SessionTree(props: SessionTreeProps) {
                   <>
                     <button type="button" className="oc-link-btn" onClick={() => toggleSessionGroup(session.id)}>
                       {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                      {expanded ? "Hide children" : `Show children (${children.length})`}
+                      {expanded ? "Hide branches" : `Show branches (${children.length})`}
                     </button>
                     {expanded && (
                       <div className="oc-child-list">
                         {visibleChildren.map(child => {
                           const childRun = latestBackgroundRunByChildSessionId.get(child.id) ?? null;
-                          const childSearchMatch = sessionSearchNeedle
-                            ? childSessionSearchMatchBySessionId.get(child.id) === true
-                            : false;
+                          const childSearchMatch = sessionSearchNeedle ? childSessionSearchMatchBySessionId.get(child.id) === true : false;
                           const childRunInFlight = childRun ? isBackgroundRunInFlight(childRun) : false;
-                          const busyAction = childRun ? backgroundActionBusyByRun[childRun.runId] : undefined;
-                          const nudgeDraft = childRun ? (backgroundSteerDraftByRun[childRun.runId] ?? "") : "";
 
                           return (
-                            <div key={child.id} className="oc-child-row" data-active={activeSessionId === child.id} data-search-match={childSearchMatch}>
-                              <button type="button" className="oc-child-row-main" onClick={() => setActiveSessionId(child.id)}>
+                            <button
+                              key={child.id}
+                              type="button"
+                              className="oc-child-row oc-child-row-main"
+                              data-active={activeSessionId === child.id}
+                              data-search-match={childSearchMatch}
+                              onClick={() => setActiveSessionId(child.id)}
+                            >
+                              <div className="oc-session-row-top">
                                 <p className="oc-child-row-title">{child.title}</p>
-                                <p className="oc-child-row-meta">{child.messageCount} msgs • {formatTimestampSummary(child.lastActiveAt)}</p>
-                              </button>
-                              {childRun && (
-                                <div className="oc-child-actions">
-                                  <span className="oc-status-pill" data-status={childRunInFlight ? "active" : "idle"}>{childRun.status}</span>
-                                  {childRunInFlight && (
-                                    <>
-                                      <Input
-                                        value={nudgeDraft}
-                                        onChange={event =>
-                                          setBackgroundSteerDraftByRun(current => ({ ...current, [childRun.runId]: event.target.value }))
-                                        }
-                                        placeholder="Steer child run..."
-                                        className="h-7 text-[11px] oc-child-steer-input"
-                                        disabled={busyAction === "abort"}
-                                      />
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => void steerBackgroundRun(childRun.runId)}
-                                        disabled={!nudgeDraft.trim()}
-                                      >
-                                        Send
-                                      </Button>
-                                    </>
-                                  )}
-                                </div>
-                              )}
-                            </div>
+                                {childRun ? (
+                                  <span className="oc-status-pill" data-status={childRunInFlight ? "warning" : "idle"}>{childRun.status}</span>
+                                ) : null}
+                              </div>
+                              <p className="oc-child-row-meta">{child.messageCount} msgs • {formatTimestampSummary(child.lastActiveAt)}</p>
+                            </button>
                           );
                         })}
 

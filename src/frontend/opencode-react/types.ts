@@ -10,21 +10,22 @@ import type {
   UsageSnapshot,
 } from "@/types/dashboard";
 
-export type SessionScreenFlyoutTab = "review" | "context";
-
 export interface SessionScreenTitlebarVM {
   streamStatus: "connecting" | "connected" | "reconnecting";
   heartbeatAt: string;
-  sidebarOpen: boolean;
-  flyoutOpen: boolean;
-  toggleSidebar: () => void;
-  toggleFlyout: () => void;
+  drawerOpen: boolean;
+  sidePanelOpen: boolean;
+  toggleDrawer: () => void;
+  toggleSidePanel: () => void;
   closePanels: () => void;
 }
 
 export interface SessionScreenLayoutVM {
-  sidebarOpen: boolean;
-  flyoutOpen: boolean;
+  drawerOpen: boolean;
+  sidePanelOpen: boolean;
+  openSidePanel: () => void;
+  closeDrawer: () => void;
+  closeSidePanel: () => void;
 }
 
 export interface SessionScreenVM {

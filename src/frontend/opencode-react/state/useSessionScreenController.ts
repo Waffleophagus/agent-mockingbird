@@ -11,20 +11,45 @@ export interface UseSessionScreenControllerInput {
 }
 
 export function useSessionScreenController(input: UseSessionScreenControllerInput): SessionScreenVM {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [flyoutOpen, setFlyoutOpen] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
 
-  const toggleSidebar = useCallback(() => {
-    setSidebarOpen(current => !current);
+  const toggleDrawer = useCallback(() => {
+    setDrawerOpen(current => {
+      const next = !current;
+      if (next) {
+        setSidePanelOpen(false);
+      }
+      return next;
+    });
   }, []);
 
-  const toggleFlyout = useCallback(() => {
-    setFlyoutOpen(current => !current);
+  const toggleSidePanel = useCallback(() => {
+    setSidePanelOpen(current => {
+      const next = !current;
+      if (next) {
+        setDrawerOpen(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const openSidePanel = useCallback(() => {
+    setSidePanelOpen(true);
+    setDrawerOpen(false);
   }, []);
 
   const closePanels = useCallback(() => {
-    setSidebarOpen(false);
-    setFlyoutOpen(false);
+    setDrawerOpen(false);
+    setSidePanelOpen(false);
+  }, []);
+
+  const closeDrawer = useCallback(() => {
+    setDrawerOpen(false);
+  }, []);
+
+  const closeSidePanel = useCallback(() => {
+    setSidePanelOpen(false);
   }, []);
 
   return buildSessionScreenVM({
@@ -32,15 +57,18 @@ export function useSessionScreenController(input: UseSessionScreenControllerInpu
     titlebar: {
       streamStatus: input.streamStatus,
       heartbeatAt: input.heartbeatAt,
-      sidebarOpen,
-      flyoutOpen,
-      toggleSidebar,
-      toggleFlyout,
+      drawerOpen,
+      sidePanelOpen,
+      toggleDrawer,
+      toggleSidePanel,
       closePanels,
     },
     layout: {
-      sidebarOpen,
-      flyoutOpen,
+      drawerOpen,
+      sidePanelOpen,
+      openSidePanel,
+      closeDrawer,
+      closeSidePanel,
     },
   });
 }

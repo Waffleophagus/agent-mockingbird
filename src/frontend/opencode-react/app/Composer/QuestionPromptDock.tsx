@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { QuestionPromptInfo, QuestionPromptRequest } from "@/types/dashboard";
 
@@ -25,6 +25,10 @@ function answerForQuestion(question: QuestionPromptInfo, selected: string[], cus
 }
 
 export function QuestionPromptDock(props: QuestionPromptDockProps) {
+  return <QuestionPromptDockInner key={props.request.id} {...props} />;
+}
+
+function QuestionPromptDockInner(props: QuestionPromptDockProps) {
   const { request, isBusy, onDismiss, onReply } = props;
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedByIndex, setSelectedByIndex] = useState<Record<number, string[]>>({});
@@ -33,7 +37,7 @@ export function QuestionPromptDock(props: QuestionPromptDockProps) {
 
   const totalQuestions = request.questions.length;
   const activeQuestion = request.questions[stepIndex];
-  const activeSelected = selectedByIndex[stepIndex] ?? [];
+  const activeSelected = useMemo(() => selectedByIndex[stepIndex] ?? [], [selectedByIndex, stepIndex]);
   const activeCustom = customByIndex[stepIndex] ?? "";
   const canGoBack = stepIndex > 0;
   const isLastStep = stepIndex >= totalQuestions - 1;
@@ -42,13 +46,6 @@ export function QuestionPromptDock(props: QuestionPromptDockProps) {
     if (!activeQuestion) return [];
     return answerForQuestion(activeQuestion, activeSelected, activeCustom);
   }, [activeCustom, activeQuestion, activeSelected]);
-
-  useEffect(() => {
-    setStepIndex(0);
-    setSelectedByIndex({});
-    setCustomByIndex({});
-    setError("");
-  }, [request.id]);
 
   function toggleOption(label: string) {
     if (!activeQuestion) return;

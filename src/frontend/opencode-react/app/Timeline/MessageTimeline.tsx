@@ -1,4 +1,4 @@
-import { AlertTriangle, LoaderCircle, RefreshCcw } from "lucide-react";
+import { AlertTriangle, LoaderCircle, RefreshCcw, Sparkles, Wrench } from "lucide-react";
 import type { RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -23,8 +23,7 @@ function stringifyToolInput(input: Record<string, unknown> | undefined): string 
 }
 
 function resolvePartTimestamp(part: ChatMessagePart, fallbackIso: string): string {
-  const iso = part.startedAt ?? part.observedAt ?? fallbackIso;
-  return iso;
+  return part.startedAt ?? part.observedAt ?? fallbackIso;
 }
 
 function sortPartsChronologically(parts: ChatMessagePart[], fallbackIso: string): ChatMessagePart[] {
@@ -34,6 +33,42 @@ function sortPartsChronologically(parts: ChatMessagePart[], fallbackIso: string)
     if (Number.isFinite(leftTs) && Number.isFinite(rightTs) && leftTs !== rightTs) return leftTs - rightTs;
     return left.id.localeCompare(right.id);
   });
+}
+
+type SessionTurn = {
+  id: string;
+  user?: LocalChatMessage;
+  assistantMessages: LocalChatMessage[];
+};
+
+function buildTurns(messages: LocalChatMessage[]): SessionTurn[] {
+  const turns: SessionTurn[] = [];
+  let current: SessionTurn | null = null;
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      current = {
+        id: message.id,
+        user: message,
+        assistantMessages: [],
+      };
+      turns.push(current);
+      continue;
+    }
+
+    if (!current) {
+      current = {
+        id: message.id,
+        assistantMessages: [message],
+      };
+      turns.push(current);
+      continue;
+    }
+
+    current.assistantMessages.push(message);
+  }
+
+  return turns;
 }
 
 export interface MessageTimelineProps {
@@ -61,6 +96,8 @@ export function MessageTimeline(props: MessageTimelineProps) {
     showToolCallDetails,
   } = props;
 
+  const turns = buildTurns(messages);
+
   return (
     <div className="oc-timeline" ref={chatScrollRef}>
       {hasNewMessages && isUserScrolledUp && (
@@ -68,95 +105,111 @@ export function MessageTimeline(props: MessageTimelineProps) {
       )}
       {loadingMessages && <p className="text-sm text-muted-foreground">Loading messages...</p>}
       {!loadingMessages && messages.length === 0 && <p className="text-sm text-muted-foreground">No messages yet.</p>}
-      {messages.map(message => {
-        const messageContent = sanitizeMessageContentForDisplay(message.role, message.content);
-        const hideMirroredAssistantContent = shouldHideMirroredAssistantContent(message, showThinkingDetails);
-        const renderedMessageContent = hideMirroredAssistantContent ? "" : messageContent;
-        const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
-        const isPending = pendingMeta?.status === "pending";
-        const isQueued = pendingMeta?.status === "queued";
-        const isDetached = pendingMeta?.status === "detached";
-        const isFailed = pendingMeta?.status === "failed";
-        const shouldRenderMessageRow =
-          message.role !== "assistant" ||
-          isPending || isQueued || isDetached || isFailed ||
-          Boolean(renderedMessageContent.trim()) ||
-          Boolean(message.memoryTrace);
+      {turns.map(turn => (
+        <div key={turn.id} className="oc-turn-block">
+          {turn.user ? (
+            <article className="oc-turn-user-card">
+              <div className="oc-turn-row-head">
+                <p>You</p>
+                <p>{formatCompactTimestamp(turn.user.at) || relativeFromIso(turn.user.at)}</p>
+              </div>
+              <MarkdownMessage content={sanitizeMessageContentForDisplay(turn.user.role, turn.user.content)} isStreaming={false} variant="message" />
+            </article>
+          ) : null}
 
-        const visibleTimelineParts = message.role === "assistant"
-          ? sortPartsChronologically((message.parts ?? []).filter(part => {
-            if (part.type === "thinking") return showThinkingDetails;
-            if (part.type === "tool_call") return showToolCallDetails;
-            return false;
-          }), message.at)
-          : [];
+          <div className="oc-turn-response-column">
+            {turn.assistantMessages.map(message => {
+              const messageContent = sanitizeMessageContentForDisplay(message.role, message.content);
+              const hideMirroredAssistantContent = shouldHideMirroredAssistantContent(message, showThinkingDetails);
+              const renderedMessageContent = hideMirroredAssistantContent ? "" : messageContent;
+              const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
+              const isPending = pendingMeta?.status === "pending";
+              const isQueued = pendingMeta?.status === "queued";
+              const isDetached = pendingMeta?.status === "detached";
+              const isFailed = pendingMeta?.status === "failed";
+              const visibleTimelineParts = sortPartsChronologically(
+                (message.parts ?? []).filter(part => {
+                  if (part.type === "thinking") return showThinkingDetails;
+                  if (part.type === "tool_call") return showToolCallDetails;
+                  return false;
+                }),
+                message.at,
+              );
 
-        return (
-          <div key={message.id} className="oc-turn-block">
-            {visibleTimelineParts.map(part => {
-              const partIso = resolvePartTimestamp(part, message.at);
-              const partTimestamp = formatCompactTimestamp(partIso) || relativeFromIso(partIso);
-              const elapsed = formatElapsedFrom(message.at, partIso);
-
-              if (part.type === "thinking") {
-                return (
-                  <article key={`${message.id}-${part.id}`} className="oc-subturn">
-                    <div className="oc-subturn-head">
-                      <p>thinking</p>
-                      <p>{elapsed ? `${elapsed} · ` : ""}{partTimestamp}</p>
-                    </div>
-                    <MarkdownMessage className="mt-1" content={part.text} isStreaming={isPending} variant="thinking" />
-                  </article>
-                );
-              }
-
-              const detailsInput = stringifyToolInput(part.input);
               return (
-                <article key={`${message.id}-${part.id}`} className="oc-subturn">
-                  <div className="oc-subturn-head">
-                    <p>tool · {part.tool}</p>
-                    <p>{elapsed ? `${elapsed} · ` : ""}{partTimestamp}</p>
+                <article key={message.id} className="oc-turn-response-card" data-pending={isPending || undefined}>
+                  <div className="oc-turn-row-head oc-turn-row-head-subtle">
+                    <p>OpenCode</p>
+                    <p>{formatCompactTimestamp(message.at) || relativeFromIso(message.at)}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground">status: {part.status}</p>
-                  {(detailsInput || part.output || part.error) && (
-                    <details className="mt-2 rounded border border-border/60 bg-background/50 p-2">
-                      <summary className="cursor-pointer text-[11px] text-muted-foreground">details</summary>
-                      {detailsInput && <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11px]">{detailsInput}</pre>}
-                      {part.output && <p className="mt-1 whitespace-pre-wrap text-[11px]">{part.output}</p>}
-                      {part.error && <p className="mt-1 whitespace-pre-wrap text-[11px] text-destructive">{part.error}</p>}
-                    </details>
-                  )}
+
+                  {visibleTimelineParts.length > 0 ? (
+                    <div className="oc-turn-parts">
+                      {visibleTimelineParts.map(part => {
+                        const partIso = resolvePartTimestamp(part, message.at);
+                        const partTimestamp = formatCompactTimestamp(partIso) || relativeFromIso(partIso);
+                        const elapsed = formatElapsedFrom(message.at, partIso);
+
+                        if (part.type === "thinking") {
+                          return (
+                            <article key={`${message.id}-${part.id}`} className="oc-turn-part oc-turn-part-thinking">
+                              <div className="oc-turn-part-head">
+                                <p><Sparkles className="size-3" /> Thinking</p>
+                                <p>{elapsed ? `${elapsed} · ` : ""}{partTimestamp}</p>
+                              </div>
+                              <MarkdownMessage content={part.text} isStreaming={isPending} variant="thinking" />
+                            </article>
+                          );
+                        }
+
+                        const detailsInput = stringifyToolInput(part.input);
+                        return (
+                          <article key={`${message.id}-${part.id}`} className="oc-turn-part oc-turn-part-tool">
+                            <div className="oc-turn-part-head">
+                              <p><Wrench className="size-3" /> {part.tool}</p>
+                              <p>{elapsed ? `${elapsed} · ` : ""}{partTimestamp}</p>
+                            </div>
+                            <p className="text-xs text-muted-foreground">status: {part.status}</p>
+                            {(detailsInput || part.output || part.error) ? (
+                              <details open={showToolCallDetails} className="oc-turn-tool-details">
+                                <summary>Details</summary>
+                                {detailsInput ? <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11px]">{detailsInput}</pre> : null}
+                                {part.output ? <p className="mt-1 whitespace-pre-wrap text-[11px]">{part.output}</p> : null}
+                                {part.error ? <p className="mt-1 whitespace-pre-wrap text-[11px] text-destructive">{part.error}</p> : null}
+                              </details>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  {isPending ? (
+                    <p className="inline-flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />OpenCode is responding...</p>
+                  ) : null}
+                  {isFailed ? (
+                    <div className="space-y-2">
+                      <p className="inline-flex items-center gap-2 text-xs text-destructive"><AlertTriangle className="size-3.5" />Failed to send request.</p>
+                      {pendingMeta?.errorMessage ? <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p> : null}
+                      {pendingMeta ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => retryFailedRequest(pendingMeta.requestId)}>
+                          <RefreshCcw className="size-3.5" />Retry
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {(isQueued || isDetached) && pendingMeta?.errorMessage ? (
+                    <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
+                  ) : null}
+                  {renderedMessageContent.trim() ? (
+                    <MarkdownMessage className="mt-1" content={renderedMessageContent} isStreaming={Boolean(isPending)} variant="message" />
+                  ) : null}
                 </article>
               );
             })}
-
-            {shouldRenderMessageRow && (
-              <article className="oc-message" data-role={message.role}>
-                <div className="oc-message-head">
-                  <p>{message.role}</p>
-                  <p>{formatCompactTimestamp(message.at) || relativeFromIso(message.at)}</p>
-                </div>
-                {isPending && (
-                  <p className="inline-flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />OpenCode is responding...</p>
-                )}
-                {isFailed && (
-                  <div className="space-y-2">
-                    <p className="inline-flex items-center gap-2 text-xs text-destructive"><AlertTriangle className="size-3.5" />Failed to send request.</p>
-                    {pendingMeta?.errorMessage && <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>}
-                    <Button type="button" size="sm" variant="outline" onClick={() => pendingMeta && retryFailedRequest(pendingMeta.requestId)}>
-                      <RefreshCcw className="size-3.5" />Retry
-                    </Button>
-                  </div>
-                )}
-                {(isQueued || isDetached) && pendingMeta?.errorMessage && (
-                  <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
-                )}
-                <MarkdownMessage className="mt-1" content={renderedMessageContent} isStreaming={Boolean(isPending)} variant="message" />
-              </article>
-            )}
           </div>
-        );
-      })}
+        </div>
+      ))}
     </div>
   );
 }
