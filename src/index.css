@@ -580,12 +580,6 @@ body {
   gap: 6px;
 }
 
-.oc-composer-agent-label {
-  font-size: 11px;
-  color: var(--text-weaker);
-  padding-left: 2px;
-}
-
 .oc-model-picker-menu-up {
   top: auto;
   bottom: calc(100% + 8px);

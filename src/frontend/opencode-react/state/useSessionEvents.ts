@@ -49,7 +49,6 @@ interface UseSessionEventsInput {
   setRunWaitTimeoutMs: Dispatch<SetStateAction<number>>;
   setChildSessionHideAfterDays: Dispatch<SetStateAction<number>>;
   setRuntimeDefaultModel: Dispatch<SetStateAction<string>>;
-  setConfigHash: Dispatch<SetStateAction<string>>;
   setStreamStatus: Dispatch<SetStateAction<"connecting" | "connected" | "reconnecting">>;
   setMemoryStatus: Dispatch<SetStateAction<MemoryStatusSnapshot | null>>;
   setMemoryActivity: Dispatch<SetStateAction<MemoryWriteEvent[]>>;
@@ -135,7 +134,10 @@ function isTimeoutLikeMessage(message: string): boolean {
 
 export function useSessionEvents(input: UseSessionEventsInput) {
   const inputRef = useRef(input);
-  inputRef.current = input;
+
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -546,7 +548,6 @@ export function useSessionEvents(input: UseSessionEventsInput) {
           const providerId = payload.config?.runtime?.opencode?.providerId?.trim() ?? "";
           const modelId = payload.config?.runtime?.opencode?.modelId?.trim() ?? "";
           input.setRuntimeDefaultModel(providerId && modelId ? `${providerId}/${modelId}` : "");
-          input.setConfigHash(typeof payload.hash === "string" ? payload.hash : "");
 
           const memoryStatusPayload = (await memoryStatusResponse.json()) as { status?: MemoryStatusSnapshot; error?: string };
           const memoryActivityPayload = (await memoryActivityResponse.json()) as { events?: MemoryWriteEvent[]; error?: string };

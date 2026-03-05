@@ -1,15 +1,14 @@
 import { useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
+import type { LocalChatMessage } from "@/frontend/app/chatHelpers";
 import type { ConfigSnapshotResponse } from "@/frontend/app/dashboardTypes";
 import {
-  DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS,
   DEFAULT_RUN_WAIT_TIMEOUT_MS,
   mergeBackgroundRunsBySession,
   normalizeChildSessionHideAfterDays,
   sortSessionsByActivity,
 } from "@/frontend/app/dashboardUtils";
-import type { LocalChatMessage } from "@/frontend/app/chatHelpers";
 import type { SessionScreenBootstrapResponse } from "@/frontend/opencode-react/types";
 import type {
   BackgroundRunSnapshot,
@@ -40,13 +39,15 @@ interface UseSessionScreenBootstrapInput {
   setRunWaitTimeoutMs: Dispatch<SetStateAction<number>>;
   setChildSessionHideAfterDays: Dispatch<SetStateAction<number>>;
   setRuntimeDefaultModel: Dispatch<SetStateAction<string>>;
-  setConfigHash: Dispatch<SetStateAction<string>>;
   setStreamStatus: Dispatch<SetStateAction<"connecting" | "connected" | "reconnecting">>;
 }
 
 export function useSessionScreenBootstrap(input: UseSessionScreenBootstrapInput) {
   const inputRef = useRef(input);
-  inputRef.current = input;
+
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -123,7 +124,6 @@ export function useSessionScreenBootstrap(input: UseSessionScreenBootstrapInput)
         const providerId = configPayload.config?.runtime?.opencode?.providerId?.trim() ?? "";
         const modelId = configPayload.config?.runtime?.opencode?.modelId?.trim() ?? "";
         input.setRuntimeDefaultModel(providerId && modelId ? `${providerId}/${modelId}` : "");
-        input.setConfigHash(typeof configPayload.hash === "string" ? configPayload.hash : "");
       } catch (error) {
         if (!alive) return;
         input.setLoading(false);
@@ -140,5 +140,5 @@ export function useSessionScreenBootstrap(input: UseSessionScreenBootstrapInput)
     return () => {
       alive = false;
     };
-    }, []);
+  }, []);
 }

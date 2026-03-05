@@ -54,8 +54,6 @@ export function RightFlyout(props: RightFlyoutProps) {
   const [flyoutTab, setFlyoutTab] = useState<"review" | "context">("context");
   const [contextData, setContextData] = useState<SessionContextResponse | null>(null);
   const [reviewData, setReviewData] = useState<SessionReviewResponse | null>(null);
-  const [contextLoading, setContextLoading] = useState(false);
-  const [reviewLoading, setReviewLoading] = useState(false);
   const [contextError, setContextError] = useState("");
   const [reviewError, setReviewError] = useState("");
 
@@ -89,33 +87,22 @@ export function RightFlyout(props: RightFlyoutProps) {
   useEffect(() => {
     const sessionId = activeSession?.id;
     if (!sessionId) {
-      setContextData(null);
-      setReviewData(null);
-      setContextError("");
-      setReviewError("");
       return;
     }
 
     const controller = new AbortController();
     const signal = controller.signal;
 
-    setContextLoading(true);
-    setReviewLoading(true);
-    setContextError("");
-    setReviewError("");
-
     void fetch(`/api/ui/sessions/${encodeURIComponent(sessionId)}/context`, { signal })
       .then(async response => {
         const payload = await response.json() as SessionContextResponse & { error?: string };
         if (!response.ok) throw new Error(payload.error ?? "Failed to load context");
         setContextData(payload);
+        setContextError("");
       })
       .catch(error => {
         if (signal.aborted) return;
         setContextError(error instanceof Error ? error.message : "Failed to load context");
-      })
-      .finally(() => {
-        if (!signal.aborted) setContextLoading(false);
       });
 
     void fetch(`/api/ui/sessions/${encodeURIComponent(sessionId)}/review`, { signal })
@@ -123,13 +110,11 @@ export function RightFlyout(props: RightFlyoutProps) {
         const payload = await response.json() as SessionReviewResponse;
         if (!response.ok) throw new Error(payload.error ?? "Failed to load review");
         setReviewData(payload);
+        setReviewError("");
       })
       .catch(error => {
         if (signal.aborted) return;
         setReviewError(error instanceof Error ? error.message : "Failed to load review");
-      })
-      .finally(() => {
-        if (!signal.aborted) setReviewLoading(false);
       });
 
     return () => controller.abort();
@@ -154,9 +139,8 @@ export function RightFlyout(props: RightFlyoutProps) {
       {flyoutTab === "review" ? (
         <div className="oc-flyout-panel">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Review</p>
-          {reviewLoading && <p className="mt-2 text-xs text-muted-foreground">Loading review state...</p>}
           {reviewError && <p className="mt-2 text-xs text-destructive">{reviewError}</p>}
-          {!reviewLoading && !reviewError && (
+          {!reviewError && (
             <p className="mt-2 text-sm text-muted-foreground">
               {reviewData?.enabled
                 ? "Review mapping is enabled for this session."
@@ -166,7 +150,6 @@ export function RightFlyout(props: RightFlyoutProps) {
         </div>
       ) : (
         <div className="oc-flyout-panel">
-          {contextLoading && <p className="text-xs text-muted-foreground">Loading context...</p>}
           {contextError && <p className="text-xs text-destructive">{contextError}</p>}
           <div className="oc-context-grid">
             <p className="oc-context-label">Session</p>

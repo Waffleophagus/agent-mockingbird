@@ -6,22 +6,8 @@ import {
   type ActiveSend,
   formatCompactTimestamp,
   type LocalChatMessage,
-  normalizeListInput,
   relativeFromIso,
 } from "@/frontend/app/chatHelpers";
-import {
-  fetchAgentCatalog,
-  fetchMcpCatalog,
-  fetchOtherConfig,
-  fetchSkillCatalog,
-  importManagedSkill,
-  saveAgentTypeChanges,
-  saveMcps,
-  saveOtherConfig as saveOtherConfigPatch,
-  saveSkills,
-  validateAgentTypeChanges,
-} from "@/frontend/app/configApi";
-import { deleteCronJob } from "@/frontend/app/cronApi";
 import {
   type ConfirmAction,
   getConfirmDialogProps,
@@ -29,31 +15,25 @@ import {
 import {
   DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS,
   DEFAULT_RUN_WAIT_TIMEOUT_MS,
-  normalizeAgentTypeDraft,
   sortSessionsByActivity,
   upsertSessionList,
 } from "@/frontend/app/dashboardUtils";
 import { type ChatPageModel } from "@/frontend/app/pages/ChatPage";
-import { SessionScreen } from "@/frontend/opencode-react/app/SessionScreen";
-import { useSessionScreenController } from "@/frontend/opencode-react/state/useSessionScreenController";
-import { useSessionEvents } from "@/frontend/opencode-react/state/useSessionEvents";
-import { useSessionScreenBootstrap } from "@/frontend/opencode-react/state/useSessionScreenBootstrap";
 import { useBackgroundRuns } from "@/frontend/app/useBackgroundRuns";
 import { type ComposerAttachment, useChatSession } from "@/frontend/app/useChatSession";
 import { useSessionHierarchy } from "@/frontend/app/useSessionHierarchy";
+import { SessionScreen } from "@/frontend/opencode-react/app/SessionScreen";
+import { useSessionEvents } from "@/frontend/opencode-react/state/useSessionEvents";
+import { useSessionScreenBootstrap } from "@/frontend/opencode-react/state/useSessionScreenBootstrap";
+import { useSessionScreenController } from "@/frontend/opencode-react/state/useSessionScreenController";
 import type {
-  AgentTypeDefinition,
   BackgroundRunSnapshot,
   ChatMessage,
   MemoryStatusSnapshot,
   MemoryWriteEvent,
   ModelOption,
-  ConfiguredMcpServer,
   SessionRunStatusSnapshot,
   SessionSummary,
-  RuntimeMcp,
-  RuntimeSkillIssue,
-  RuntimeSkill,
   UsageSnapshot,
 } from "@/types/dashboard";
 import "streamdown/styles.css";
@@ -100,46 +80,8 @@ export function SessionScreenApp() {
   const [showToolCallDetails, setShowToolCallDetails] = useState(() =>
     loadBooleanSetting(CHAT_SHOW_TOOL_CALLS_KEY, false),
   );
-  const [openAgentModelPickerId, setOpenAgentModelPickerId] = useState<string | null>(null);
-  const [agentModelQuery, setAgentModelQuery] = useState("");
-  const [agentFocusedModelIndex, setAgentFocusedModelIndex] = useState(0);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionError, setSessionError] = useState("");
-  const [agentTypes, setAgentTypes] = useState<AgentTypeDefinition[]>([]);
-  const [configHash, setConfigHash] = useState("");
-  const [agentConfigHash, setAgentConfigHash] = useState("");
-  const [opencodeConfigFilePath, setOpencodeConfigFilePath] = useState("");
-  const [opencodePersistenceMode, setOpencodePersistenceMode] = useState("");
-  const [skillsDraft, setSkillsDraft] = useState("");
-  const [availableSkills, setAvailableSkills] = useState<RuntimeSkill[]>([]);
-  const [disabledSkills, setDisabledSkills] = useState<string[]>([]);
-  const [invalidSkills, setInvalidSkills] = useState<RuntimeSkillIssue[]>([]);
-  const [skillsCatalogHash, setSkillsCatalogHash] = useState("");
-  const [skillsManagedPath, setSkillsManagedPath] = useState("");
-  const [skillsDisabledPath, setSkillsDisabledPath] = useState("");
-  const [availableMcps, setAvailableMcps] = useState<RuntimeMcp[]>([]);
-  const [mcpServers, setMcpServers] = useState<ConfiguredMcpServer[]>([]);
-  const [mcpsDraft, setMcpsDraft] = useState("");
-  const [skillInput, setSkillInput] = useState("");
-  const [mcpInput, setMcpInput] = useState("");
-  const [importSkillId, setImportSkillId] = useState("");
-  const [importSkillContent, setImportSkillContent] = useState("");
-  const [isSavingSkills, setIsSavingSkills] = useState(false);
-  const [isSavingMcps, setIsSavingMcps] = useState(false);
-  const [isSavingAgents, setIsSavingAgents] = useState(false);
-  const [isImportingSkill, setIsImportingSkill] = useState(false);
-  const [loadingSkillCatalog, setLoadingSkillCatalog] = useState(false);
-  const [loadingMcpCatalog, setLoadingMcpCatalog] = useState(false);
-  const [loadingAgentCatalog, setLoadingAgentCatalog] = useState(false);
-  const [skillsError, setSkillsError] = useState("");
-  const [skillCatalogError, setSkillCatalogError] = useState("");
-  const [mcpCatalogError, setMcpCatalogError] = useState("");
-  const [mcpsError, setMcpsError] = useState("");
-  const [mcpActionError, setMcpActionError] = useState("");
-  const [mcpActionBusyId, setMcpActionBusyId] = useState("");
-  const [agentsError, setAgentsError] = useState("");
-  const [agentCatalogError, setAgentCatalogError] = useState("");
-  const [agentTypesBaseline, setAgentTypesBaseline] = useState<AgentTypeDefinition[]>([]);
   const [usage, setUsage] = useState<UsageSnapshot>({
     requestCount: 0,
     inputTokens: 0,
@@ -156,16 +98,7 @@ export function SessionScreenApp() {
   const [activeSend, setActiveSend] = useState<ActiveSend | null>(null);
   const [runWaitTimeoutMs, setRunWaitTimeoutMs] = useState(DEFAULT_RUN_WAIT_TIMEOUT_MS);
   const [runtimeDefaultModel, setRuntimeDefaultModel] = useState("");
-  const [runtimeFallbackModels, setRuntimeFallbackModels] = useState<string[]>([]);
-  const [runtimeImageModel, setRuntimeImageModel] = useState("");
   const [isSyncingRuntimeDefaultModel, setIsSyncingRuntimeDefaultModel] = useState(false);
-  const [isSavingOtherConfig, setIsSavingOtherConfig] = useState(false);
-  const [loadingOtherConfig, setLoadingOtherConfig] = useState(false);
-  const [otherConfigError, setOtherConfigError] = useState("");
-  const [cronRefreshKey, setCronRefreshKey] = useState(0);
-  const [openFallbackModelPickerIndex, setOpenFallbackModelPickerIndex] = useState<number | null>(null);
-  const [fallbackModelQuery, setFallbackModelQuery] = useState("");
-  const [fallbackFocusedModelIndex, setFallbackFocusedModelIndex] = useState(0);
   const [runStatusBySession, setRunStatusBySession] = useState<Record<string, SessionRunStatusSnapshot>>({});
   const [runErrorsBySession, setRunErrorsBySession] = useState<Record<string, string>>({});
   const [compactedAtBySession, setCompactedAtBySession] = useState<Record<string, string>>({});
@@ -190,10 +123,6 @@ export function SessionScreenApp() {
   const abortedRequestIdsRef = useRef(new Set<string>());
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
-  const agentModelPickerRef = useRef<HTMLDivElement>(null);
-  const agentModelSearchInputRef = useRef<HTMLInputElement>(null);
-  const fallbackModelPickerRef = useRef<HTMLDivElement>(null);
-  const fallbackModelSearchInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const previousActiveSessionIdRef = useRef("");
   const isSending = activeSend !== null;
@@ -244,7 +173,6 @@ export function SessionScreenApp() {
     setRunWaitTimeoutMs,
     setChildSessionHideAfterDays,
     setRuntimeDefaultModel,
-    setConfigHash,
     setBackgroundRunsBySession,
     setMemoryError,
     setStreamStatus,
@@ -270,7 +198,6 @@ export function SessionScreenApp() {
     setRunWaitTimeoutMs,
     setChildSessionHideAfterDays,
     setRuntimeDefaultModel,
-    setConfigHash,
     setStreamStatus,
     setMemoryStatus,
     setMemoryActivity,
@@ -465,22 +392,6 @@ export function SessionScreenApp() {
     }
     return [...byId.values()];
   }, [modelOptions, activeSession?.model]);
-  const availableFallbackModels = useMemo(() => {
-    const byId = new Map(modelOptions.map(option => [option.id, option]));
-    for (const fallbackModel of runtimeFallbackModels) {
-      const id = fallbackModel.trim();
-      if (!id || byId.has(id)) continue;
-      const [providerId, ...rest] = id.split("/");
-      const modelId = rest.join("/") || id;
-      byId.set(id, {
-        id,
-        label: `${id} (configured)`,
-        providerId: providerId || "custom",
-        modelId,
-      });
-    }
-    return [...byId.values()];
-  }, [modelOptions, runtimeFallbackModels]);
   const selectedModelLabel = useMemo(() => {
     if (!activeSession) return "Select model";
     return availableModels.find(option => option.id === activeSession.model)?.label ?? activeSession.model;
@@ -498,41 +409,10 @@ export function SessionScreenApp() {
       return haystack.includes(query);
     });
   }, [availableModels, modelQuery]);
-  const filteredFallbackModelOptions = useMemo(() => {
-    const query = fallbackModelQuery.trim().toLowerCase();
-    if (!query) return availableFallbackModels;
-    return availableFallbackModels.filter(option => {
-      const haystack = `${option.label} ${option.id} ${option.providerId} ${option.modelId}`.toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [availableFallbackModels, fallbackModelQuery]);
 
   useEffect(() => {
     setFocusedModelIndex(0);
   }, [filteredModelOptions]);
-  const configuredSkills = useMemo(() => normalizeListInput(skillsDraft), [skillsDraft]);
-  const configuredSkillSet = useMemo(() => new Set(configuredSkills), [configuredSkills]);
-  const configuredUnavailableSkills = useMemo(
-    () => configuredSkills.filter(id => !availableSkills.some(skill => skill.id === id)),
-    [availableSkills, configuredSkills],
-  );
-  const normalizedMcpServers = useMemo(() => {
-    const deduped = new Map<string, ConfiguredMcpServer>();
-    for (const server of mcpServers) {
-      const id = server.id.trim();
-      if (!id) continue;
-      deduped.set(id, { ...server, id });
-    }
-    return [...deduped.values()].sort((a, b) => a.id.localeCompare(b.id));
-  }, [mcpServers]);
-  const configuredMcps = useMemo(() => normalizeListInput(mcpsDraft), [mcpsDraft]);
-  const mcpServerIdSet = useMemo(() => new Set(normalizedMcpServers.map(server => server.id)), [normalizedMcpServers]);
-  const configuredMcpSet = useMemo(() => new Set(configuredMcps), [configuredMcps]);
-  const runtimeMcpById = useMemo(() => new Map(availableMcps.map(mcp => [mcp.id, mcp])), [availableMcps]);
-  const discoverableMcps = useMemo(
-    () => availableMcps.filter(mcp => !configuredMcpSet.has(mcp.id)),
-    [availableMcps, configuredMcpSet],
-  );
 
   useEffect(() => {
     setIsModelPickerOpen(false);
@@ -562,60 +442,6 @@ export function SessionScreenApp() {
       document.removeEventListener("keydown", handleEscape);
     };
   }, [isModelPickerOpen]);
-
-  useEffect(() => {
-    if (!openAgentModelPickerId) return;
-    agentModelSearchInputRef.current?.focus();
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!agentModelPickerRef.current?.contains(event.target as Node)) {
-        setOpenAgentModelPickerId(null);
-      }
-    };
-    const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpenAgentModelPickerId(null);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [openAgentModelPickerId]);
-
-  useEffect(() => {
-    setAgentFocusedModelIndex(0);
-  }, [agentModelQuery, openAgentModelPickerId]);
-
-  useEffect(() => {
-    if (openFallbackModelPickerIndex === null) return;
-    fallbackModelSearchInputRef.current?.focus();
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!fallbackModelPickerRef.current?.contains(event.target as Node)) {
-        setOpenFallbackModelPickerIndex(null);
-      }
-    };
-    const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpenFallbackModelPickerIndex(null);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [openFallbackModelPickerIndex]);
-
-  useEffect(() => {
-    setFallbackFocusedModelIndex(0);
-  }, [fallbackModelQuery, openFallbackModelPickerIndex]);
 
   useEffect(() => {
     const container = chatScrollRef.current;
@@ -712,9 +538,6 @@ export function SessionScreenApp() {
       const updated = payload.session;
 
       setSessions(current => upsertSessionList(current, updated));
-      if (typeof payload.configHash === "string" && payload.configHash.trim()) {
-        setConfigHash(payload.configHash);
-      }
       if (typeof payload.runtimeDefaultModel === "string") {
         setRuntimeDefaultModel(payload.runtimeDefaultModel);
       }
@@ -757,9 +580,6 @@ export function SessionScreenApp() {
       }
       if (typeof payload.runtimeDefaultModel === "string") {
         setRuntimeDefaultModel(payload.runtimeDefaultModel);
-      }
-      if (typeof payload.configHash === "string" && payload.configHash.trim()) {
-        setConfigHash(payload.configHash);
       }
     } catch (error) {
       setModelError(error instanceof Error ? error.message : "Failed to sync runtime default model");

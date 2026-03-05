@@ -1,7 +1,8 @@
+import { useCallback, useState } from "react";
+
 import type { ChatPageModel } from "@/frontend/app/pages/ChatPage";
 import { buildSessionScreenVM } from "@/frontend/opencode-react/state/adapters";
 import type { SessionScreenVM } from "@/frontend/opencode-react/types";
-import { useCallback, useState } from "react";
 
 export interface UseSessionScreenControllerInput {
   chat: ChatPageModel;

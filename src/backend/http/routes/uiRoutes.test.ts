@@ -3,6 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { createUiRoutes as CreateUiRoutesType } from "./uiRoutes";
+import type * as RepositoryModuleType from "../../db/repository";
+
 const testRoot = mkdtempSync(path.join(tmpdir(), "wafflebot-ui-routes-test-"));
 const testDbPath = path.join(testRoot, "wafflebot.ui-routes.test.db");
 const testConfigPath = path.join(testRoot, "wafflebot.ui-routes.config.json");
@@ -31,8 +34,8 @@ interface RuntimeStub {
   >;
 }
 
-type CreateUiRoutesFn = typeof import("./uiRoutes").createUiRoutes;
-type RepositoryModule = typeof import("../../db/repository");
+type CreateUiRoutesFn = typeof CreateUiRoutesType;
+type RepositoryModule = typeof RepositoryModuleType;
 
 let createUiRoutes: CreateUiRoutesFn;
 let repository: RepositoryModule;

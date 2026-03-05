@@ -17,13 +17,14 @@ import {
 } from "react";
 
 import { Input } from "@/components/ui/input";
+import type { LocalChatMessage } from "@/frontend/app/chatHelpers";
 import { cn } from "@/frontend/app/dashboardUtils";
+import type { ComposerAttachment } from "@/frontend/app/useChatSession";
 import { ComposerDock } from "@/frontend/opencode-react/app/Composer/ComposerDock";
 import { RightFlyout } from "@/frontend/opencode-react/app/Flyout/RightFlyout";
 import { SessionTree } from "@/frontend/opencode-react/app/Sidebar/SessionTree";
 import { MessageTimeline } from "@/frontend/opencode-react/app/Timeline/MessageTimeline";
 import type { SessionScreenLayoutVM } from "@/frontend/opencode-react/types";
-import type { ComposerAttachment } from "@/frontend/app/useChatSession";
 import type {
   BackgroundRunSnapshot,
   MemoryStatusSnapshot,
@@ -44,7 +45,7 @@ export interface ChatPageModel {
   activeBackgroundInFlightCount: number;
   activeBackgroundRuns: BackgroundRunSnapshot[];
   activeConfigPanelTab: ConfigPanelTab;
-  activeMessages: import("@/frontend/app/chatHelpers").LocalChatMessage[];
+  activeMessages: LocalChatMessage[];
   activeRunStatusHint: string;
   activeRunStatusLabel: string;
   activeSession?: SessionSummary;
@@ -404,7 +405,6 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
             >
               <Scissors className="size-3.5" /> {isCompacting ? "Compacting..." : "Compact"}
             </button>
-            <span className="oc-composer-agent-label">Wafflebot</span>
           </div>
         </div>
       </section>
