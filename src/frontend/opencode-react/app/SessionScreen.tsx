@@ -8,10 +8,12 @@ export function SessionScreen({ model, managementScreen }: { model: SessionScree
   return (
     <>
       <Titlebar model={model.titlebar} />
-      <div hidden={model.activeScreen !== "chat"}>
+      <div className="flex min-h-0 flex-1" hidden={model.activeScreen !== "chat"}>
         <ChatPage model={model.chat} layout={model.layout} />
       </div>
-      <div hidden={model.activeScreen === "chat"}>{managementScreen}</div>
+      <div className="flex min-h-0 flex-1" hidden={model.activeScreen === "chat"}>
+        {managementScreen}
+      </div>
     </>
   );
 }
