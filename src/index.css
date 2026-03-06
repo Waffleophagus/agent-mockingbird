@@ -1397,7 +1397,9 @@ body {
 
 @media (max-width: 940px) {
   .oc-global-titlebar {
-    grid-template-columns: auto 1fr auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     gap: 6px;
   }
 
@@ -1416,6 +1418,9 @@ body {
   }
 
   .oc-global-titlebar-center {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
     justify-content: center;
     overflow: hidden;
   }
