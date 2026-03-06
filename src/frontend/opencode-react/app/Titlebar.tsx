@@ -1,4 +1,5 @@
-import { Activity, Clock3, Cpu, PanelLeft, PanelRight, SearchX, Settings2, Users, Wrench } from "lucide-react";
+import { Clock3, Cpu, Menu, MessageSquareText, PanelLeft, PanelRight, Settings2, Users, Wrench } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { relativeFromIso } from "@/frontend/app/chatHelpers";
@@ -14,17 +15,41 @@ export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
     openScreen,
     toggleDrawer,
     toggleSidePanel,
-    closePanels,
   } = model;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const screenButtons = [
-    { id: "chat", label: "Chat", icon: Activity },
+    { id: "chat", label: "Chat", icon: MessageSquareText },
     { id: "skills", label: "Skills", icon: Wrench },
     { id: "mcp", label: "MCP", icon: Cpu },
     { id: "agents", label: "Agents", icon: Users },
     { id: "other", label: "Other", icon: Settings2 },
     { id: "cron", label: "Cron", icon: Clock3 },
   ] as const;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [menuOpen]);
 
   return (
     <header className="oc-global-titlebar">
@@ -45,24 +70,6 @@ export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
         <div className="oc-titlebar-session-meta">
           <p className="oc-titlebar-session-title">Wafflebot</p>
         </div>
-        <div className="flex flex-wrap items-center justify-center gap-2 px-4">
-          {screenButtons.map(button => {
-            const Icon = button.icon;
-            return (
-              <Button
-                key={button.id}
-                type="button"
-                size="sm"
-                variant={activeScreen === button.id ? "default" : "outline"}
-                className="h-8 gap-1.5 px-2.5"
-                onClick={() => openScreen(button.id)}
-              >
-                <Icon className="size-3.5" />
-                <span>{button.label}</span>
-              </Button>
-            );
-          })}
-        </div>
       </div>
       <div className="oc-global-titlebar-right">
         <div className="oc-connection-pill">
@@ -81,16 +88,42 @@ export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
         >
           <PanelRight className="size-3.5" />
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="oc-titlebar-action oc-panel-toggle"
-          aria-label="Close panels"
-          onClick={closePanels}
-        >
-          <SearchX className="size-3.5" />
-        </Button>
+        <div className="oc-titlebar-menu-wrap" ref={menuRef}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="oc-titlebar-action oc-panel-toggle"
+            data-active={menuOpen}
+            aria-label="Open navigation menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(current => !current)}
+          >
+            <Menu className="size-3.5" />
+          </Button>
+          {menuOpen ? (
+            <div className="oc-titlebar-menu-panel">
+              {screenButtons.map(button => {
+                const Icon = button.icon;
+                return (
+                  <button
+                    key={button.id}
+                    type="button"
+                    className="oc-titlebar-menu-item"
+                    data-active={activeScreen === button.id}
+                    onClick={() => {
+                      openScreen(button.id);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    <Icon className="size-3.5" />
+                    <span>{button.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
       </div>
     </header>
   );
