@@ -1,10 +1,6 @@
-import { Cpu, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Cpu, Plus, Trash2 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import type { ConfiguredMcpServer, RuntimeMcp } from "@/types/dashboard";
 
 interface McpPageProps {
@@ -35,6 +31,12 @@ interface McpPageProps {
   setMcpServerType: (id: string, type: "remote" | "local") => void;
   configuredMcpSet: Set<string>;
   updateMcpServer: (id: string, updater: (server: ConfiguredMcpServer) => ConfiguredMcpServer) => void;
+}
+
+function mgmtBadgeClass(variant: "success" | "warning" | "outline"): string {
+  if (variant === "success") return "mgmt-badge-success";
+  if (variant === "warning") return "mgmt-badge-warning";
+  return "";
 }
 
 export function McpPage(props: McpPageProps) {
@@ -69,292 +71,327 @@ export function McpPage(props: McpPageProps) {
   } = props;
 
   return (
-    <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-      <Card className="panel-noise flex min-h-0 flex-col">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Cpu className="size-4" />
-            MCP Management
-          </CardTitle>
-          <CardDescription>Manage MCP allow-list and verify runtime status from OpenCode.</CardDescription>
-        </CardHeader>
-        <CardContent className="min-h-0 space-y-3 overflow-y-auto">
-          <div className="flex gap-2">
-            <Input
-              value={mcpInput}
-              onChange={event => setMcpInput(event.target.value)}
-              placeholder="mcp id (e.g. github)"
-              onKeyDown={event => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  addMcp();
-                }
-              }}
-            />
-            <Button type="button" onClick={addMcp} disabled={!mcpInput.trim()}>
-              <Plus className="size-4" />
-              Add
-            </Button>
-          </div>
+    <section className="mgmt-page">
+      <div className="mgmt-page-header">
+        <p className="mgmt-page-eyebrow">Configuration</p>
+        <h2 className="mgmt-page-title">MCP Servers</h2>
+        <p className="mgmt-page-subtitle">Manage MCP allow-list and verify runtime status from OpenCode.</p>
+      </div>
 
-          <div className="space-y-2">
-            {configuredMcps.length === 0 && (
-              <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                No MCP servers configured yet.
-              </p>
-            )}
-            {configuredMcps.map(mcp => (
-              <div
-                key={mcp}
-                className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/70 px-3 py-2"
+      <div className="mgmt-grid mgmt-grid-sidebar">
+        {/* Left panel: MCP management */}
+        <div className="mgmt-panel">
+          <div className="mgmt-panel-header">
+            <div className="mgmt-panel-header-row">
+              <h3 className="mgmt-panel-title">
+                <Cpu size={14} />
+                Active Servers
+              </h3>
+              <span className="mgmt-badge">{configuredMcps.length} enabled</span>
+            </div>
+          </div>
+          <div className="mgmt-panel-body">
+            {/* Add MCP input */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="text"
+                className="mgmt-input"
+                style={{ flex: 1 }}
+                value={mcpInput}
+                onChange={event => setMcpInput(event.target.value)}
+                placeholder="mcp id (e.g. github)"
+                onKeyDown={event => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addMcp();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="mgmt-pill-btn mgmt-pill-btn-primary"
+                onClick={addMcp}
+                disabled={!mcpInput.trim()}
               >
-                <div className="min-w-0 space-y-1">
-                  <p className="truncate text-sm">{mcp}</p>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={mcpStatusVariant(runtimeMcpById.get(mcp)?.status ?? "unknown")}>
-                      {mcpStatusLabel(runtimeMcpById.get(mcp)?.status ?? "unknown")}
-                    </Badge>
-                    {runtimeMcpById.get(mcp)?.error && (
-                      <p className="truncate text-xs text-muted-foreground">{runtimeMcpById.get(mcp)?.error}</p>
-                    )}
+                <Plus size={13} />
+                Add
+              </button>
+            </div>
+
+            {/* Configured MCP list */}
+            {configuredMcps.length === 0 && <div className="mgmt-empty">No MCP servers configured yet.</div>}
+            {configuredMcps.map(mcp => {
+              const runtime = runtimeMcpById.get(mcp);
+              const status = runtime?.status ?? "unknown";
+              return (
+                <div key={mcp} className="mgmt-card">
+                  <div className="mgmt-card-header">
+                    <div className="mgmt-card-title">
+                      <span className={`mgmt-dot ${status === "connected" ? "mgmt-dot-on" : "mgmt-dot-off"}`} />
+                      <span>{mcp}</span>
+                    </div>
+                    <span className={`mgmt-badge ${mgmtBadgeClass(mcpStatusVariant(status))}`}>
+                      {mcpStatusLabel(status)}
+                    </span>
+                  </div>
+                  {runtime?.error && (
+                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--text-weaker)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {runtime.error}
+                    </p>
+                  )}
+                  <div className="mgmt-actions" style={{ marginTop: 6 }}>
+                    <button
+                      type="button"
+                      className="mgmt-pill-btn"
+                      onClick={() => void runMcpRuntimeAction(mcp, "connect")}
+                      disabled={mcpActionBusyId.length > 0}
+                      style={{ fontSize: 11, height: 26, padding: "0 10px" }}
+                    >
+                      Connect
+                    </button>
+                    <button
+                      type="button"
+                      className="mgmt-pill-btn"
+                      onClick={() => requestDisconnectMcp(mcp)}
+                      disabled={mcpActionBusyId.length > 0}
+                      style={{ fontSize: 11, height: 26, padding: "0 10px" }}
+                    >
+                      Disconnect
+                    </button>
+                    <button
+                      type="button"
+                      className="mgmt-pill-btn"
+                      onClick={() => void runMcpRuntimeAction(mcp, "authStart")}
+                      disabled={mcpActionBusyId.length > 0}
+                      style={{ fontSize: 11, height: 26, padding: "0 10px" }}
+                    >
+                      Auth
+                    </button>
+                    <button
+                      type="button"
+                      className="mgmt-pill-btn"
+                      onClick={() => void runMcpRuntimeAction(mcp, "authRemove")}
+                      disabled={mcpActionBusyId.length > 0}
+                      style={{ fontSize: 11, height: 26, padding: "0 10px" }}
+                    >
+                      Reset Auth
+                    </button>
+                    <button
+                      type="button"
+                      className="mgmt-pill-btn mgmt-pill-btn-danger mgmt-pill-btn-ghost"
+                      onClick={() => requestRemoveMcp(mcp)}
+                      style={{ height: 26, padding: "0 8px" }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void runMcpRuntimeAction(mcp, "connect")}
-                    disabled={mcpActionBusyId.length > 0}
-                  >
-                    Connect
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => requestDisconnectMcp(mcp)}
-                    disabled={mcpActionBusyId.length > 0}
-                  >
-                    Disconnect
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void runMcpRuntimeAction(mcp, "authStart")}
-                    disabled={mcpActionBusyId.length > 0}
-                  >
-                    Auth
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void runMcpRuntimeAction(mcp, "authRemove")}
-                    disabled={mcpActionBusyId.length > 0}
-                  >
-                    Reset Auth
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 w-8 p-0"
-                    onClick={() => requestRemoveMcp(mcp)}
-                  >
-                    <Trash2 className="size-4 text-destructive" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+              );
+            })}
 
-          {discoverableMcps.length > 0 && (
-            <div className="space-y-2 rounded-md border border-border bg-muted/60 p-3">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Detected in runtime</p>
-              <div className="space-y-2">
+            {/* Discoverable MCPs */}
+            {discoverableMcps.length > 0 && (
+              <div className="mgmt-section">
+                <span className="mgmt-form-label">Detected in runtime</span>
                 {discoverableMcps.map(mcp => (
-                  <div key={mcp.id} className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm">{mcp.id}</p>
-                      <Badge variant={mcpStatusVariant(mcp.status)}>{mcpStatusLabel(mcp.status)}</Badge>
+                  <div key={mcp.id} className="mgmt-card">
+                    <div className="mgmt-card-header">
+                      <div className="mgmt-card-title">
+                        <span>{mcp.id}</span>
+                        <span className={`mgmt-badge ${mgmtBadgeClass(mcpStatusVariant(mcp.status))}`}>
+                          {mcpStatusLabel(mcp.status)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="mgmt-pill-btn"
+                        style={{ fontSize: 11, height: 26, padding: "0 10px" }}
+                        onClick={() => {
+                          setMcpsDraft([...configuredMcps, mcp.id].join("\n"));
+                          if (!mcpServerIdSet.has(mcp.id)) {
+                            setMcpServers(current => [
+                              ...current,
+                              {
+                                id: mcp.id,
+                                type: "remote",
+                                enabled: true,
+                                url: "http://127.0.0.1:8000/mcp",
+                                headers: {},
+                                oauth: "auto",
+                              },
+                            ]);
+                          }
+                        }}
+                      >
+                        Enable
+                      </button>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setMcpsDraft([...configuredMcps, mcp.id].join("\n"));
-                        if (!mcpServerIdSet.has(mcp.id)) {
-                          setMcpServers(current => [
-                            ...current,
-                            {
-                              id: mcp.id,
-                              type: "remote",
-                              enabled: true,
-                              url: "http://127.0.0.1:8000/mcp",
-                              headers: {},
-                              oauth: "auto",
-                            },
-                          ]);
-                        }
-                      }}
-                    >
-                      Enable
-                    </Button>
                   </div>
                 ))}
               </div>
+            )}
+
+            {/* Actions */}
+            <div className="mgmt-actions mgmt-actions-end" style={{ paddingTop: 4 }}>
+              <button type="button" className="mgmt-pill-btn" onClick={() => void refreshMcpCatalog()} disabled={loadingMcpCatalog}>
+                {loadingMcpCatalog ? "Refreshing..." : "Refresh"}
+              </button>
+              <button type="button" className="mgmt-pill-btn mgmt-pill-btn-primary" onClick={() => void saveMcpsConfig()} disabled={isSavingMcps}>
+                {isSavingMcps ? "Saving..." : "Save MCPs"}
+              </button>
             </div>
-          )}
-
-          <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => void refreshMcpCatalog()} disabled={loadingMcpCatalog}>
-              {loadingMcpCatalog ? "Refreshing..." : "Refresh"}
-            </Button>
-            <Button type="button" onClick={() => void saveMcpsConfig()} disabled={isSavingMcps}>
-              {isSavingMcps ? "Saving..." : "Save MCPs"}
-            </Button>
+            {mcpCatalogError && <div className="mgmt-error">{mcpCatalogError}</div>}
+            {mcpsError && <div className="mgmt-error">{mcpsError}</div>}
+            {mcpActionError && <div className="mgmt-error">{mcpActionError}</div>}
           </div>
-          {mcpCatalogError && <p className="text-xs text-destructive">{mcpCatalogError}</p>}
-          {mcpsError && <p className="text-xs text-destructive">{mcpsError}</p>}
-          {mcpActionError && <p className="text-xs text-destructive">{mcpActionError}</p>}
-        </CardContent>
-      </Card>
+        </div>
 
-      <Card className="panel-noise flex min-h-0 flex-col">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <SlidersHorizontal className="size-4" />
-            Server Definitions
-          </CardTitle>
-          <CardDescription>Configure remote/local MCP server details used by OpenCode.</CardDescription>
-        </CardHeader>
-        <CardContent className="min-h-0 space-y-3 overflow-y-auto">
-          {normalizedMcpServers.length === 0 && (
-            <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-              No MCP server definitions yet. Add one from the panel on the left.
-            </p>
-          )}
-          {normalizedMcpServers.map(server => (
-            <div key={server.id} className="space-y-2 rounded-md border border-border bg-muted/60 p-3">
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_96px]">
-                <Input value={server.id} onChange={event => renameMcpServer(server.id, event.target.value)} placeholder="mcp id" />
-                <select
-                  value={server.type}
-                  onChange={event => setMcpServerType(server.id, event.target.value === "local" ? "local" : "remote")}
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="remote">remote</option>
-                  <option value="local">local</option>
-                </select>
-                <label className="flex items-center gap-2 rounded-md border border-input px-3 text-sm">
+        {/* Right panel: server definitions */}
+        <div className="mgmt-panel">
+          <div className="mgmt-panel-header">
+            <h3 className="mgmt-panel-title">Server Definitions</h3>
+            <p className="mgmt-panel-desc">Configure remote/local MCP server details used by OpenCode.</p>
+          </div>
+          <div className="mgmt-panel-body">
+            {normalizedMcpServers.length === 0 && (
+              <div className="mgmt-empty">No MCP server definitions yet. Add one from the panel on the left.</div>
+            )}
+            {normalizedMcpServers.map(server => (
+              <div key={server.id} className="mgmt-section">
+                {/* Server header */}
+                <div style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(0,1fr) 110px auto" }}>
                   <input
-                    type="checkbox"
-                    checked={configuredMcpSet.has(server.id)}
-                    onChange={event => {
-                      if (event.target.checked) {
-                        setMcpsDraft([...configuredMcps, server.id].join("\n"));
-                      } else {
-                        setMcpsDraft(configuredMcps.filter(value => value !== server.id).join("\n"));
-                      }
-                    }}
-                  />
-                  enabled
-                </label>
-              </div>
-              {server.type === "remote" ? (
-                <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_140px]">
-                  <Input
-                    value={server.url}
-                    onChange={event =>
-                      updateMcpServer(server.id, current =>
-                        current.type === "remote" ? { ...current, url: event.target.value } : current,
-                      )
-                    }
-                    placeholder="https://example.com/mcp"
+                    type="text"
+                    className="mgmt-input"
+                    value={server.id}
+                    onChange={event => renameMcpServer(server.id, event.target.value)}
+                    placeholder="mcp id"
                   />
                   <select
-                    value={server.oauth}
-                    onChange={event =>
-                      updateMcpServer(server.id, current =>
-                        current.type === "remote"
-                          ? { ...current, oauth: event.target.value === "off" ? "off" : "auto" }
-                          : current,
-                      )
-                    }
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    value={server.type}
+                    onChange={event => setMcpServerType(server.id, event.target.value === "local" ? "local" : "remote")}
+                    className="mgmt-select"
                   >
-                    <option value="auto">oauth auto</option>
-                    <option value="off">oauth off</option>
+                    <option value="remote">remote</option>
+                    <option value="local">local</option>
                   </select>
-                  <Input
-                    value={typeof server.timeoutMs === "number" ? String(server.timeoutMs) : ""}
-                    onChange={event =>
-                      updateMcpServer(server.id, current =>
-                        current.type === "remote"
-                          ? {
-                              ...current,
-                              timeoutMs: event.target.value.trim()
-                                ? Number.isFinite(Number(event.target.value))
-                                  ? Number(event.target.value)
-                                  : undefined
-                                : undefined,
-                            }
-                          : current,
-                      )
-                    }
-                    placeholder="timeout ms"
-                  />
+                  <label className="mgmt-checkbox-row" style={{ height: 36, paddingRight: 4 }}>
+                    <input
+                      type="checkbox"
+                      checked={configuredMcpSet.has(server.id)}
+                      onChange={event => {
+                        if (event.target.checked) {
+                          setMcpsDraft([...configuredMcps, server.id].join("\n"));
+                        } else {
+                          setMcpsDraft(configuredMcps.filter(value => value !== server.id).join("\n"));
+                        }
+                      }}
+                    />
+                    enabled
+                  </label>
                 </div>
-              ) : (
-                <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px]">
-                  <Input
-                    value={server.command.join(" ")}
-                    onChange={event =>
-                      updateMcpServer(server.id, current =>
-                        current.type === "local"
-                          ? {
-                              ...current,
-                              command: event.target.value
-                                .split(" ")
-                                .map(value => value.trim())
-                                .filter(Boolean),
-                            }
-                          : current,
-                      )
-                    }
-                    placeholder="bun run mcp-server.ts"
-                  />
-                  <Input
-                    value={typeof server.timeoutMs === "number" ? String(server.timeoutMs) : ""}
-                    onChange={event =>
-                      updateMcpServer(server.id, current =>
-                        current.type === "local"
-                          ? {
-                              ...current,
-                              timeoutMs: event.target.value.trim()
-                                ? Number.isFinite(Number(event.target.value))
-                                  ? Number(event.target.value)
-                                  : undefined
-                                : undefined,
-                            }
-                          : current,
-                      )
-                    }
-                    placeholder="timeout ms"
-                  />
-                </div>
-              )}
-            </div>
-          ))}
-          <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-            {configuredMcps.length} enabled MCP server{configuredMcps.length === 1 ? "" : "s"} across {normalizedMcpServers.length} definition
-            {normalizedMcpServers.length === 1 ? "" : "s"}.
+
+                {/* Server config fields */}
+                {server.type === "remote" ? (
+                  <div style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(0,1fr) 130px 130px" }}>
+                    <input
+                      type="text"
+                      className="mgmt-input"
+                      value={server.url}
+                      onChange={event =>
+                        updateMcpServer(server.id, current =>
+                          current.type === "remote" ? { ...current, url: event.target.value } : current,
+                        )
+                      }
+                      placeholder="https://example.com/mcp"
+                    />
+                    <select
+                      value={server.oauth}
+                      onChange={event =>
+                        updateMcpServer(server.id, current =>
+                          current.type === "remote"
+                            ? { ...current, oauth: event.target.value === "off" ? "off" : "auto" }
+                            : current,
+                        )
+                      }
+                      className="mgmt-select"
+                    >
+                      <option value="auto">oauth auto</option>
+                      <option value="off">oauth off</option>
+                    </select>
+                    <input
+                      type="text"
+                      className="mgmt-input"
+                      value={typeof server.timeoutMs === "number" ? String(server.timeoutMs) : ""}
+                      onChange={event =>
+                        updateMcpServer(server.id, current =>
+                          current.type === "remote"
+                            ? {
+                                ...current,
+                                timeoutMs: event.target.value.trim()
+                                  ? Number.isFinite(Number(event.target.value))
+                                    ? Number(event.target.value)
+                                    : undefined
+                                  : undefined,
+                              }
+                            : current,
+                        )
+                      }
+                      placeholder="timeout ms"
+                    />
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(0,1fr) 130px" }}>
+                    <input
+                      type="text"
+                      className="mgmt-input"
+                      value={server.command.join(" ")}
+                      onChange={event =>
+                        updateMcpServer(server.id, current =>
+                          current.type === "local"
+                            ? {
+                                ...current,
+                                command: event.target.value
+                                  .split(" ")
+                                  .map(value => value.trim())
+                                  .filter(Boolean),
+                              }
+                            : current,
+                        )
+                      }
+                      placeholder="bun run mcp-server.ts"
+                    />
+                    <input
+                      type="text"
+                      className="mgmt-input"
+                      value={typeof server.timeoutMs === "number" ? String(server.timeoutMs) : ""}
+                      onChange={event =>
+                        updateMcpServer(server.id, current =>
+                          current.type === "local"
+                            ? {
+                                ...current,
+                                timeoutMs: event.target.value.trim()
+                                  ? Number.isFinite(Number(event.target.value))
+                                    ? Number(event.target.value)
+                                    : undefined
+                                  : undefined,
+                              }
+                            : current,
+                        )
+                      }
+                      placeholder="timeout ms"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+            <p className="mgmt-count-note">
+              {configuredMcps.length} enabled MCP server{configuredMcps.length === 1 ? "" : "s"} across{" "}
+              {normalizedMcpServers.length} definition{normalizedMcpServers.length === 1 ? "" : "s"}.
+            </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </section>
   );
 }

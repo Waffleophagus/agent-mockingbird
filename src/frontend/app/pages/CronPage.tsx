@@ -1,4 +1,4 @@
-import { Clock, Copy, List, Play, Save, Trash2, TrendingUp } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, Copy, List, Play, Save, Timer, Trash2, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type {
@@ -8,10 +8,6 @@ import type {
   CronJobPatchInput,
   CronJobStep,
 } from "@/backend/cron/types";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { formatCompactTimestamp, relativeFromIso } from "@/frontend/app/chatHelpers";
 import {
   createCronJob,
@@ -56,11 +52,11 @@ function formatSchedule(job: CronJobDefinition): string {
   return job.scheduleKind;
 }
 
-function stateVariant(state: CronJobInstance["state"]): "success" | "warning" | "outline" {
-  if (state === "completed") return "success";
-  if (state === "running") return "warning";
-  if (state === "failed" || state === "dead") return "warning";
-  return "outline";
+function stateVariant(state: CronJobInstance["state"]): string {
+  if (state === "completed") return "mgmt-badge-success";
+  if (state === "running") return "mgmt-badge-warning";
+  if (state === "failed" || state === "dead") return "mgmt-badge-warning";
+  return "";
 }
 
 function buildScheduleDraft(job: CronJobDefinition): ScheduleDraft {
@@ -320,207 +316,225 @@ export function CronPage(props: CronPageProps) {
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Button type="button" variant={tab === "jobs" ? "default" : "outline"} size="sm" onClick={() => setTab("jobs")}>
-          <List className="size-4" />
-          Jobs
-        </Button>
-        <Button type="button" variant={tab === "instances" ? "default" : "outline"} size="sm" onClick={() => setTab("instances")}>
-          <TrendingUp className="size-4" />
-          Instances
-        </Button>
+    <section className="mgmt-page">
+      <div className="mgmt-page-header">
+        <p className="mgmt-page-eyebrow">Scheduler</p>
+        <h2 className="mgmt-page-title">Cron Jobs</h2>
+        <p className="mgmt-page-subtitle">Inspect jobs, change schedules, and view run history.</p>
       </div>
 
-      {error && <p className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
-      {notice && <p className="rounded-md border border-border bg-muted/70 p-3 text-sm text-muted-foreground">{notice}</p>}
+      <div className="mgmt-tab-bar">
+        <button
+          type="button"
+          className="mgmt-tab"
+          data-active={tab === "jobs"}
+          onClick={() => setTab("jobs")}
+        >
+          <List size={14} />
+          Jobs
+        </button>
+        <button
+          type="button"
+          className="mgmt-tab"
+          data-active={tab === "instances"}
+          onClick={() => setTab("instances")}
+        >
+          <TrendingUp size={14} />
+          Instances
+        </button>
+      </div>
 
-      {loading && (
-        <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-          Loading cron data...
-        </p>
-      )}
+      {error && <div className="mgmt-error">{error}</div>}
+      {notice && <div className="mgmt-notice">{notice}</div>}
+      {loading && <div className="mgmt-loading">Loading cron data...</div>}
 
       {!loading && tab === "jobs" && (
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="panel-noise flex min-h-0 flex-col">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="size-4" />
-                Cron Jobs
-              </CardTitle>
-              <CardDescription>
-                Inspect cron jobs, duplicate them, change scheduling, or run them immediately. Create or deeper edits should happen through chat.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="min-h-0 space-y-3 overflow-y-auto">
+        <div className="mgmt-grid mgmt-grid-sidebar">
+          {/* Sidebar: job list */}
+          <div className="mgmt-panel">
+            <div className="mgmt-panel-header">
+              <div className="mgmt-panel-header-row">
+                <h3 className="mgmt-panel-title">
+                  <Clock size={14} />
+                  All Jobs
+                </h3>
+                <span className="mgmt-badge">{jobs.length}</span>
+              </div>
+            </div>
+            <div className="mgmt-panel-body">
+              {/* Health summary */}
               {health && (
-                <div className="space-y-2 rounded-md border border-border bg-muted/70 p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs uppercase tracking-wide text-muted-foreground">System</span>
-                    <Badge variant={health.enabled ? "success" : "outline"}>{health.enabled ? "enabled" : "disabled"}</Badge>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-muted-foreground">Jobs:</span> {health.jobs.enabled}/{health.jobs.total} enabled
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Queued:</span> {health.instances.queued}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Running:</span> {health.instances.running}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Failed:</span> {health.instances.failed}
-                    </div>
-                  </div>
+                <div className="mgmt-stat-grid">
+                  <span className="mgmt-stat-label">System</span>
+                  <span className="mgmt-stat-value">
+                    <span className={`mgmt-badge ${health.enabled ? "mgmt-badge-success" : ""}`}>
+                      {health.enabled ? "active" : "disabled"}
+                    </span>
+                  </span>
+                  <span className="mgmt-stat-label">Jobs</span>
+                  <span className="mgmt-stat-value">{health.jobs.enabled}/{health.jobs.total} on</span>
+                  <span className="mgmt-stat-label">Queued</span>
+                  <span className="mgmt-stat-value">{health.instances.queued}</span>
+                  <span className="mgmt-stat-label">Running</span>
+                  <span className="mgmt-stat-value">{health.instances.running}</span>
+                  <span className="mgmt-stat-label">Failed</span>
+                  <span className="mgmt-stat-value">{health.instances.failed}</span>
                 </div>
               )}
 
+              {/* Handlers */}
               {handlers.length > 0 && (
-                <div className="space-y-1 rounded-md border border-border bg-muted/60 p-3">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Handlers on file</p>
-                  <div className="flex flex-wrap gap-1">
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span className="mgmt-form-label">Handlers on file</span>
+                  <div className="mgmt-tags">
                     {handlers.map(handler => (
-                      <Badge key={handler} variant="outline" className="text-[10px]">
-                        {handler}
-                      </Badge>
+                      <span key={handler} className="mgmt-tag">{handler}</span>
                     ))}
                   </div>
                 </div>
               )}
 
-              <div className="space-y-2">
-                {jobs.length === 0 && (
-                  <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                    No cron jobs configured.
-                  </p>
-                )}
-                {jobs.map(job => (
-                  <button
-                    key={job.id}
-                    type="button"
-                    onClick={() => setSelectedJobId(job.id)}
-                    className="w-full rounded-md border border-border bg-muted/70 px-3 py-2 text-left transition hover:border-border/80 data-[active=true]:border-primary/50 data-[active=true]:bg-primary/5"
-                    data-active={selectedJobId === job.id}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className={`inline-block size-2 shrink-0 rounded-full ${job.enabled ? "bg-success" : "bg-muted-foreground"}`} />
-                        <span className="truncate text-sm font-medium">{job.name}</span>
-                      </div>
-                      <Badge variant="outline">{job.runMode}</Badge>
+              {/* Job list */}
+              {jobs.length === 0 && <div className="mgmt-empty">No cron jobs configured.</div>}
+              {jobs.map(job => (
+                <button
+                  key={job.id}
+                  type="button"
+                  onClick={() => setSelectedJobId(job.id)}
+                  className="mgmt-card mgmt-card-interactive"
+                  data-active={selectedJobId === job.id}
+                  style={{ textAlign: "left", width: "100%" }}
+                >
+                  <div className="mgmt-card-header">
+                    <div className="mgmt-card-title">
+                      <span className={`mgmt-dot ${job.enabled ? "mgmt-dot-on" : "mgmt-dot-off"}`} />
+                      <span>{job.name}</span>
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span>{formatSchedule(job)}</span>
-                      {jobBusyById[job.id] ? <span>{jobBusyById[job.id]}...</span> : null}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                    <span className="mgmt-badge">{job.runMode}</span>
+                  </div>
+                  <div className="mgmt-card-meta">
+                    <Timer size={11} />
+                    <span>{formatSchedule(job)}</span>
+                    {jobBusyById[job.id] ? <span style={{ fontStyle: "italic" }}>{jobBusyById[job.id]}...</span> : null}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <Card className="panel-noise flex min-h-0 flex-col">
-            <CardHeader>
-              <CardTitle>Job Details</CardTitle>
-              <CardDescription>Inspect job behavior and update only the schedule from this UI.</CardDescription>
-            </CardHeader>
-            <CardContent className="min-h-0 overflow-y-auto">
+          {/* Main: job details */}
+          <div className="mgmt-panel">
+            <div className="mgmt-panel-header">
+              <h3 className="mgmt-panel-title">Job Details</h3>
+              <p className="mgmt-panel-desc">Inspect behavior and update the schedule from this UI.</p>
+            </div>
+            <div className="mgmt-panel-body">
               {!selectedJob || !scheduleDraft ? (
-                <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                  Select a job to inspect or edit its schedule.
-                </p>
+                <div className="mgmt-empty">Select a job to inspect or edit its schedule.</div>
               ) : (
-                <div className="space-y-4">
-                  <div className="space-y-2 rounded-md border border-border bg-muted/50 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                <>
+                  {/* Identity + actions */}
+                  <div className="mgmt-section">
+                    <div className="mgmt-card-header">
                       <div>
-                        <h3 className="font-medium">{selectedJob.name}</h3>
-                        <p className="text-xs text-muted-foreground">{selectedJob.id}</p>
+                        <h4 className="mgmt-section-title">{selectedJob.name}</h4>
+                        <p className="mgmt-section-desc" style={{ fontFamily: "'Geist Mono', monospace" }}>{selectedJob.id}</p>
                       </div>
-                      <Badge variant={selectedJob.enabled ? "success" : "outline"}>
+                      <span className={`mgmt-badge ${selectedJob.enabled ? "mgmt-badge-success" : ""}`}>
                         {selectedJob.enabled ? "enabled" : "disabled"}
-                      </Badge>
+                      </span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
+                    <div className="mgmt-actions">
+                      <button
                         type="button"
-                        size="sm"
-                        variant={selectedJob.enabled ? "outline" : "default"}
+                        className={`mgmt-pill-btn ${selectedJob.enabled ? "" : "mgmt-pill-btn-primary"}`}
                         disabled={Boolean(jobBusyById[selectedJob.id])}
                         onClick={() => void toggleJobEnabled(selectedJob)}
                       >
                         {selectedJob.enabled ? "Disable" : "Enable"}
-                      </Button>
-                      <Button
+                      </button>
+                      <button
                         type="button"
-                        size="sm"
-                        variant="outline"
+                        className="mgmt-pill-btn"
                         disabled={Boolean(jobBusyById[selectedJob.id])}
                         onClick={() => void runJob(selectedJob)}
                       >
-                        <Play className="size-3.5" />
+                        <Play size={12} />
                         Run now
-                      </Button>
-                      <Button
+                      </button>
+                      <button
                         type="button"
-                        size="sm"
-                        variant="outline"
+                        className="mgmt-pill-btn"
                         disabled={Boolean(jobBusyById[selectedJob.id])}
                         onClick={() => void duplicateJob(selectedJob)}
                       >
-                        <Copy className="size-3.5" />
+                        <Copy size={12} />
                         Duplicate
-                      </Button>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => requestRemoveCronJob(selectedJob.id)}>
-                        <Trash2 className="size-3.5 text-destructive" />
+                      </button>
+                      <button
+                        type="button"
+                        className="mgmt-pill-btn mgmt-pill-btn-danger"
+                        onClick={() => requestRemoveCronJob(selectedJob.id)}
+                      >
+                        <Trash2 size={12} />
                         Delete
-                      </Button>
+                      </button>
                     </div>
                   </div>
 
-                  <div className="grid gap-2 text-xs">
-                    <div>
-                      <span className="text-muted-foreground">Run mode:</span> {selectedJob.runMode}
+                  {/* Metadata */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div className="mgmt-detail-row">
+                      <span className="mgmt-detail-label">Run mode</span>
+                      <span className="mgmt-detail-value">{selectedJob.runMode}</span>
                     </div>
                     {selectedJob.agentPromptTemplate && (
-                      <div>
-                        <span className="text-muted-foreground">Agent prompt:</span>
-                        <pre className="mt-1 whitespace-pre-wrap rounded bg-muted/50 p-2 text-[10px]">{selectedJob.agentPromptTemplate}</pre>
+                      <div className="mgmt-detail-row">
+                        <span className="mgmt-detail-label">Prompt</span>
+                        <div className="mgmt-detail-value">
+                          <pre>{selectedJob.agentPromptTemplate}</pre>
+                        </div>
                       </div>
                     )}
                     {selectedJob.handlerKey && (
-                      <div>
-                        <span className="text-muted-foreground">Handler:</span> {selectedJob.handlerKey}
+                      <div className="mgmt-detail-row">
+                        <span className="mgmt-detail-label">Handler</span>
+                        <span className="mgmt-detail-value">{selectedJob.handlerKey}</span>
                       </div>
                     )}
                     {selectedJob.conditionModulePath && (
-                      <div>
-                        <span className="text-muted-foreground">Condition module:</span> {selectedJob.conditionModulePath}
+                      <div className="mgmt-detail-row">
+                        <span className="mgmt-detail-label">Condition</span>
+                        <span className="mgmt-detail-value" style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11 }}>{selectedJob.conditionModulePath}</span>
                       </div>
                     )}
                     {Object.keys(selectedJob.payload).length > 0 && (
-                      <div>
-                        <span className="text-muted-foreground">Payload:</span>
-                        <pre className="mt-1 overflow-x-auto rounded bg-muted/50 p-2 text-[10px]">{JSON.stringify(selectedJob.payload, null, 2)}</pre>
+                      <div className="mgmt-detail-row">
+                        <span className="mgmt-detail-label">Payload</span>
+                        <div className="mgmt-detail-value">
+                          <pre>{JSON.stringify(selectedJob.payload, null, 2)}</pre>
+                        </div>
                       </div>
                     )}
-                    <div>
-                      <span className="text-muted-foreground">Created:</span> {formatCompactTimestamp(selectedJob.createdAt)} ({relativeFromIso(selectedJob.createdAt)})
+                    <div className="mgmt-detail-row">
+                      <span className="mgmt-detail-label">Created</span>
+                      <span className="mgmt-detail-value">{formatCompactTimestamp(selectedJob.createdAt)} ({relativeFromIso(selectedJob.createdAt)})</span>
                     </div>
-                    <div>
-                      <span className="text-muted-foreground">Updated:</span> {formatCompactTimestamp(selectedJob.updatedAt)} ({relativeFromIso(selectedJob.updatedAt)})
+                    <div className="mgmt-detail-row">
+                      <span className="mgmt-detail-label">Updated</span>
+                      <span className="mgmt-detail-value">{formatCompactTimestamp(selectedJob.updatedAt)} ({relativeFromIso(selectedJob.updatedAt)})</span>
                     </div>
                   </div>
 
-                  <div className="space-y-3 rounded-md border border-border bg-muted/50 p-3">
+                  {/* Schedule editor */}
+                  <div className="mgmt-section">
                     <div>
-                      <h4 className="text-sm font-medium">Schedule</h4>
-                      <p className="text-xs text-muted-foreground">This UI only edits scheduling. Prompt, handler, and run-mode changes should happen through chat.</p>
+                      <h4 className="mgmt-section-title">Schedule</h4>
+                      <p className="mgmt-section-desc">Only scheduling is editable here. Prompt, handler, and run-mode changes go through chat.</p>
                     </div>
-                    <div className="grid gap-2 md:grid-cols-[140px_minmax(0,1fr)]">
-                      <label className="text-xs text-muted-foreground">Schedule type</label>
+
+                    <div className="mgmt-form-row">
+                      <label className="mgmt-form-label">Type</label>
                       <select
                         value={scheduleDraft.scheduleKind}
                         onChange={event =>
@@ -528,17 +542,20 @@ export function CronPage(props: CronPageProps) {
                             current ? { ...current, scheduleKind: event.target.value as ScheduleDraft["scheduleKind"] } : current,
                           )
                         }
-                        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        className="mgmt-select"
                       >
                         <option value="every">every</option>
                         <option value="cron">cron</option>
                         <option value="at">at</option>
                       </select>
                     </div>
-                    {scheduleDraft.scheduleKind === "every" ? (
-                      <div className="grid gap-2 md:grid-cols-[140px_minmax(0,1fr)]">
-                        <label className="text-xs text-muted-foreground">Every ms</label>
-                        <Input
+
+                    {scheduleDraft.scheduleKind === "every" && (
+                      <div className="mgmt-form-row">
+                        <label className="mgmt-form-label">Every ms</label>
+                        <input
+                          type="text"
+                          className="mgmt-input"
                           value={scheduleDraft.everyMs}
                           onChange={event =>
                             setScheduleDraft(current => (current ? { ...current, everyMs: event.target.value } : current))
@@ -546,11 +563,14 @@ export function CronPage(props: CronPageProps) {
                           placeholder="60000"
                         />
                       </div>
-                    ) : null}
-                    {scheduleDraft.scheduleKind === "cron" ? (
-                      <div className="grid gap-2 md:grid-cols-[140px_minmax(0,1fr)]">
-                        <label className="text-xs text-muted-foreground">Cron expression</label>
-                        <Input
+                    )}
+
+                    {scheduleDraft.scheduleKind === "cron" && (
+                      <div className="mgmt-form-row">
+                        <label className="mgmt-form-label">Expression</label>
+                        <input
+                          type="text"
+                          className="mgmt-input"
                           value={scheduleDraft.scheduleExpr}
                           onChange={event =>
                             setScheduleDraft(current => (current ? { ...current, scheduleExpr: event.target.value } : current))
@@ -558,11 +578,14 @@ export function CronPage(props: CronPageProps) {
                           placeholder="0 * * * *"
                         />
                       </div>
-                    ) : null}
-                    {scheduleDraft.scheduleKind === "at" ? (
-                      <div className="grid gap-2 md:grid-cols-[140px_minmax(0,1fr)]">
-                        <label className="text-xs text-muted-foreground">Run at ISO</label>
-                        <Input
+                    )}
+
+                    {scheduleDraft.scheduleKind === "at" && (
+                      <div className="mgmt-form-row">
+                        <label className="mgmt-form-label">Run at ISO</label>
+                        <input
+                          type="text"
+                          className="mgmt-input"
                           value={scheduleDraft.atIso}
                           onChange={event =>
                             setScheduleDraft(current => (current ? { ...current, atIso: event.target.value } : current))
@@ -570,10 +593,13 @@ export function CronPage(props: CronPageProps) {
                           placeholder="2026-03-05T18:30:00.000Z"
                         />
                       </div>
-                    ) : null}
-                    <div className="grid gap-2 md:grid-cols-[140px_minmax(0,1fr)]">
-                      <label className="text-xs text-muted-foreground">Timezone</label>
-                      <Input
+                    )}
+
+                    <div className="mgmt-form-row">
+                      <label className="mgmt-form-label">Timezone</label>
+                      <input
+                        type="text"
+                        className="mgmt-input"
                         value={scheduleDraft.timezone}
                         onChange={event =>
                           setScheduleDraft(current => (current ? { ...current, timezone: event.target.value } : current))
@@ -581,37 +607,39 @@ export function CronPage(props: CronPageProps) {
                         placeholder="America/Chicago"
                       />
                     </div>
-                    <div className="flex justify-end">
-                      <Button
+
+                    <div className="mgmt-actions mgmt-actions-end">
+                      <button
                         type="button"
+                        className="mgmt-pill-btn mgmt-pill-btn-primary"
                         disabled={Boolean(jobBusyById[selectedJob.id])}
                         onClick={() => void saveSchedule(selectedJob)}
                       >
-                        <Save className="size-3.5" />
+                        <Save size={12} />
                         Save schedule
-                      </Button>
+                      </button>
                     </div>
                   </div>
-                </div>
+                </>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
       {!loading && tab === "instances" && (
-        <Card className="panel-noise flex min-h-0 flex-1 flex-col">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-4">
+        <div className="mgmt-panel" style={{ flex: 1 }}>
+          <div className="mgmt-panel-header">
+            <div className="mgmt-panel-header-row">
               <div>
-                <CardTitle>Run Instances</CardTitle>
-                <CardDescription>View recent cron job executions and their status.</CardDescription>
+                <h3 className="mgmt-panel-title">Run Instances</h3>
+                <p className="mgmt-panel-desc">View recent cron job executions and their status.</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="mgmt-actions">
                 <select
                   value={instanceFilterJobId}
                   onChange={event => setInstanceFilterJobId(event.target.value)}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  className="mgmt-select"
                 >
                   <option value="">All jobs</option>
                   {jobs.map(job => (
@@ -623,102 +651,100 @@ export function CronPage(props: CronPageProps) {
                 <select
                   value={conditionalAgentFilter}
                   onChange={event => setConditionalAgentFilter(event.target.value as ConditionalAgentFilter)}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  className="mgmt-select"
                 >
                   <option value="all">All outcomes</option>
-                  <option value="invoked">Conditional: agent invoked</option>
-                  <option value="not_invoked">Conditional: no agent invoke</option>
+                  <option value="invoked">Agent invoked</option>
+                  <option value="not_invoked">No agent invoke</option>
                 </select>
               </div>
             </div>
-          </CardHeader>
-          <CardContent className="min-h-0 flex-1 overflow-y-auto">
-            <div className="space-y-4">
-              {visibleInstances.length === 0 && (
-                <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                  No instances found.
-                </p>
-              )}
-              {visibleInstances.map(instance => {
-                const job = jobById.get(instance.jobDefinitionId);
-                return (
-                  <div key={instance.id} className="space-y-2 rounded-md border border-border bg-muted/70 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{job?.name ?? instance.jobDefinitionId}</span>
-                        <Badge variant={stateVariant(instance.state)}>{instance.state}</Badge>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setSelectedInstanceId(selectedInstanceId === instance.id ? null : instance.id)}
-                      >
-                        {selectedInstanceId === instance.id ? "Hide steps" : "Show steps"}
-                      </Button>
+          </div>
+          <div className="mgmt-panel-body">
+            {visibleInstances.length === 0 && <div className="mgmt-empty">No instances found.</div>}
+            {visibleInstances.map(instance => {
+              const job = jobById.get(instance.jobDefinitionId);
+              const isExpanded = selectedInstanceId === instance.id;
+              return (
+                <div key={instance.id} className="mgmt-instance-card">
+                  <div className="mgmt-card-header">
+                    <div className="mgmt-card-title">
+                      <span>{job?.name ?? instance.jobDefinitionId}</span>
+                      <span className={`mgmt-badge ${stateVariant(instance.state)}`}>{instance.state}</span>
                     </div>
-                    <div className="grid gap-1 text-xs text-muted-foreground">
-                      <div>
-                        <span className="text-muted-foreground">Scheduled:</span> {formatCompactTimestamp(instance.scheduledFor)}
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Attempt:</span> {instance.attempt}/{job?.maxAttempts ?? "?"}
-                      </div>
-                      {job?.runMode === "conditional_agent" && (
-                        <div>
-                          <span className="text-muted-foreground">Agent invoked:</span> {instance.agentInvoked ? "yes" : "no"}
-                        </div>
-                      )}
-                      {instance.resultSummary && (
-                        <div>
-                          <span className="text-muted-foreground">Result:</span> {instance.resultSummary}
-                        </div>
-                      )}
-                      {instance.error !== null && instance.error !== undefined && (
-                        <pre className="overflow-x-auto rounded bg-destructive/10 p-2 text-[10px] text-destructive">
-                          {JSON.stringify(instance.error, null, 2)}
-                        </pre>
-                      )}
+                    <button
+                      type="button"
+                      className="mgmt-pill-btn mgmt-pill-btn-ghost"
+                      onClick={() => setSelectedInstanceId(isExpanded ? null : instance.id)}
+                    >
+                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      {isExpanded ? "Hide" : "Steps"}
+                    </button>
+                  </div>
+
+                  <div className="mgmt-stat-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+                    <div>
+                      <span className="mgmt-stat-label">Scheduled</span>
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--text-base)" }}>{formatCompactTimestamp(instance.scheduledFor)}</p>
                     </div>
-                    {selectedInstanceId === instance.id && steps.length > 0 && (
-                      <div className="mt-2 space-y-2 rounded border border-border/60 bg-muted/50 p-2">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Steps</p>
-                        {steps.map(step => (
-                          <div key={step.id} className="space-y-1 text-xs">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline">{step.stepKind}</Badge>
-                              <Badge
-                                variant={
-                                  step.status === "completed"
-                                    ? "success"
-                                    : step.status === "failed"
-                                      ? "warning"
-                                      : "outline"
-                                }
-                              >
-                                {step.status}
-                              </Badge>
-                            </div>
-                            {step.output !== null && step.output !== undefined && (
-                              <pre className="overflow-x-auto rounded bg-muted/50 p-2 text-[10px]">
-                                {JSON.stringify(step.output, null, 2)}
-                              </pre>
-                            )}
-                            {step.error !== null && step.error !== undefined && (
-                              <pre className="overflow-x-auto rounded bg-destructive/10 p-2 text-[10px] text-destructive">
-                                {JSON.stringify(step.error, null, 2)}
-                              </pre>
-                            )}
-                          </div>
-                        ))}
+                    <div>
+                      <span className="mgmt-stat-label">Attempt</span>
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--text-base)" }}>{instance.attempt}/{job?.maxAttempts ?? "?"}</p>
+                    </div>
+                    {job?.runMode === "conditional_agent" && (
+                      <div>
+                        <span className="mgmt-stat-label">Agent invoked</span>
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--text-base)" }}>{instance.agentInvoked ? "yes" : "no"}</p>
                       </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+
+                  {instance.resultSummary && (
+                    <div style={{ fontSize: 12, color: "var(--text-weak)" }}>
+                      <span className="mgmt-form-label">Result</span> {instance.resultSummary}
+                    </div>
+                  )}
+
+                  {instance.error !== null && instance.error !== undefined && (
+                    <div className="mgmt-error">
+                      <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 11 }}>
+                        {JSON.stringify(instance.error, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
+                  {isExpanded && steps.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
+                      <span className="mgmt-form-label">Steps</span>
+                      {steps.map(step => (
+                        <div key={step.id} className="mgmt-step-card">
+                          <div className="mgmt-actions">
+                            <span className="mgmt-badge">{step.stepKind}</span>
+                            <span className={`mgmt-badge ${step.status === "completed" ? "mgmt-badge-success" : step.status === "failed" ? "mgmt-badge-warning" : ""}`}>
+                              {step.status}
+                            </span>
+                          </div>
+                          {step.output !== null && step.output !== undefined && (
+                            <pre style={{ margin: 0, padding: "8px 10px", borderRadius: 10, background: "color-mix(in srgb, var(--surface-inset-base) 70%, transparent)", border: "1px solid color-mix(in srgb, var(--border-weak-base) 55%, transparent)", fontFamily: "'Geist Mono', monospace", fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                              {JSON.stringify(step.output, null, 2)}
+                            </pre>
+                          )}
+                          {step.error !== null && step.error !== undefined && (
+                            <div className="mgmt-error">
+                              <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 11 }}>
+                                {JSON.stringify(step.error, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </section>
   );

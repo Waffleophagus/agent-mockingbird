@@ -1,9 +1,5 @@
-import { AlertTriangle, Plus, SlidersHorizontal, Trash2, Wrench } from "lucide-react";
+import { AlertTriangle, Plus, Trash2, Wrench } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import type { RuntimeSkill, RuntimeSkillIssue } from "@/types/dashboard";
 
 interface SkillsPageProps {
@@ -68,179 +64,208 @@ export function SkillsPage(props: SkillsPageProps) {
   } = props;
 
   return (
-    <section className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-      <Card className="panel-noise flex min-h-0 flex-col">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Wrench className="size-4" />
-            Skill Exposure
-          </CardTitle>
-          <CardDescription>Toggle which OpenCode skills are exposed to runtime sessions.</CardDescription>
-        </CardHeader>
-        <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-          {(skillsManagedPath || skillsDisabledPath) && (
-            <div className="rounded-md border border-border bg-muted/70 p-3 text-[11px] text-muted-foreground">
-              {skillsManagedPath && <p>Enabled root: {skillsManagedPath}</p>}
-              {skillsDisabledPath && <p>Disabled root: {skillsDisabledPath}</p>}
+    <section className="mgmt-page">
+      <div className="mgmt-page-header">
+        <p className="mgmt-page-eyebrow">Configuration</p>
+        <h2 className="mgmt-page-title">Skills</h2>
+        <p className="mgmt-page-subtitle">Toggle which OpenCode skills are exposed to runtime sessions.</p>
+      </div>
+
+      <div className="mgmt-grid mgmt-grid-sidebar">
+        {/* Left panel: skill list */}
+        <div className="mgmt-panel">
+          <div className="mgmt-panel-header">
+            <div className="mgmt-panel-header-row">
+              <h3 className="mgmt-panel-title">
+                <Wrench size={14} />
+                Skill Exposure
+              </h3>
+              <span className="mgmt-badge">{availableSkills.length} available</span>
             </div>
-          )}
-          <div className="flex gap-2">
-            <Input
-              value={skillInput}
-              onChange={event => setSkillInput(event.target.value)}
-              placeholder="skill id (e.g. btca-cli)"
-              onKeyDown={event => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  addSkill();
-                }
-              }}
-            />
-            <Button type="button" onClick={addSkill} disabled={!skillInput.trim()}>
-              <Plus className="size-4" />
-              Add
-            </Button>
           </div>
+          <div className="mgmt-panel-body">
+            {/* Path info */}
+            {(skillsManagedPath || skillsDisabledPath) && (
+              <div className="mgmt-notice" style={{ fontSize: 11, fontFamily: "'Geist Mono', monospace" }}>
+                {skillsManagedPath && <p style={{ margin: 0 }}>Enabled root: {skillsManagedPath}</p>}
+                {skillsDisabledPath && <p style={{ margin: "2px 0 0" }}>Disabled root: {skillsDisabledPath}</p>}
+              </div>
+            )}
 
-          {loadingSkillCatalog && (
-            <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-              Loading runtime skills...
-            </p>
-          )}
+            {/* Add skill input */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="text"
+                className="mgmt-input"
+                style={{ flex: 1 }}
+                value={skillInput}
+                onChange={event => setSkillInput(event.target.value)}
+                placeholder="skill id (e.g. btca-cli)"
+                onKeyDown={event => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addSkill();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="mgmt-pill-btn mgmt-pill-btn-primary"
+                onClick={addSkill}
+                disabled={!skillInput.trim()}
+              >
+                <Plus size={13} />
+                Add
+              </button>
+            </div>
 
-          <div className="space-y-2">
+            {loadingSkillCatalog && <div className="mgmt-loading">Loading runtime skills...</div>}
+
+            {/* Skill list */}
             {!loadingSkillCatalog && availableSkills.length === 0 && (
-              <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                No runtime skills discovered yet.
-              </p>
+              <div className="mgmt-empty">No runtime skills discovered yet.</div>
             )}
             {availableSkills.map(skill => {
               const enabled = configuredSkillSet.has(skill.id);
               return (
-                <div key={skill.id} className="space-y-1 rounded-md border border-border bg-muted/70 px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium">{skill.name}</span>
-                    <Button
+                <div key={skill.id} className="mgmt-card" data-active={enabled}>
+                  <div className="mgmt-card-header">
+                    <div className="mgmt-card-title">
+                      <span className={`mgmt-dot ${enabled ? "mgmt-dot-on" : "mgmt-dot-off"}`} />
+                      <span>{skill.name}</span>
+                    </div>
+                    <button
                       type="button"
-                      size="sm"
-                      variant={enabled ? "default" : "outline"}
+                      className={`mgmt-pill-btn ${enabled ? "mgmt-pill-btn-primary" : ""}`}
                       onClick={() => toggleSkillEnabled(skill.id)}
+                      style={{ fontSize: 11, height: 26, padding: "0 10px" }}
                     >
                       {enabled ? "Enabled" : "Disabled"}
-                    </Button>
+                    </button>
                   </div>
-                  <p className="text-xs text-muted-foreground">{skill.description || "No description provided."}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">{skill.location}</p>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--text-weak)", lineHeight: 1.4 }}>
+                    {skill.description || "No description provided."}
+                  </p>
+                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--text-weaker)", fontFamily: "'Geist Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {skill.location}
+                  </p>
                 </div>
               );
             })}
-          </div>
 
-          {disabledSkills.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Disabled on disk</p>
-              <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-                {disabledSkills.join(", ")}
+            {/* Disabled skills */}
+            {disabledSkills.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span className="mgmt-form-label">Disabled on disk</span>
+                <div className="mgmt-notice" style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11 }}>
+                  {disabledSkills.join(", ")}
+                </div>
+              </div>
+            )}
+
+            {/* Invalid skills */}
+            {invalidSkills.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span className="mgmt-form-label" style={{ color: "var(--surface-warning-strong)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <AlertTriangle size={12} />
+                  Invalid Skills
+                </span>
+                {invalidSkills.map(issue => (
+                  <div key={`${issue.id ?? "unknown"}:${issue.location}`} className="mgmt-warn-card">
+                    <p className="mgmt-warn-card-title">{issue.id || "Unknown skill"}</p>
+                    <p className="mgmt-warn-card-text">{issue.reason}</p>
+                    <p className="mgmt-warn-card-text" style={{ fontFamily: "'Geist Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{issue.location}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Configured but unavailable */}
+            {configuredUnavailableSkills.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span className="mgmt-form-label">Configured but unavailable</span>
+                {configuredUnavailableSkills.map(skill => (
+                  <div key={skill} className="mgmt-card">
+                    <div className="mgmt-card-header">
+                      <span style={{ fontSize: 13, color: "var(--text-base)" }}>{skill}</span>
+                      <button
+                        type="button"
+                        className="mgmt-pill-btn mgmt-pill-btn-danger mgmt-pill-btn-ghost"
+                        onClick={() => requestRemoveSkill(skill)}
+                        style={{ height: 26, padding: "0 8px" }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="mgmt-actions mgmt-actions-end" style={{ paddingTop: 4 }}>
+              <button type="button" className="mgmt-pill-btn" onClick={() => void refreshSkillCatalog()} disabled={loadingSkillCatalog}>
+                {loadingSkillCatalog ? "Refreshing..." : "Refresh"}
+              </button>
+              <button type="button" className="mgmt-pill-btn mgmt-pill-btn-primary" onClick={() => void saveSkillsConfig()} disabled={isSavingSkills}>
+                {isSavingSkills ? "Saving..." : "Save skills"}
+              </button>
+            </div>
+            {skillCatalogError && <div className="mgmt-error">{skillCatalogError}</div>}
+            {skillsError && <div className="mgmt-error">{skillsError}</div>}
+          </div>
+        </div>
+
+        {/* Right panel: import + bulk editor */}
+        <div className="mgmt-panel">
+          <div className="mgmt-panel-header">
+            <h3 className="mgmt-panel-title">Import + Bulk Editor</h3>
+            <p className="mgmt-panel-desc">Import managed skills and keep a bulk editable allow-list.</p>
+          </div>
+          <div className="mgmt-panel-body">
+            {/* Import section */}
+            <div className="mgmt-section">
+              <span className="mgmt-form-label">Import managed skill</span>
+              <input
+                type="text"
+                className="mgmt-input"
+                value={importSkillId}
+                onChange={event => setImportSkillId(event.target.value)}
+                placeholder="new skill id (e.g. my-skill)"
+              />
+              <textarea
+                className="mgmt-textarea"
+                value={importSkillContent}
+                onChange={event => setImportSkillContent(event.target.value)}
+                style={{ minHeight: 120 }}
+                placeholder="Paste SKILL.md content"
+              />
+              <div className="mgmt-actions mgmt-actions-end">
+                <button
+                  type="button"
+                  className="mgmt-pill-btn mgmt-pill-btn-primary"
+                  onClick={() => void importSkill()}
+                  disabled={isImportingSkill || !importSkillId.trim() || !importSkillContent.trim()}
+                >
+                  {isImportingSkill ? "Importing..." : "Import skill"}
+                </button>
               </div>
             </div>
-          )}
 
-          {invalidSkills.length > 0 && (
-            <div className="space-y-2">
-              <p className="flex items-center gap-2 text-xs uppercase tracking-wide text-amber-600">
-                <AlertTriangle className="size-3.5" />
-                Invalid Skills
-              </p>
-              {invalidSkills.map(issue => (
-                <div key={`${issue.id ?? "unknown"}:${issue.location}`} className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-                  <p className="text-xs font-medium text-amber-700">{issue.id || "Unknown skill"}</p>
-                  <p className="text-xs text-amber-700/90">{issue.reason}</p>
-                  <p className="truncate text-[11px] text-amber-700/80">{issue.location}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {configuredUnavailableSkills.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Configured but unavailable</p>
-              {configuredUnavailableSkills.map(skill => (
-                <div
-                  key={skill}
-                  className="flex items-center justify-between rounded-md border border-border bg-muted/70 px-3 py-2"
-                >
-                  <span className="text-sm">{skill}</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 w-8 p-0"
-                    onClick={() => requestRemoveSkill(skill)}
-                  >
-                    <Trash2 className="size-4 text-destructive" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => void refreshSkillCatalog()} disabled={loadingSkillCatalog}>
-              {loadingSkillCatalog ? "Refreshing..." : "Refresh"}
-            </Button>
-            <Button type="button" onClick={() => void saveSkillsConfig()} disabled={isSavingSkills}>
-              {isSavingSkills ? "Saving..." : "Save skills"}
-            </Button>
-          </div>
-          {skillCatalogError && <p className="text-xs text-destructive">{skillCatalogError}</p>}
-          {skillsError && <p className="text-xs text-destructive">{skillsError}</p>}
-        </CardContent>
-      </Card>
-
-      <Card className="panel-noise flex min-h-0 flex-col">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <SlidersHorizontal className="size-4" />
-            Import + Bulk Editor
-          </CardTitle>
-          <CardDescription>Import managed skills and keep a bulk editable allow-list.</CardDescription>
-        </CardHeader>
-        <CardContent className="min-h-0 space-y-3 overflow-y-auto">
-          <div className="space-y-2 rounded-md border border-border bg-muted/70 p-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Import managed skill</p>
-            <Input
-              value={importSkillId}
-              onChange={event => setImportSkillId(event.target.value)}
-              placeholder="new skill id (e.g. my-skill)"
+            {/* Bulk editor */}
+            <textarea
+              className="mgmt-textarea"
+              value={skillsDraft}
+              onChange={event => setSkillsDraft(event.target.value)}
+              style={{ minHeight: 240 }}
+              placeholder="One skill per line"
             />
-            <Textarea
-              value={importSkillContent}
-              onChange={event => setImportSkillContent(event.target.value)}
-              className="min-h-28 resize-y"
-              placeholder="Paste SKILL.md content"
-            />
-            <div className="flex items-center justify-end">
-              <Button
-                type="button"
-                onClick={() => void importSkill()}
-                disabled={isImportingSkill || !importSkillId.trim() || !importSkillContent.trim()}
-              >
-                {isImportingSkill ? "Importing..." : "Import skill"}
-              </Button>
-            </div>
+            <p className="mgmt-count-note">
+              {configuredSkills.length} configured skill{configuredSkills.length === 1 ? "" : "s"}.
+            </p>
           </div>
-
-          <Textarea
-            value={skillsDraft}
-            onChange={event => setSkillsDraft(event.target.value)}
-            className="min-h-64 resize-y"
-            placeholder="One skill per line"
-          />
-          <div className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-            {configuredSkills.length} configured skill{configuredSkills.length === 1 ? "" : "s"}.
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </section>
   );
 }

@@ -886,7 +886,14 @@ export function ManagementWorkspace(props: ManagementWorkspaceProps) {
   const confirmDialog = getConfirmDialogProps(confirmAction);
 
   return (
-    <main className="min-h-[calc(100vh-4rem)] bg-background px-4 py-4 text-foreground sm:px-6">
+    <main
+      className="text-foreground"
+      style={{
+        minHeight: "calc(100vh - 4rem)",
+        background: "linear-gradient(180deg, color-mix(in srgb, var(--background-base) 92%, var(--surface-raised-base) 8%), var(--background-base))",
+        padding: "20px 16px",
+      }}
+    >
       <ConfirmDialog
         open={confirmDialog.open}
         title={confirmDialog.title}
@@ -896,7 +903,9 @@ export function ManagementWorkspace(props: ManagementWorkspaceProps) {
         onConfirm={handleConfirmAction}
         onCancel={() => setConfirmAction(null)}
       />
-      <div className="mx-auto flex h-full w-full max-w-7xl flex-col gap-4">{renderScreen()}</div>
+      <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
+        {renderScreen()}
+      </div>
     </main>
   );
 }

@@ -1,10 +1,6 @@
 import { ChevronsUpDown, RefreshCcw, Save, Settings2, Trash2 } from "lucide-react";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, RefObject, SetStateAction } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/frontend/app/dashboardUtils";
 import type { ModelOption } from "@/types/dashboard";
 
 interface OtherConfigPageProps {
@@ -57,133 +53,129 @@ export function OtherConfigPage(props: OtherConfigPageProps) {
   } = props;
 
   return (
-    <section className="min-h-0 flex-1 overflow-hidden">
-      <Card className="panel-noise flex h-full min-h-0 flex-col overflow-hidden">
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Settings2 className="size-4" />
-                Other Config
-              </CardTitle>
-              <CardDescription>Runtime fallback order for OpenCode model selection.</CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void refreshOtherConfig()}
-                disabled={loadingOtherConfig}
-              >
-                <RefreshCcw className="size-4" />
+    <section className="mgmt-page">
+      <div className="mgmt-page-header">
+        <p className="mgmt-page-eyebrow">Configuration</p>
+        <h2 className="mgmt-page-title">Other Config</h2>
+        <p className="mgmt-page-subtitle">Runtime fallback order for OpenCode model selection.</p>
+      </div>
+
+      <div className="mgmt-panel" style={{ flex: 1 }}>
+        <div className="mgmt-panel-header">
+          <div className="mgmt-panel-header-row">
+            <h3 className="mgmt-panel-title">
+              <Settings2 size={14} />
+              Runtime Config
+            </h3>
+            <div className="mgmt-actions">
+              <button type="button" className="mgmt-pill-btn" onClick={() => void refreshOtherConfig()} disabled={loadingOtherConfig}>
+                <RefreshCcw size={12} />
                 {loadingOtherConfig ? "Refreshing..." : "Refresh"}
-              </Button>
-              <Button type="button" size="sm" onClick={() => void saveOtherConfig()} disabled={isSavingOtherConfig}>
-                <Save className="size-4" />
-                {isSavingOtherConfig ? "Saving..." : "Save other config"}
-              </Button>
+              </button>
+              <button type="button" className="mgmt-pill-btn mgmt-pill-btn-primary" onClick={() => void saveOtherConfig()} disabled={isSavingOtherConfig}>
+                <Save size={12} />
+                {isSavingOtherConfig ? "Saving..." : "Save config"}
+              </button>
             </div>
           </div>
-          {otherConfigError && <p className="text-xs text-destructive">{otherConfigError}</p>}
-        </CardHeader>
-        <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 p-3">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Fallback Models</p>
-              <p className="text-xs text-muted-foreground">
-                Tried in order after the selected model fails. No heuristic substitution is used.
-              </p>
-            </div>
-            <Button type="button" variant="outline" size="sm" onClick={addFallbackModel}>
-              Add fallback
-            </Button>
-          </div>
-
-          <div className="space-y-2 rounded-lg border border-border bg-muted/60 p-3">
-            <p className="text-xs font-medium text-muted-foreground">Image Model</p>
-            <p className="text-xs text-muted-foreground">
-              Used when an incoming request has images and the active session model does not support image input.
-            </p>
-            <div className="relative">
-              <select
-                value={runtimeImageModel}
-                onChange={event => setRuntimeImageModel(event.target.value)}
-                className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/70"
-              >
-                <option value="">(Auto) first fallback or small model</option>
-                {availableFallbackModels.map(option => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+          {otherConfigError && <div className="mgmt-error" style={{ marginTop: 8 }}>{otherConfigError}</div>}
+        </div>
+        <div className="mgmt-panel-body">
+          {/* Fallback models info */}
+          <div className="mgmt-section">
+            <div className="mgmt-card-header">
+              <div>
+                <h4 className="mgmt-section-title">Fallback Models</h4>
+                <p className="mgmt-section-desc">Tried in order after the selected model fails. No heuristic substitution is used.</p>
+              </div>
+              <button type="button" className="mgmt-pill-btn" onClick={addFallbackModel}>
+                Add fallback
+              </button>
             </div>
           </div>
 
+          {/* Image model */}
+          <div className="mgmt-section">
+            <div>
+              <h4 className="mgmt-section-title">Image Model</h4>
+              <p className="mgmt-section-desc">Used when an incoming request has images and the active session model does not support image input.</p>
+            </div>
+            <select
+              value={runtimeImageModel}
+              onChange={event => setRuntimeImageModel(event.target.value)}
+              className="mgmt-select"
+              style={{ width: "100%" }}
+            >
+              <option value="">(Auto) first fallback or small model</option>
+              {availableFallbackModels.map(option => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Fallback model list */}
           {runtimeFallbackModels.length === 0 && (
-            <p className="rounded-md border border-border bg-muted/70 p-3 text-xs text-muted-foreground">
-              No configured fallback models.
-            </p>
+            <div className="mgmt-empty">No configured fallback models.</div>
           )}
 
           {runtimeFallbackModels.map((fallbackModel, index) => (
-            <div key={`${fallbackModel}-${index}`} className="space-y-2 rounded-lg border border-border bg-muted/60 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium text-muted-foreground">Fallback #{index + 1}</p>
-                <Button
+            <div key={`${fallbackModel}-${index}`} className="mgmt-section">
+              <div className="mgmt-card-header">
+                <span className="mgmt-form-label">Fallback #{index + 1}</span>
+                <button
                   type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 w-8 p-0"
+                  className="mgmt-pill-btn mgmt-pill-btn-danger mgmt-pill-btn-ghost"
                   onClick={() => removeFallbackModel(index)}
+                  style={{ height: 26, padding: "0 8px" }}
                 >
-                  <Trash2 className="size-4 text-destructive" />
-                </Button>
+                  <Trash2 size={13} />
+                </button>
               </div>
-              <div className="relative" ref={openFallbackModelPickerIndex === index ? fallbackModelPickerRef : undefined}>
+              <div style={{ position: "relative" }} ref={openFallbackModelPickerIndex === index ? fallbackModelPickerRef : undefined}>
                 <button
                   type="button"
                   onClick={() => {
                     setFallbackModelQuery("");
                     setOpenFallbackModelPickerIndex(current => (current === index ? null : index));
                   }}
-                  className="flex h-9 w-full items-center justify-between rounded-md border border-border bg-background px-2 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/70"
+                  className="mgmt-model-trigger"
                   aria-expanded={openFallbackModelPickerIndex === index}
                   aria-haspopup="listbox"
                 >
-                  <span className="truncate">
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {availableFallbackModels.find(model => model.id === fallbackModel)?.label ?? fallbackModel}
                   </span>
-                  <ChevronsUpDown className="size-4 text-muted-foreground" />
+                  <ChevronsUpDown size={14} style={{ color: "var(--text-weaker)", flexShrink: 0 }} />
                 </button>
                 {openFallbackModelPickerIndex === index && (
-                  <div className="absolute z-30 mt-1 w-full rounded-lg border border-border bg-card p-2 shadow-lg">
-                    <Input
+                  <div className="mgmt-model-picker-dropdown">
+                    <input
                       ref={fallbackModelSearchInputRef}
+                      type="text"
+                      className="mgmt-input"
                       value={fallbackModelQuery}
                       onChange={event => setFallbackModelQuery(event.target.value)}
                       onKeyDown={event => handleFallbackModelSearchKeyDown(event, index)}
                       placeholder="Search model..."
-                      className="h-8"
+                      style={{ height: 32, fontSize: 12 }}
                     />
-                    <div className="mt-2 max-h-64 overflow-y-auto" role="listbox">
+                    <div style={{ marginTop: 6, maxHeight: 240, overflowY: "auto" }} role="listbox">
                       {filteredFallbackModelOptions().length === 0 ? (
-                        <p className="px-2 py-2 text-xs text-muted-foreground">No models match your search.</p>
+                        <p style={{ padding: "8px 10px", fontSize: 12, color: "var(--text-weaker)" }}>No models match your search.</p>
                       ) : (
                         filteredFallbackModelOptions().map((option, optionIndex) => (
                           <button
                             key={option.id}
                             type="button"
                             onClick={() => selectFallbackModelFromPicker(index, option.id)}
-                            className={cn(
-                              "w-full rounded-md px-2 py-1.5 text-left text-sm transition",
-                              optionIndex === fallbackFocusedModelIndex ? "bg-primary/10" : "hover:bg-muted",
-                            )}
+                            className="mgmt-model-option"
+                            data-focused={optionIndex === fallbackFocusedModelIndex}
                             data-active={fallbackModel === option.id}
                           >
-                            <p className="truncate">{option.label}</p>
-                            <p className="truncate text-xs text-muted-foreground">{option.id}</p>
+                            <p className="mgmt-model-option-label">{option.label}</p>
+                            <p className="mgmt-model-option-id">{option.id}</p>
                           </button>
                         ))
                       )}
@@ -193,8 +185,8 @@ export function OtherConfigPage(props: OtherConfigPageProps) {
               </div>
             </div>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </section>
   );
 }
