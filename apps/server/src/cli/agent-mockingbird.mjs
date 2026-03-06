@@ -1040,6 +1040,14 @@ async function restartOpencodeServiceForAuthRefresh() {
       message: "systemctl --user unavailable; skipping automatic OpenCode restart.",
     };
   }
+  const loadState = shell("systemctl", ["--user", "show", "--property=LoadState", "--value", UNIT_OPENCODE]);
+  if (loadState.code === 0 && loadState.stdout.trim() === "not-found") {
+    return {
+      attempted: false,
+      ok: false,
+      message: `${UNIT_OPENCODE} is not installed as a user service; provider credentials were saved without a restart.`,
+    };
+  }
   const restarted = shell("systemctl", ["--user", "restart", UNIT_OPENCODE]);
   if (restarted.code !== 0) {
     const detail = (restarted.stderr || restarted.stdout).trim() || "unknown error";

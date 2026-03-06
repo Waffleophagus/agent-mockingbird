@@ -39,6 +39,7 @@ async function applyCandidateConfig(
     currentPath: string;
     currentConfig: AgentMockingbirdConfig;
     candidate: AgentMockingbirdConfig;
+    runSemanticValidation: boolean;
     runSmokeValidation: boolean;
     autoRollbackOnFailure: boolean;
   },
@@ -47,7 +48,9 @@ async function applyCandidateConfig(
   semantic: ConfigSemanticSummary;
   smokeTest: ConfigSmokeTestSummary | null;
 }> {
-  const semantic = await runSemanticValidation(input.candidate);
+  const semantic = input.runSemanticValidation
+    ? await runSemanticValidation(input.candidate)
+    : { providerCount: 0, modelCount: 0 };
   if (!input.runSmokeValidation) {
     const snapshot = persistConfigSnapshot(input.currentPath, input.candidate);
     return { snapshot, semantic, smokeTest: null };
@@ -100,6 +103,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function shouldRunSemanticValidation(current: AgentMockingbirdConfig, candidate: AgentMockingbirdConfig) {
+  return JSON.stringify(current.runtime.opencode) !== JSON.stringify(candidate.runtime.opencode);
+}
+
 export async function applyConfigPatch(input: {
   patch: unknown;
   expectedHash?: string;
@@ -129,10 +136,12 @@ export async function applyConfigPatch(input: {
   }
 
   const runSmokeValidation = policy?.requireSmokeTest ? true : input.runSmokeTest !== false;
+  const runSemanticValidation = shouldRunSemanticValidation(current.config, candidate);
   const validated = await applyCandidateConfig({
     currentPath: current.path,
     currentConfig: current.config,
     candidate,
+    runSemanticValidation,
     runSmokeValidation,
     autoRollbackOnFailure: policy?.autoRollbackOnFailure ?? false,
   });
@@ -164,10 +173,12 @@ export async function replaceConfig(input: {
   assertExpectedHashMatches(current.hash, input.expectedHash);
 
   const runSmokeValidation = policy?.requireSmokeTest ? true : input.runSmokeTest !== false;
+  const runSemanticValidation = shouldRunSemanticValidation(current.config, candidate);
   const validated = await applyCandidateConfig({
     currentPath: current.path,
     currentConfig: current.config,
     candidate,
+    runSemanticValidation,
     runSmokeValidation,
     autoRollbackOnFailure: policy?.autoRollbackOnFailure ?? false,
   });
