@@ -2,9 +2,11 @@ import { useCallback, useState } from "react";
 
 import type { ChatPageModel } from "@/frontend/app/pages/ChatPage";
 import { buildSessionScreenVM } from "@/frontend/opencode-react/state/adapters";
-import type { SessionScreenVM } from "@/frontend/opencode-react/types";
+import type { SessionScreenMode, SessionScreenVM } from "@/frontend/opencode-react/types";
 
 export interface UseSessionScreenControllerInput {
+  activeScreen: SessionScreenMode;
+  setActiveScreen: (screen: SessionScreenMode) => void;
   chat: ChatPageModel;
   streamStatus: "connecting" | "connected" | "reconnecting";
   heartbeatAt: string;
@@ -60,10 +62,12 @@ export function useSessionScreenController(input: UseSessionScreenControllerInpu
   return buildSessionScreenVM({
     chat: input.chat,
     titlebar: {
+      activeScreen: input.activeScreen,
       streamStatus: input.streamStatus,
       heartbeatAt: input.heartbeatAt,
       drawerOpen,
       sidePanelOpen,
+      openScreen: input.setActiveScreen,
       toggleDrawer,
       toggleSidePanel,
       closePanels,

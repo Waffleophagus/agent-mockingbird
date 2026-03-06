@@ -1,6 +1,8 @@
 import type {
+  CronJobCreateInput,
   CronJobDefinition,
   CronJobInstance,
+  CronJobPatchInput,
   CronJobStep,
   CronHealthSnapshot,
 } from "@/backend/cron/types";
@@ -63,6 +65,19 @@ export async function fetchCronJob(jobId: string): Promise<CronJobDefinition> {
   return payload.job;
 }
 
+export async function createCronJob(input: CronJobCreateInput): Promise<CronJobDefinition> {
+  const response = await fetch("/api/cron/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const payload = (await response.json()) as CronJobResponse;
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Failed to create cron job");
+  }
+  return payload.job;
+}
+
 export async function deleteCronJob(jobId: string): Promise<boolean> {
   const response = await fetch(`/api/cron/jobs/${encodeURIComponent(jobId)}`, {
     method: "DELETE",
@@ -75,16 +90,37 @@ export async function deleteCronJob(jobId: string): Promise<boolean> {
 }
 
 export async function setCronJobEnabled(jobId: string, enabled: boolean): Promise<CronJobDefinition> {
+  return updateCronJob(jobId, { enabled });
+}
+
+export async function updateCronJob(jobId: string, patch: CronJobPatchInput): Promise<CronJobDefinition> {
   const response = await fetch(`/api/cron/jobs/${encodeURIComponent(jobId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify(patch),
   });
   const payload = (await response.json()) as UpdateJobResponse;
   if (!response.ok) {
     throw new Error(payload.error ?? "Failed to update cron job");
   }
   return payload.job;
+}
+
+export async function runCronJobNow(jobId: string): Promise<{ queued: boolean; runId?: string }> {
+  const response = await fetch(`/api/cron/jobs/${encodeURIComponent(jobId)}/run`, {
+    method: "POST",
+  });
+  const payload = (await response.json()) as { queued?: boolean; runId?: string; error?: string };
+  if (!response.ok && response.status !== 202 && response.status !== 409) {
+    throw new Error(payload.error ?? "Failed to queue cron run");
+  }
+  if (typeof payload.queued !== "boolean") {
+    throw new Error(payload.error ?? "Failed to queue cron run");
+  }
+  return {
+    queued: payload.queued,
+    runId: typeof payload.runId === "string" ? payload.runId : undefined,
+  };
 }
 
 export async function fetchCronInstances(

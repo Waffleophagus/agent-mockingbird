@@ -13,6 +13,7 @@ export interface BuildSessionScreenAdapterInput {
 
 export function buildSessionScreenVM(input: BuildSessionScreenAdapterInput): SessionScreenVM {
   return {
+    activeScreen: input.titlebar.activeScreen,
     titlebar: input.titlebar,
     layout: input.layout,
     chat: input.chat,

@@ -17,10 +17,12 @@ import { type ChatPageModel } from "@/frontend/app/pages/ChatPage";
 import { useBackgroundRuns } from "@/frontend/app/useBackgroundRuns";
 import { type ComposerAttachment, useChatSession } from "@/frontend/app/useChatSession";
 import { useSessionHierarchy } from "@/frontend/app/useSessionHierarchy";
+import { ManagementWorkspace } from "@/frontend/opencode-react/app/ManagementWorkspace";
 import { SessionScreen } from "@/frontend/opencode-react/app/SessionScreen";
 import { useSessionEvents } from "@/frontend/opencode-react/state/useSessionEvents";
 import { useSessionScreenBootstrap } from "@/frontend/opencode-react/state/useSessionScreenBootstrap";
 import { useSessionScreenController } from "@/frontend/opencode-react/state/useSessionScreenController";
+import type { SessionScreenMode } from "@/frontend/opencode-react/types";
 import type {
   BackgroundRunSnapshot,
   ChatMessage,
@@ -147,6 +149,7 @@ export function SessionScreenApp() {
   const [childSessionSearchQuery, setChildSessionSearchQuery] = useState("");
   const [childSessionHideAfterDays, setChildSessionHideAfterDays] = useState(DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
+  const [activeScreen, setActiveScreen] = useState<SessionScreenMode>("chat");
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [focusedModelIndex, setFocusedModelIndex] = useState(0);
@@ -923,6 +926,8 @@ export function SessionScreenApp() {
     usage,
   };
   const sessionScreenModel = useSessionScreenController({
+    activeScreen,
+    setActiveScreen,
     chat: chatPageModel,
     streamStatus,
     heartbeatAt,
@@ -930,7 +935,16 @@ export function SessionScreenApp() {
 
   return (
     <main className="oc-app">
-      <SessionScreen model={sessionScreenModel} />
+      <SessionScreen
+        model={sessionScreenModel}
+        managementScreen={
+          <ManagementWorkspace
+            activeScreen={activeScreen}
+            availableModels={availableModels}
+            activeSessionModel={activeSession?.model ?? ""}
+          />
+        }
+      />
     </main>
   );
 }

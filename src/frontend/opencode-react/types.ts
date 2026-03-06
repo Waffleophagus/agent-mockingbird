@@ -10,11 +10,15 @@ import type {
   UsageSnapshot,
 } from "@/types/dashboard";
 
+export type SessionScreenMode = "chat" | "skills" | "mcp" | "agents" | "other" | "cron";
+
 export interface SessionScreenTitlebarVM {
   streamStatus: "connecting" | "connected" | "reconnecting";
   heartbeatAt: string;
+  activeScreen: SessionScreenMode;
   drawerOpen: boolean;
   sidePanelOpen: boolean;
+  openScreen: (screen: SessionScreenMode) => void;
   toggleDrawer: () => void;
   toggleSidePanel: () => void;
   closePanels: () => void;
@@ -30,6 +34,7 @@ export interface SessionScreenLayoutVM {
 }
 
 export interface SessionScreenVM {
+  activeScreen: SessionScreenMode;
   titlebar: SessionScreenTitlebarVM;
   layout: SessionScreenLayoutVM;
   chat: ChatPageModel;

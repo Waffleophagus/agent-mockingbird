@@ -1,4 +1,4 @@
-import { PanelLeft, PanelRight, SearchX } from "lucide-react";
+import { Activity, Clock3, Cpu, PanelLeft, PanelRight, SearchX, Settings2, Users, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { relativeFromIso } from "@/frontend/app/chatHelpers";
@@ -6,14 +6,25 @@ import type { SessionScreenTitlebarVM } from "@/frontend/opencode-react/types";
 
 export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
   const {
+    activeScreen,
     heartbeatAt,
     streamStatus,
     drawerOpen,
     sidePanelOpen,
+    openScreen,
     toggleDrawer,
     toggleSidePanel,
     closePanels,
   } = model;
+
+  const screenButtons = [
+    { id: "chat", label: "Chat", icon: Activity },
+    { id: "skills", label: "Skills", icon: Wrench },
+    { id: "mcp", label: "MCP", icon: Cpu },
+    { id: "agents", label: "Agents", icon: Users },
+    { id: "other", label: "Other", icon: Settings2 },
+    { id: "cron", label: "Cron", icon: Clock3 },
+  ] as const;
 
   return (
     <header className="oc-global-titlebar">
@@ -33,6 +44,24 @@ export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
       <div className="oc-global-titlebar-center">
         <div className="oc-titlebar-session-meta">
           <p className="oc-titlebar-session-title">Wafflebot</p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-2 px-4">
+          {screenButtons.map(button => {
+            const Icon = button.icon;
+            return (
+              <Button
+                key={button.id}
+                type="button"
+                size="sm"
+                variant={activeScreen === button.id ? "default" : "outline"}
+                className="h-8 gap-1.5 px-2.5"
+                onClick={() => openScreen(button.id)}
+              >
+                <Icon className="size-3.5" />
+                <span>{button.label}</span>
+              </Button>
+            );
+          })}
         </div>
       </div>
       <div className="oc-global-titlebar-right">
