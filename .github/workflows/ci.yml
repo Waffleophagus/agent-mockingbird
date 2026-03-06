@@ -214,10 +214,13 @@ jobs:
         run: |
           set -euo pipefail
           tarball="agent-mockingbird-installer-${{ steps.meta.outputs.package_version }}.tgz"
-          (
+          packed_tarball="$(
             cd packages/agent-mockingbird-installer
-            bun pm pack --filename "../../${tarball}" --quiet >/dev/null
-          )
+            bun pm pack --destination ../.. --quiet
+          )"
+          packed_tarball="$(printf '%s' "${packed_tarball}" | tail -n 1)"
+          test -f "${packed_tarball}"
+          mv -- "${packed_tarball}" "${tarball}"
           test -f "${tarball}"
           echo "AGENT_MOCKINGBIRD_INSTALLER_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
