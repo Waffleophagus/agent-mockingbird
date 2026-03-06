@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { legacySpecialistToAgentType } from "../../shared/agentTypes";
 import { sqlite } from "../db/client";
-import { DEFAULT_AGENTS, DEFAULT_MCPS, DEFAULT_SKILLS } from "../defaults";
+import { DEFAULT_AGENTS, DEFAULT_AGENT_TYPES, DEFAULT_MCPS, DEFAULT_SKILLS } from "../defaults";
 import { env } from "../env";
 import { resolveDataPath } from "../paths";
 import {
@@ -323,7 +323,7 @@ function buildLegacyBootstrappedConfig() {
       mcps: readLegacyStringListConfig("mcps", DEFAULT_MCPS),
       mcpServers: [],
       agents: readLegacyAgentConfig(DEFAULT_AGENTS),
-      agentTypes: readLegacyAgentTypeConfig([]),
+      agentTypes: readLegacyAgentTypeConfig(DEFAULT_AGENT_TYPES),
     },
   };
   candidate.ui.agentTypes = mergeAgentTypesWithLegacyAgents(candidate.ui.agentTypes, candidate.ui.agents);

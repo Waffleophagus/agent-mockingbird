@@ -73,3 +73,16 @@ test("parseConfig auto-aligns mismatched memory workspace to explicit opencode d
   expect(parsed.runtime.opencode.directory).toBe("/tmp/opencode-workspace");
   expect(parsed.runtime.memory.workspaceDir).toBe("/tmp/opencode-workspace");
 });
+
+test("example config ships a default build heartbeat", () => {
+  const filePath = path.resolve(process.cwd(), "wafflebot.config.example.json");
+  const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    ui?: { agentTypes?: Array<{ id?: string; heartbeat?: { enabled?: boolean; interval?: string; ackMaxChars?: number } }> };
+  };
+
+  const buildAgent = raw.ui?.agentTypes?.find(agent => agent.id === "build");
+  expect(buildAgent).toBeDefined();
+  expect(buildAgent?.heartbeat?.enabled).toBe(true);
+  expect(buildAgent?.heartbeat?.interval).toBe("30m");
+  expect(buildAgent?.heartbeat?.ackMaxChars).toBe(300);
+});

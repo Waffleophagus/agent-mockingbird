@@ -128,6 +128,22 @@
     "mcps": [],
     "mcpServers": [],
     "agents": [],
-    "agentTypes": []
+    "agentTypes": [
+      {
+        "id": "build",
+        "name": "Wafflebot",
+        "description": "Default primary agent.",
+        "mode": "primary",
+        "hidden": false,
+        "disable": false,
+        "options": {},
+        "heartbeat": {
+          "enabled": true,
+          "interval": "30m",
+          "prompt": "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.",
+          "ackMaxChars": 300
+        }
+      }
+    ]
   }
 }
