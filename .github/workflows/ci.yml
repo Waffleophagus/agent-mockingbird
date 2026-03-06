@@ -155,7 +155,9 @@ jobs:
               "bin",
               "runtime-assets",
               ".agents",
-              "src",
+              "apps/server",
+              "packages/api",
+              "packages/contracts",
               "dist",
               "deploy",
               "scripts",
@@ -198,7 +200,12 @@ jobs:
           tar_contents="$(tar -tzf "${tarball}")"
           grep -Fqx -- "package/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/agent-mockingbird" <<<"${tar_contents}"
+          grep -Fqx -- "package/bin/runtime-assets.mjs" <<<"${tar_contents}"
+          grep -Fqx -- "package/apps/server/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/apps/server/src/index.ts" <<<"${tar_contents}"
+          grep -Fqx -- "package/packages/api/package.json" <<<"${tar_contents}"
+          grep -Fqx -- "package/packages/contracts/package.json" <<<"${tar_contents}"
+          grep -Fqx -- "package/dist/web/index.html" <<<"${tar_contents}"
           echo "AGENT_MOCKINGBIRD_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
