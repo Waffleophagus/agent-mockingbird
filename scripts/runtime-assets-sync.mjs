@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import process from "node:process";
-import { syncRuntimeWorkspaceAssets } from "../src/cli/runtime-assets.mjs";
+import { syncRuntimeWorkspaceAssets } from "../apps/server/src/cli/runtime-assets.mjs";
 
 const { console } = globalThis;
 

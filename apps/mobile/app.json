@@ -11,14 +11,22 @@
     },
     "plugins": [
       "expo-router",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-font",
+      "expo-secure-store"
     ],
     "android": {
-      "package": "dev.agent-mockingbird.mobile",
+      "package": "com.waffleophagus.agentmockingbird",
       "edgeToEdgeEnabled": true
     },
     "ios": {
       "bundleIdentifier": "dev.agent-mockingbird.mobile"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2c63e5a9-cd47-4f08-8beb-8b2651c1f3f0"
+      }
     }
   }
 }

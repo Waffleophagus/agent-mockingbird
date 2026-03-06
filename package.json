@@ -13,6 +13,7 @@
     "dev:server": "turbo run dev --filter=@agent-mockingbird/server",
     "dev:web": "turbo run dev --filter=@agent-mockingbird/server",
     "dev:mobile": "turbo run dev --filter=@agent-mockingbird/mobile",
+    "dev:stack": "bun run build:cli && bash scripts/dev-stack.sh",
     "build:cli": "bun run ./build-cli.mjs",
     "build:android": "bash ./apps/mobile/build-android.sh",
     "build": "turbo run build",
@@ -24,7 +25,8 @@
     "db:generate": "turbo run db:generate --filter=@agent-mockingbird/server",
     "db:migrate": "turbo run db:migrate --filter=@agent-mockingbird/server",
     "db:check": "turbo run db:check --filter=@agent-mockingbird/server",
-    "db:wipe": "turbo run db:wipe --filter=@agent-mockingbird/server"
+    "db:wipe": "turbo run db:wipe --filter=@agent-mockingbird/server",
+    "config:migrate-opencode-env": "bun run ./scripts/migrate-opencode-env.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",

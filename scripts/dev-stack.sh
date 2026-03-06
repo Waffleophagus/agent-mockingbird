@@ -156,7 +156,7 @@ else
     export AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR="${DEV_WORKSPACE_DIR}"
     export AGENT_MOCKINGBIRD_CONFIG_PATH="${DEV_CONFIG_PATH}"
     export AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY="${DEV_WORKSPACE_DIR}"
-    exec bun --hot src/index.ts
+    exec bun --hot apps/server/src/index.ts
   ) &
   AGENT_MOCKINGBIRD_PID=$!
 

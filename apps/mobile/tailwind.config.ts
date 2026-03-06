@@ -1,6 +1,7 @@
 import type { Config } from "tailwindcss";
 
 export default {
+  presets: [require("nativewind/preset")],
   content: ["./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {

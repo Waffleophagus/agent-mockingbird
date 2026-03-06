@@ -1,4 +1,4 @@
-import { applyConfigPatch, getConfigSnapshot } from "../src/backend/config/service";
+import { applyConfigPatch, getConfigSnapshot } from "../apps/server/src/backend/config/service";
 
 const LEGACY_OPENCODE_ENV_KEYS = [
   "AGENT_MOCKINGBIRD_OPENCODE_BASE_URL",
