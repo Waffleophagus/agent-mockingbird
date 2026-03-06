@@ -18,18 +18,24 @@ test("applyConfigPatch skips OpenCode semantic validation for memory-only change
   const previousWorkspacePath = process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
   const previousNodeEnv = process.env.NODE_ENV;
   const previousFetch = globalThis.fetch;
+  const blockingFetch = Object.assign(
+    (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      void input;
+      void init;
+      throw new Error("semantic validation should not call fetch for memory-only patches");
+    },
+    previousFetch,
+  );
 
   writeFileSync(configPath, JSON.stringify(raw, null, 2), "utf8");
   process.env.NODE_ENV = "test";
   process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = configPath;
   process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR = workspacePath;
-  globalThis.fetch = (() => {
-    throw new Error("semantic validation should not call fetch for memory-only patches");
-  }) as typeof fetch;
+  globalThis.fetch = blockingFetch;
 
   try {
     const { getConfigSnapshot, applyConfigPatch } = await import("./service");
-    const current = getConfigSnapshot();
+    getConfigSnapshot();
     const result = await applyConfigPatch({
       runSmokeTest: false,
       patch: {
