@@ -149,8 +149,9 @@ export function AgentsPage(props: AgentsPageProps) {
               {/* ID + Name */}
               <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label className="mgmt-form-label">ID</label>
+                  <label className="mgmt-form-label" htmlFor={`agent-id-${agentType.id}`}>ID</label>
                   <input
+                    id={`agent-id-${agentType.id}`}
                     type="text"
                     className="mgmt-input"
                     value={agentType.id}
@@ -159,8 +160,9 @@ export function AgentsPage(props: AgentsPageProps) {
                   />
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label className="mgmt-form-label">Name</label>
+                  <label className="mgmt-form-label" htmlFor={`agent-name-${agentType.id}`}>Name</label>
                   <input
+                    id={`agent-name-${agentType.id}`}
                     type="text"
                     className="mgmt-input"
                     value={agentType.name ?? ""}
@@ -173,8 +175,9 @@ export function AgentsPage(props: AgentsPageProps) {
               {/* Description + Model */}
               <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label className="mgmt-form-label">Description</label>
+                  <label className="mgmt-form-label" htmlFor={`agent-description-${agentType.id}`}>Description</label>
                   <input
+                    id={`agent-description-${agentType.id}`}
                     type="text"
                     className="mgmt-input"
                     value={agentType.description ?? ""}
@@ -183,7 +186,7 @@ export function AgentsPage(props: AgentsPageProps) {
                   />
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label className="mgmt-form-label">Model</label>
+                  <span className="mgmt-form-label">Model</span>
                   <div
                     className="relative"
                     style={{ position: "relative" }}
@@ -253,8 +256,9 @@ export function AgentsPage(props: AgentsPageProps) {
 
               {/* Prompt */}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <label className="mgmt-form-label">Prompt</label>
+                <label className="mgmt-form-label" htmlFor={`agent-prompt-${agentType.id}`}>Prompt</label>
                 <textarea
+                  id={`agent-prompt-${agentType.id}`}
                   className="mgmt-textarea"
                   value={agentType.prompt ?? ""}
                   onChange={event => updateAgentTypeField(agentType.id, "prompt", event.target.value)}
@@ -266,10 +270,11 @@ export function AgentsPage(props: AgentsPageProps) {
               {/* Mode + Enabled */}
               <div className="mgmt-actions">
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label className="mgmt-form-label">Mode</label>
+                  <label className="mgmt-form-label" htmlFor={`agent-mode-${agentType.id}`}>Mode</label>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <ShieldCheck size={14} style={{ color: "var(--text-weaker)" }} />
                     <select
+                      id={`agent-mode-${agentType.id}`}
                       className="mgmt-select"
                       style={{ height: 32, fontSize: 12 }}
                       value={agentType.mode}
@@ -284,7 +289,7 @@ export function AgentsPage(props: AgentsPageProps) {
                   </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label className="mgmt-form-label">Status</label>
+                  <span className="mgmt-form-label">Status</span>
                   <label className="mgmt-checkbox-row" style={{ height: 32 }}>
                     <input
                       type="checkbox"

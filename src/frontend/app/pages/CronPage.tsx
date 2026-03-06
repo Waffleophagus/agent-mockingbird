@@ -180,7 +180,7 @@ export function CronPage(props: CronPageProps) {
   useEffect(() => {
     if (!selectedJob) return;
     setScheduleDraft(buildScheduleDraft(selectedJob));
-  }, [selectedJob?.id]);
+  }, [selectedJob]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,12 +235,6 @@ export function CronPage(props: CronPageProps) {
       }),
     [conditionalAgentFilter, instances, jobById],
   );
-
-  async function reloadJobs() {
-    const [jobsData, healthData] = await Promise.all([fetchCronJobs(), fetchCronHealth()]);
-    setJobs(jobsData);
-    setHealth(healthData);
-  }
 
   async function withJobBusy(jobId: string, action: string, run: () => Promise<void>) {
     setJobBusyById(current => ({ ...current, [jobId]: action }));
@@ -534,8 +528,9 @@ export function CronPage(props: CronPageProps) {
                     </div>
 
                     <div className="mgmt-form-row">
-                      <label className="mgmt-form-label">Type</label>
+                      <label className="mgmt-form-label" htmlFor={`cron-schedule-type-${selectedJob.id}`}>Type</label>
                       <select
+                        id={`cron-schedule-type-${selectedJob.id}`}
                         value={scheduleDraft.scheduleKind}
                         onChange={event =>
                           setScheduleDraft(current =>
@@ -552,8 +547,9 @@ export function CronPage(props: CronPageProps) {
 
                     {scheduleDraft.scheduleKind === "every" && (
                       <div className="mgmt-form-row">
-                        <label className="mgmt-form-label">Every ms</label>
+                        <label className="mgmt-form-label" htmlFor={`cron-schedule-every-${selectedJob.id}`}>Every ms</label>
                         <input
+                          id={`cron-schedule-every-${selectedJob.id}`}
                           type="text"
                           className="mgmt-input"
                           value={scheduleDraft.everyMs}
@@ -567,8 +563,9 @@ export function CronPage(props: CronPageProps) {
 
                     {scheduleDraft.scheduleKind === "cron" && (
                       <div className="mgmt-form-row">
-                        <label className="mgmt-form-label">Expression</label>
+                        <label className="mgmt-form-label" htmlFor={`cron-schedule-expr-${selectedJob.id}`}>Expression</label>
                         <input
+                          id={`cron-schedule-expr-${selectedJob.id}`}
                           type="text"
                           className="mgmt-input"
                           value={scheduleDraft.scheduleExpr}
@@ -582,8 +579,9 @@ export function CronPage(props: CronPageProps) {
 
                     {scheduleDraft.scheduleKind === "at" && (
                       <div className="mgmt-form-row">
-                        <label className="mgmt-form-label">Run at ISO</label>
+                        <label className="mgmt-form-label" htmlFor={`cron-schedule-at-${selectedJob.id}`}>Run at ISO</label>
                         <input
+                          id={`cron-schedule-at-${selectedJob.id}`}
                           type="text"
                           className="mgmt-input"
                           value={scheduleDraft.atIso}
@@ -596,8 +594,9 @@ export function CronPage(props: CronPageProps) {
                     )}
 
                     <div className="mgmt-form-row">
-                      <label className="mgmt-form-label">Timezone</label>
+                      <label className="mgmt-form-label" htmlFor={`cron-schedule-timezone-${selectedJob.id}`}>Timezone</label>
                       <input
+                        id={`cron-schedule-timezone-${selectedJob.id}`}
                         type="text"
                         className="mgmt-input"
                         value={scheduleDraft.timezone}
