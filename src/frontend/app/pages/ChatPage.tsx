@@ -1,7 +1,7 @@
 import {
   Brain,
+  ChevronLeft,
   ChevronsUpDown,
-  CircleSlash,
   LayoutPanelLeft,
   RefreshCcw,
   Scissors,
@@ -69,6 +69,7 @@ export interface ChatPageModel {
   chatScrollRef: RefObject<HTMLDivElement | null>;
   checkInBackgroundRun: (run: BackgroundRunSnapshot) => Promise<void>;
   childSessionHideAfterDays: number;
+  childParentSessionIdByChildSessionId: Map<string, string>;
   childSessionSearchMatchBySessionId: Map<string, boolean>;
   childSessionSearchQuery: string;
   childSessionVisibilityByParentSessionId: {
@@ -184,6 +185,7 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
     chatControlError,
     chatScrollRef,
     childSessionHideAfterDays,
+    childParentSessionIdByChildSessionId,
     childSessionSearchMatchBySessionId,
     childSessionSearchQuery,
     childSessionVisibilityByParentSessionId,
@@ -264,6 +266,20 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
   } = model;
 
   const visibleMessages = useMemo(() => activeMessages, [activeMessages]);
+  const sessionTitleById = useMemo(() => {
+    const next = new Map<string, string>();
+    for (const session of rootSessions) {
+      next.set(session.id, session.title);
+    }
+    for (const children of Object.values(childSessionsByParentSessionId)) {
+      for (const child of children) {
+        next.set(child.id, child.title);
+      }
+    }
+    return next;
+  }, [rootSessions, childSessionsByParentSessionId]);
+  const activeParentSessionId = activeSession ? (childParentSessionIdByChildSessionId.get(activeSession.id) ?? "") : "";
+  const activeParentSessionTitle = activeParentSessionId ? (sessionTitleById.get(activeParentSessionId) ?? "Parent session") : "";
   const drawerOpen = layout?.drawerOpen ?? false;
   const sidePanelOpen = layout?.sidePanelOpen ?? false;
 
@@ -323,6 +339,16 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
           <header className="oc-session-header">
             <div className="oc-session-header-main">
               <div>
+                {activeParentSessionId ? (
+                  <button
+                    type="button"
+                    className="oc-session-back-link"
+                    onClick={() => setActiveSessionId(activeParentSessionId)}
+                  >
+                    <ChevronLeft className="size-3.5" />
+                    {activeParentSessionTitle}
+                  </button>
+                ) : null}
                 <h2 className="oc-session-title">{activeSession?.title ?? "Main"}</h2>
               </div>
               <div className="oc-session-quick-actions">
@@ -362,6 +388,9 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
             showThinkingDetails={showThinkingDetails}
             showToolCallDetails={showToolCallDetails}
             retryFailedRequest={retryFailedRequest}
+            activeBackgroundRuns={activeBackgroundRuns}
+            onSelectSession={setActiveSessionId}
+            sessionTitleById={sessionTitleById}
           />
 
           {activePermissionRequest ? (
@@ -382,8 +411,11 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
               <ComposerDock
                 composerFormRef={composerFormRef}
                 sendMessage={sendMessage}
+                canAbort={canAbortActiveSession}
                 isSending={isSending}
+                isAborting={isAborting}
                 draftMessage={draftMessage}
+                requestAbortRun={requestAbortRun}
                 setDraftMessage={setDraftMessage}
                 draftAttachments={draftAttachments}
                 removeComposerAttachment={removeComposerAttachment}
@@ -437,9 +469,6 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
                     </button>
                   </div>
                   <div className="oc-composer-secondary-controls">
-                    <button type="button" className="oc-inline-btn" onClick={requestAbortRun} disabled={!canAbortActiveSession}>
-                      <CircleSlash className="size-3.5" /> {isAborting ? "Aborting..." : "Abort"}
-                    </button>
                     <button
                       type="button"
                       className="oc-inline-btn"

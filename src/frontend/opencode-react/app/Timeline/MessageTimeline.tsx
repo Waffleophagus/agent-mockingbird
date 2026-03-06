@@ -1,8 +1,9 @@
-import { AlertTriangle, ChevronDown, LoaderCircle, RefreshCcw, Sparkles, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowRight, ChevronDown, LoaderCircle, RefreshCcw, Sparkles, Wrench } from "lucide-react";
 import type { RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  extractBackgroundAnnouncements,
   formatCompactTimestamp,
   formatElapsedFrom,
   type LocalChatMessage,
@@ -11,7 +12,7 @@ import {
   shouldHideMirroredAssistantContent,
 } from "@/frontend/app/chatHelpers";
 import { MarkdownMessage } from "@/frontend/app/components/MarkdownMessage";
-import type { ChatMessagePart } from "@/types/dashboard";
+import type { BackgroundRunSnapshot, ChatMessagePart } from "@/types/dashboard";
 
 function stringifyToolInput(input: Record<string, unknown> | undefined): string {
   if (!input) return "";
@@ -90,6 +91,9 @@ export interface MessageTimelineProps {
   showThinkingDetails: boolean;
   showToolCallDetails: boolean;
   retryFailedRequest: (requestId: string) => void;
+  activeBackgroundRuns: BackgroundRunSnapshot[];
+  onSelectSession: (sessionId: string) => void;
+  sessionTitleById: Map<string, string>;
 }
 
 export function MessageTimeline(props: MessageTimelineProps) {
@@ -103,9 +107,14 @@ export function MessageTimeline(props: MessageTimelineProps) {
     scrollToBottom,
     showThinkingDetails,
     showToolCallDetails,
+    activeBackgroundRuns,
+    onSelectSession,
+    sessionTitleById,
   } = props;
 
   const turns = buildTurns(messages);
+  const runsById = new Map(activeBackgroundRuns.map(run => [run.runId, run]));
+  const renderedBackgroundRunIds = new Set<string>();
 
   return (
     <div className="oc-timeline" ref={chatScrollRef}>
@@ -129,13 +138,19 @@ export function MessageTimeline(props: MessageTimelineProps) {
           <div className="oc-turn-response-column">
             {turn.assistantMessages.map(message => {
               const messageContent = sanitizeMessageContentForDisplay(message.role, message.content);
+              const backgroundContent = extractBackgroundAnnouncements(messageContent);
               const hideMirroredAssistantContent = shouldHideMirroredAssistantContent(message, showThinkingDetails);
-              const renderedMessageContent = hideMirroredAssistantContent ? "" : messageContent;
+              const renderedMessageContent = hideMirroredAssistantContent ? "" : backgroundContent.remainingContent;
               const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
               const isPending = pendingMeta?.status === "pending";
               const isQueued = pendingMeta?.status === "queued";
               const isDetached = pendingMeta?.status === "detached";
               const isFailed = pendingMeta?.status === "failed";
+              const visibleBackgroundAnnouncements = backgroundContent.announcements.filter(announcement => {
+                if (renderedBackgroundRunIds.has(announcement.runId)) return false;
+                renderedBackgroundRunIds.add(announcement.runId);
+                return true;
+              });
               const visibleTimelineParts = sortPartsChronologically(
                 (message.parts ?? []).filter(part => {
                   if (part.type === "thinking") return showThinkingDetails;
@@ -151,6 +166,36 @@ export function MessageTimeline(props: MessageTimelineProps) {
                     <p>OpenCode</p>
                     <p>{formatCompactTimestamp(message.at) || relativeFromIso(message.at)}</p>
                   </div>
+
+                  {visibleBackgroundAnnouncements.length > 0 ? (
+                    <div className="oc-subagent-links">
+                      {visibleBackgroundAnnouncements.map(announcement => {
+                        const run = runsById.get(announcement.runId);
+                        const targetSessionId = run?.childSessionId ?? announcement.childSessionId;
+                        const sessionTitle = sessionTitleById.get(targetSessionId) ?? targetSessionId;
+                        const summary = announcement.summary || run?.resultSummary || "Background session ready.";
+
+                        return (
+                          <button
+                            key={`${message.id}-${announcement.runId}`}
+                            type="button"
+                            className="oc-subagent-link-card"
+                            onClick={() => onSelectSession(targetSessionId)}
+                          >
+                            <div className="oc-subagent-link-copy">
+                              <p className="oc-subagent-link-kicker">Subagent session</p>
+                              <p className="oc-subagent-link-title">{sessionTitle}</p>
+                              <p className="oc-subagent-link-summary">{summary}</p>
+                            </div>
+                            <span className="oc-subagent-link-action">
+                              Open
+                              <ArrowRight className="size-3.5" />
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
 
                   {visibleTimelineParts.length > 0 ? (
                     <div className="oc-turn-parts">

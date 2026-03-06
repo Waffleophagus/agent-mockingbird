@@ -1,4 +1,4 @@
-import { Send, X } from "lucide-react";
+import { ArrowUp, Square, X } from "lucide-react";
 import type { ClipboardEvent as ReactClipboardEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -8,8 +8,11 @@ import type { ComposerAttachment } from "@/frontend/app/useChatSession";
 export interface ComposerDockProps {
   composerFormRef: RefObject<HTMLFormElement | null>;
   sendMessage: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  canAbort: boolean;
   isSending: boolean;
+  isAborting: boolean;
   draftMessage: string;
+  requestAbortRun: () => void;
   setDraftMessage: (value: string) => void;
   draftAttachments: ComposerAttachment[];
   removeComposerAttachment: (id: string) => void;
@@ -20,12 +23,15 @@ export interface ComposerDockProps {
 export function ComposerDock(props: ComposerDockProps) {
   const {
     composerFormRef,
+    canAbort,
     draftAttachments,
     draftMessage,
     handleComposerKeyDown,
     handleComposerPaste,
+    isAborting,
     isSending,
     removeComposerAttachment,
+    requestAbortRun,
     sendMessage,
     setDraftMessage,
   } = props;
@@ -55,10 +61,32 @@ export function ComposerDock(props: ComposerDockProps) {
       />
       <div className="oc-composer-actions">
         <p className="text-xs text-muted-foreground">Enter to send, Shift+Enter for newline.</p>
-        <Button type="submit" size="sm" disabled={!draftMessage.trim() && draftAttachments.length === 0}>
-          <Send className="size-4" />
-          {isSending ? "Queue" : "Send"}
-        </Button>
+        <div className="oc-composer-action-buttons">
+          {canAbort ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="oc-composer-icon-button"
+              onClick={requestAbortRun}
+              disabled={isAborting}
+              aria-label={isAborting ? "Aborting active run" : "Abort active run"}
+              title={isAborting ? "Aborting..." : "Abort active run"}
+            >
+              <Square className="size-3.5 fill-current" />
+            </Button>
+          ) : null}
+          <Button
+            type="submit"
+            size="sm"
+            className="oc-composer-icon-button oc-composer-send-button"
+            disabled={!draftMessage.trim() && draftAttachments.length === 0}
+            aria-label={isSending ? "Queue message" : "Send message"}
+            title={isSending ? "Queue message" : "Send message"}
+          >
+            <ArrowUp className="size-4" />
+          </Button>
+        </div>
       </div>
     </form>
   );

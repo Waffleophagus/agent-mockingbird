@@ -206,6 +206,7 @@ export function useSessionHierarchy({
     activeBackgroundRuns,
     inFlightBackgroundRunsBySession,
     latestBackgroundRunByChildSessionId,
+    childParentSessionIdByChildSessionId,
     rootSessions,
     childSessionsByParentSessionId,
     sessionSearchNeedle,

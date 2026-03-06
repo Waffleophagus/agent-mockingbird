@@ -111,6 +111,50 @@ export function shouldHideMirroredAssistantContent(message: ChatMessage, showThi
   return thinkingParts.some(part => normalizeComparableText(part.text) === normalizedContent);
 }
 
+export interface BackgroundAnnouncement {
+  runId: string;
+  summary: string;
+  childSessionId: string;
+  raw: string;
+}
+
+const BACKGROUND_ANNOUNCEMENT_RE = /\[Background ([^\]]+)\]\s*([\s\S]*?)\nChild session:\s*([^\s\n]+)/g;
+
+export function extractBackgroundAnnouncements(content: string): {
+  announcements: BackgroundAnnouncement[];
+  remainingContent: string;
+} {
+  if (!content.includes("[Background ") || !content.includes("Child session:")) {
+    return {
+      announcements: [],
+      remainingContent: content,
+    };
+  }
+
+  const announcements: BackgroundAnnouncement[] = [];
+  let remainingContent = content;
+
+  for (const match of content.matchAll(BACKGROUND_ANNOUNCEMENT_RE)) {
+    const raw = match[0];
+    const runId = match[1]?.trim() ?? "";
+    const summary = match[2]?.trim() ?? "";
+    const childSessionId = match[3]?.trim() ?? "";
+    if (!raw || !runId || !childSessionId) continue;
+    announcements.push({
+      runId,
+      summary,
+      childSessionId,
+      raw,
+    });
+    remainingContent = remainingContent.replace(raw, "");
+  }
+
+  return {
+    announcements,
+    remainingContent: remainingContent.replace(/\n{3,}/g, "\n\n").trim(),
+  };
+}
+
 export function normalizeListInput(value: string): string[] {
   const seen = new Set<string>();
   const list: string[] = [];

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  extractBackgroundAnnouncements,
   mergeMessages,
   shouldHideMirroredAssistantContent,
   type LocalChatMessage,
@@ -118,5 +119,33 @@ describe("mergeMessages", () => {
 
     expect(merged[0]?.content).toBe("updated");
     expect(merged[0]?.uiMeta).toEqual(existing[0]?.uiMeta);
+  });
+});
+
+describe("extractBackgroundAnnouncements", () => {
+  test("extracts a background announcement and leaves non-announcement copy behind", () => {
+    const content = [
+      "[Background bg-123] Story finished successfully.",
+      "Child session: session-child-1",
+      "",
+      "Here are the merged results.",
+    ].join("\n");
+
+    const parsed = extractBackgroundAnnouncements(content);
+    expect(parsed.announcements).toEqual([
+      {
+        runId: "bg-123",
+        summary: "Story finished successfully.",
+        childSessionId: "session-child-1",
+        raw: "[Background bg-123] Story finished successfully.\nChild session: session-child-1",
+      },
+    ]);
+    expect(parsed.remainingContent).toBe("Here are the merged results.");
+  });
+
+  test("returns original content when no background announcement exists", () => {
+    const parsed = extractBackgroundAnnouncements("Normal assistant reply");
+    expect(parsed.announcements).toEqual([]);
+    expect(parsed.remainingContent).toBe("Normal assistant reply");
   });
 });

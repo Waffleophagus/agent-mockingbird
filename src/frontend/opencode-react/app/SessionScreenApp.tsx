@@ -1,17 +1,12 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ConfirmDialog } from "@/components/ui/dialog";
 import {
   type ActiveSend,
   formatCompactTimestamp,
   type LocalChatMessage,
   relativeFromIso,
 } from "@/frontend/app/chatHelpers";
-import {
-  type ConfirmAction,
-  getConfirmDialogProps,
-} from "@/frontend/app/dashboardTypes";
 import {
   DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS,
   DEFAULT_RUN_WAIT_TIMEOUT_MS,
@@ -152,7 +147,6 @@ export function SessionScreenApp() {
   const [childSessionSearchQuery, setChildSessionSearchQuery] = useState("");
   const [childSessionHideAfterDays, setChildSessionHideAfterDays] = useState(DEFAULT_CHILD_SESSION_HIDE_AFTER_DAYS);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
-  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [focusedModelIndex, setFocusedModelIndex] = useState(0);
@@ -395,6 +389,7 @@ export function SessionScreenApp() {
     activeBackgroundRuns,
     inFlightBackgroundRunsBySession,
     latestBackgroundRunByChildSessionId,
+    childParentSessionIdByChildSessionId,
     rootSessions,
     childSessionsByParentSessionId,
     sessionSearchNeedle,
@@ -571,25 +566,11 @@ export function SessionScreenApp() {
     setHasNewMessages(false);
   }
   function requestAbortRun() {
-    if (!activeSession) return;
-    setConfirmAction({ type: "abort-run", sessionId: activeSession.id });
+    void abortActiveRun();
   }
 
   function requestAbortBackgroundRun(runId: string) {
-    setConfirmAction({ type: "abort-background", runId });
-  }
-
-  function handleConfirmAction() {
-    const action = confirmAction;
-    setConfirmAction(null);
-    if (!action) return;
-    if (action.type === "abort-run") {
-      void abortActiveRun();
-      return;
-    }
-    if (action.type === "abort-background") {
-      void abortBackgroundRun(action.runId);
-    }
+    void abortBackgroundRun(runId);
   }
 
   function toggleSessionGroup(sessionId: string) {
@@ -850,6 +831,7 @@ export function SessionScreenApp() {
     chatScrollRef,
     checkInBackgroundRun,
     childSessionHideAfterDays,
+    childParentSessionIdByChildSessionId,
     childSessionSearchMatchBySessionId,
     childSessionSearchQuery,
     childSessionVisibilityByParentSessionId,
@@ -948,23 +930,7 @@ export function SessionScreenApp() {
 
   return (
     <main className="oc-app">
-      {renderConfirmDialog()}
       <SessionScreen model={sessionScreenModel} />
     </main>
   );
-
-  function renderConfirmDialog() {
-    const props = getConfirmDialogProps(confirmAction);
-    return (
-      <ConfirmDialog
-        open={props.open}
-        title={props.title}
-        description={props.description}
-        confirmLabel={props.confirmLabel}
-        variant={props.variant}
-        onConfirm={handleConfirmAction}
-        onCancel={() => setConfirmAction(null)}
-      />
-    );
-  }
 }
