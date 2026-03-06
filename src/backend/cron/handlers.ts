@@ -43,14 +43,17 @@ const heartbeatCheckHandler: CronHandler = async ctx => {
   const result = await executeHeartbeat(agentId, sessionId, heartbeatConfig);
 
   return {
-    status: result.acknowledged ? "ok" : "error",
-    summary: result.suppressed
-      ? "Heartbeat acknowledged (suppressed)"
-      : result.error ?? "Heartbeat executed",
+    status: result.error ? "error" : "ok",
+    summary: result.error
+      ? result.error
+      : result.suppressed
+        ? result.response ?? (result.acknowledged ? "Heartbeat acknowledged (suppressed)" : "Heartbeat skipped")
+        : result.response ?? "Heartbeat executed",
     data: {
       agentId,
       sessionId,
       acknowledged: result.acknowledged,
+      skipped: result.skipped ?? false,
       suppressed: result.suppressed,
       response: result.response,
     },

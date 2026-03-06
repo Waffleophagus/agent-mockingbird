@@ -1389,19 +1389,54 @@ body {
   }
 }
 
+@media (max-width: 480px) {
+  .oc-global-titlebar-center {
+    display: none;
+  }
+}
+
 @media (max-width: 940px) {
   .oc-global-titlebar {
-    height: auto;
-    grid-template-columns: 1fr;
-    padding: 8px 10px;
+    grid-template-columns: auto 1fr auto;
+    gap: 6px;
+  }
+
+  .oc-global-titlebar-left,
+  .oc-global-titlebar-right {
+    gap: 4px;
+  }
+
+  .oc-titlebar-action {
+    height: 28px;
+    min-width: 28px;
+  }
+
+  .oc-panel-toggle {
+    width: 28px;
   }
 
   .oc-global-titlebar-center {
-    justify-content: flex-start;
+    justify-content: center;
+    overflow: hidden;
   }
 
-  .oc-titlebar-session-meta {
-    align-items: flex-start;
+  .oc-titlebar-session-title {
+    font-size: 12px;
+    max-width: 100px;
+  }
+
+  .oc-connection-pill {
+    font-size: 9px;
+    gap: 4px;
+  }
+
+  .oc-connection-state {
+    display: none;
+  }
+
+  .oc-dot {
+    width: 6px;
+    height: 6px;
   }
 
   .oc-session-header,

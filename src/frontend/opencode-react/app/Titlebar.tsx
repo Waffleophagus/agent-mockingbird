@@ -77,17 +77,6 @@ export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
           <span className="oc-connection-state">{streamStatus === "connected" ? "RUNTIME ONLINE" : "RECONNECTING"}</span>
           {heartbeatAt ? <span className="oc-connection-heartbeat">HEARTBEAT {relativeFromIso(heartbeatAt)}</span> : null}
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="oc-titlebar-action oc-panel-toggle"
-          data-active={sidePanelOpen}
-          aria-label="Toggle context panel"
-          onClick={toggleSidePanel}
-        >
-          <PanelRight className="size-3.5" />
-        </Button>
         <div className="oc-titlebar-menu-wrap" ref={menuRef}>
           <Button
             type="button"
@@ -124,6 +113,17 @@ export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
             </div>
           ) : null}
         </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="oc-titlebar-action oc-panel-toggle"
+          data-active={sidePanelOpen}
+          aria-label="Toggle context panel"
+          onClick={toggleSidePanel}
+        >
+          <PanelRight className="size-3.5" />
+        </Button>
       </div>
     </header>
   );

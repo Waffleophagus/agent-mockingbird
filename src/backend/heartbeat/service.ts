@@ -6,7 +6,8 @@ import type { HeartbeatConfig, HeartbeatContext, HeartbeatResult } from "./types
 import { getConfigSnapshot } from "../config/service";
 import { getRuntime } from "../runtime";
 
-const HEARTBEAT_OK_PATTERN = /\bHEARTBEAT_OK\b/;
+const DEFAULT_HEARTBEAT_PROMPT =
+  "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.";
 
 export function parseInterval(interval: string): number {
   const match = interval.match(/^(\d+)([mhd])$/);
@@ -42,26 +43,66 @@ export function buildHeartbeatPrompt(config: HeartbeatConfig, context: Heartbeat
     }
   }
 
+  parts.push(`## Heartbeat Prompt
+
+${config.prompt?.trim() || DEFAULT_HEARTBEAT_PROMPT}`);
+
   parts.push(`## Heartbeat Context
 - Agent: ${context.agentId}
 - Current time: ${context.now}
 - Scheduled for: ${context.scheduledFor}
 ${context.lastHeartbeat ? `- Last heartbeat: ${context.lastHeartbeat}` : ""}
 
-**Instructions:** Check the items above. If everything is fine and nothing needs attention, reply with "HEARTBEAT_OK" (optionally with brief status, max ${config.ackMaxChars} chars). If something needs attention, describe what and why.`);
-
-  if (config.prompt) {
-    parts.push(`## Custom Instructions\n\n${config.prompt}`);
-  }
+**Instructions:** If everything is fine and nothing needs attention, reply with "HEARTBEAT_OK" (optionally with brief status, max ${config.ackMaxChars} chars). If something needs attention, describe what and why.`);
 
   return parts.join("\n\n");
 }
 
 export function isHeartbeatAck(response: string, ackMaxChars: number): boolean {
-  if (!HEARTBEAT_OK_PATTERN.test(response)) return false;
+  const trimmed = response.trim();
+  if (!trimmed) return false;
 
-  const remaining = response.replace(HEARTBEAT_OK_PATTERN, "").trim();
+  const stripped = stripHeartbeatTokenAtEdges(trimmed);
+  if (!stripped.didStrip) return false;
+
+  const remaining = stripped.text.trim();
   return remaining.length <= ackMaxChars;
+}
+
+function stripHeartbeatTokenAtEdges(response: string): { didStrip: boolean; text: string } {
+  let text = response.trim();
+  let didStrip = false;
+  const token = "HEARTBEAT_OK";
+  const isWordChar = (value: string | undefined) => Boolean(value && /[A-Za-z0-9_]/.test(value));
+
+  while (text) {
+    const prefixNext = text[token.length];
+    if (text.startsWith(token) && !isWordChar(prefixNext)) {
+      text = text.slice(token.length).trimStart();
+      didStrip = true;
+      continue;
+    }
+
+    const index = text.lastIndexOf(token);
+    const beforeToken = index > 0 ? text[index - 1] : undefined;
+    const afterToken = index >= 0 ? text[index + token.length] : undefined;
+    if (
+      index >= 0 &&
+      !isWordChar(beforeToken) &&
+      !isWordChar(afterToken) &&
+      text.slice(index + token.length).replace(/[^\w]/g, "").length === 0
+    ) {
+      const before = text.slice(0, index).trimEnd();
+      const after = text.slice(index + token.length).trimStart();
+      text = `${before}${after}`.trim();
+      didStrip = true;
+      continue;
+    }
+
+    break;
+  }
+
+  return { didStrip, text };
 }
 
 export async function executeHeartbeat(
@@ -72,6 +113,7 @@ export async function executeHeartbeat(
   if (!isActiveHours(config)) {
     return {
       acknowledged: false,
+      skipped: true,
       suppressed: true,
       response: "Skipped: outside active hours",
     };
@@ -114,6 +156,15 @@ export async function executeHeartbeat(
       response: acknowledged ? undefined : response,
     };
   } catch (error) {
+    if (error instanceof Error && (error.name === "RuntimeSessionBusyError" || error.name === "RuntimeSessionQueuedError")) {
+      return {
+        acknowledged: false,
+        skipped: true,
+        suppressed: true,
+        response: "Skipped: session busy",
+      };
+    }
+
     return {
       acknowledged: false,
       suppressed: false,

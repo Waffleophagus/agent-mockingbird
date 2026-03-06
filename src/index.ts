@@ -25,6 +25,7 @@ import index from "./index.html";
 ensureSeedData();
 ensureConfigFile();
 const configSnapshot = getConfigSnapshot();
+let heartbeatConfigSyncHash = configSnapshot.hash;
 
 const queueConfig = configSnapshot.config.runtime.queue;
 const laneQueue = initLaneQueue({
@@ -91,6 +92,15 @@ void syncHeartbeatJobsForAgents(cronService, configSnapshot.config.ui.agentTypes
   console.error("[startup] Failed to sync heartbeat jobs:", err);
 });
 
+const heartbeatJobSyncTimer = setInterval(() => {
+  const nextSnapshot = getConfigSnapshot();
+  if (nextSnapshot.hash === heartbeatConfigSyncHash) return;
+  heartbeatConfigSyncHash = nextSnapshot.hash;
+  void syncHeartbeatJobsForAgents(cronService, nextSnapshot.config.ui.agentTypes).catch(err => {
+    console.error("[heartbeat] Failed to sync heartbeat jobs:", err);
+  });
+}, 5_000);
+
 const heartbeatTimer = setInterval(() => {
   const heartbeat = recordHeartbeat("scheduler");
   eventStream.publish(createHeartbeatUpdatedEvent(heartbeat, "scheduler"));
@@ -117,6 +127,7 @@ const server = serve({
 
 const shutdown = () => {
   clearInterval(heartbeatTimer);
+  clearInterval(heartbeatJobSyncTimer);
   stopSkillsCatalogWatcher();
   cronService.stop();
   runService.stop();

@@ -20,6 +20,7 @@ export interface HeartbeatContext {
 
 export interface HeartbeatResult {
   acknowledged: boolean;
+  skipped?: boolean;
   suppressed: boolean;
   response?: string;
   error?: string;

@@ -44,8 +44,8 @@ describe("isHeartbeatAck", () => {
     expect(isHeartbeatAck("HEARTBEAT_OK - nothing urgent", 300)).toBe(true);
   });
 
-  test("matches HEARTBEAT_OK in middle", () => {
-    expect(isHeartbeatAck("All good HEARTBEAT_OK done", 300)).toBe(true);
+  test("rejects HEARTBEAT_OK in middle", () => {
+    expect(isHeartbeatAck("All good HEARTBEAT_OK done", 300)).toBe(false);
   });
 
   test("rejects if remaining content too long", () => {
@@ -64,6 +64,10 @@ describe("isHeartbeatAck", () => {
   test("accepts exactly at limit", () => {
     const content = "HEARTBEAT_OK " + "x".repeat(300);
     expect(isHeartbeatAck(content, 300)).toBe(true);
+  });
+
+  test("matches markup-free token at end with punctuation", () => {
+    expect(isHeartbeatAck("All good. HEARTBEAT_OK.", 300)).toBe(true);
   });
 });
 
