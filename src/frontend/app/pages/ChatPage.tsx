@@ -353,7 +353,7 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
                 <h2 className="oc-session-title">{activeSession?.title ?? "Main"}</h2>
               </div>
               <div className="oc-session-quick-actions">
-                <button type="button" className="oc-inline-btn" onClick={() => layout?.openSidePanel()}>
+                <button type="button" className="oc-inline-btn oc-context-button" onClick={() => layout?.openSidePanel()}>
                   <LayoutPanelLeft className="size-3.5" /> Context
                 </button>
               </div>
@@ -472,7 +472,7 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
                   <div className="oc-composer-secondary-controls">
                     <button
                       type="button"
-                      className="oc-inline-btn"
+                      className="oc-inline-btn oc-refresh-button"
                       onClick={() => activeSession && void refreshBackgroundRunsForSession(activeSession.id)}
                       disabled={!activeSession || loadingBackgroundRuns}
                     >
@@ -480,7 +480,7 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
                     </button>
                     <button
                       type="button"
-                      className="oc-inline-btn"
+                      className="oc-inline-btn oc-compact-button"
                       onClick={() => activeSession && void compactSession(activeSession.id)}
                       disabled={!activeSession || isCompacting || isActiveSessionRunning}
                     >

@@ -60,7 +60,7 @@ export function ComposerDock(props: ComposerDockProps) {
         className="oc-composer-input"
       />
       <div className="oc-composer-actions">
-        <p className="text-xs text-muted-foreground">Enter to send, Shift+Enter for newline.</p>
+        <p className="text-xs text-muted-foreground oc-composer-hint">Enter to send, Shift+Enter for newline.</p>
         <div className="oc-composer-action-buttons">
           {canAbort ? (
             <Button

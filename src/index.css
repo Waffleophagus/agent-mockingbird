@@ -1459,6 +1459,17 @@ body {
     align-items: stretch;
   }
 
+  .oc-composer-action-buttons {
+    margin-left: auto;
+  }
+
+  .oc-composer-hint,
+  .oc-context-button,
+  .oc-refresh-button,
+  .oc-compact-button {
+    display: none;
+  }
+
   .oc-composer-primary-controls {
     margin-left: 0;
   }
