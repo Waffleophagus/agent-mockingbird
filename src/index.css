@@ -250,6 +250,10 @@ body {
   background: linear-gradient(180deg, color-mix(in srgb, var(--background-base) 92%, var(--surface-raised-base) 8%), var(--background-base));
 }
 
+.oc-session-main[data-empty="true"] {
+  justify-content: center;
+}
+
 .oc-session-header,
 .oc-session-meta-errors,
 .oc-composer-dock,
@@ -262,6 +266,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: padding 220ms ease, opacity 220ms ease, transform 220ms ease;
+}
+
+.oc-session-main[data-empty="true"] .oc-session-header {
+  padding: 0 0 14px;
+  opacity: 0.96;
+  transform: translateY(-10px);
 }
 
 .oc-session-header-main {
@@ -331,6 +342,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition: padding 220ms ease, opacity 220ms ease;
+}
+
+.oc-session-main[data-empty="true"] .oc-session-meta-errors {
+  padding-bottom: 10px;
 }
 
 .oc-session-sidebar,
@@ -489,6 +505,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  transition: flex-basis 220ms ease, max-height 220ms ease, opacity 220ms ease, padding 220ms ease;
+}
+
+.oc-session-main[data-empty="true"] .oc-timeline {
+  flex: 0 0 auto;
+  max-height: 48px;
+  overflow: hidden;
+  opacity: 0.7;
+  padding: 0 0 8px;
 }
 
 .oc-turn-block {
@@ -663,6 +688,11 @@ body {
   position: relative;
   z-index: 10;
   padding-bottom: 10px;
+  transition: transform 220ms ease, margin 220ms ease;
+}
+
+.oc-session-main[data-empty="true"] .oc-composer-dock {
+  transform: translateY(-8px);
 }
 
 .oc-composer {

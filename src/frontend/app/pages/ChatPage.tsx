@@ -282,6 +282,7 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
   const activeParentSessionTitle = activeParentSessionId ? (sessionTitleById.get(activeParentSessionId) ?? "Parent session") : "";
   const drawerOpen = layout?.drawerOpen ?? false;
   const sidePanelOpen = layout?.sidePanelOpen ?? false;
+  const isEmptyState = !loadingMessages && visibleMessages.length === 0 && !activePermissionRequest && !activeQuestionRequest;
 
   return (
     <section className="oc-session-shell" data-drawer-open={drawerOpen} data-sidepanel-open={sidePanelOpen}>
@@ -335,7 +336,7 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
           />
         </div>
 
-        <section className="oc-session-main">
+        <section className="oc-session-main" data-empty={isEmptyState}>
           <header className="oc-session-header">
             <div className="oc-session-header-main">
               <div>
