@@ -33,7 +33,13 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # caches
 .eslintcache
 .cache
+.turbo
 *.tsbuildinfo
+
+# expo
+.expo
+apps/mobile/.expo
+apps/mobile/web-build
 
 # IntelliJ based IDEs
 .idea

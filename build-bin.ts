@@ -2,7 +2,8 @@
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
-const outdir = path.join(process.cwd(), "dist");
+const repoRoot = import.meta.dir;
+const outdir = path.join(repoRoot, "dist");
 
 if (existsSync(outdir)) {
   rmSync(outdir, { recursive: true, force: true });
@@ -11,9 +12,9 @@ mkdirSync(outdir, { recursive: true });
 
 console.log("Building standalone binary...");
 const result = await Bun.build({
-  entrypoints: ["./src/index.ts"],
+  entrypoints: [path.join(repoRoot, "apps/server/src/index.ts")],
   compile: {
-    outfile: "./dist/wafflebot",
+    outfile: path.join(repoRoot, "dist/wafflebot"),
   },
   minify: true,
   sourcemap: "linked",
@@ -27,7 +28,7 @@ if (!result.success) {
 }
 
 console.log("Copying migrations...");
-cpSync(path.join(process.cwd(), "drizzle"), path.join(outdir, "drizzle"), { recursive: true });
+cpSync(path.join(repoRoot, "drizzle"), path.join(outdir, "drizzle"), { recursive: true });
 
 console.log(`Build complete: ${outdir}/wafflebot`);
 console.log("\nTo deploy, copy the entire 'dist' folder to your target location.");

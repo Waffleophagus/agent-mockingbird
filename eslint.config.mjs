@@ -18,6 +18,9 @@ export default tseslint.config(
       "sandbox-agent/**",
       "data/**",
       "runtime-assets/**",
+      ".turbo/**",
+      "apps/mobile/.expo/**",
+      "apps/mobile/web-build/**",
     ],
   },
   js.configs.recommended,
@@ -42,7 +45,11 @@ export default tseslint.config(
     settings: {
       "import/resolver": {
         typescript: {
-          project: "./tsconfig.json",
+          project: [
+            "./tsconfig.json",
+            "./apps/*/tsconfig.json",
+            "./packages/*/tsconfig.json",
+          ],
         },
       },
     },

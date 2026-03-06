@@ -1,0 +1,47 @@
+{
+  "name": "@wafflebot/mobile",
+  "private": true,
+  "version": "0.0.1",
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start --dev-client",
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "build:android:dev": "bunx eas-cli build --profile development:device --platform android --local",
+    "build:android:preview": "bunx eas-cli build --profile preview:device --platform android --local",
+    "build:android:prod": "bunx eas-cli build --profile production --platform android --local",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@wafflebot/api": "workspace:*",
+    "@wafflebot/app-core": "workspace:*",
+    "@wafflebot/contracts": "workspace:*",
+    "@expo/vector-icons": "~14.1.0",
+    "expo": "~54.0.0",
+    "expo-constants": "~17.1.0",
+    "expo-dev-client": "~6.0.10",
+    "expo-linking": "~8.0.0",
+    "expo-notifications": "~0.32.0",
+    "expo-router": "~6.0.0",
+    "expo-status-bar": "~3.0.0",
+    "lucide-react-native": "^0.564.0",
+    "nativewind": "^4.1.23",
+    "react": "19.1.0",
+    "react-native": "0.81.0",
+    "react-native-reanimated": "~4.1.0",
+    "react-native-safe-area-context": "~5.4.0",
+    "react-native-screens": "~4.16.0",
+    "react-native-svg": "15.12.1",
+    "mobx": "^6.13.7",
+    "mobx-state-tree": "^7.0.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.4",
+    "@types/react": "~19.1.10",
+    "eas-cli": "^16.24.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.9.3"
+  }
+}

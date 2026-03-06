@@ -1,0 +1,33 @@
+{
+  "name": "@wafflebot/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "NODE_ENV=production bun src/index.ts",
+    "build": "bun run ../../build.ts",
+    "build:bin": "bun run ../../build-bin.ts",
+    "lint": "eslint .",
+    "test": "bun test ./src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:generate": "drizzle-kit generate --config ../../drizzle.config.ts",
+    "db:migrate": "bun run src/backend/db/migrate.ts",
+    "db:check": "drizzle-kit check --config ../../drizzle.config.ts",
+    "db:wipe": "bun run src/backend/db/wipe.ts"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.2.15",
+    "@opencode-ai/sdk": "^1.2.15",
+    "@t3-oss/env-core": "^0.13.10",
+    "@trpc/server": "^11.7.1",
+    "@wafflebot/api": "workspace:*",
+    "@wafflebot/contracts": "workspace:*",
+    "cron": "^4.4.0",
+    "drizzle-orm": "^0.45.1",
+    "jsonc-parser": "^3.3.1",
+    "sqlite-vec": "0.1.7-alpha.2",
+    "zod": "^4.3.6"
+  }
+}

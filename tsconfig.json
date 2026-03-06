@@ -6,14 +6,10 @@
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": true,
-
-    // Bundler mode
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
-
-    // Best practices
     "strict": true,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
@@ -21,17 +17,22 @@
     "noImplicitOverride": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@wafflebot/contracts": ["./packages/contracts/src/index.ts"],
+      "@wafflebot/contracts/*": ["./packages/contracts/src/*"],
+      "@wafflebot/api": ["./packages/api/src/index.ts"],
+      "@wafflebot/api/*": ["./packages/api/src/*"],
+      "@wafflebot/app-core": ["./packages/app-core/src/index.ts"],
+      "@wafflebot/app-core/*": ["./packages/app-core/src/*"]
     },
-
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    ".opencode/tools/**/*.ts",
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts",
+    "packages/**/*.tsx",
     "scripts/**/*.ts",
     "build.ts",
     "build-bin.ts",
@@ -39,5 +40,14 @@
     "eslint.config.mjs",
     "drizzle.config.ts"
   ],
-  "exclude": ["dist", "node_modules", "openclaw", "opencode", "opencode-sdk-js", "convex-backend", "rivet", "sandbox-agent"]
+  "exclude": [
+    "dist",
+    "node_modules",
+    "openclaw",
+    "opencode",
+    "opencode-sdk-js",
+    "convex-backend",
+    "rivet",
+    "sandbox-agent"
+  ]
 }

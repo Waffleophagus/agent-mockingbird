@@ -1,0 +1,16 @@
+{
+  "name": "@wafflebot/contracts",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agentTypes": "./src/agentTypes.ts",
+    "./cron": "./src/cron.ts",
+    "./dashboard": "./src/dashboard.ts",
+    "./realtime": "./src/realtime.ts"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

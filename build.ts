@@ -1,23 +1,23 @@
 #!/usr/bin/env bun
-import plugin from "bun-plugin-tailwind";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
-const outdir = path.join(process.cwd(), "dist");
+const repoRoot = import.meta.dir;
+const outdir = path.join(repoRoot, "dist");
 
 if (existsSync(outdir)) {
   await rm(outdir, { recursive: true, force: true });
 }
 
-const entrypoints = [...new Bun.Glob("**/*.html").scanSync("src")]
-  .map(file => path.resolve("src", file))
-  .filter(file => !file.includes("node_modules"));
+const webRoot = path.join(repoRoot, "apps", "web");
+const webOutdir = path.join(outdir, "web");
+
+const entrypoints = [path.join(webRoot, "index.html")];
 
 const result = await Bun.build({
   entrypoints,
-  outdir,
-  plugins: [plugin],
+  outdir: webOutdir,
   minify: true,
   target: "browser",
   sourcemap: "linked",
@@ -33,4 +33,4 @@ if (!result.success) {
   process.exit(1);
 }
 
-console.log(`Built ${result.outputs.length} assets into ${outdir}`);
+console.log(`Built ${result.outputs.length} assets into ${webOutdir}`);

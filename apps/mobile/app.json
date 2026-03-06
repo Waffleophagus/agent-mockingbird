@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Wafflebot Mobile",
+    "slug": "wafflebot-mobile",
+    "scheme": "wafflebot",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "experiments": {
+      "typedRoutes": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-notifications"
+    ],
+    "android": {
+      "package": "dev.wafflebot.mobile",
+      "edgeToEdgeEnabled": true
+    },
+    "ios": {
+      "bundleIdentifier": "dev.wafflebot.mobile"
+    }
+  }
+}
