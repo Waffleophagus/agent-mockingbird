@@ -21,7 +21,7 @@ fs.writeFileSync(
 
 const result = spawnSync(
   "npm",
-  ["exec", "--yes", pkg, "--", ...process.argv.slice(2)],
+  ["exec", "--yes", "--package", pkg, "agent-mockingbird", "--", ...process.argv.slice(2)],
   {
     stdio: "inherit",
     env: {

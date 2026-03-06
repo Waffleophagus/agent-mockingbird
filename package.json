@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.10",
+  "bin": {
+    "agent-mockingbird": "bin/agent-mockingbird"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"

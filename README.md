@@ -340,12 +340,14 @@ Direct package execution from private registry:
 
 ```bash
 npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/agent-mockingbird-installer@latest" install
+  --package "@waffleophagus/agent-mockingbird-installer@latest" \
+  agent-mockingbird-installer install
 ```
 
 ```bash
 bunx --bun npm exec --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/agent-mockingbird-installer@latest" -- install
+  --package "@waffleophagus/agent-mockingbird-installer@latest" \
+  agent-mockingbird-installer -- install
 ```
 
 Agent Mockingbird commands:
