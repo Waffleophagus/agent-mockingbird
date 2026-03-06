@@ -137,7 +137,7 @@ export function SessionTree(props: SessionTreeProps) {
                   <>
                     <button type="button" className="oc-link-btn" onClick={() => toggleSessionGroup(session.id)}>
                       {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                      {expanded ? "Hide branches" : `Show branches (${children.length})`}
+                      {expanded ? "Hide subagents" : `Show subagents (${children.length})`}
                     </button>
                     {expanded && (
                       <div className="oc-child-list">

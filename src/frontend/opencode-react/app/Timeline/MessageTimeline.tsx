@@ -1,4 +1,4 @@
-import { AlertTriangle, LoaderCircle, RefreshCcw, Sparkles, Wrench } from "lucide-react";
+import { AlertTriangle, ChevronDown, LoaderCircle, RefreshCcw, Sparkles, Wrench } from "lucide-react";
 import type { RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,15 @@ function buildTurns(messages: LocalChatMessage[]): SessionTurn[] {
   }
 
   return turns;
+}
+
+function toolSummary(part: Extract<ChatMessagePart, { type: "tool_call" }>) {
+  if (part.error?.trim()) return part.error.trim();
+  if (part.output?.trim()) return part.output.trim().slice(0, 120);
+  if (part.input && Object.keys(part.input).length > 0) {
+    return `${Object.keys(part.input).length} arg${Object.keys(part.input).length === 1 ? "" : "s"}`;
+  }
+  return "No details";
 }
 
 export interface MessageTimelineProps {
@@ -163,22 +172,28 @@ export function MessageTimeline(props: MessageTimelineProps) {
                         }
 
                         const detailsInput = stringifyToolInput(part.input);
+                        const summary = toolSummary(part);
                         return (
-                          <article key={`${message.id}-${part.id}`} className="oc-turn-part oc-turn-part-tool">
-                            <div className="oc-turn-part-head">
-                              <p><Wrench className="size-3" /> {part.tool}</p>
-                              <p>{elapsed ? `${elapsed} · ` : ""}{partTimestamp}</p>
-                            </div>
-                            <p className="text-xs text-muted-foreground">status: {part.status}</p>
+                          <details key={`${message.id}-${part.id}`} className="oc-turn-part oc-turn-part-tool">
+                            <summary className="oc-turn-tool-summary">
+                              <div className="oc-turn-part-head oc-turn-part-head-tool">
+                                <p><Wrench className="size-3" /> {part.tool}</p>
+                                <p>{elapsed ? `${elapsed} · ` : ""}{partTimestamp}</p>
+                              </div>
+                              <div className="oc-turn-tool-summary-copy">
+                                <p className="text-xs text-muted-foreground">status: {part.status}</p>
+                                <p className="oc-turn-tool-summary-text">{summary}</p>
+                              </div>
+                              <ChevronDown className="oc-turn-tool-chevron size-3.5" />
+                            </summary>
                             {(detailsInput || part.output || part.error) ? (
-                              <details open={showToolCallDetails} className="oc-turn-tool-details">
-                                <summary>Details</summary>
+                              <div className="oc-turn-tool-details">
                                 {detailsInput ? <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11px]">{detailsInput}</pre> : null}
                                 {part.output ? <p className="mt-1 whitespace-pre-wrap text-[11px]">{part.output}</p> : null}
                                 {part.error ? <p className="mt-1 whitespace-pre-wrap text-[11px] text-destructive">{part.error}</p> : null}
-                              </details>
+                              </div>
                             ) : null}
-                          </article>
+                          </details>
                         );
                       })}
                     </div>

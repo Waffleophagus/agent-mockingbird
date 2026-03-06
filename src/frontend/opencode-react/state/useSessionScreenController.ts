@@ -24,6 +24,11 @@ export function useSessionScreenController(input: UseSessionScreenControllerInpu
     });
   }, []);
 
+  const openDrawer = useCallback(() => {
+    setDrawerOpen(true);
+    setSidePanelOpen(false);
+  }, []);
+
   const toggleSidePanel = useCallback(() => {
     setSidePanelOpen(current => {
       const next = !current;
@@ -66,6 +71,7 @@ export function useSessionScreenController(input: UseSessionScreenControllerInpu
     layout: {
       drawerOpen,
       sidePanelOpen,
+      openDrawer,
       openSidePanel,
       closeDrawer,
       closeSidePanel,

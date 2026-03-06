@@ -23,6 +23,7 @@ export interface SessionScreenTitlebarVM {
 export interface SessionScreenLayoutVM {
   drawerOpen: boolean;
   sidePanelOpen: boolean;
+  openDrawer: () => void;
   openSidePanel: () => void;
   closeDrawer: () => void;
   closeSidePanel: () => void;

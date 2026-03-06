@@ -333,7 +333,9 @@ export function ChatPage({ model, layout }: { model: ChatPageModel; layout?: Ses
             </div>
             <div className="oc-session-status-strip">
               {activeBackgroundInFlightCount > 0 ? (
-                <span className="oc-status-pill" data-status="warning">background sessions {activeBackgroundInFlightCount}</span>
+                <button type="button" className="oc-status-pill oc-status-pill-action" data-status="warning" onClick={() => layout?.openDrawer()}>
+                  background sessions {activeBackgroundInFlightCount}
+                </button>
               ) : null}
               {activeRunStatusHint ? <span className="oc-inline-note">{activeRunStatusHint}</span> : null}
             </div>
