@@ -43,14 +43,14 @@ bun run typecheck
 
 `bun run test` is intentionally scoped to `src` so local `opencode/` clone tests are not included.
 
-Local Opencode UI source (required for current frontend styling/assets):
+Optional local OpenCode checkout for smoke testing and sync scripts:
 
 ```bash
 git clone https://github.com/anomalyco/opencode.git opencode
 bash scripts/pull-opencode.sh
 ```
 
-`opencode/` is intentionally gitignored in this repo.
+`opencode/` is intentionally gitignored in this repo. The frontend no longer imports UI CSS/fonts from that sibling checkout during normal builds.
 
 Database migrations (Drizzle + SQLite):
 

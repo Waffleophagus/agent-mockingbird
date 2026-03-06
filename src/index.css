@@ -2,15 +2,15 @@
 @import "tw-animate-css";
 @source "../node_modules/streamdown/dist/*.js";
 
-@import "../opencode/packages/ui/src/styles/colors.css";
-@import "../opencode/packages/ui/src/styles/theme.css";
-@import "../opencode/packages/ui/src/styles/base.css";
-@import "../opencode/packages/ui/src/styles/utilities.css";
-@import "../opencode/packages/ui/src/styles/animations.css";
+@import "./vendor/opencode-ui/styles/colors.css";
+@import "./vendor/opencode-ui/styles/theme.css";
+@import "./vendor/opencode-ui/styles/base.css";
+@import "./vendor/opencode-ui/styles/utilities.css";
+@import "./vendor/opencode-ui/styles/animations.css";
 
 @font-face {
   font-family: "Geist";
-  src: url("../opencode/packages/ui/src/assets/fonts/geist.woff2") format("woff2");
+  src: url("./vendor/opencode-ui/fonts/geist.woff2") format("woff2");
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
@@ -18,7 +18,7 @@
 
 @font-face {
   font-family: "Geist Mono";
-  src: url("../opencode/packages/ui/src/assets/fonts/geist-mono-italic.woff2") format("woff2");
+  src: url("./vendor/opencode-ui/fonts/geist-mono-italic.woff2") format("woff2");
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
