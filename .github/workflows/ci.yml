@@ -195,7 +195,8 @@ jobs:
           tarball="wafflebot-${{ steps.meta.outputs.package_version }}.tgz"
           bun pm pack --filename "${tarball}" --quiet >/dev/null
           test -f "${tarball}"
-          tar -tzf "${tarball}" | grep -qx "package/src/index.ts"
+          tar_contents="$(tar -tzf "${tarball}")"
+          grep -Fqx -- "package/src/index.ts" <<<"${tar_contents}"
           echo "WAFFLEBOT_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
