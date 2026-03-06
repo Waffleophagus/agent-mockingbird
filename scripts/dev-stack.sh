@@ -5,15 +5,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 OPENCODE_HOST="${OPENCODE_HOST:-127.0.0.1}"
 OPENCODE_PORT="${OPENCODE_PORT:-4096}"
-WAFFLEBOT_PORT="${WAFFLEBOT_PORT:-3001}"
+AGENT_MOCKINGBIRD_PORT="${AGENT_MOCKINGBIRD_PORT:-3001}"
 OPENCODE_LOG_LEVEL="${OPENCODE_LOG_LEVEL:-INFO}"
 OPENCODE_URL="http://${OPENCODE_HOST}:${OPENCODE_PORT}"
-WAFFLEBOT_URL="http://127.0.0.1:${WAFFLEBOT_PORT}"
-DEV_WORKSPACE_DIR="${WAFFLEBOT_MEMORY_WORKSPACE_DIR:-${ROOT_DIR}/data/workspace}"
-DEV_CONFIG_PATH="${WAFFLEBOT_CONFIG_PATH:-${ROOT_DIR}/data/wafflebot.dev-stack.config.json}"
-DEV_RUNTIME_ASSETS_STATE_PATH="${WAFFLEBOT_RUNTIME_ASSETS_STATE_PATH:-${ROOT_DIR}/data/runtime-assets-state.dev-stack.json}"
-DEV_DB_PATH="${WAFFLEBOT_DB_PATH:-${ROOT_DIR}/data/wafflebot.db}"
-DEV_RESET_RUNTIME_BINDINGS="${WAFFLEBOT_DEV_RESET_BINDINGS:-0}"
+AGENT_MOCKINGBIRD_URL="http://127.0.0.1:${AGENT_MOCKINGBIRD_PORT}"
+DEV_WORKSPACE_DIR="${AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR:-${ROOT_DIR}/data/workspace}"
+DEV_CONFIG_PATH="${AGENT_MOCKINGBIRD_CONFIG_PATH:-${ROOT_DIR}/data/agent-mockingbird.dev-stack.config.json}"
+DEV_RUNTIME_ASSETS_STATE_PATH="${AGENT_MOCKINGBIRD_RUNTIME_ASSETS_STATE_PATH:-${ROOT_DIR}/data/runtime-assets-state.dev-stack.json}"
+DEV_DB_PATH="${AGENT_MOCKINGBIRD_DB_PATH:-${ROOT_DIR}/data/agent-mockingbird.db}"
+DEV_RESET_RUNTIME_BINDINGS="${AGENT_MOCKINGBIRD_DEV_RESET_BINDINGS:-0}"
 
 if ! command -v bun >/dev/null 2>&1; then
   echo "bun is required but not found in PATH."
@@ -31,14 +31,14 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 OPENCODE_PID=""
-WAFFLEBOT_PID=""
+AGENT_MOCKINGBIRD_PID=""
 
 cleanup() {
   local exit_code=$?
   set +e
-  if [[ -n "${WAFFLEBOT_PID}" ]] && kill -0 "${WAFFLEBOT_PID}" 2>/dev/null; then
-    kill "${WAFFLEBOT_PID}" 2>/dev/null
-    wait "${WAFFLEBOT_PID}" 2>/dev/null
+  if [[ -n "${AGENT_MOCKINGBIRD_PID}" ]] && kill -0 "${AGENT_MOCKINGBIRD_PID}" 2>/dev/null; then
+    kill "${AGENT_MOCKINGBIRD_PID}" 2>/dev/null
+    wait "${AGENT_MOCKINGBIRD_PID}" 2>/dev/null
   fi
   if [[ -n "${OPENCODE_PID}" ]] && kill -0 "${OPENCODE_PID}" 2>/dev/null; then
     kill "${OPENCODE_PID}" 2>/dev/null
@@ -74,9 +74,9 @@ else
   echo "[stack] starting opencode at ${OPENCODE_URL}"
   (
     cd "${ROOT_DIR}"
-    export WAFFLEBOT_PORT="${WAFFLEBOT_PORT}"
-    export WAFFLEBOT_MEMORY_WORKSPACE_DIR="${DEV_WORKSPACE_DIR}"
-    export WAFFLEBOT_MEMORY_API_BASE_URL="${WAFFLEBOT_MEMORY_API_BASE_URL:-http://127.0.0.1:${WAFFLEBOT_PORT}}"
+    export AGENT_MOCKINGBIRD_PORT="${AGENT_MOCKINGBIRD_PORT}"
+    export AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR="${DEV_WORKSPACE_DIR}"
+    export AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL="${AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL:-http://127.0.0.1:${AGENT_MOCKINGBIRD_PORT}}"
     export OPENCODE_DISABLE_EXTERNAL_SKILLS="${OPENCODE_DISABLE_EXTERNAL_SKILLS:-1}"
     exec opencode serve \
       --hostname "${OPENCODE_HOST}" \
@@ -111,29 +111,29 @@ if [[ -f "${DEV_WORKSPACE_DIR}/.opencode/package.json" ]]; then
     bun install --frozen-lockfile >/dev/null
   )
 fi
-echo "[stack] syncing runtime.opencode settings into wafflebot config (workspace: ${DEV_WORKSPACE_DIR})"
+echo "[stack] syncing runtime.opencode settings into agent-mockingbird config (workspace: ${DEV_WORKSPACE_DIR})"
 (
   cd "${ROOT_DIR}"
-  unset WAFFLEBOT_OPENCODE_PROVIDER_ID
-  unset WAFFLEBOT_OPENCODE_MODEL_ID
-  unset WAFFLEBOT_OPENCODE_MODEL_FALLBACKS
-  unset WAFFLEBOT_OPENCODE_SMALL_MODEL
-  unset WAFFLEBOT_OPENCODE_TIMEOUT_MS
-  unset WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS
-  unset WAFFLEBOT_OPENCODE_RUN_WAIT_TIMEOUT_MS
-  WAFFLEBOT_CONFIG_PATH="${DEV_CONFIG_PATH}" \
-  WAFFLEBOT_MEMORY_WORKSPACE_DIR="${DEV_WORKSPACE_DIR}" \
-    WAFFLEBOT_OPENCODE_BASE_URL="${OPENCODE_URL}" \
-    WAFFLEBOT_OPENCODE_DIRECTORY="${DEV_WORKSPACE_DIR}" \
+  unset AGENT_MOCKINGBIRD_OPENCODE_PROVIDER_ID
+  unset AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID
+  unset AGENT_MOCKINGBIRD_OPENCODE_MODEL_FALLBACKS
+  unset AGENT_MOCKINGBIRD_OPENCODE_SMALL_MODEL
+  unset AGENT_MOCKINGBIRD_OPENCODE_TIMEOUT_MS
+  unset AGENT_MOCKINGBIRD_OPENCODE_PROMPT_TIMEOUT_MS
+  unset AGENT_MOCKINGBIRD_OPENCODE_RUN_WAIT_TIMEOUT_MS
+  AGENT_MOCKINGBIRD_CONFIG_PATH="${DEV_CONFIG_PATH}" \
+  AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR="${DEV_WORKSPACE_DIR}" \
+    AGENT_MOCKINGBIRD_OPENCODE_BASE_URL="${OPENCODE_URL}" \
+    AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY="${DEV_WORKSPACE_DIR}" \
     bun run config:migrate-opencode-env >/dev/null || true
 )
 if [[ "${DEV_RESET_RUNTIME_BINDINGS}" == "1" ]]; then
   echo "[stack] resetting stale opencode session bindings in ${DEV_DB_PATH}"
   (
     cd "${ROOT_DIR}"
-    WAFFLEBOT_DB_PATH="${DEV_DB_PATH}" bun -e '
+    AGENT_MOCKINGBIRD_DB_PATH="${DEV_DB_PATH}" bun -e '
       import { Database } from "bun:sqlite";
-      const dbPath = process.env.WAFFLEBOT_DB_PATH;
+      const dbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
       if (!dbPath) process.exit(0);
       const db = new Database(dbPath);
       try {
@@ -144,37 +144,37 @@ if [[ "${DEV_RESET_RUNTIME_BINDINGS}" == "1" ]]; then
     ' >/dev/null
   )
 fi
-echo "[stack] starting wafflebot at ${WAFFLEBOT_URL}"
-existing_wafflebot_code="$(curl -sS -m 2 -o /dev/null -w "%{http_code}" "${WAFFLEBOT_URL}/api/health" || true)"
-if [[ "${existing_wafflebot_code}" != "000" ]]; then
-  echo "[stack] reusing existing wafflebot at ${WAFFLEBOT_URL}"
+echo "[stack] starting agent-mockingbird at ${AGENT_MOCKINGBIRD_URL}"
+existing_agent_mockingbird_code="$(curl -sS -m 2 -o /dev/null -w "%{http_code}" "${AGENT_MOCKINGBIRD_URL}/api/health" || true)"
+if [[ "${existing_agent_mockingbird_code}" != "000" ]]; then
+  echo "[stack] reusing existing agent-mockingbird at ${AGENT_MOCKINGBIRD_URL}"
 else
   (
     cd "${ROOT_DIR}"
-    export PORT="${WAFFLEBOT_PORT}"
-    export WAFFLEBOT_DB_PATH="${DEV_DB_PATH}"
-    export WAFFLEBOT_MEMORY_WORKSPACE_DIR="${DEV_WORKSPACE_DIR}"
-    export WAFFLEBOT_CONFIG_PATH="${DEV_CONFIG_PATH}"
-    export WAFFLEBOT_OPENCODE_DIRECTORY="${DEV_WORKSPACE_DIR}"
+    export PORT="${AGENT_MOCKINGBIRD_PORT}"
+    export AGENT_MOCKINGBIRD_DB_PATH="${DEV_DB_PATH}"
+    export AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR="${DEV_WORKSPACE_DIR}"
+    export AGENT_MOCKINGBIRD_CONFIG_PATH="${DEV_CONFIG_PATH}"
+    export AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY="${DEV_WORKSPACE_DIR}"
     exec bun --hot src/index.ts
   ) &
-  WAFFLEBOT_PID=$!
+  AGENT_MOCKINGBIRD_PID=$!
 
-  if ! wait_for_http "${WAFFLEBOT_URL}/api/health" "wafflebot"; then
-    echo "Wafflebot failed readiness check."
+  if ! wait_for_http "${AGENT_MOCKINGBIRD_URL}/api/health" "agent-mockingbird"; then
+    echo "Agent Mockingbird failed readiness check."
     exit 1
   fi
 fi
 
 echo "[stack] ready"
 echo "[stack] opencode: ${OPENCODE_URL}"
-echo "[stack] wafflebot: ${WAFFLEBOT_URL}"
+echo "[stack] agent-mockingbird: ${AGENT_MOCKINGBIRD_URL}"
 echo "[stack] workspace: ${DEV_WORKSPACE_DIR}"
 echo "[stack] config: ${DEV_CONFIG_PATH}"
 echo "[stack] press Ctrl+C to stop both"
 
-if [[ -n "${WAFFLEBOT_PID}" ]]; then
-  wait "${WAFFLEBOT_PID}"
+if [[ -n "${AGENT_MOCKINGBIRD_PID}" ]]; then
+  wait "${AGENT_MOCKINGBIRD_PID}"
 elif [[ -n "${OPENCODE_PID}" ]]; then
   wait "${OPENCODE_PID}"
 else

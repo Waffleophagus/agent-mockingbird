@@ -20,7 +20,7 @@ import type {
   QuestionPromptRequest,
   SessionSummary,
   UsageSnapshot,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 interface UseSessionScreenBootstrapInput {
   loadedSessionsRef: MutableRefObject<Set<string>>;

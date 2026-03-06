@@ -96,7 +96,7 @@ function renderSignalMentions(message: string, mentions?: Array<{ uuid?: string;
 }
 
 function buildPairingMessage(code: string) {
-  return `Pairing required. Reply is blocked until approved.\nCode: ${code}\nApprove in Wafflebot API or dashboard.`;
+  return `Pairing required. Reply is blocked until approved.\nCode: ${code}\nApprove in Agent Mockingbird API or dashboard.`;
 }
 
 function messageIncludesMention(content: string, mentionRegexes: Array<RegExp>) {

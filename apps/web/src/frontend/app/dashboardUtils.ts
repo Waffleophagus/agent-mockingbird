@@ -1,5 +1,5 @@
-import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft } from "@wafflebot/contracts/agentTypes";
-import type { AgentTypeDefinition, BackgroundRunSnapshot, SessionSummary } from "@wafflebot/contracts/dashboard";
+import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft } from "@agent-mockingbird/contracts/agentTypes";
+import type { AgentTypeDefinition, BackgroundRunSnapshot, SessionSummary } from "@agent-mockingbird/contracts/dashboard";
 
 export const RUN_POLL_INTERVAL_MS = 350;
 export const DEFAULT_RUN_WAIT_TIMEOUT_MS = 180_000;

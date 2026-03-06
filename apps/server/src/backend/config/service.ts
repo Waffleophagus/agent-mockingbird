@@ -3,7 +3,7 @@ import {
   evaluateConfigPolicyForPatch,
   evaluateConfigPolicyForReplace,
 } from "./policy";
-import type { WafflebotConfig } from "./schema";
+import type { AgentMockingbirdConfig } from "./schema";
 import { runSemanticValidation } from "./semantic";
 import { runSmokeTest } from "./smoke";
 import {
@@ -31,14 +31,14 @@ export {
   type ConfigPolicySummary,
   type ConfigSemanticSummary,
   type ConfigSmokeTestSummary,
-  type WafflebotConfigSnapshot,
+  type AgentMockingbirdConfigSnapshot,
 } from "./types";
 
 async function applyCandidateConfig(
   input: {
     currentPath: string;
-    currentConfig: WafflebotConfig;
-    candidate: WafflebotConfig;
+    currentConfig: AgentMockingbirdConfig;
+    candidate: AgentMockingbirdConfig;
     runSmokeValidation: boolean;
     autoRollbackOnFailure: boolean;
   },

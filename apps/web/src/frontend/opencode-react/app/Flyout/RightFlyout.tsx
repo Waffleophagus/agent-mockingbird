@@ -12,7 +12,7 @@ import type {
   MemoryWriteEvent,
   SessionSummary,
   UsageSnapshot,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 export interface RightFlyoutProps {
   activeSession?: SessionSummary;

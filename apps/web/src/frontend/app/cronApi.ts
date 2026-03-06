@@ -5,7 +5,7 @@ import type {
   CronJobPatchInput,
   CronJobStep,
   CronHealthSnapshot,
-} from "@wafflebot/contracts/cron";
+} from "@agent-mockingbird/contracts/cron";
 
 interface CronJobsResponse {
   jobs: CronJobDefinition[];

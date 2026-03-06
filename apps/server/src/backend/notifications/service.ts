@@ -19,7 +19,7 @@ function buildMessagesForEvent(event: RuntimeEvent): ExpoPushMessage[] {
     if (!body) return [];
     return devices.map(device => ({
       to: device.expoPushToken,
-      title: "Wafflebot replied",
+      title: "Agent Mockingbird replied",
       body: body.slice(0, 180),
       data: {
         eventType: event.type,
@@ -63,7 +63,7 @@ export class NotificationService {
     if (messages.length === 0) return;
 
     try {
-      const response = await fetch(env.WAFFLEBOT_EXPO_PUSH_API_URL, {
+      const response = await fetch(env.AGENT_MOCKINGBIRD_EXPO_PUSH_API_URL, {
         method: "POST",
         headers: {
           "content-type": "application/json",

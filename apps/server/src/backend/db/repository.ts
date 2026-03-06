@@ -9,7 +9,7 @@ import type {
   MessageMemoryTrace,
   SessionSummary,
   UsageSnapshot,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 import { toLegacySpecialistAgent } from "../agents/service";
 import { getConfig as getManagedConfig } from "../config/service";
 import { clearCronTables } from "../cron/storage";

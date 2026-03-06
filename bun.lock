@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "wafflebot",
+      "name": "agent-mockingbird",
       "devDependencies": {
         "@eslint/js": "^9.39.3",
         "@types/bun": "latest",
@@ -22,13 +22,13 @@
       },
     },
     "apps/mobile": {
-      "name": "@wafflebot/mobile",
+      "name": "@agent-mockingbird/mobile",
       "version": "0.0.1",
       "dependencies": {
         "@expo/vector-icons": "~14.1.0",
-        "@wafflebot/api": "workspace:*",
-        "@wafflebot/app-core": "workspace:*",
-        "@wafflebot/contracts": "workspace:*",
+        "@agent-mockingbird/api": "workspace:*",
+        "@agent-mockingbird/app-core": "workspace:*",
+        "@agent-mockingbird/contracts": "workspace:*",
         "expo": "~54.0.0",
         "expo-constants": "~17.1.0",
         "expo-dev-client": "~6.0.10",
@@ -56,15 +56,15 @@
       },
     },
     "apps/server": {
-      "name": "@wafflebot/server",
+      "name": "@agent-mockingbird/server",
       "version": "0.0.1",
       "dependencies": {
         "@opencode-ai/plugin": "^1.2.15",
         "@opencode-ai/sdk": "^1.2.15",
         "@t3-oss/env-core": "^0.13.10",
         "@trpc/server": "^11.7.1",
-        "@wafflebot/api": "workspace:*",
-        "@wafflebot/contracts": "workspace:*",
+        "@agent-mockingbird/api": "workspace:*",
+        "@agent-mockingbird/contracts": "workspace:*",
         "cron": "^4.4.0",
         "drizzle-orm": "^0.45.1",
         "jsonc-parser": "^3.3.1",
@@ -73,12 +73,12 @@
       },
     },
     "apps/web": {
-      "name": "@wafflebot/web",
+      "name": "@agent-mockingbird/web",
       "version": "0.0.1",
       "dependencies": {
         "@base-ui/react": "^1.2.0",
         "@streamdown/code": "^1.0.3",
-        "@wafflebot/contracts": "workspace:*",
+        "@agent-mockingbird/contracts": "workspace:*",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "lucide-react": "^0.564.0",
@@ -91,37 +91,37 @@
       },
     },
     "packages/api": {
-      "name": "@wafflebot/api",
+      "name": "@agent-mockingbird/api",
       "version": "0.0.1",
       "dependencies": {
         "@trpc/client": "^11.7.1",
         "@trpc/server": "^11.7.1",
-        "@wafflebot/contracts": "workspace:*",
+        "@agent-mockingbird/contracts": "workspace:*",
         "zod": "^4.3.6",
       },
     },
     "packages/app-core": {
-      "name": "@wafflebot/app-core",
+      "name": "@agent-mockingbird/app-core",
       "version": "0.0.1",
       "dependencies": {
-        "@wafflebot/api": "workspace:*",
-        "@wafflebot/contracts": "workspace:*",
+        "@agent-mockingbird/api": "workspace:*",
+        "@agent-mockingbird/contracts": "workspace:*",
         "mobx": "^6.13.7",
         "mobx-state-tree": "^7.0.2",
       },
     },
     "packages/contracts": {
-      "name": "@wafflebot/contracts",
+      "name": "@agent-mockingbird/contracts",
       "version": "0.0.1",
       "dependencies": {
         "zod": "^4.3.6",
       },
     },
-    "packages/wafflebot-installer": {
-      "name": "@waffleophagus/wafflebot-installer",
+    "packages/agent-mockingbird-installer": {
+      "name": "@waffleophagus/agent-mockingbird-installer",
       "version": "0.0.1",
       "bin": {
-        "wafflebot-installer": "bin/wafflebot-installer.mjs",
+        "agent-mockingbird-installer": "bin/agent-mockingbird-installer.mjs",
       },
     },
   },
@@ -808,19 +808,19 @@
 
     "@urql/exchange-retry": ["@urql/exchange-retry@1.2.0", "", { "dependencies": { "@urql/core": ">=4.0.0", "wonka": "^6.3.2" } }, "sha512-1O/biKiVhhn0EtvDF4UOvz325K4RrLupfL8rHcmqD2TBLv4qVDWQuzx4JGa1FfqjjRb+C9TNZ6w19f32Mq85Ug=="],
 
-    "@wafflebot/api": ["@wafflebot/api@workspace:packages/api"],
+    "@agent-mockingbird/api": ["@agent-mockingbird/api@workspace:packages/api"],
 
-    "@wafflebot/app-core": ["@wafflebot/app-core@workspace:packages/app-core"],
+    "@agent-mockingbird/app-core": ["@agent-mockingbird/app-core@workspace:packages/app-core"],
 
-    "@wafflebot/contracts": ["@wafflebot/contracts@workspace:packages/contracts"],
+    "@agent-mockingbird/contracts": ["@agent-mockingbird/contracts@workspace:packages/contracts"],
 
-    "@wafflebot/mobile": ["@wafflebot/mobile@workspace:apps/mobile"],
+    "@agent-mockingbird/mobile": ["@agent-mockingbird/mobile@workspace:apps/mobile"],
 
-    "@wafflebot/server": ["@wafflebot/server@workspace:apps/server"],
+    "@agent-mockingbird/server": ["@agent-mockingbird/server@workspace:apps/server"],
 
-    "@wafflebot/web": ["@wafflebot/web@workspace:apps/web"],
+    "@agent-mockingbird/web": ["@agent-mockingbird/web@workspace:apps/web"],
 
-    "@waffleophagus/wafflebot-installer": ["@waffleophagus/wafflebot-installer@workspace:packages/wafflebot-installer"],
+    "@waffleophagus/agent-mockingbird-installer": ["@waffleophagus/agent-mockingbird-installer@workspace:packages/agent-mockingbird-installer"],
 
     "@xmldom/xmldom": ["@xmldom/xmldom@0.7.13", "", {}, "sha512-lm2GW5PkosIzccsaZIz7tp8cPADSIlIHWDFTR1N0SzfinhhYgeIQjFMz4rYzanCScr3DqQLeomUDArp6MWKm+g=="],
 
@@ -2806,11 +2806,11 @@
 
     "@urql/exchange-retry/@urql/core": ["@urql/core@5.2.0", "", { "dependencies": { "@0no-co/graphql.web": "^1.0.13", "wonka": "^6.3.2" } }, "sha512-/n0ieD0mvvDnVAXEQgX/7qJiVcvYvNkOHeBvkwtylfjydar123caCXcl58PXFY11oU1oquJocVXHxLAbtv4x1A=="],
 
-    "@wafflebot/mobile/@types/react": ["@types/react@19.1.17", "", { "dependencies": { "csstype": "^3.0.2" } }, "sha512-Qec1E3mhALmaspIrhWt9jkQMNdw6bReVu64mjvhbhq2NFPftLPVr+l1SZgmw/66WwBNpDh7ao5AT6gF5v41PFA=="],
+    "@agent-mockingbird/mobile/@types/react": ["@types/react@19.1.17", "", { "dependencies": { "csstype": "^3.0.2" } }, "sha512-Qec1E3mhALmaspIrhWt9jkQMNdw6bReVu64mjvhbhq2NFPftLPVr+l1SZgmw/66WwBNpDh7ao5AT6gF5v41PFA=="],
 
-    "@wafflebot/web/react": ["react@19.2.4", "", {}, "sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ=="],
+    "@agent-mockingbird/web/react": ["react@19.2.4", "", {}, "sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ=="],
 
-    "@wafflebot/web/tailwindcss": ["tailwindcss@4.2.1", "", {}, "sha512-/tBrSQ36vCleJkAOsy9kbNTgaxvGbyOamC30PRePTQe/o1MFwEKHQk4Cn7BNGaPtjp+PuUrByJehM1hgxfq4sw=="],
+    "@agent-mockingbird/web/tailwindcss": ["tailwindcss@4.2.1", "", {}, "sha512-/tBrSQ36vCleJkAOsy9kbNTgaxvGbyOamC30PRePTQe/o1MFwEKHQk4Cn7BNGaPtjp+PuUrByJehM1hgxfq4sw=="],
 
     "ajv-formats/ajv": ["ajv@8.11.0", "", { "dependencies": { "fast-deep-equal": "^3.1.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2", "uri-js": "^4.2.2" } }, "sha512-wGgprdCvMalC0BztXvitD2hC04YffAvtsUn93JbGXYLAtCUO4xd17mCCZQxUOItiBwZvJScWo8NIvQMQ71rdpg=="],
 

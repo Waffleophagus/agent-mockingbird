@@ -10,7 +10,7 @@ import type {
   QuestionPromptRequest,
   SessionScreenBootstrapResponse,
   SessionSummary,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 export interface AppApiServices {
   getSessionBootstrap: (input?: { sessionId?: string }) => Promise<SessionScreenBootstrapResponse>;

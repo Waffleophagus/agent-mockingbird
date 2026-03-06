@@ -14,7 +14,7 @@ console.log("Building standalone binary...");
 const result = await Bun.build({
   entrypoints: [path.join(repoRoot, "apps/server/src/index.ts")],
   compile: {
-    outfile: path.join(repoRoot, "dist/wafflebot"),
+    outfile: path.join(repoRoot, "dist/agent-mockingbird"),
   },
   minify: true,
   sourcemap: "linked",
@@ -30,5 +30,5 @@ if (!result.success) {
 console.log("Copying migrations...");
 cpSync(path.join(repoRoot, "drizzle"), path.join(outdir, "drizzle"), { recursive: true });
 
-console.log(`Build complete: ${outdir}/wafflebot`);
+console.log(`Build complete: ${outdir}/agent-mockingbird`);
 console.log("\nTo deploy, copy the entire 'dist' folder to your target location.");

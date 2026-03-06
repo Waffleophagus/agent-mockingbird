@@ -37,7 +37,7 @@ import type {
   QuestionPromptRequest,
   SessionSummary,
   UsageSnapshot,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 type ConfigPanelTab = "usage" | "memory" | "background";
 

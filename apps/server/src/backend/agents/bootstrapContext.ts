@@ -2,7 +2,7 @@ import { parse as parseJsonc } from "jsonc-parser";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-import type { WafflebotConfig } from "../config/schema";
+import type { AgentMockingbirdConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
@@ -83,11 +83,11 @@ export interface ImportedOpenclawBootstrap {
   skippedExisting: Array<{ name: BootstrapFileName; targetPath: string }>;
 }
 
-function resolveWorkspaceDir(config: WafflebotConfig): string {
+function resolveWorkspaceDir(config: AgentMockingbirdConfig): string {
   return resolveOpencodeWorkspaceDir(config);
 }
 
-function resolveBootstrapConfig(config: WafflebotConfig): BootstrapConfig {
+function resolveBootstrapConfig(config: AgentMockingbirdConfig): BootstrapConfig {
   const source = config.runtime.opencode.bootstrap;
   return {
     enabled: source.enabled === true,
@@ -147,7 +147,7 @@ function identityHasValues(identity: WorkspaceIdentityProfile): boolean {
   );
 }
 
-export function loadWorkspaceIdentityProfile(config: WafflebotConfig = getConfigSnapshot().config) {
+export function loadWorkspaceIdentityProfile(config: AgentMockingbirdConfig = getConfigSnapshot().config) {
   const workspaceDir = resolveWorkspaceDir(config);
   const identityPath = path.join(workspaceDir, "IDENTITY.md");
   if (!existsSync(identityPath)) return null;
@@ -195,12 +195,12 @@ function trimBootstrapContent(content: string, fileName: string, maxChars: numbe
   };
 }
 
-function resolveOpencodeConfigFilePath(config: WafflebotConfig): string {
+function resolveOpencodeConfigFilePath(config: AgentMockingbirdConfig): string {
   const workspaceDir = resolveWorkspaceDir(config);
   return path.join(workspaceDir, ".opencode", "opencode.jsonc");
 }
 
-function resolveAgentRuntimeDetails(config: WafflebotConfig, agentId: string): AgentRuntimeDetails | null {
+function resolveAgentRuntimeDetails(config: AgentMockingbirdConfig, agentId: string): AgentRuntimeDetails | null {
   const trimmedId = agentId.trim();
   if (!trimmedId) return null;
   const configPath = resolveOpencodeConfigFilePath(config);
@@ -246,7 +246,7 @@ export function importOpenclawBootstrapFromDirectory(input: {
   sourceDirectory: string;
   overwrite?: boolean;
   files?: unknown;
-  config?: WafflebotConfig;
+  config?: AgentMockingbirdConfig;
 }): ImportedOpenclawBootstrap {
   const sourceDirectory = path.resolve(input.sourceDirectory.trim());
   const sourceStats = statSync(sourceDirectory);
@@ -288,7 +288,7 @@ export function importOpenclawBootstrapFromDirectory(input: {
 
 export function buildWorkspaceBootstrapPromptContext(input?: {
   agentId?: string;
-  config?: WafflebotConfig;
+  config?: AgentMockingbirdConfig;
 }): WorkspaceBootstrapPromptContext {
   const config = input?.config ?? getConfigSnapshot().config;
   const workspaceDir = resolveWorkspaceDir(config);

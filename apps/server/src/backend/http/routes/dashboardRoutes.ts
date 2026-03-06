@@ -113,7 +113,7 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
         const workspaceAlignment = resolveWorkspaceAlignment(snapshot.config);
         return Response.json({
           configAuthority: {
-            source: "wafflebot-config-json",
+            source: "agent-mockingbird-config-json",
             path: snapshot.path,
             hash: snapshot.hash,
           },
@@ -123,7 +123,7 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
             effectiveConfigPath: storage.configFilePath,
             persistenceMode: storage.persistenceMode,
             projection: {
-              source: "wafflebot-config-json",
+              source: "agent-mockingbird-config-json",
               syncs: ["small_model", "skills.paths", "mcp", "agent"],
             },
             identity: bootstrap.identity,

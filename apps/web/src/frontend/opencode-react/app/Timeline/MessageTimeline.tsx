@@ -12,7 +12,7 @@ import {
   shouldHideMirroredAssistantContent,
 } from "@/frontend/app/chatHelpers";
 import { MarkdownMessage } from "@/frontend/app/components/MarkdownMessage";
-import type { BackgroundRunSnapshot, ChatMessagePart } from "@wafflebot/contracts/dashboard";
+import type { BackgroundRunSnapshot, ChatMessagePart } from "@agent-mockingbird/contracts/dashboard";
 
 function stringifyToolInput(input: Record<string, unknown> | undefined): string {
   if (!input) return "";

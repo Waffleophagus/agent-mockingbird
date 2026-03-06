@@ -5,12 +5,12 @@ import {
   normalizeAgentTypeList,
   normalizeAgentTypeMode,
   normalizeLegacySpecialistAgents,
-} from "@wafflebot/contracts/agentTypes";
-import type { RuntimeAgent, SpecialistAgent } from "@wafflebot/contracts/dashboard";
-import type { AgentTypeDefinition, WafflebotConfig } from "../config/schema";
+} from "@agent-mockingbird/contracts/agentTypes";
+import type { RuntimeAgent, SpecialistAgent } from "@agent-mockingbird/contracts/dashboard";
+import type { AgentTypeDefinition, AgentMockingbirdConfig } from "../config/schema";
 import { createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";
 
-const WAFFLEBOT_AGENT_MANAGED_FLAG = "wafflebotManaged";
+const AGENT_MOCKINGBIRD_AGENT_MANAGED_FLAG = "agentMockingbirdManaged";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -28,7 +28,7 @@ export function normalizeConfiguredAgents(agents: Array<SpecialistAgent>) {
   return normalizeLegacySpecialistAgents(agents) as SpecialistAgent[];
 }
 
-export function resolveConfiguredAgentIds(config: WafflebotConfig) {
+export function resolveConfiguredAgentIds(config: AgentMockingbirdConfig) {
   return normalizeConfiguredAgentTypes(config.ui.agentTypes).map(agent => agent.id);
 }
 
@@ -45,14 +45,14 @@ export function resolveConfiguredAgentTypesFromLegacyAgents(agents: Array<Specia
   return normalizeConfiguredAgentTypes(normalizedAgents.map(agent => legacySpecialistToAgentType(agent) as AgentTypeDefinition));
 }
 
-function createAgentClient(config: WafflebotConfig) {
+function createAgentClient(config: AgentMockingbirdConfig) {
   return createOpencodeV2ClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
     directory: config.runtime.opencode.directory,
   });
 }
 
-export async function listRuntimeAgents(config: WafflebotConfig): Promise<RuntimeAgent[]> {
+export async function listRuntimeAgents(config: AgentMockingbirdConfig): Promise<RuntimeAgent[]> {
   const client = createAgentClient(config);
   const payload = unwrapSdkData<Array<Record<string, unknown>>>(
     await client.app.agents(undefined, {
@@ -96,7 +96,7 @@ function isManagedRuntimeAgentConfig(value: unknown) {
   if (!isPlainObject(value)) return false;
   const options = value.options;
   if (!isPlainObject(options)) return false;
-  return options[WAFFLEBOT_AGENT_MANAGED_FLAG] === true;
+  return options[AGENT_MOCKINGBIRD_AGENT_MANAGED_FLAG] === true;
 }
 
 function toRuntimeAgentConfig(agent: AgentTypeDefinition, previous?: Record<string, unknown>) {
@@ -117,9 +117,9 @@ function toRuntimeAgentConfig(agent: AgentTypeDefinition, previous?: Record<stri
     hidden: normalizedAgent.hidden === true,
     options: {
       ...currentOptions,
-      [WAFFLEBOT_AGENT_MANAGED_FLAG]: true,
+      [AGENT_MOCKINGBIRD_AGENT_MANAGED_FLAG]: true,
       ...(isPlainObject(normalizedAgent.options) ? normalizedAgent.options : {}),
-      wafflebotDisplayName: normalizedAgent.name ?? normalizedAgent.id,
+      agentMockingbirdDisplayName: normalizedAgent.name ?? normalizedAgent.id,
     },
   };
 }

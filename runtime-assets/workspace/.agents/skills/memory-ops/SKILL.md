@@ -1,11 +1,11 @@
 ---
 name: memory-ops
-description: Use Wafflebot memory effectively for persistent context across sessions.
+description: Use Agent Mockingbird memory effectively for persistent context across sessions.
 ---
 
 # memory-ops
 
-Use Wafflebot memory effectively for persistent context across sessions.
+Use Agent Mockingbird memory effectively for persistent context across sessions.
 
 ## Memory Tools
 

@@ -6,10 +6,10 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-APP_USER="${WAFFLEBOT_USER:-wafflebot}"
-APP_GROUP="${WAFFLEBOT_GROUP:-${APP_USER}}"
-APP_DIR="${WAFFLEBOT_APP_DIR:-/srv/wafflebot/app}"
-DATA_DIR="${WAFFLEBOT_DATA_DIR:-/var/lib/wafflebot}"
+APP_USER="${AGENT_MOCKINGBIRD_USER:-agent-mockingbird}"
+APP_GROUP="${AGENT_MOCKINGBIRD_GROUP:-${APP_USER}}"
+APP_DIR="${AGENT_MOCKINGBIRD_APP_DIR:-/srv/agent-mockingbird/app}"
+DATA_DIR="${AGENT_MOCKINGBIRD_DATA_DIR:-/var/lib/agent-mockingbird}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UNIT_DIR="/etc/systemd/system"
 TMP_DIR="$(mktemp -d)"
@@ -61,24 +61,24 @@ render_unit() {
     -e "s|^User=.*$|User=${APP_USER}|" \
     -e "s|^Group=.*$|Group=${APP_GROUP}|" \
     -e "s|^WorkingDirectory=.*$|WorkingDirectory=${APP_DIR}|" \
-    -e "s|/srv/wafflebot/app|${APP_DIR}|g" \
-    -e "s|/var/lib/wafflebot|${DATA_DIR}|g" \
+    -e "s|/srv/agent-mockingbird/app|${APP_DIR}|g" \
+    -e "s|/var/lib/agent-mockingbird|${DATA_DIR}|g" \
     "${src}" > "${dst}"
 }
 
 render_unit "${APP_DIR}/deploy/systemd/opencode.service" "${TMP_DIR}/opencode.service"
-render_unit "${APP_DIR}/deploy/systemd/wafflebot.service" "${TMP_DIR}/wafflebot.service"
+render_unit "${APP_DIR}/deploy/systemd/agent-mockingbird.service" "${TMP_DIR}/agent-mockingbird.service"
 
 install -m 0644 "${TMP_DIR}/opencode.service" "${UNIT_DIR}/opencode.service"
-install -m 0644 "${TMP_DIR}/wafflebot.service" "${UNIT_DIR}/wafflebot.service"
+install -m 0644 "${TMP_DIR}/agent-mockingbird.service" "${UNIT_DIR}/agent-mockingbird.service"
 
 systemctl daemon-reload
-systemctl enable --now opencode.service wafflebot.service
+systemctl enable --now opencode.service agent-mockingbird.service
 
-echo "Installed wafflebot with systemd services:"
+echo "Installed agent-mockingbird with systemd services:"
 echo "  opencode.service"
-echo "  wafflebot.service"
+echo "  agent-mockingbird.service"
 echo
 echo "Health checks:"
 echo "  curl -sS http://127.0.0.1:3001/api/health"
-echo "  systemctl status wafflebot.service --no-pager"
+echo "  systemctl status agent-mockingbird.service --no-pager"

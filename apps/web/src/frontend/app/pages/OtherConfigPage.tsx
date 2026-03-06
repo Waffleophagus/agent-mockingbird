@@ -1,7 +1,7 @@
 import { ChevronsUpDown, RefreshCcw, Save, Settings2, Trash2 } from "lucide-react";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, RefObject, SetStateAction } from "react";
 
-import type { ModelOption } from "@wafflebot/contracts/dashboard";
+import type { ModelOption } from "@agent-mockingbird/contracts/dashboard";
 
 interface OtherConfigPageProps {
   refreshOtherConfig: () => Promise<void>;

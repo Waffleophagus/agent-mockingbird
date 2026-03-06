@@ -1,9 +1,9 @@
 import { tool } from "@opencode-ai/plugin";
 
 function resolveApiBaseUrl() {
-  const explicit = process.env.WAFFLEBOT_MEMORY_API_BASE_URL?.trim();
+  const explicit = process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  const port = process.env.WAFFLEBOT_PORT?.trim() || process.env.PORT?.trim() || "3001";
+  const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001";
   return `http://127.0.0.1:${port}`;
 }
 

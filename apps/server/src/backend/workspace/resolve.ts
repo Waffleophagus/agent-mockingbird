@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { WafflebotConfig } from "../config/schema";
+import type { AgentMockingbirdConfig } from "../config/schema";
 import { getBinaryDir } from "../paths";
 
 function resolvePathFromBinaryRoot(dirPath: string) {
@@ -8,17 +8,17 @@ function resolvePathFromBinaryRoot(dirPath: string) {
   return path.resolve(getBinaryDir(), dirPath);
 }
 
-export function resolveMemoryWorkspaceDir(config: WafflebotConfig) {
+export function resolveMemoryWorkspaceDir(config: AgentMockingbirdConfig) {
   return resolvePathFromBinaryRoot(config.runtime.memory.workspaceDir.trim());
 }
 
-export function resolveOpencodeWorkspaceDir(config: WafflebotConfig) {
+export function resolveOpencodeWorkspaceDir(config: AgentMockingbirdConfig) {
   const configured = config.runtime.opencode.directory?.trim();
   if (configured) return resolvePathFromBinaryRoot(configured);
   return resolveMemoryWorkspaceDir(config);
 }
 
-export function resolveWorkspaceAlignment(config: WafflebotConfig) {
+export function resolveWorkspaceAlignment(config: AgentMockingbirdConfig) {
   const memoryWorkspaceDir = resolveMemoryWorkspaceDir(config);
   const opencodeConfigured = config.runtime.opencode.directory?.trim();
   const opencodeWorkspaceDir = opencodeConfigured

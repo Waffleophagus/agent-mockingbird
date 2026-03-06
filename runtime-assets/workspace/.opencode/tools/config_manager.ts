@@ -2,13 +2,13 @@ import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 
 function resolveApiBaseUrl() {
-  const explicit = process.env.WAFFLEBOT_CONFIG_API_BASE_URL?.trim();
+  const explicit = process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  const memoryAlias = process.env.WAFFLEBOT_MEMORY_API_BASE_URL?.trim();
+  const memoryAlias = process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim();
   if (memoryAlias) return memoryAlias.replace(/\/+$/, "");
-  const cronAlias = process.env.WAFFLEBOT_CRON_API_BASE_URL?.trim();
+  const cronAlias = process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL?.trim();
   if (cronAlias) return cronAlias.replace(/\/+$/, "");
-  const port = process.env.WAFFLEBOT_PORT?.trim() || process.env.PORT?.trim() || "3001";
+  const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001";
   return `http://127.0.0.1:${port}`;
 }
 
@@ -40,7 +40,7 @@ const argsSchema = z.discriminatedUnion("action", [
 
 export default tool({
   description:
-    "Read or update Wafflebot managed config through validated APIs with hash conflict detection and optional smoke tests.",
+    "Read or update Agent Mockingbird managed config through validated APIs with hash conflict detection and optional smoke tests.",
   args: {
     action: tool.schema.enum(["get_config", "patch_config", "replace_config"]),
     patch: tool.schema.unknown().optional(),

@@ -13,11 +13,11 @@ const DEFAULT_SCOPE = "waffleophagus";
 const DEFAULT_REGISTRY_URL = "https://git.waffleophagus.com/api/packages/waffleophagus/npm/";
 const PUBLIC_NPM_REGISTRY = "https://registry.npmjs.org/";
 const DEFAULT_TAG = "latest";
-const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".wafflebot");
+const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".agent-mockingbird");
 const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
 const UNIT_OPENCODE = "opencode.service";
-const UNIT_WAFFLEBOT = "wafflebot.service";
-const WAFFLEBOT_API_BASE_URL = "http://127.0.0.1:3001";
+const UNIT_AGENT_MOCKINGBIRD = "agent-mockingbird.service";
+const AGENT_MOCKINGBIRD_API_BASE_URL = "http://127.0.0.1:3001";
 const DEFAULT_ENABLED_SKILLS = ["config-editor", "config-auditor", "runtime-diagnose", "memory-ops"];
 
 const ANSI = {
@@ -173,7 +173,7 @@ function normalizeRegistryUrl(url) {
 }
 
 function printHelp() {
-  console.log(`wafflebot\n\nUsage:\n  wafflebot <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact wafflebot version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+  console.log(`agent-mockingbird\n\nUsage:\n  agent-mockingbird <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact agent-mockingbird version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
 }
 
 function colorEnabled() {
@@ -282,8 +282,8 @@ async function promptRuntimeAssetConflictDecision(conflict) {
   }
 }
 
-function prepareRuntimeAssetsSourceDir(wafflebotAppDir) {
-  const packagedRuntimeAssetsDir = path.join(wafflebotAppDir, "runtime-assets", "workspace");
+function prepareRuntimeAssetsSourceDir(agentMockingbirdAppDir) {
+  const packagedRuntimeAssetsDir = path.join(agentMockingbirdAppDir, "runtime-assets", "workspace");
   if (fs.existsSync(packagedRuntimeAssetsDir)) {
     return {
       sourceDir: packagedRuntimeAssetsDir,
@@ -292,14 +292,14 @@ function prepareRuntimeAssetsSourceDir(wafflebotAppDir) {
     };
   }
 
-  const legacySkillsDir = path.join(wafflebotAppDir, ".agents", "skills");
+  const legacySkillsDir = path.join(agentMockingbirdAppDir, ".agents", "skills");
   if (!fs.existsSync(legacySkillsDir)) {
     throw new Error(
       `runtime assets missing in package: expected ${packagedRuntimeAssetsDir} (or legacy fallback ${legacySkillsDir})`,
     );
   }
 
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wafflebot-runtime-assets-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-runtime-assets-"));
   const tempSourceDir = path.join(tempDir, "workspace");
   const tempSkillsDir = path.join(tempSourceDir, ".agents", "skills");
   ensureDir(path.dirname(tempSkillsDir));
@@ -307,7 +307,7 @@ function prepareRuntimeAssetsSourceDir(wafflebotAppDir) {
   writeFile(
     path.join(tempSourceDir, "AGENTS.md"),
     [
-      "# Wafflebot Runtime Agent Guide",
+      "# Agent Mockingbird Runtime Agent Guide",
       "",
       "This workspace was initialized from legacy packaged skills fallback.",
       "Prefer configured skills in `.agents/skills` and follow direct user instructions.",
@@ -332,7 +332,7 @@ async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
 
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
-      const skillsResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/skills`, { method: "GET" });
+      const skillsResponse = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills`, { method: "GET" });
       if (!skillsResponse.ok) {
         throw new Error(`GET /api/config/skills failed (${skillsResponse.status})`);
       }
@@ -349,7 +349,7 @@ async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
         };
       }
 
-      const catalogResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/skills/catalog`, { method: "GET" });
+      const catalogResponse = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills/catalog`, { method: "GET" });
       if (!catalogResponse.ok) {
         throw new Error(`GET /api/config/skills/catalog failed (${catalogResponse.status})`);
       }
@@ -371,7 +371,7 @@ async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
 
       const expectedHash = typeof payload?.hash === "string" ? payload.hash.trim() : "";
 
-      const updateResponse = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/skills`, {
+      const updateResponse = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -431,24 +431,24 @@ function pathsFor(rootDir, scope) {
     rootDir,
     npmPrefix,
     localBinDir,
-    wafflebotShimPath: path.join(localBinDir, "wafflebot"),
+    agentMockingbirdShimPath: path.join(localBinDir, "agent-mockingbird"),
     opencodeShimPath: path.join(localBinDir, "opencode"),
     dataDir: path.join(rootDir, "data"),
     workspaceDir: path.join(rootDir, "workspace"),
     logsDir: path.join(rootDir, "logs"),
     etcDir: path.join(rootDir, "etc"),
     npmrcPath: path.join(rootDir, "etc", "npmrc"),
-    wafflebotAppDirGlobal: path.join(npmPrefix, "lib", "node_modules", `@${normalizedScope}`, "wafflebot"),
-    wafflebotAppDirLocal: path.join(npmPrefix, "node_modules", `@${normalizedScope}`, "wafflebot"),
-    wafflebotBinGlobal: path.join(npmPrefix, "bin", "wafflebot"),
-    wafflebotBinLocal: path.join(npmPrefix, "node_modules", ".bin", "wafflebot"),
+    agentMockingbirdAppDirGlobal: path.join(npmPrefix, "lib", "node_modules", `@${normalizedScope}`, "agent-mockingbird"),
+    agentMockingbirdAppDirLocal: path.join(npmPrefix, "node_modules", `@${normalizedScope}`, "agent-mockingbird"),
+    agentMockingbirdBinGlobal: path.join(npmPrefix, "bin", "agent-mockingbird"),
+    agentMockingbirdBinLocal: path.join(npmPrefix, "node_modules", ".bin", "agent-mockingbird"),
     opencodeBinGlobal: path.join(npmPrefix, "bin", "opencode"),
     opencodeBinLocal: path.join(npmPrefix, "node_modules", ".bin", "opencode"),
     bunBinManagedGlobal: path.join(npmPrefix, "bin", "bun"),
     bunBinManagedLocal: path.join(npmPrefix, "node_modules", ".bin", "bun"),
     bunBinTools: path.join(rootDir, "tools", "bun", "bin", "bun"),
     opencodeUnitPath: path.join(USER_UNIT_DIR, UNIT_OPENCODE),
-    wafflebotUnitPath: path.join(USER_UNIT_DIR, UNIT_WAFFLEBOT),
+    agentMockingbirdUnitPath: path.join(USER_UNIT_DIR, UNIT_AGENT_MOCKINGBIRD),
   };
 }
 
@@ -461,16 +461,16 @@ function firstExistingPath(candidates) {
   return null;
 }
 
-function resolveWafflebotAppDir(paths) {
-  return firstExistingPath([paths.wafflebotAppDirGlobal, paths.wafflebotAppDirLocal]);
+function resolveAgentMockingbirdAppDir(paths) {
+  return firstExistingPath([paths.agentMockingbirdAppDirGlobal, paths.agentMockingbirdAppDirLocal]);
 }
 
-function resolveWafflebotBin(paths) {
-  return firstExistingPath([paths.wafflebotBinGlobal, paths.wafflebotBinLocal]);
+function resolveAgentMockingbirdBin(paths) {
+  return firstExistingPath([paths.agentMockingbirdBinGlobal, paths.agentMockingbirdBinLocal]);
 }
 
-function resolveWafflebotServiceEntrypoint(wafflebotAppDir) {
-  const pkgPath = path.join(wafflebotAppDir, "package.json");
+function resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir) {
+  const pkgPath = path.join(agentMockingbirdAppDir, "package.json");
   const candidates = [];
   if (fs.existsSync(pkgPath)) {
     try {
@@ -488,7 +488,7 @@ function resolveWafflebotServiceEntrypoint(wafflebotAppDir) {
 
   candidates.push("src/index.ts", "src/index.js", "dist/index.js", "index.js");
   for (const relPath of candidates) {
-    const absolutePath = path.join(wafflebotAppDir, relPath);
+    const absolutePath = path.join(agentMockingbirdAppDir, relPath);
     if (fs.existsSync(absolutePath)) {
       return absolutePath;
     }
@@ -585,23 +585,23 @@ function ensureLocalBinPath(paths) {
   return { inPath: false, updatedFiles };
 }
 
-function writeWafflebotShim(paths, wafflebotBin) {
+function writeAgentMockingbirdShim(paths, agentMockingbirdBin) {
   ensureDir(paths.localBinDir);
   const shim = `#!/usr/bin/env bash
 set -euo pipefail
-# managed-by: wafflebot-installer
-exec "${wafflebotBin}" "$@"
+# managed-by: agent-mockingbird-installer
+exec "${agentMockingbirdBin}" "$@"
 `;
-  writeFile(paths.wafflebotShimPath, shim);
-  fs.chmodSync(paths.wafflebotShimPath, 0o755);
-  return paths.wafflebotShimPath;
+  writeFile(paths.agentMockingbirdShimPath, shim);
+  fs.chmodSync(paths.agentMockingbirdShimPath, 0o755);
+  return paths.agentMockingbirdShimPath;
 }
 
 function writeOpencodeShim(paths, opencodeBin) {
   ensureDir(paths.localBinDir);
   const shim = `#!/usr/bin/env bash
 set -euo pipefail
-# managed-by: wafflebot-installer
+# managed-by: agent-mockingbird-installer
 exec "${opencodeBin}" "$@"
 `;
   writeFile(paths.opencodeShimPath, shim);
@@ -609,15 +609,15 @@ exec "${opencodeBin}" "$@"
   return paths.opencodeShimPath;
 }
 
-function removeWafflebotShim(paths) {
-  if (!fs.existsSync(paths.wafflebotShimPath)) {
+function removeAgentMockingbirdShim(paths) {
+  if (!fs.existsSync(paths.agentMockingbirdShimPath)) {
     return false;
   }
-  const content = fs.readFileSync(paths.wafflebotShimPath, "utf8");
-  if (!content.includes("managed-by: wafflebot-installer")) {
+  const content = fs.readFileSync(paths.agentMockingbirdShimPath, "utf8");
+  if (!content.includes("managed-by: agent-mockingbird-installer")) {
     return false;
   }
-  fs.rmSync(paths.wafflebotShimPath, { force: true });
+  fs.rmSync(paths.agentMockingbirdShimPath, { force: true });
   return true;
 }
 
@@ -626,19 +626,19 @@ function removeOpencodeShim(paths) {
     return false;
   }
   const content = fs.readFileSync(paths.opencodeShimPath, "utf8");
-  if (!content.includes("managed-by: wafflebot-installer")) {
+  if (!content.includes("managed-by: agent-mockingbird-installer")) {
     return false;
   }
   fs.rmSync(paths.opencodeShimPath, { force: true });
   return true;
 }
 
-function unitContents(paths, bunBin, opencodeBin, wafflebotAppDir, wafflebotEntrypoint) {
-  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Wafflebot (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=WAFFLEBOT_PORT=3001\nEnvironment=WAFFLEBOT_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+function unitContents(paths, bunBin, opencodeBin, agentMockingbirdAppDir, agentMockingbirdEntrypoint) {
+  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const wafflebot = `[Unit]\nDescription=Wafflebot API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${wafflebotAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=WAFFLEBOT_CONFIG_PATH=${path.join(paths.dataDir, "wafflebot.config.json")}\nEnvironment=WAFFLEBOT_DB_PATH=${path.join(paths.dataDir, "wafflebot.db")}\nEnvironment=WAFFLEBOT_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=WAFFLEBOT_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nExecStart=${bunBin} ${wafflebotEntrypoint}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const agent-mockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${agentMockingbirdAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nExecStart=${bunBin} ${agentMockingbirdEntrypoint}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  return { opencode, wafflebot };
+  return { opencode, agent-mockingbird };
 }
 
 function ensureSystemdUserAvailable() {
@@ -704,15 +704,15 @@ async function healthCheckWithRetry(url, input = {}) {
 }
 
 function runPostInstallVerification() {
-  const wafflebotStatus = shell("systemctl", ["--user", "status", UNIT_WAFFLEBOT, "--no-pager"]);
+  const agentMockingbirdStatus = shell("systemctl", ["--user", "status", UNIT_AGENT_MOCKINGBIRD, "--no-pager"]);
   const opencodeStatus = shell("systemctl", ["--user", "status", UNIT_OPENCODE, "--no-pager"]);
   const linger = shell("loginctl", ["show-user", userName(), "-p", "Linger"]);
   return {
-    wafflebotServiceOk: wafflebotStatus.code === 0,
+    agentMockingbirdServiceOk: agentMockingbirdStatus.code === 0,
     opencodeServiceOk: opencodeStatus.code === 0,
     lingerOk: linger.code === 0 && linger.stdout.toLowerCase().includes("linger=yes"),
     commandOutput: {
-      wafflebotStatus: (wafflebotStatus.stdout || wafflebotStatus.stderr).trim(),
+      agentMockingbirdStatus: (agentMockingbirdStatus.stdout || agentMockingbirdStatus.stderr).trim(),
       opencodeStatus: (opencodeStatus.stdout || opencodeStatus.stderr).trim(),
       linger: (linger.stdout || linger.stderr).trim(),
     },
@@ -767,7 +767,7 @@ function buildInstallSummary({ args, paths }) {
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
   return summarizeActionPlan("Install plan", [
-    `- Target package: @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
+    `- Target package: @${args.scope.replace(/^@/, "")}/agent-mockingbird (${target})`,
     `- Private registry scope: @${args.scope.replace(/^@/, "")} -> ${args.registryUrl}`,
     `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, opencode-ai)`,
     `- Install root: ${paths.rootDir}`,
@@ -781,11 +781,11 @@ function buildInstallSummary({ args, paths }) {
       ? `   - bun: ${success(`found at ${resolveBunBinary(paths)}`)}`
       : `   - bun: ${warn(`not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`)}`,
     "3. Install/refresh OpenCode CLI dependency (`opencode-ai@latest`) from npmjs.",
-    `4. Install Wafflebot package (@${args.scope.replace(/^@/, "")}/wafflebot) from your scoped registry.`,
+    `4. Install Agent Mockingbird package (@${args.scope.replace(/^@/, "")}/agent-mockingbird) from your scoped registry.`,
     "5. Create/refresh runtime directories under the install root.",
-    `6. Install CLI shims at ${paths.wafflebotShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
+    `6. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
     `7. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
-    `8. Write user services: ${paths.opencodeUnitPath} and ${paths.wafflebotUnitPath}.`,
+    `8. Write user services: ${paths.opencodeUnitPath} and ${paths.agentMockingbirdUnitPath}.`,
     "9. Reload systemd user daemon and enable/start both services.",
     args.skipLinger
       ? "10. Skip linger configuration (--skip-linger set)."
@@ -803,15 +803,15 @@ function buildUpdateSummary({ args, paths }) {
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
   return summarizeActionPlan("Update plan", [
-    `- Update target: @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
+    `- Update target: @${args.scope.replace(/^@/, "")}/agent-mockingbird (${target})`,
     `- Install root: ${paths.rootDir}`,
     "",
     "What this update does:",
-    "1. Refresh Wafflebot package + OpenCode CLI dependency.",
+    "1. Refresh Agent Mockingbird package + OpenCode CLI dependency.",
     `2. Ensure Bun runtime is available${hasBun ? ` (${success("already present")})` : ` (${warn(`will install${hasCurl ? " with curl fallback" : ""}`)})`}.`,
     "3. Re-seed workspace skills from bundled package.",
     "4. Re-write CLI shim + systemd user units to current paths/entrypoint.",
-    "   - Includes wafflebot + opencode shims in ~/.local/bin",
+    "   - Includes agent-mockingbird + opencode shims in ~/.local/bin",
     "5. Reload daemon, enable/start services, then force restart both units.",
     args.skipLinger
       ? "6. Skip linger configuration (--skip-linger set)."
@@ -822,7 +822,7 @@ function buildUpdateSummary({ args, paths }) {
     `- It does not wipe ${paths.dataDir} or ${paths.workspaceDir}.`,
     "- It does not uninstall/recreate services from scratch unless unit contents changed.",
     "- It does not reset runtime configuration, DB data, sessions, skills, or agents.",
-    `- It does not rerun full onboarding unless you manually run ${paint("wafflebot install", ANSI.bold)} again.`,
+    `- It does not rerun full onboarding unless you manually run ${paint("agent-mockingbird install", ANSI.bold)} again.`,
     "",
     `Precheck: systemctl --user ${hasSystemdUser ? success("available") : errorText("unavailable (update will fail)")}`,
   ]);
@@ -835,19 +835,19 @@ function buildUpdateDryRun({ args, paths }) {
   const hasLoginctl = commandExists("loginctl");
 
   const actions = [
-    `Refresh package @${args.scope.replace(/^@/, "")}/wafflebot (${target})`,
+    `Refresh package @${args.scope.replace(/^@/, "")}/agent-mockingbird (${target})`,
     "Refresh opencode-ai dependency",
     hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
     "Reseed workspace skills from bundled package",
-    "Rewrite wafflebot CLI shim",
+    "Rewrite agent-mockingbird CLI shim",
     "Rewrite opencode CLI shim",
-    "Rewrite systemd user unit files for opencode + wafflebot",
-    "systemctl --user daemon-reload + enable --now opencode.service wafflebot.service",
-    "systemctl --user restart opencode.service wafflebot.service",
+    "Rewrite systemd user unit files for opencode + agent-mockingbird",
+    "systemctl --user daemon-reload + enable --now opencode.service agent-mockingbird.service",
+    "systemctl --user restart opencode.service agent-mockingbird.service",
     args.skipLinger
       ? "Skip loginctl linger step (--skip-linger)"
       : "Check/enable loginctl linger when needed",
-    `GET ${WAFFLEBOT_API_BASE_URL}/api/health`,
+    `GET ${AGENT_MOCKINGBIRD_API_BASE_URL}/api/health`,
     "Run service verification checks",
     "Initialize default enabled skills if runtime config currently has none",
   ];
@@ -881,7 +881,7 @@ async function runOnboardingCommand(args) {
   const paths = pathsFor(args.rootDir, args.scope);
   const opencodeBin = resolveOpencodeBin(paths) ?? (commandExists("opencode") ? "opencode" : null);
   if (!opencodeBin) {
-    throw new Error("opencode binary not found. Run `wafflebot install` first.");
+    throw new Error("opencode binary not found. Run `agent-mockingbird install` first.");
   }
   const onboarding = await runInteractiveProviderOnboarding({ opencodeBin });
   return {
@@ -892,7 +892,7 @@ async function runOnboardingCommand(args) {
 }
 
 async function migrateOpenclawWorkspace(input) {
-  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw`, {
+  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -914,14 +914,14 @@ async function migrateOpenclawWorkspace(input) {
 }
 
 async function fetchMemoryStatus() {
-  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/memory/status`, { method: "GET" });
+  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/memory/status`, { method: "GET" });
   if (!response.ok) return null;
   const payload = await response.json();
   return payload?.status ?? null;
 }
 
 async function syncMemoryNow() {
-  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/memory/sync`, { method: "POST" });
+  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/memory/sync`, { method: "POST" });
   if (!response.ok) {
     let payload = {};
     try {
@@ -957,11 +957,11 @@ async function confirmInstall(args, paths, mode) {
 function packageSpec(scope, version, tag) {
   const normalizedScope = scope.replace(/^@/, "");
   const target = version || tag;
-  return `@${normalizedScope}/wafflebot@${target}`;
+  return `@${normalizedScope}/agent-mockingbird@${target}`;
 }
 
 function readInstalledVersion(paths) {
-  const appDir = resolveWafflebotAppDir(paths);
+  const appDir = resolveAgentMockingbirdAppDir(paths);
   if (!appDir) {
     return null;
   }
@@ -982,7 +982,7 @@ function readInstalledOpenCodeVersion(paths) {
 
 async function fetchRuntimeDefaultModel() {
   try {
-    const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config`, { method: "GET" });
+    const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`, { method: "GET" });
     if (!response.ok) return "";
     const payload = await response.json();
     const providerId = payload?.config?.runtime?.opencode?.providerId;
@@ -1000,7 +1000,7 @@ async function fetchRuntimeDefaultModel() {
 
 async function fetchRuntimeModelOptions() {
   try {
-    const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/opencode/models`, { method: "GET" });
+    const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/opencode/models`, { method: "GET" });
     const payload = await response.json();
     if (!response.ok || !Array.isArray(payload?.models)) {
       return [];
@@ -1138,7 +1138,7 @@ async function promptSearchableModelChoice(input) {
 }
 
 async function setRuntimeDefaultModel(modelRef) {
-  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/runtime/default-model`, {
+  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/runtime/default-model`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: modelRef }),
@@ -1157,7 +1157,7 @@ async function setRuntimeDefaultModel(modelRef) {
 
 async function fetchRuntimeMemoryConfig() {
   try {
-    const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config`, { method: "GET" });
+    const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`, { method: "GET" });
     if (!response.ok) {
       return {
         enabled: true,
@@ -1186,7 +1186,7 @@ async function fetchRuntimeMemoryConfig() {
 }
 
 async function fetchRuntimeConfigHash() {
-  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config`, { method: "GET" });
+  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`, { method: "GET" });
   if (!response.ok) {
     throw new Error(`Failed to read runtime config hash (${response.status})`);
   }
@@ -1200,7 +1200,7 @@ async function fetchRuntimeConfigHash() {
 
 async function setRuntimeMemoryEmbeddingConfig(input) {
   const expectedHash = await fetchRuntimeConfigHash();
-  const response = await fetch(`${WAFFLEBOT_API_BASE_URL}/api/config/patch-safe`, {
+  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/patch-safe`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1375,7 +1375,7 @@ async function runInteractiveProviderOnboarding(input) {
   }
 
   console.log("");
-  console.log(heading("Wafflebot onboarding"));
+  console.log(heading("Agent Mockingbird onboarding"));
   console.log(info("Optional: connect inference providers through OpenCode and pick a default runtime model."));
 
   const pathChoice = await promptSelect("Choose onboarding flow", [
@@ -1402,7 +1402,7 @@ async function runInteractiveProviderOnboarding(input) {
     {
       value: "skip",
       label: "Skip for now",
-      hint: "You can rerun later with wafflebot status + dashboard settings",
+      hint: "You can rerun later with agent-mockingbird status + dashboard settings",
     },
   ]);
 
@@ -1706,13 +1706,13 @@ async function installOrUpdate(args, mode) {
 
   npmInstall(paths.npmPrefix, [packageSpec(args.scope, args.version, args.tag)], ["-g"], env);
 
-  const wafflebotBin = resolveWafflebotBin(paths);
-  if (!wafflebotBin) {
+  const agentMockingbirdBin = resolveAgentMockingbirdBin(paths);
+  if (!agentMockingbirdBin) {
     throw new Error(
-      `wafflebot binary missing: looked in ${paths.wafflebotBinGlobal} and ${paths.wafflebotBinLocal}`,
+      `agent-mockingbird binary missing: looked in ${paths.agentMockingbirdBinGlobal} and ${paths.agentMockingbirdBinLocal}`,
     );
   }
-  const shimPath = writeWafflebotShim(paths, wafflebotBin);
+  const shimPath = writeAgentMockingbirdShim(paths, agentMockingbirdBin);
   const pathSetup = ensureLocalBinPath(paths);
 
   const bunBin = resolveBunBinary(paths);
@@ -1720,13 +1720,13 @@ async function installOrUpdate(args, mode) {
     throw new Error("bun binary was not found after install.");
   }
 
-  const wafflebotAppDir = resolveWafflebotAppDir(paths);
-  if (!wafflebotAppDir) {
+  const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
+  if (!agentMockingbirdAppDir) {
     throw new Error(
-      `wafflebot package directory missing: looked in ${paths.wafflebotAppDirGlobal} and ${paths.wafflebotAppDirLocal}`,
+      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal} and ${paths.agentMockingbirdAppDirLocal}`,
     );
   }
-  const runtimeAssetsSource = prepareRuntimeAssetsSourceDir(wafflebotAppDir);
+  const runtimeAssetsSource = prepareRuntimeAssetsSourceDir(agentMockingbirdAppDir);
   const runtimeAssetsStatePath = path.join(paths.dataDir, "runtime-assets-state.json");
   let runtimeAssets;
   try {
@@ -1754,10 +1754,10 @@ async function installOrUpdate(args, mode) {
     }
     must(bunBin, installArgs, { cwd: workspaceOpencodeDir });
   }
-  const wafflebotEntrypoint = resolveWafflebotServiceEntrypoint(wafflebotAppDir);
-  if (!wafflebotEntrypoint) {
+  const agentMockingbirdEntrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
+  if (!agentMockingbirdEntrypoint) {
     throw new Error(
-      `wafflebot runtime entrypoint missing in ${wafflebotAppDir} (checked package module/main and common entry files).`,
+      `agent-mockingbird runtime entrypoint missing in ${agentMockingbirdAppDir} (checked package module/main and common entry files).`,
     );
   }
   const opencodeBin = resolveOpencodeBin(paths);
@@ -1768,14 +1768,14 @@ async function installOrUpdate(args, mode) {
   }
   const opencodeShimPath = writeOpencodeShim(paths, opencodeBin);
 
-  const units = unitContents(paths, bunBin, opencodeBin, wafflebotAppDir, wafflebotEntrypoint);
+  const units = unitContents(paths, bunBin, opencodeBin, agentMockingbirdAppDir, agentMockingbirdEntrypoint);
   writeFile(paths.opencodeUnitPath, units.opencode);
-  writeFile(paths.wafflebotUnitPath, units.wafflebot);
+  writeFile(paths.agentMockingbirdUnitPath, units.agent-mockingbird);
 
   must("systemctl", ["--user", "daemon-reload"]);
-  must("systemctl", ["--user", "enable", "--now", UNIT_OPENCODE, UNIT_WAFFLEBOT]);
+  must("systemctl", ["--user", "enable", "--now", UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
   if (mode === "update") {
-    must("systemctl", ["--user", "restart", UNIT_OPENCODE, UNIT_WAFFLEBOT]);
+    must("systemctl", ["--user", "restart", UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
   }
 
   const linger = ensureLinger(args.skipLinger);
@@ -1809,12 +1809,12 @@ async function installOrUpdate(args, mode) {
     mode,
     rootDir: paths.rootDir,
     registryUrl: args.registryUrl,
-    wafflebotVersion: readInstalledVersion(paths),
+    agentMockingbirdVersion: readInstalledVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
     shimPath,
     opencodeShimPath,
     pathSetup,
-    units: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
+    units: [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
     runtimeAssets,
     defaultSkillSync,
     health,
@@ -1827,7 +1827,7 @@ async function installOrUpdate(args, mode) {
 async function status(args) {
   const paths = pathsFor(args.rootDir, args.scope);
   const unitStates = {};
-  for (const unit of [UNIT_OPENCODE, UNIT_WAFFLEBOT]) {
+  for (const unit of [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]) {
     const result = shell("systemctl", ["--user", "is-active", unit]);
     unitStates[unit] = result.code === 0 ? result.stdout.trim() : "inactive";
   }
@@ -1836,7 +1836,7 @@ async function status(args) {
   return {
     mode: "status",
     rootDir: paths.rootDir,
-    wafflebotVersion: readInstalledVersion(paths),
+    agentMockingbirdVersion: readInstalledVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
     unitStates,
     health,
@@ -1844,7 +1844,7 @@ async function status(args) {
 }
 
 function serviceCommand(action) {
-  must("systemctl", ["--user", action, UNIT_OPENCODE, UNIT_WAFFLEBOT]);
+  must("systemctl", ["--user", action, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
 }
 
 async function manageService(args, action) {
@@ -1871,7 +1871,7 @@ async function uninstall(args) {
       rl.close();
       throw new Error("Aborted by user.");
     }
-    const purgeAnswer = (await rl.question("Purge data/workspace under ~/.wafflebot/data and ~/.wafflebot/workspace? [y/N] ")).trim().toLowerCase();
+    const purgeAnswer = (await rl.question("Purge data/workspace under ~/.agent-mockingbird/data and ~/.agent-mockingbird/workspace? [y/N] ")).trim().toLowerCase();
     args.purgeData = purgeAnswer === "y" || purgeAnswer === "yes";
     rl.close();
   } else if (!args.yes) {
@@ -1882,15 +1882,15 @@ async function uninstall(args) {
     args.keepData = true;
   }
 
-  shell("systemctl", ["--user", "disable", "--now", UNIT_WAFFLEBOT, UNIT_OPENCODE]);
-  if (fs.existsSync(paths.wafflebotUnitPath)) {
-    fs.rmSync(paths.wafflebotUnitPath, { force: true });
+  shell("systemctl", ["--user", "disable", "--now", UNIT_AGENT_MOCKINGBIRD, UNIT_OPENCODE]);
+  if (fs.existsSync(paths.agentMockingbirdUnitPath)) {
+    fs.rmSync(paths.agentMockingbirdUnitPath, { force: true });
   }
   if (fs.existsSync(paths.opencodeUnitPath)) {
     fs.rmSync(paths.opencodeUnitPath, { force: true });
   }
   shell("systemctl", ["--user", "daemon-reload"]);
-  const removedShim = removeWafflebotShim(paths);
+  const removedShim = removeAgentMockingbirdShim(paths);
   const removedOpencodeShim = removeOpencodeShim(paths);
 
   if (args.purgeData) {
@@ -1913,7 +1913,7 @@ async function uninstall(args) {
   return {
     mode: "uninstall",
     rootDir: paths.rootDir,
-    unitsRemoved: [UNIT_OPENCODE, UNIT_WAFFLEBOT],
+    unitsRemoved: [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
     removedShim,
     removedOpencodeShim,
     removed: true,
@@ -1932,7 +1932,7 @@ function printResult(result, asJson) {
     console.log(`${result.mode} complete`);
     console.log(`root: ${result.rootDir}`);
     console.log(`registry: ${result.registryUrl}`);
-    console.log(`wafflebot: ${result.wafflebotVersion ?? "unknown"}`);
+    console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "unknown"}`);
     console.log(`cli: ${result.shimPath ?? "unavailable"}`);
     if (result.opencodeShimPath) {
@@ -1974,12 +1974,12 @@ function printResult(result, asJson) {
       console.log("linger: enabled");
     }
     if (result.verify) {
-      console.log(`verify: wafflebot.service=${result.verify.wafflebotServiceOk ? "ok" : "failed"}`);
+      console.log(`verify: agent-mockingbird.service=${result.verify.agentMockingbirdServiceOk ? "ok" : "failed"}`);
       console.log(`verify: opencode.service=${result.verify.opencodeServiceOk ? "ok" : "failed"}`);
       console.log(`verify: linger=${result.verify.lingerOk ? "yes" : "no"}`);
-      if (!result.verify.wafflebotServiceOk || !result.verify.opencodeServiceOk || !result.verify.lingerOk) {
+      if (!result.verify.agentMockingbirdServiceOk || !result.verify.opencodeServiceOk || !result.verify.lingerOk) {
         console.log("verify-details:");
-        console.log(result.verify.commandOutput.wafflebotStatus || "(no output)");
+        console.log(result.verify.commandOutput.agentMockingbirdStatus || "(no output)");
         console.log(result.verify.commandOutput.opencodeStatus || "(no output)");
         console.log(result.verify.commandOutput.linger || "(no output)");
       }
@@ -2038,9 +2038,9 @@ function printResult(result, asJson) {
   if (result.mode === "status") {
     console.log("status");
     console.log(`root: ${result.rootDir}`);
-    console.log(`wafflebot: ${result.wafflebotVersion ?? "not installed"}`);
+    console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
-    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_WAFFLEBOT}=${result.unitStates[UNIT_WAFFLEBOT]}`);
+    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
     console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
     return;
   }
@@ -2048,9 +2048,9 @@ function printResult(result, asJson) {
   if (result.mode === "restart" || result.mode === "start" || result.mode === "stop") {
     console.log(`${result.mode} complete`);
     console.log(`root: ${result.rootDir}`);
-    console.log(`wafflebot: ${result.wafflebotVersion ?? "not installed"}`);
+    console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
-    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_WAFFLEBOT}=${result.unitStates[UNIT_WAFFLEBOT]}`);
+    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
     console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
     return;
   }
@@ -2121,9 +2121,9 @@ function printResult(result, asJson) {
 
 function evaluateResult(result) {
   const isActive =
-    result?.unitStates?.[UNIT_OPENCODE] === "active" && result?.unitStates?.[UNIT_WAFFLEBOT] === "active";
+    result?.unitStates?.[UNIT_OPENCODE] === "active" && result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] === "active";
   if (result.mode === "install" || result.mode === "update") {
-    if (!result.health?.ok || !result.verify?.wafflebotServiceOk || !result.verify?.opencodeServiceOk) {
+    if (!result.health?.ok || !result.verify?.agentMockingbirdServiceOk || !result.verify?.opencodeServiceOk) {
       return 2;
     }
     return 0;
@@ -2136,7 +2136,7 @@ function evaluateResult(result) {
   }
   if (result.mode === "stop") {
     const stopped =
-      result?.unitStates?.[UNIT_OPENCODE] !== "active" && result?.unitStates?.[UNIT_WAFFLEBOT] !== "active";
+      result?.unitStates?.[UNIT_OPENCODE] !== "active" && result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] !== "active";
     return stopped ? 0 : 2;
   }
   return 0;
@@ -2147,7 +2147,7 @@ async function main() {
   if (!args.command || args.command === "help") {
     printHelp();
     if (!args.command) {
-      console.log("\nHint: run `wafflebot status` to check service health.");
+      console.log("\nHint: run `agent-mockingbird status` to check service health.");
     }
     return;
   }
@@ -2155,7 +2155,7 @@ async function main() {
   let result;
   if (args.command === "install") {
     if (args.dryRun) {
-      throw new Error("--dry-run is supported for `wafflebot update` only.");
+      throw new Error("--dry-run is supported for `agent-mockingbird update` only.");
     }
     result = await installOrUpdate(args, "install");
   } else if (args.command === "update") {
@@ -2166,7 +2166,7 @@ async function main() {
     }
   } else if (args.command === "onboard") {
     if (args.dryRun) {
-      throw new Error("--dry-run is not applicable to `wafflebot onboard`.");
+      throw new Error("--dry-run is not applicable to `agent-mockingbird onboard`.");
     }
     result = await runOnboardingCommand(args);
   } else if (args.command === "status") {
@@ -2180,7 +2180,7 @@ async function main() {
   } else if (args.command === "uninstall") {
     result = await uninstall(args);
   } else if (args.command === "import-openclaw-legacy") {
-    throw new Error("`wafflebot import openclaw ...` is deprecated. Use `wafflebot onboard` and pick the OpenClaw flow.");
+    throw new Error("`agent-mockingbird import openclaw ...` is deprecated. Use `agent-mockingbird onboard` and pick the OpenClaw flow.");
   } else {
     throw new Error(`Unknown command: ${args.command}`);
   }

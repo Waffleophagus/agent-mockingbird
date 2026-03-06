@@ -5,7 +5,7 @@ import path from "node:path";
 import { parseConfig } from "./store";
 import { ConfigApplyError } from "./types";
 
-test("parseConfig reports a clear error when WAFFLEBOT_CONFIG_PATH points to OpenCode config.json", () => {
+test("parseConfig reports a clear error when AGENT_MOCKINGBIRD_CONFIG_PATH points to OpenCode config.json", () => {
   expect(() =>
     parseConfig({
       $schema: "https://opencode.ai/config.json",
@@ -14,16 +14,16 @@ test("parseConfig reports a clear error when WAFFLEBOT_CONFIG_PATH points to Ope
   ).toThrowError(
     new ConfigApplyError(
       "schema",
-      "Config file appears to be OpenCode config.json, not wafflebot config. Set WAFFLEBOT_CONFIG_PATH to a wafflebot config file (default: ./data/wafflebot.config.json).",
+      "Config file appears to be OpenCode config.json, not agent-mockingbird config. Set AGENT_MOCKINGBIRD_CONFIG_PATH to a agent-mockingbird config file (default: ./data/agent-mockingbird.config.json).",
     ),
   );
 });
 
-test("parseConfig does not use WAFFLEBOT_OPENCODE_* env vars as runtime fallbacks", () => {
-  const previousModelId = process.env.WAFFLEBOT_OPENCODE_MODEL_ID;
-  process.env.WAFFLEBOT_OPENCODE_MODEL_ID = "env-only-model";
+test("parseConfig does not use AGENT_MOCKINGBIRD_OPENCODE_* env vars as runtime fallbacks", () => {
+  const previousModelId = process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID;
+  process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID = "env-only-model";
   try {
-    const filePath = path.resolve(process.cwd(), "wafflebot.config.example.json");
+    const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
     const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
       runtime?: { opencode?: Record<string, unknown> };
     };
@@ -34,15 +34,15 @@ test("parseConfig does not use WAFFLEBOT_OPENCODE_* env vars as runtime fallback
     expect(() => parseConfig(raw)).toThrowError(ConfigApplyError);
   } finally {
     if (previousModelId === undefined) {
-      delete process.env.WAFFLEBOT_OPENCODE_MODEL_ID;
+      delete process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID;
     } else {
-      process.env.WAFFLEBOT_OPENCODE_MODEL_ID = previousModelId;
+      process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID = previousModelId;
     }
   }
 });
 
 test("parseConfig auto-fills opencode directory from memory workspace when unset", () => {
-  const filePath = path.resolve(process.cwd(), "wafflebot.config.example.json");
+  const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
     runtime?: { opencode?: Record<string, unknown>; memory?: Record<string, unknown> };
   };
@@ -59,7 +59,7 @@ test("parseConfig auto-fills opencode directory from memory workspace when unset
 });
 
 test("parseConfig auto-aligns mismatched memory workspace to explicit opencode directory", () => {
-  const filePath = path.resolve(process.cwd(), "wafflebot.config.example.json");
+  const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
     runtime?: { opencode?: Record<string, unknown>; memory?: Record<string, unknown> };
   };
@@ -75,7 +75,7 @@ test("parseConfig auto-aligns mismatched memory workspace to explicit opencode d
 });
 
 test("example config ships a default build heartbeat", () => {
-  const filePath = path.resolve(process.cwd(), "wafflebot.config.example.json");
+  const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
     ui?: { agentTypes?: Array<{ id?: string; heartbeat?: { enabled?: boolean; interval?: string; ackMaxChars?: number } }> };
   };

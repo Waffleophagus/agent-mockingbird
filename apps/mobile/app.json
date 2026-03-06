@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Wafflebot Mobile",
-    "slug": "wafflebot-mobile",
-    "scheme": "wafflebot",
+    "name": "Agent Mockingbird Mobile",
+    "slug": "agent-mockingbird-mobile",
+    "scheme": "agent-mockingbird",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -14,11 +14,11 @@
       "expo-notifications"
     ],
     "android": {
-      "package": "dev.wafflebot.mobile",
+      "package": "dev.agent-mockingbird.mobile",
       "edgeToEdgeEnabled": true
     },
     "ios": {
-      "bundleIdentifier": "dev.wafflebot.mobile"
+      "bundleIdentifier": "dev.agent-mockingbird.mobile"
     }
   }
 }

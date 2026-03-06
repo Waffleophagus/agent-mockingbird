@@ -5,7 +5,7 @@ import type {
   SessionMessagePartPhase,
   SessionSummary,
   UsageSnapshot,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 export type RuntimeEventSource = "api" | "runtime" | "scheduler" | "system";
 

@@ -42,10 +42,10 @@ jobs:
       - name: Verify CLI is synced
         run: |
           set -euo pipefail
-          if ! git diff --quiet -- bin/wafflebot; then
-            echo "bin/wafflebot is out of sync with src/cli/wafflebot.mjs."
+          if ! git diff --quiet -- bin/agent-mockingbird; then
+            echo "bin/agent-mockingbird is out of sync with src/cli/agent-mockingbird.mjs."
             echo "Run: bun run build:cli"
-            git --no-pager diff -- bin/wafflebot
+            git --no-pager diff -- bin/agent-mockingbird
             exit 1
           fi
 
@@ -90,7 +90,7 @@ jobs:
             should_publish="true"
           elif [[ "${event}" == "push" && "${ref}" == "refs/heads/main" ]]; then
             should_publish="true"
-            package_name="@${scope}/wafflebot"
+            package_name="@${scope}/agent-mockingbird"
             latest_published="$(bunx npm view "${package_name}" version --registry "${registry_url}" 2>/dev/null || true)"
             package_version="$(BASE_VERSION="${base_version}" LATEST_PUBLISHED="${latest_published}" bun -e '
               const base = (process.env.BASE_VERSION || "").trim();
@@ -147,7 +147,7 @@ jobs:
             const scope = (process.env.REGISTRY_SCOPE || "").toLowerCase();
             const version = process.env.PKG_VERSION;
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.name = `@${scope}/wafflebot`;
+            pkg.name = `@${scope}/agent-mockingbird`;
             pkg.private = false;
             pkg.version = version;
             pkg.publishConfig = { registry: process.env.REGISTRY_URL };
@@ -165,7 +165,7 @@ jobs:
               "bun.lock",
               "bunfig.toml",
               "tsconfig.json",
-              "wafflebot.config.example.json"
+              "agent-mockingbird.config.example.json"
             ];
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           '
@@ -179,38 +179,38 @@ jobs:
             const path = require("path");
             const scope = (process.env.REGISTRY_SCOPE || "").toLowerCase();
             const version = process.env.PKG_VERSION;
-            const pkgPath = path.join("packages", "wafflebot-installer", "package.json");
+            const pkgPath = path.join("packages", "agent-mockingbird-installer", "package.json");
             const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-            pkg.name = `@${scope}/wafflebot-installer`;
+            pkg.name = `@${scope}/agent-mockingbird-installer`;
             pkg.private = false;
             pkg.version = version;
             pkg.publishConfig = { registry: process.env.REGISTRY_URL };
             fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
           '
 
-      - name: Pack wafflebot artifact
+      - name: Pack agent-mockingbird artifact
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          tarball="wafflebot-${{ steps.meta.outputs.package_version }}.tgz"
+          tarball="agent-mockingbird-${{ steps.meta.outputs.package_version }}.tgz"
           bun pm pack --filename "${tarball}" --quiet >/dev/null
           test -f "${tarball}"
           tar_contents="$(tar -tzf "${tarball}")"
           grep -Fqx -- "package/src/index.ts" <<<"${tar_contents}"
-          echo "WAFFLEBOT_TARBALL=${tarball}" >> "${GITHUB_ENV}"
+          echo "AGENT_MOCKINGBIRD_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
-      - name: Pack wafflebot-installer artifact
+      - name: Pack agent-mockingbird-installer artifact
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          tarball="wafflebot-installer-${{ steps.meta.outputs.package_version }}.tgz"
+          tarball="agent-mockingbird-installer-${{ steps.meta.outputs.package_version }}.tgz"
           (
-            cd packages/wafflebot-installer
+            cd packages/agent-mockingbird-installer
             bun pm pack --filename "../../${tarball}" --quiet >/dev/null
           )
           test -f "${tarball}"
-          echo "WAFFLEBOT_INSTALLER_TARBALL=${tarball}" >> "${GITHUB_ENV}"
+          echo "AGENT_MOCKINGBIRD_INSTALLER_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
       - name: Configure registry auth
@@ -251,22 +251,22 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          package_name="@${REGISTRY_SCOPE}/wafflebot"
+          package_name="@${REGISTRY_SCOPE}/agent-mockingbird"
           package_version="${{ steps.meta.outputs.package_version }}"
           if bunx npm view "${package_name}@${package_version}" version --registry "${REGISTRY_URL%/}/" >/dev/null 2>&1; then
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          bunx npm publish "${WAFFLEBOT_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
+          bunx npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
 
       - name: Publish installer package tarball
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          package_name="@${REGISTRY_SCOPE}/wafflebot-installer"
+          package_name="@${REGISTRY_SCOPE}/agent-mockingbird-installer"
           package_version="${{ steps.meta.outputs.package_version }}"
           if bunx npm view "${package_name}@${package_version}" version --registry "${REGISTRY_URL%/}/" >/dev/null 2>&1; then
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          bunx npm publish "${WAFFLEBOT_INSTALLER_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
+          bunx npm publish "${AGENT_MOCKINGBIRD_INSTALLER_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"

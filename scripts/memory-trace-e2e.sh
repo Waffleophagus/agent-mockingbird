@@ -14,25 +14,25 @@ if ! command -v bun >/dev/null 2>&1; then
   exit 1
 fi
 
-WAFFLEBOT_BASE_URL="${WAFFLEBOT_BASE_URL:-http://127.0.0.1:${WAFFLEBOT_PORT:-3001}}"
+AGENT_MOCKINGBIRD_BASE_URL="${AGENT_MOCKINGBIRD_BASE_URL:-http://127.0.0.1:${AGENT_MOCKINGBIRD_PORT:-3001}}"
 MARKER="trace-e2e-$(date +%s)-$RANDOM"
 MEMORY_TEXT="Durable trace marker ${MARKER} should be recalled for E2E verification."
-SESSION_MODEL="${WAFFLEBOT_E2E_MODEL:-}"
+SESSION_MODEL="${AGENT_MOCKINGBIRD_E2E_MODEL:-}"
 
-echo "[memory:trace:e2e] base URL: ${WAFFLEBOT_BASE_URL}"
+echo "[memory:trace:e2e] base URL: ${AGENT_MOCKINGBIRD_BASE_URL}"
 echo "[memory:trace:e2e] marker: ${MARKER}"
 
 echo "[memory:trace:e2e] health check"
-curl -fsS "${WAFFLEBOT_BASE_URL}/api/health" >/dev/null
+curl -fsS "${AGENT_MOCKINGBIRD_BASE_URL}/api/health" >/dev/null
 
 echo "[memory:trace:e2e] writing durable memory seed"
-curl -fsS "${WAFFLEBOT_BASE_URL}/api/memory/remember" \
+curl -fsS "${AGENT_MOCKINGBIRD_BASE_URL}/api/memory/remember" \
   -H "Content-Type: application/json" \
-  -d "{\"type\":\"fact\",\"source\":\"system\",\"content\":\"${MEMORY_TEXT}\"}" >/tmp/wafflebot-memory-trace-remember.json
+  -d "{\"type\":\"fact\",\"source\":\"system\",\"content\":\"${MEMORY_TEXT}\"}" >/tmp/agent-mockingbird-memory-trace-remember.json
 
 if [[ -z "${SESSION_MODEL}" ]]; then
   echo "[memory:trace:e2e] resolving model from existing sessions"
-  if SESSIONS_JSON="$(curl -fsS "${WAFFLEBOT_BASE_URL}/api/sessions" 2>/dev/null)"; then
+  if SESSIONS_JSON="$(curl -fsS "${AGENT_MOCKINGBIRD_BASE_URL}/api/sessions" 2>/dev/null)"; then
     SESSION_MODEL="$(
       printf '%s\n' "${SESSIONS_JSON}" \
         | bun -e '
@@ -54,7 +54,7 @@ fi
 
 if [[ -z "${SESSION_MODEL}" ]]; then
   echo "[memory:trace:e2e] resolving model from /api/opencode/models"
-  if MODELS_JSON="$(curl -fsS "${WAFFLEBOT_BASE_URL}/api/opencode/models" 2>/dev/null)"; then
+  if MODELS_JSON="$(curl -fsS "${AGENT_MOCKINGBIRD_BASE_URL}/api/opencode/models" 2>/dev/null)"; then
     SESSION_MODEL="$(
       printf '%s\n' "${MODELS_JSON}" \
         | bun -e '
@@ -68,7 +68,7 @@ if [[ -z "${SESSION_MODEL}" ]]; then
 fi
 
 if [[ -z "${SESSION_MODEL}" ]]; then
-  echo "[memory:trace:e2e] no model available. Configure OpenCode models or set WAFFLEBOT_E2E_MODEL."
+  echo "[memory:trace:e2e] no model available. Configure OpenCode models or set AGENT_MOCKINGBIRD_E2E_MODEL."
   exit 1
 fi
 
@@ -83,7 +83,7 @@ SESSION_CREATE_PAYLOAD="$(
 
 echo "[memory:trace:e2e] creating session"
 SESSION_ID="$(
-  curl -fsS "${WAFFLEBOT_BASE_URL}/api/sessions" \
+  curl -fsS "${AGENT_MOCKINGBIRD_BASE_URL}/api/sessions" \
     -H "Content-Type: application/json" \
     -d "${SESSION_CREATE_PAYLOAD}" \
     | bun -e 'const data=JSON.parse(await new Response(Bun.stdin.stream()).text()); console.log(data.session?.id ?? "");'
@@ -96,14 +96,14 @@ fi
 
 echo "[memory:trace:e2e] session: ${SESSION_ID}"
 echo "[memory:trace:e2e] sending chat prompt through runtime"
-curl -fsS "${WAFFLEBOT_BASE_URL}/api/chat" \
+curl -fsS "${AGENT_MOCKINGBIRD_BASE_URL}/api/chat" \
   -H "Content-Type: application/json" \
   -d "{\"sessionId\":\"${SESSION_ID}\",\"content\":\"Please answer briefly. Use any relevant memory for this marker: ${MARKER}\"}" \
-  >/tmp/wafflebot-memory-trace-chat.json
+  >/tmp/agent-mockingbird-memory-trace-chat.json
 
 echo "[memory:trace:e2e] loading session messages"
-MESSAGES_JSON="$(curl -fsS "${WAFFLEBOT_BASE_URL}/api/sessions/${SESSION_ID}/messages")"
-printf '%s\n' "${MESSAGES_JSON}" >/tmp/wafflebot-memory-trace-messages.json
+MESSAGES_JSON="$(curl -fsS "${AGENT_MOCKINGBIRD_BASE_URL}/api/sessions/${SESSION_ID}/messages")"
+printf '%s\n' "${MESSAGES_JSON}" >/tmp/agent-mockingbird-memory-trace-messages.json
 
 TRACE_SUMMARY="$(
   printf '%s\n' "${MESSAGES_JSON}" \

@@ -17,15 +17,15 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 
 mkdir -p "${DIST_DIR}"
-ARCHIVE_PATH="${DIST_DIR}/wafflebot-${VERSION}.tar.gz"
+ARCHIVE_PATH="${DIST_DIR}/agent-mockingbird-${VERSION}.tar.gz"
 CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
-PREFIX="wafflebot-${VERSION}/"
+PREFIX="agent-mockingbird-${VERSION}/"
 
 git -C "${ROOT_DIR}" archive --format=tar.gz --prefix="${PREFIX}" -o "${ARCHIVE_PATH}" HEAD
 
 (
   cd "${DIST_DIR}"
-  sha256sum "wafflebot-${VERSION}.tar.gz" > "wafflebot-${VERSION}.tar.gz.sha256"
+  sha256sum "agent-mockingbird-${VERSION}.tar.gz" > "agent-mockingbird-${VERSION}.tar.gz.sha256"
 )
 
 echo "Created:"

@@ -1,6 +1,6 @@
 # Memory Runtime Contract
 
-This contract defines how OpenCode runtime memory is expected to behave in Wafflebot.
+This contract defines how OpenCode runtime memory is expected to behave in Agent Mockingbird.
 
 ## Contract
 

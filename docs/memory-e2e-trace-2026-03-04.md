@@ -1,7 +1,7 @@
 # Memory E2E Trace (QMD + sqlite-vec)
 
 Date: 2026-03-04
-Repo: `/var/home/matt/Documents/random-vibecoded-stuff/wafflebot`
+Repo: `/var/home/matt/Documents/random-vibecoded-stuff/agent-mockingbird`
 
 ## Goal
 Verify end-to-end memory ingest and retrieval behavior with the family prompt scenario, and inspect debug traces from the current `qmd_hybrid` pipeline.
@@ -18,7 +18,7 @@ bun run src/backend/memory/cli.ts search --debug "family members relatives spous
 bun run src/backend/memory/cli.ts search --debug "family"
 ```
 
-Raw capture file: `/tmp/wafflebot-memory-trace-output.txt`
+Raw capture file: `/tmp/agent-mockingbird-memory-trace-output.txt`
 
 ## Key Results
 

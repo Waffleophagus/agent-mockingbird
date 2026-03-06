@@ -1,15 +1,14 @@
 #!/usr/bin/env bun
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import process from "node:process";
 
 const { console } = globalThis;
 
-const root = process.cwd();
-const src = path.join(root, "src", "cli", "wafflebot.mjs");
-const runtimeAssetsSrc = path.join(root, "src", "cli", "runtime-assets.mjs");
-const outDir = path.join(root, "bin");
-const out = path.join(outDir, "wafflebot");
+const repoRoot = import.meta.dir;
+const src = path.join(repoRoot, "apps", "server", "src", "cli", "agent-mockingbird.mjs");
+const runtimeAssetsSrc = path.join(repoRoot, "apps", "server", "src", "cli", "runtime-assets.mjs");
+const outDir = path.join(repoRoot, "bin");
+const out = path.join(outDir, "agent-mockingbird");
 const runtimeAssetsOut = path.join(outDir, "runtime-assets.mjs");
 
 if (!existsSync(src)) {

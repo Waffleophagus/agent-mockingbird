@@ -17,12 +17,12 @@
     "noImplicitOverride": true,
     "baseUrl": ".",
     "paths": {
-      "@wafflebot/contracts": ["./packages/contracts/src/index.ts"],
-      "@wafflebot/contracts/*": ["./packages/contracts/src/*"],
-      "@wafflebot/api": ["./packages/api/src/index.ts"],
-      "@wafflebot/api/*": ["./packages/api/src/*"],
-      "@wafflebot/app-core": ["./packages/app-core/src/index.ts"],
-      "@wafflebot/app-core/*": ["./packages/app-core/src/*"]
+      "@agent-mockingbird/contracts": ["./packages/contracts/src/index.ts"],
+      "@agent-mockingbird/contracts/*": ["./packages/contracts/src/*"],
+      "@agent-mockingbird/api": ["./packages/api/src/index.ts"],
+      "@agent-mockingbird/api/*": ["./packages/api/src/*"],
+      "@agent-mockingbird/app-core": ["./packages/app-core/src/index.ts"],
+      "@agent-mockingbird/app-core/*": ["./packages/app-core/src/*"]
     },
     "noUnusedLocals": false,
     "noUnusedParameters": false,

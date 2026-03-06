@@ -1,4 +1,4 @@
-import type { WafflebotConfig } from "./schema";
+import type { AgentMockingbirdConfig } from "./schema";
 import { ConfigApplyError } from "./types";
 
 export interface ConfigPolicyDecision {
@@ -103,7 +103,7 @@ function collectChangedPaths(current: unknown, next: unknown, path: string, out:
   }
 }
 
-function evaluatePolicy(config: WafflebotConfig, changedPaths: string[]): ConfigPolicyDecision {
+function evaluatePolicy(config: AgentMockingbirdConfig, changedPaths: string[]): ConfigPolicyDecision {
   const policy = config.runtime.configPolicy;
   const mode = policy.mode;
   const rejected = new Set<string>();
@@ -132,15 +132,15 @@ function evaluatePolicy(config: WafflebotConfig, changedPaths: string[]): Config
   };
 }
 
-export function evaluateConfigPolicyForPatch(config: WafflebotConfig, patch: unknown): ConfigPolicyDecision {
+export function evaluateConfigPolicyForPatch(config: AgentMockingbirdConfig, patch: unknown): ConfigPolicyDecision {
   const changed = new Set<string>();
   collectPatchPaths(patch, "", changed);
   return evaluatePolicy(config, [...changed].sort((a, b) => a.localeCompare(b)));
 }
 
 export function evaluateConfigPolicyForReplace(
-  current: WafflebotConfig,
-  candidate: WafflebotConfig,
+  current: AgentMockingbirdConfig,
+  candidate: AgentMockingbirdConfig,
 ): ConfigPolicyDecision {
   const changed = new Set<string>();
   collectChangedPaths(current, candidate, "", changed);

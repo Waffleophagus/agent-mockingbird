@@ -24,9 +24,9 @@ import {
   isWriteIntentMemoryQuery,
   memoryInjectionResultKey,
 } from "./memoryPromptDedup";
-import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "@wafflebot/contracts/dashboard";
+import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "@agent-mockingbird/contracts/dashboard";
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
-import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
+import type { ConfiguredMcpServer, AgentMockingbirdConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import {
   createBackgroundRunUpdatedEvent,
@@ -176,7 +176,7 @@ type OpencodeRuntimeEvent =
   | OpencodeQuestionRepliedEvent
   | OpencodeQuestionRejectedEvent;
 type ResolvedModel = { providerId: string; modelId: string };
-type RuntimeOpencodeConfig = WafflebotConfig["runtime"]["opencode"];
+type RuntimeOpencodeConfig = AgentMockingbirdConfig["runtime"]["opencode"];
 type RuntimeAgentCatalog = {
   ids: Set<string>;
   primaryId?: string;
@@ -519,7 +519,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       const promptInput = await this.buildPromptInputWithMemory(opencodeSessionId, primaryText);
       const requestedAgent = await this.resolveRequestedAgentId(input.agent?.trim(), session.id);
       const effectiveAgent = requestedAgent ?? (await this.resolvePrimaryAgentId(undefined, { emitRetryStatus: false }));
-      const memorySystemPrompt = this.buildWafflebotSystemPrompt({
+      const memorySystemPrompt = this.buildAgentMockingbirdSystemPrompt({
         agentId: effectiveAgent,
       });
       const promptParts = this.applyMemoryPromptToParts(inputParts, promptInput.content);
@@ -1275,7 +1275,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     return runtimeConfig?.fallbackModels.find(model => model.trim())?.trim() || this.currentSmallModel();
   }
 
-  private buildWafflebotSystemPrompt(input?: { agentId?: string }): string | undefined {
+  private buildAgentMockingbirdSystemPrompt(input?: { agentId?: string }): string | undefined {
     const memoryConfig = currentMemoryConfig();
     const config = getConfigSnapshot().config;
     const workspaceContext = buildWorkspaceBootstrapPromptContext({
@@ -1315,7 +1315,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       );
     }
 
-    if (env.WAFFLEBOT_CRON_ENABLED) {
+    if (env.AGENT_MOCKINGBIRD_CRON_ENABLED) {
       lines.push("");
       lines.push(
         "Cron policy:",
@@ -3335,7 +3335,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     try {
       const created = unwrapSdkData<Session>(
         await this.getClient().session.create({
-          body: { title: "wafflebot-runtime-health" },
+          body: { title: "agent-mockingbird-runtime-health" },
           responseStyle: "data",
           throwOnError: true,
           signal: this.healthProbeSignal(timeoutMs),

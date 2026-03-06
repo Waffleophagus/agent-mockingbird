@@ -1,4 +1,4 @@
-import type { WafflebotConfig } from "./schema";
+import type { AgentMockingbirdConfig } from "./schema";
 import { getConfigSnapshot } from "./service";
 import {
   connectRuntimeMcp,
@@ -78,7 +78,7 @@ export interface RuntimeMcpCatalogResult {
 }
 
 export async function runRuntimeMcpAction(
-  config: WafflebotConfig,
+  config: AgentMockingbirdConfig,
   id: string,
   action: RuntimeMcpAction,
   hash: string,

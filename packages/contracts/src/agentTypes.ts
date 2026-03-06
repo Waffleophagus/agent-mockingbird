@@ -102,9 +102,9 @@ export function legacySpecialistToAgentType(agent: LegacySpecialistAgentLike): A
     hidden: false,
     disable: agent.status === "offline",
     options: {
-      wafflebotManagedLegacy: true,
-      wafflebotDisplayName: agent.name.trim(),
-      wafflebotStatus: agent.status,
+      agentMockingbirdManagedLegacy: true,
+      agentMockingbirdDisplayName: agent.name.trim(),
+      agentMockingbirdStatus: agent.status,
     },
   };
 }

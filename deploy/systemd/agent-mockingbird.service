@@ -1,0 +1,26 @@
+[Unit]
+Description=Agent Mockingbird API and Dashboard
+After=network.target opencode.service
+Wants=network.target opencode.service
+
+[Service]
+Type=simple
+User=agent-mockingbird
+Group=agent-mockingbird
+WorkingDirectory=/srv/agent-mockingbird/app
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=AGENT_MOCKINGBIRD_CONFIG_PATH=/var/lib/agent-mockingbird/agent-mockingbird.config.json
+Environment=AGENT_MOCKINGBIRD_DB_PATH=/var/lib/agent-mockingbird/agent-mockingbird.db
+Environment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=/srv/agent-mockingbird/app
+ExecStart=/usr/bin/env bun src/index.ts
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/agent-mockingbird/app /var/lib/agent-mockingbird
+
+[Install]
+WantedBy=multi-user.target

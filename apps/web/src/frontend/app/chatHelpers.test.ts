@@ -6,7 +6,7 @@ import {
   shouldHideMirroredAssistantContent,
   type LocalChatMessage,
 } from "@/frontend/app/chatHelpers";
-import type { ChatMessage } from "@wafflebot/contracts/dashboard";
+import type { ChatMessage } from "@agent-mockingbird/contracts/dashboard";
 
 function assistantMessage(input?: Partial<ChatMessage>): ChatMessage {
   return {

@@ -1,4 +1,4 @@
-import type { SessionScreenBootstrapResponse } from "@wafflebot/contracts/dashboard";
+import type { SessionScreenBootstrapResponse } from "@agent-mockingbird/contracts/dashboard";
 
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import type { RuntimeEngine } from "../contracts/runtime";

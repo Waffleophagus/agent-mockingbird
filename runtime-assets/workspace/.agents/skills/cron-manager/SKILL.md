@@ -1,11 +1,11 @@
 ---
 name: cron-manager
-description: Create, inspect, update, run, and delete Wafflebot cron jobs using cron_manager with the 3-mode model (background, conditional_agent, agent).
+description: Create, inspect, update, run, and delete Agent Mockingbird cron jobs using cron_manager with the 3-mode model (background, conditional_agent, agent).
 ---
 
 # cron-manager
 
-Use this skill when users want to manage scheduled jobs in Wafflebot.
+Use this skill when users want to manage scheduled jobs in Agent Mockingbird.
 
 ## Cron mode model
 

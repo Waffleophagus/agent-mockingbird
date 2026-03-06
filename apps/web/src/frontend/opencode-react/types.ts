@@ -8,7 +8,7 @@ import type {
   QuestionPromptRequest,
   SessionSummary,
   UsageSnapshot,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 export type SessionScreenMode = "chat" | "skills" | "mcp" | "agents" | "other" | "cron";
 

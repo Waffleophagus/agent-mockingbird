@@ -2,9 +2,9 @@ import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 
 function resolveApiBaseUrl() {
-  const explicit = process.env.WAFFLEBOT_CONFIG_API_BASE_URL?.trim();
+  const explicit = process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  const port = process.env.WAFFLEBOT_PORT?.trim() || process.env.PORT?.trim() || "3001";
+  const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001";
   return `http://127.0.0.1:${port}`;
 }
 
@@ -54,7 +54,7 @@ const argsSchema = z.discriminatedUnion("action", [
 
 export default tool({
   description:
-    "Manage OpenCode agent definitions through Wafflebot's OpenCode-backed APIs with validation and hash conflict detection.",
+    "Manage OpenCode agent definitions through Agent Mockingbird's OpenCode-backed APIs with validation and hash conflict detection.",
   args: {
     action: tool.schema.enum(["list", "validate_patch", "apply_patch"]),
     upserts: tool.schema.array(tool.schema.unknown()).optional(),

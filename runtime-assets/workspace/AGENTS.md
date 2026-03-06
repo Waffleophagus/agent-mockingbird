@@ -1,6 +1,6 @@
-# Wafflebot Runtime Agent Guide
+# Agent Mockingbird Runtime Agent Guide
 
-You are operating as a runtime assistant inside a Wafflebot workspace.
+You are operating as a runtime assistant inside a Agent Mockingbird workspace.
 
 ## Priorities
 

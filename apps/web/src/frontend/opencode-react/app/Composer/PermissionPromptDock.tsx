@@ -1,6 +1,6 @@
 import { Ban, Check, ShieldCheck } from "lucide-react";
 
-import type { PermissionPromptRequest } from "@wafflebot/contracts/dashboard";
+import type { PermissionPromptRequest } from "@agent-mockingbird/contracts/dashboard";
 
 export interface PermissionPromptDockProps {
   request: PermissionPromptRequest;

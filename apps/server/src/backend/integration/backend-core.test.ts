@@ -3,18 +3,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const testRoot = mkdtempSync(path.join(tmpdir(), "wafflebot-backend-test-"));
-const testDbPath = path.join(testRoot, "wafflebot.test.db");
+const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-backend-test-"));
+const testDbPath = path.join(testRoot, "agent-mockingbird.test.db");
 const testWorkspacePath = path.join(testRoot, "workspace");
-const testConfigPath = path.join(testRoot, "wafflebot.test.config.json");
+const testConfigPath = path.join(testRoot, "agent-mockingbird.test.config.json");
 
 process.env.NODE_ENV = "test";
-process.env.WAFFLEBOT_DB_PATH = testDbPath;
-process.env.WAFFLEBOT_CONFIG_PATH = testConfigPath;
-process.env.WAFFLEBOT_MEMORY_WORKSPACE_DIR = testWorkspacePath;
-process.env.WAFFLEBOT_MEMORY_EMBED_PROVIDER = "none";
-process.env.WAFFLEBOT_MEMORY_ENABLED = "true";
-process.env.WAFFLEBOT_CRON_ENABLED = "true";
+process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
+process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = testConfigPath;
+process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR = testWorkspacePath;
+process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER = "none";
+process.env.AGENT_MOCKINGBIRD_MEMORY_ENABLED = "true";
+process.env.AGENT_MOCKINGBIRD_CRON_ENABLED = "true";
 
 interface SessionSummaryLite {
   id: string;
@@ -670,7 +670,7 @@ describe("runtime health route", () => {
       configAuthority?: { source?: string; path?: string; hash?: string };
       opencode?: { baseUrl?: string; directory?: string; effectiveConfigPath?: string };
     };
-    expect(payload.configAuthority?.source).toBe("wafflebot-config-json");
+    expect(payload.configAuthority?.source).toBe("agent-mockingbird-config-json");
     expect(typeof payload.configAuthority?.path).toBe("string");
     expect(typeof payload.configAuthority?.hash).toBe("string");
     expect(typeof payload.opencode?.baseUrl).toBe("string");

@@ -7,31 +7,31 @@ services:
     volumes:
       - ../:/workspace
     environment:
-      WAFFLEBOT_MEMORY_API_BASE_URL: http://wafflebot:3001
+      AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL: http://agent-mockingbird:3001
     ports:
       - "4096:4096"
 
-  wafflebot:
+  agent-mockingbird:
     image: oven/bun:1.3
     working_dir: /workspace
     command:
       [
         "/bin/bash",
         "-lc",
-        "WAFFLEBOT_OPENCODE_BASE_URL=http://opencode:4096 WAFFLEBOT_OPENCODE_DIRECTORY=/workspace bun run config:migrate-opencode-env >/dev/null || true; exec bun src/index.ts",
+        "AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://opencode:4096 AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY=/workspace bun run config:migrate-opencode-env >/dev/null || true; exec bun src/index.ts",
       ]
     depends_on:
       - opencode
     volumes:
       - ../:/workspace
-      - wafflebot_data:/var/lib/wafflebot
+      - agent_mockingbird_data:/var/lib/agent-mockingbird
     environment:
       NODE_ENV: production
       PORT: "3001"
-      WAFFLEBOT_CONFIG_PATH: /var/lib/wafflebot/wafflebot.config.json
-      WAFFLEBOT_DB_PATH: /var/lib/wafflebot/wafflebot.db
+      AGENT_MOCKINGBIRD_CONFIG_PATH: /var/lib/agent-mockingbird/agent-mockingbird.config.json
+      AGENT_MOCKINGBIRD_DB_PATH: /var/lib/agent-mockingbird/agent-mockingbird.db
     ports:
       - "3001:3001"
 
 volumes:
-  wafflebot_data:
+  agent_mockingbird_data:

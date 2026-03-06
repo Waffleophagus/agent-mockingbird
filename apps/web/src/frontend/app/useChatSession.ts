@@ -16,7 +16,7 @@ import type {
   ChatMessage,
   SessionRunStatusSnapshot,
   SessionSummary,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 interface AgentRunSnapshot {
   id: string;

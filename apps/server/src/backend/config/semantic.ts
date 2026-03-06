@@ -1,6 +1,6 @@
 import type { ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 
-import type { WafflebotConfig } from "./schema";
+import type { AgentMockingbirdConfig } from "./schema";
 import { ConfigApplyError, type ConfigSemanticSummary } from "./types";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
 
@@ -44,7 +44,7 @@ export function resolveModelRefForValidation(
   return { providerId: defaultProvider, modelId: trimmed };
 }
 
-async function loadProviderModelMap(config: WafflebotConfig) {
+async function loadProviderModelMap(config: AgentMockingbirdConfig) {
   try {
     const client = createOpencodeClientFromConnection({
       baseUrl: config.runtime.opencode.baseUrl,
@@ -93,7 +93,7 @@ function assertModelAvailable(
   }
 }
 
-export async function runSemanticValidation(config: WafflebotConfig): Promise<ConfigSemanticSummary> {
+export async function runSemanticValidation(config: AgentMockingbirdConfig): Promise<ConfigSemanticSummary> {
   const providerMap = await loadProviderModelMap(config);
   const primaryRef = resolveModelRefForValidation(
     config.runtime.opencode.modelId,

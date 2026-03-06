@@ -370,7 +370,7 @@ export const runtimeConfigPolicySchema = z
   })
   .strict();
 
-export const wafflebotConfigSchema = z
+export const agentMockingbirdConfigSchema = z
   .object({
     version: z.literal(1),
     runtime: z
@@ -469,6 +469,6 @@ export const wafflebotConfigSchema = z
   })
   .strict();
 
-export type WafflebotConfig = z.infer<typeof wafflebotConfigSchema>;
+export type AgentMockingbirdConfig = z.infer<typeof agentMockingbirdConfigSchema>;
 export type ConfiguredMcpServer = z.infer<typeof configuredMcpServerSchema>;
 export type AgentTypeDefinition = z.infer<typeof agentTypeDefinitionSchema>;

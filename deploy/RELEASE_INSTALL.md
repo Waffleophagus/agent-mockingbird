@@ -7,31 +7,31 @@ This project ships as a tarball from GitHub Releases.
 Recommended first-run flow on Linux:
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/wafflebot/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
 This installs:
 
-- `@waffleophagus/wafflebot` from `https://git.waffleophagus.com/api/packages/waffleophagus/npm/`
+- `@waffleophagus/agent-mockingbird` from `https://git.waffleophagus.com/api/packages/waffleophagus/npm/`
 - `opencode-ai` from npmjs
-- user services (`opencode.service`, `wafflebot.service`) in `~/.config/systemd/user`
+- user services (`opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
 
-Install root defaults to `~/.wafflebot`.
+Install root defaults to `~/.agent-mockingbird`.
 
-After install, operational commands are available through `wafflebot`:
+After install, operational commands are available through `agent-mockingbird`:
 
 ```bash
-wafflebot status
-wafflebot restart
-wafflebot update
+agent-mockingbird status
+agent-mockingbird restart
+agent-mockingbird update
 ```
 
 ## Maintainer flow (build + publish)
 
 1. Push a tag (for example `v0.1.0`) or run the `Release Bundle` workflow manually.
 2. GitHub Actions will produce and publish:
-   - `wafflebot-<version>.tar.gz`
-   - `wafflebot-<version>.tar.gz.sha256`
+   - `agent-mockingbird-<version>.tar.gz`
+   - `agent-mockingbird-<version>.tar.gz.sha256`
 
 ## Host install flow
 
@@ -39,21 +39,21 @@ Run as root on your target Linux host:
 
 ```bash
 VERSION=v0.1.0
-curl -LO "https://github.com/<owner>/<repo>/releases/download/${VERSION}/wafflebot-${VERSION}.tar.gz"
-curl -LO "https://github.com/<owner>/<repo>/releases/download/${VERSION}/wafflebot-${VERSION}.tar.gz.sha256"
-sha256sum -c "wafflebot-${VERSION}.tar.gz.sha256"
-tar -xzf "wafflebot-${VERSION}.tar.gz"
-cd "wafflebot-${VERSION}"
+curl -LO "https://github.com/<owner>/<repo>/releases/download/${VERSION}/agent-mockingbird-${VERSION}.tar.gz"
+curl -LO "https://github.com/<owner>/<repo>/releases/download/${VERSION}/agent-mockingbird-${VERSION}.tar.gz.sha256"
+sha256sum -c "agent-mockingbird-${VERSION}.tar.gz.sha256"
+tar -xzf "agent-mockingbird-${VERSION}.tar.gz"
+cd "agent-mockingbird-${VERSION}"
 sudo bash scripts/install-systemd.sh
 ```
 
 Optional install overrides:
 
 ```bash
-sudo WAFFLEBOT_USER=wafflebot \
-  WAFFLEBOT_GROUP=wafflebot \
-  WAFFLEBOT_APP_DIR=/srv/wafflebot/app \
-  WAFFLEBOT_DATA_DIR=/var/lib/wafflebot \
+sudo AGENT_MOCKINGBIRD_USER=agent-mockingbird \
+  AGENT_MOCKINGBIRD_GROUP=agent-mockingbird \
+  AGENT_MOCKINGBIRD_APP_DIR=/srv/agent-mockingbird/app \
+  AGENT_MOCKINGBIRD_DATA_DIR=/var/lib/agent-mockingbird \
   bash scripts/install-systemd.sh
 ```
 
@@ -67,7 +67,7 @@ After install, verify:
 
 ```bash
 systemctl status opencode.service --no-pager
-systemctl status wafflebot.service --no-pager
+systemctl status agent-mockingbird.service --no-pager
 curl -sS http://127.0.0.1:3001/api/health
 ```
 
@@ -86,5 +86,5 @@ OWNER="<github-owner>"
 REPO="<repo-name>"
 VERSION="v0.1.0"
 bun add -g "github:${OWNER}/${REPO}#${VERSION}"
-wafflebot
+agent-mockingbird
 ```

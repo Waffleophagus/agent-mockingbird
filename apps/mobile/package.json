@@ -1,5 +1,5 @@
 {
-  "name": "@wafflebot/mobile",
+  "name": "@agent-mockingbird/mobile",
   "private": true,
   "version": "0.0.1",
   "main": "expo-router/entry",
@@ -15,9 +15,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@wafflebot/api": "workspace:*",
-    "@wafflebot/app-core": "workspace:*",
-    "@wafflebot/contracts": "workspace:*",
+    "@agent-mockingbird/api": "workspace:*",
+    "@agent-mockingbird/app-core": "workspace:*",
+    "@agent-mockingbird/contracts": "workspace:*",
     "@expo/vector-icons": "~14.1.0",
     "expo": "~54.0.0",
     "expo-constants": "~17.1.0",

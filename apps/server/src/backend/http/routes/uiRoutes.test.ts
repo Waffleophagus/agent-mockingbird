@@ -6,16 +6,16 @@ import path from "node:path";
 import type { createUiRoutes as CreateUiRoutesType } from "./uiRoutes";
 import type * as RepositoryModuleType from "../../db/repository";
 
-const testRoot = mkdtempSync(path.join(tmpdir(), "wafflebot-ui-routes-test-"));
-const testDbPath = path.join(testRoot, "wafflebot.ui-routes.test.db");
-const testConfigPath = path.join(testRoot, "wafflebot.ui-routes.config.json");
+const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-ui-routes-test-"));
+const testDbPath = path.join(testRoot, "agent-mockingbird.ui-routes.test.db");
+const testConfigPath = path.join(testRoot, "agent-mockingbird.ui-routes.config.json");
 const testWorkspacePath = path.join(testRoot, "workspace");
 
 process.env.NODE_ENV = "test";
-process.env.WAFFLEBOT_DB_PATH = testDbPath;
-process.env.WAFFLEBOT_CONFIG_PATH = testConfigPath;
-process.env.WAFFLEBOT_MEMORY_WORKSPACE_DIR = testWorkspacePath;
-process.env.WAFFLEBOT_MEMORY_EMBED_PROVIDER = "none";
+process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
+process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = testConfigPath;
+process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR = testWorkspacePath;
+process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER = "none";
 
 interface RuntimeStub {
   syncSessionMessages: (sessionId: string) => Promise<void>;

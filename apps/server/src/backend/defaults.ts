@@ -1,4 +1,4 @@
-import type { SpecialistAgent } from "@wafflebot/contracts/dashboard";
+import type { SpecialistAgent } from "@agent-mockingbird/contracts/dashboard";
 import type { AgentTypeDefinition } from "./config/schema";
 
 export const DEFAULT_SKILLS: string[] = [
@@ -13,7 +13,7 @@ export const DEFAULT_AGENTS: SpecialistAgent[] = [];
 export const DEFAULT_AGENT_TYPES: AgentTypeDefinition[] = [
   {
     id: "build",
-    name: "Wafflebot",
+    name: "Agent Mockingbird",
     description: "Default primary agent.",
     mode: "primary",
     hidden: false,

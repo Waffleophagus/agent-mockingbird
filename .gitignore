@@ -8,11 +8,11 @@ dist
 data/*
 data/*
 bin/*
-!bin/wafflebot
+!bin/agent-mockingbird
 data/workspace/
-data/wafflebot.config.json
-data/wafflebot.config.json.bak
-wafflebot.config.json
+data/agent-mockingbird.config.json
+data/agent-mockingbird.config.json.bak
+agent-mockingbird.config.json
 
 # code coverage
 coverage

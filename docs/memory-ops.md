@@ -1,13 +1,13 @@
 # Memory Ops Runbook
 
-This runbook is for Wafflebot operators maintaining OpenCode-backed memory.
+This runbook is for Agent Mockingbird operators maintaining OpenCode-backed memory.
 
 ## Source of Truth
 
 - Durable files in workspace:
   - `MEMORY.md`
   - `memory/*.md`
-- Indexed state in Wafflebot SQLite tables:
+- Indexed state in Agent Mockingbird SQLite tables:
   - `memory_files`
   - `memory_chunks`
   - `memory_chunks_fts`

@@ -1,9 +1,9 @@
-import { legacySpecialistToAgentType } from "@wafflebot/contracts/agentTypes";
+import { legacySpecialistToAgentType } from "@agent-mockingbird/contracts/agentTypes";
 import type {
   AgentTypeDefinition,
   BackgroundRunSnapshot,
   DashboardBootstrap,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 export type AgentRunState = "queued" | "running" | "completed" | "failed";
 

@@ -23,11 +23,11 @@ export interface OpencodeConnectionInfo {
 }
 
 function resolveAuthHeader() {
-  const explicit = env.WAFFLEBOT_OPENCODE_AUTH_HEADER?.trim();
+  const explicit = env.AGENT_MOCKINGBIRD_OPENCODE_AUTH_HEADER?.trim();
   if (explicit) return explicit;
 
-  const username = env.WAFFLEBOT_OPENCODE_USERNAME?.trim();
-  const password = env.WAFFLEBOT_OPENCODE_PASSWORD ?? "";
+  const username = env.AGENT_MOCKINGBIRD_OPENCODE_USERNAME?.trim();
+  const password = env.AGENT_MOCKINGBIRD_OPENCODE_PASSWORD ?? "";
   if (!username) return undefined;
   return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@wafflebot/server",
+  "name": "@agent-mockingbird/server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -22,8 +22,8 @@
     "@opencode-ai/sdk": "^1.2.15",
     "@t3-oss/env-core": "^0.13.10",
     "@trpc/server": "^11.7.1",
-    "@wafflebot/api": "workspace:*",
-    "@wafflebot/contracts": "workspace:*",
+    "@agent-mockingbird/api": "workspace:*",
+    "@agent-mockingbird/contracts": "workspace:*",
     "cron": "^4.4.0",
     "drizzle-orm": "^0.45.1",
     "jsonc-parser": "^3.3.1",

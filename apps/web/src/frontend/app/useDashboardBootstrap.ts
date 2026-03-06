@@ -39,7 +39,7 @@ import type {
   SessionRunStatusSnapshot,
   SessionSummary,
   UsageSnapshot,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 type StreamStatus = "connecting" | "connected" | "reconnecting";
 const IN_FLIGHT_BACKGROUND_STATUSES = new Set<BackgroundRunSnapshot["status"]>([

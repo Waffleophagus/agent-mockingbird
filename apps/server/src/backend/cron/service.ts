@@ -385,20 +385,20 @@ export class CronService {
   private workerTimer: Timer | null = null;
   private schedulerBusy = false;
   private workerBusy = false;
-  private readonly workerId = `wafflebot-${process.pid}`;
+  private readonly workerId = `agent-mockingbird-${process.pid}`;
 
   constructor(private runtime: RuntimeEngine) {
     ensureCronTables();
   }
 
   start() {
-    if (!env.WAFFLEBOT_CRON_ENABLED) return;
+    if (!env.AGENT_MOCKINGBIRD_CRON_ENABLED) return;
     this.schedulerTimer = setInterval(() => {
       void this.schedulerTick();
-    }, env.WAFFLEBOT_CRON_SCHEDULER_POLL_MS);
+    }, env.AGENT_MOCKINGBIRD_CRON_SCHEDULER_POLL_MS);
     this.workerTimer = setInterval(() => {
       void this.workerTick();
-    }, env.WAFFLEBOT_CRON_WORKER_POLL_MS);
+    }, env.AGENT_MOCKINGBIRD_CRON_WORKER_POLL_MS);
     void this.schedulerTick();
     void this.workerTick();
   }
@@ -763,10 +763,10 @@ export class CronService {
     };
 
     return {
-      enabled: env.WAFFLEBOT_CRON_ENABLED,
-      schedulerPollMs: env.WAFFLEBOT_CRON_SCHEDULER_POLL_MS,
-      workerPollMs: env.WAFFLEBOT_CRON_WORKER_POLL_MS,
-      leaseMs: env.WAFFLEBOT_CRON_LEASE_MS,
+      enabled: env.AGENT_MOCKINGBIRD_CRON_ENABLED,
+      schedulerPollMs: env.AGENT_MOCKINGBIRD_CRON_SCHEDULER_POLL_MS,
+      workerPollMs: env.AGENT_MOCKINGBIRD_CRON_WORKER_POLL_MS,
+      leaseMs: env.AGENT_MOCKINGBIRD_CRON_LEASE_MS,
       jobs,
       instances,
     };
@@ -797,7 +797,7 @@ export class CronService {
   }
 
   private async schedulerTick() {
-    if (!env.WAFFLEBOT_CRON_ENABLED || this.schedulerBusy) return;
+    if (!env.AGENT_MOCKINGBIRD_CRON_ENABLED || this.schedulerBusy) return;
     this.schedulerBusy = true;
     try {
       ensureCronTables();
@@ -811,7 +811,7 @@ export class CronService {
       );
 
       for (const row of definitions) {
-        const dueTimes = computeDueTimesForDefinition(row, now, env.WAFFLEBOT_CRON_MAX_ENQUEUE_PER_JOB_TICK);
+        const dueTimes = computeDueTimesForDefinition(row, now, env.AGENT_MOCKINGBIRD_CRON_MAX_ENQUEUE_PER_JOB_TICK);
         if (!dueTimes.length) continue;
         let lastEnqueued = row.last_enqueued_for ?? null;
         for (const scheduledFor of dueTimes) {
@@ -904,7 +904,7 @@ export class CronService {
             AND (state = 'queued' OR state = 'failed')
         `,
         )
-        .run(now, this.workerId, now + env.WAFFLEBOT_CRON_LEASE_MS, candidate.id);
+        .run(now, this.workerId, now + env.AGENT_MOCKINGBIRD_CRON_LEASE_MS, candidate.id);
       if (claimed.changes < 1) return null;
 
       return selectOne<CronInstanceRow>(
@@ -920,7 +920,7 @@ export class CronService {
   }
 
   private async workerTick() {
-    if (!env.WAFFLEBOT_CRON_ENABLED || this.workerBusy) return;
+    if (!env.AGENT_MOCKINGBIRD_CRON_ENABLED || this.workerBusy) return;
     this.workerBusy = true;
     try {
       const now = nowMs();

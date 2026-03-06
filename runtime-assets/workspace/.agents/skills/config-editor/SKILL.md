@@ -1,6 +1,6 @@
 ---
 name: config-editor
-description: Safely read and update Wafflebot runtime configuration with hash-aware, smoke-tested writes.
+description: Safely read and update Agent Mockingbird runtime configuration with hash-aware, smoke-tested writes.
 ---
 
 # config-editor

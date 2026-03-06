@@ -31,7 +31,7 @@ import type {
   RuntimeMcp,
   RuntimeSkill,
   RuntimeSkillIssue,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 interface ManagementWorkspaceProps {
   activeScreen: SessionScreenMode;

@@ -7,7 +7,7 @@ import type {
   CronJobInstance,
   CronJobPatchInput,
   CronJobStep,
-} from "@wafflebot/contracts/cron";
+} from "@agent-mockingbird/contracts/cron";
 import { formatCompactTimestamp, relativeFromIso } from "@/frontend/app/chatHelpers";
 import {
   createCronJob,

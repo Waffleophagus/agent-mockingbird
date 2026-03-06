@@ -131,7 +131,7 @@
     "agentTypes": [
       {
         "id": "build",
-        "name": "Wafflebot",
+        "name": "Agent Mockingbird",
         "description": "Default primary agent.",
         "mode": "primary",
         "hidden": false,

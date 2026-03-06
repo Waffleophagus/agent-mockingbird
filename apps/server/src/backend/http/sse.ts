@@ -1,4 +1,4 @@
-import type { HeartbeatSnapshot, UsageSnapshot } from "@wafflebot/contracts/dashboard";
+import type { HeartbeatSnapshot, UsageSnapshot } from "@agent-mockingbird/contracts/dashboard";
 import {
   createHeartbeatUpdatedEvent,
   createUsageUpdatedEvent,

@@ -5,8 +5,8 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import os from "node:os";
 import path from "node:path";
 
-import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft, normalizeAgentTypeMode } from "@wafflebot/contracts/agentTypes";
-import type { AgentTypeDefinition, WafflebotConfig } from "../config/schema";
+import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft, normalizeAgentTypeMode } from "@agent-mockingbird/contracts/agentTypes";
+import type { AgentTypeDefinition, AgentMockingbirdConfig } from "../config/schema";
 import { agentTypeDefinitionSchema } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
@@ -108,7 +108,7 @@ function canonicalOpencodeConfigPath(baseDir: string) {
   return path.join(baseDir, ".opencode", "opencode.jsonc");
 }
 
-function resolveOpencodeConfigFile(config: WafflebotConfig, createIfMissing = true) {
+function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissing = true) {
   const baseDir = resolveOpencodeWorkspaceDir(config);
   const fallback = canonicalOpencodeConfigPath(baseDir);
   if (!createIfMissing) {
@@ -121,7 +121,7 @@ function resolveOpencodeConfigFile(config: WafflebotConfig, createIfMissing = tr
   return fallback;
 }
 
-export function getOpencodeAgentStorageInfo(config: WafflebotConfig = getConfigSnapshot().config): OpencodeAgentStorageInfo {
+export function getOpencodeAgentStorageInfo(config: AgentMockingbirdConfig = getConfigSnapshot().config): OpencodeAgentStorageInfo {
   const directory = resolveOpencodeWorkspaceDir(config);
   return {
     directory,
@@ -130,7 +130,7 @@ export function getOpencodeAgentStorageInfo(config: WafflebotConfig = getConfigS
   };
 }
 
-function listAgentSearchRoots(config: WafflebotConfig): string[] {
+function listAgentSearchRoots(config: AgentMockingbirdConfig): string[] {
   const roots = new Set<string>();
   const baseDir = resolveOpencodeWorkspaceDir(config);
   roots.add(baseDir);
@@ -155,7 +155,7 @@ function listAgentSearchRoots(config: WafflebotConfig): string[] {
   return [...roots];
 }
 
-function deleteAgentMarkdownFiles(config: WafflebotConfig, agentId: string): string[] {
+function deleteAgentMarkdownFiles(config: AgentMockingbirdConfig, agentId: string): string[] {
   const normalized = agentId.trim();
   if (!normalized) return [];
   const deleted: string[] = [];
@@ -210,14 +210,14 @@ function hashAgentTypes(agentTypes: AgentTypeDefinition[]): string {
     .digest("hex");
 }
 
-function createOpencodeConfigClient(config: WafflebotConfig) {
+function createOpencodeConfigClient(config: AgentMockingbirdConfig) {
   return createOpencodeClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
     directory: config.runtime.opencode.directory,
   });
 }
 
-async function disposeOpencodeInstance(config: WafflebotConfig) {
+async function disposeOpencodeInstance(config: AgentMockingbirdConfig) {
   try {
     await createOpencodeConfigClient(config).instance.dispose({
       responseStyle: "data",
@@ -229,7 +229,7 @@ async function disposeOpencodeInstance(config: WafflebotConfig) {
   }
 }
 
-async function getOpencodeConfig(config: WafflebotConfig) {
+async function getOpencodeConfig(config: AgentMockingbirdConfig) {
   const client = createOpencodeConfigClient(config);
   return unwrapSdkData<Config>(
     await client.config.get({
@@ -240,7 +240,7 @@ async function getOpencodeConfig(config: WafflebotConfig) {
   );
 }
 
-async function loadProviderModelMap(config: WafflebotConfig) {
+async function loadProviderModelMap(config: AgentMockingbirdConfig) {
   const client = createOpencodeConfigClient(config);
   const payload = unwrapSdkData<ConfigProvidersResponse>(
     await client.config.providers({

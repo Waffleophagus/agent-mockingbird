@@ -1,6 +1,6 @@
 ---
 name: config-auditor
-description: Audit Wafflebot config for drift, risky values, and operability issues, then suggest minimal safe patches.
+description: Audit Agent Mockingbird config for drift, risky values, and operability issues, then suggest minimal safe patches.
 ---
 
 # config-auditor

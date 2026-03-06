@@ -1,5 +1,5 @@
 {
-  "name": "wafflebot",
+  "name": "agent-mockingbird",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -9,21 +9,22 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev --parallel --filter=@wafflebot/server --filter=@wafflebot/mobile",
-    "dev:server": "turbo run dev --filter=@wafflebot/server",
-    "dev:web": "turbo run dev --filter=@wafflebot/server",
-    "dev:mobile": "turbo run dev --filter=@wafflebot/mobile",
+    "dev": "turbo run dev --parallel --filter=@agent-mockingbird/server --filter=@agent-mockingbird/mobile",
+    "dev:server": "turbo run dev --filter=@agent-mockingbird/server",
+    "dev:web": "turbo run dev --filter=@agent-mockingbird/server",
+    "dev:mobile": "turbo run dev --filter=@agent-mockingbird/mobile",
+    "build:cli": "bun run ./build-cli.mjs",
     "build:android": "bash ./apps/mobile/build-android.sh",
     "build": "turbo run build",
-    "build:server": "turbo run build --filter=@wafflebot/server",
-    "build:web": "turbo run build --filter=@wafflebot/web",
+    "build:server": "turbo run build --filter=@agent-mockingbird/server",
+    "build:web": "turbo run build --filter=@agent-mockingbird/web",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "db:generate": "turbo run db:generate --filter=@wafflebot/server",
-    "db:migrate": "turbo run db:migrate --filter=@wafflebot/server",
-    "db:check": "turbo run db:check --filter=@wafflebot/server",
-    "db:wipe": "turbo run db:wipe --filter=@wafflebot/server"
+    "db:generate": "turbo run db:generate --filter=@agent-mockingbird/server",
+    "db:migrate": "turbo run db:migrate --filter=@agent-mockingbird/server",
+    "db:check": "turbo run db:check --filter=@agent-mockingbird/server",
+    "db:wipe": "turbo run db:wipe --filter=@agent-mockingbird/server"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",

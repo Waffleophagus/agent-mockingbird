@@ -5,18 +5,18 @@ import path from "node:path";
 
 import type { MemorySearchResult } from "../memory/types";
 
-const testRoot = mkdtempSync(path.join(tmpdir(), "wafflebot-runtime-test-"));
-const testDbPath = path.join(testRoot, "wafflebot.runtime.test.db");
+const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-runtime-test-"));
+const testDbPath = path.join(testRoot, "agent-mockingbird.runtime.test.db");
 const testWorkspacePath = path.join(testRoot, "workspace");
-const testConfigPath = path.join(testRoot, "wafflebot.runtime.config.json");
+const testConfigPath = path.join(testRoot, "agent-mockingbird.runtime.config.json");
 
 process.env.NODE_ENV = "test";
-process.env.WAFFLEBOT_DB_PATH = testDbPath;
-process.env.WAFFLEBOT_CONFIG_PATH = testConfigPath;
-process.env.WAFFLEBOT_MEMORY_WORKSPACE_DIR = testWorkspacePath;
-process.env.WAFFLEBOT_MEMORY_ENABLED = "false";
-process.env.WAFFLEBOT_MEMORY_TOOL_MODE = "tool_only";
-process.env.WAFFLEBOT_CRON_ENABLED = "false";
+process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
+process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = testConfigPath;
+process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR = testWorkspacePath;
+process.env.AGENT_MOCKINGBIRD_MEMORY_ENABLED = "false";
+process.env.AGENT_MOCKINGBIRD_MEMORY_TOOL_MODE = "tool_only";
+process.env.AGENT_MOCKINGBIRD_CRON_ENABLED = "false";
 
 interface RepositoryApi {
   ensureSeedData: () => void;
@@ -485,7 +485,7 @@ function createMockClient(input: {
         if (input.appAgents) return input.appAgents(request);
         return {
           data: [
-            { name: "wafflebot", mode: "primary" },
+            { name: "agent-mockingbird", mode: "primary" },
             { name: "general", mode: "subagent" },
           ],
         };
@@ -638,7 +638,7 @@ describe("opencode runtime failover contract", () => {
     const runtime = createRuntimeWithClient(
       createMockClient({
         appAgents: async () => ({
-          data: [{ name: "wafflebot", mode: "primary" }],
+          data: [{ name: "agent-mockingbird", mode: "primary" }],
         }),
         prompt: async (request) => {
           seenAgents.push(request.body?.agent);

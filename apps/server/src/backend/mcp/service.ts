@@ -1,5 +1,5 @@
-import type { RuntimeMcp, RuntimeMcpStatus } from "@wafflebot/contracts/dashboard";
-import type { ConfiguredMcpServer, WafflebotConfig } from "../config/schema";
+import type { RuntimeMcp, RuntimeMcpStatus } from "@agent-mockingbird/contracts/dashboard";
+import type { ConfiguredMcpServer, AgentMockingbirdConfig } from "../config/schema";
 import { createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -19,11 +19,11 @@ export function normalizeMcpServerDefinitions(servers: Array<ConfiguredMcpServer
   return [...deduped.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function resolveConfiguredMcpServers(config: WafflebotConfig) {
+export function resolveConfiguredMcpServers(config: AgentMockingbirdConfig) {
   return normalizeMcpServerDefinitions(config.ui.mcpServers ?? []);
 }
 
-export function resolveConfiguredMcpIds(config: WafflebotConfig) {
+export function resolveConfiguredMcpIds(config: AgentMockingbirdConfig) {
   const configuredServers = resolveConfiguredMcpServers(config);
   if (configuredServers.length > 0) {
     return normalizeMcpIds(configuredServers.filter(server => server.enabled).map(server => server.id));
@@ -31,7 +31,7 @@ export function resolveConfiguredMcpIds(config: WafflebotConfig) {
   return normalizeMcpIds(config.ui.mcps);
 }
 
-function createMcpClient(config: WafflebotConfig) {
+function createMcpClient(config: AgentMockingbirdConfig) {
   return createOpencodeV2ClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
     directory: config.runtime.opencode.directory,
@@ -55,7 +55,7 @@ function extractMcpError(value: unknown) {
   return trimmed || undefined;
 }
 
-export async function listRuntimeMcps(config: WafflebotConfig): Promise<RuntimeMcp[]> {
+export async function listRuntimeMcps(config: AgentMockingbirdConfig): Promise<RuntimeMcp[]> {
   const enabled = new Set(resolveConfiguredMcpIds(config));
   const client = createMcpClient(config);
   const payload = unwrapSdkData<Record<string, unknown>>(
@@ -143,7 +143,7 @@ export function buildDesiredRuntimeMcpConfigMap(input: {
   return desired;
 }
 
-export async function connectRuntimeMcp(config: WafflebotConfig, id: string) {
+export async function connectRuntimeMcp(config: AgentMockingbirdConfig, id: string) {
   const client = createMcpClient(config);
   return unwrapSdkData<boolean>(
     await client.mcp.connect(
@@ -157,7 +157,7 @@ export async function connectRuntimeMcp(config: WafflebotConfig, id: string) {
   );
 }
 
-export async function disconnectRuntimeMcp(config: WafflebotConfig, id: string) {
+export async function disconnectRuntimeMcp(config: AgentMockingbirdConfig, id: string) {
   const client = createMcpClient(config);
   return unwrapSdkData<boolean>(
     await client.mcp.disconnect(
@@ -171,7 +171,7 @@ export async function disconnectRuntimeMcp(config: WafflebotConfig, id: string) 
   );
 }
 
-export async function startRuntimeMcpAuth(config: WafflebotConfig, id: string) {
+export async function startRuntimeMcpAuth(config: AgentMockingbirdConfig, id: string) {
   const client = createMcpClient(config);
   const response = unwrapSdkData<{ authorizationUrl: string }>(
     await client.mcp.auth.start(
@@ -186,7 +186,7 @@ export async function startRuntimeMcpAuth(config: WafflebotConfig, id: string) {
   return response.authorizationUrl;
 }
 
-export async function removeRuntimeMcpAuth(config: WafflebotConfig, id: string) {
+export async function removeRuntimeMcpAuth(config: AgentMockingbirdConfig, id: string) {
   const client = createMcpClient(config);
   return unwrapSdkData<{ success: true }>(
     await client.mcp.auth.remove(

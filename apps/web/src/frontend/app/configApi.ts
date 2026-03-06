@@ -1,12 +1,12 @@
 import type { OpencodeAgentStorageResponse } from "@/frontend/app/dashboardTypes";
-import { normalizeAgentTypeDraft } from "@wafflebot/contracts/agentTypes";
+import { normalizeAgentTypeDraft } from "@agent-mockingbird/contracts/agentTypes";
 import type {
   AgentTypeDefinition,
   ConfiguredMcpServer,
   RuntimeMcp,
   RuntimeSkillIssue,
   RuntimeSkill,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 interface ApiErrorPayload {
   error?: string;

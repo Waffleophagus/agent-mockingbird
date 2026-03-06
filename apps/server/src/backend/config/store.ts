@@ -3,19 +3,19 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import path from "node:path";
 import { z } from "zod";
 
-import { legacySpecialistToAgentType } from "@wafflebot/contracts/agentTypes";
+import { legacySpecialistToAgentType } from "@agent-mockingbird/contracts/agentTypes";
 import { sqlite } from "../db/client";
 import { DEFAULT_AGENTS, DEFAULT_AGENT_TYPES, DEFAULT_MCPS, DEFAULT_SKILLS } from "../defaults";
 import { env } from "../env";
 import { resolveDataPath } from "../paths";
 import {
   agentTypeDefinitionSchema,
-  wafflebotConfigSchema,
+  agentMockingbirdConfigSchema,
   specialistAgentSchema,
   type AgentTypeDefinition,
-  type WafflebotConfig,
+  type AgentMockingbirdConfig,
 } from "./schema";
-import { ConfigApplyError, type WafflebotConfigSnapshot } from "./types";
+import { ConfigApplyError, type AgentMockingbirdConfigSnapshot } from "./types";
 import { resolveWorkspaceAlignment } from "../workspace/resolve";
 
 interface ConfigRow {
@@ -23,7 +23,7 @@ interface ConfigRow {
 }
 
 const CONFIG_VERSION = 1 as const;
-const DEFAULT_CONFIG_FILENAME = "wafflebot.config.json";
+const DEFAULT_CONFIG_FILENAME = "agent-mockingbird.config.json";
 const BACKUP_SUFFIX = ".bak";
 const DEFAULT_SMOKE_TEST_PROMPT = 'Just respond "OK" to this to confirm the gateway is working.';
 const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
@@ -40,7 +40,7 @@ const legacyAgentTypeListSchema = z.array(agentTypeDefinitionSchema);
 type LegacyConfigKey = "skills" | "mcps" | "agents" | "agent_types";
 
 function resolvedConfigPath() {
-  const configuredPath = env.WAFFLEBOT_CONFIG_PATH?.trim();
+  const configuredPath = env.AGENT_MOCKINGBIRD_CONFIG_PATH?.trim();
   if (configuredPath) {
     return path.resolve(configuredPath);
   }
@@ -76,7 +76,7 @@ function stableStringify(value: unknown): string {
   return `{${serializedEntries.join(",")}}`;
 }
 
-function computeConfigHash(config: WafflebotConfig) {
+function computeConfigHash(config: AgentMockingbirdConfig) {
   return createHash("sha256").update(stableStringify(config)).digest("hex");
 }
 
@@ -108,37 +108,37 @@ function readExplicitEnvBoolean(key: string) {
 function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
   const memoryPatch: Record<string, unknown> = {};
 
-  const memoryEnabled = readExplicitEnvBoolean("WAFFLEBOT_MEMORY_ENABLED");
+  const memoryEnabled = readExplicitEnvBoolean("AGENT_MOCKINGBIRD_MEMORY_ENABLED");
   if (typeof memoryEnabled === "boolean") memoryPatch.enabled = memoryEnabled;
-  const memoryWorkspaceDir = readExplicitEnvString("WAFFLEBOT_MEMORY_WORKSPACE_DIR");
+  const memoryWorkspaceDir = readExplicitEnvString("AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR");
   if (memoryWorkspaceDir) memoryPatch.workspaceDir = memoryWorkspaceDir;
-  const memoryEmbedProvider = readExplicitEnvString("WAFFLEBOT_MEMORY_EMBED_PROVIDER");
+  const memoryEmbedProvider = readExplicitEnvString("AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER");
   if (memoryEmbedProvider) memoryPatch.embedProvider = memoryEmbedProvider;
-  const memoryEmbedModel = readExplicitEnvString("WAFFLEBOT_MEMORY_EMBED_MODEL");
+  const memoryEmbedModel = readExplicitEnvString("AGENT_MOCKINGBIRD_MEMORY_EMBED_MODEL");
   if (memoryEmbedModel) memoryPatch.embedModel = memoryEmbedModel;
-  const memoryOllamaBaseUrl = readExplicitEnvString("WAFFLEBOT_MEMORY_OLLAMA_BASE_URL");
+  const memoryOllamaBaseUrl = readExplicitEnvString("AGENT_MOCKINGBIRD_MEMORY_OLLAMA_BASE_URL");
   if (memoryOllamaBaseUrl) memoryPatch.ollamaBaseUrl = memoryOllamaBaseUrl;
-  const memoryChunkTokens = readExplicitEnvNumber("WAFFLEBOT_MEMORY_CHUNK_TOKENS");
+  const memoryChunkTokens = readExplicitEnvNumber("AGENT_MOCKINGBIRD_MEMORY_CHUNK_TOKENS");
   if (typeof memoryChunkTokens === "number") memoryPatch.chunkTokens = memoryChunkTokens;
-  const memoryChunkOverlap = readExplicitEnvNumber("WAFFLEBOT_MEMORY_CHUNK_OVERLAP");
+  const memoryChunkOverlap = readExplicitEnvNumber("AGENT_MOCKINGBIRD_MEMORY_CHUNK_OVERLAP");
   if (typeof memoryChunkOverlap === "number") memoryPatch.chunkOverlap = memoryChunkOverlap;
-  const memoryMaxResults = readExplicitEnvNumber("WAFFLEBOT_MEMORY_MAX_RESULTS");
+  const memoryMaxResults = readExplicitEnvNumber("AGENT_MOCKINGBIRD_MEMORY_MAX_RESULTS");
   if (typeof memoryMaxResults === "number") memoryPatch.maxResults = memoryMaxResults;
-  const memoryMinScore = readExplicitEnvNumber("WAFFLEBOT_MEMORY_MIN_SCORE");
+  const memoryMinScore = readExplicitEnvNumber("AGENT_MOCKINGBIRD_MEMORY_MIN_SCORE");
   if (typeof memoryMinScore === "number") memoryPatch.minScore = memoryMinScore;
-  const memorySyncCooldownMs = readExplicitEnvNumber("WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS");
+  const memorySyncCooldownMs = readExplicitEnvNumber("AGENT_MOCKINGBIRD_MEMORY_SYNC_COOLDOWN_MS");
   if (typeof memorySyncCooldownMs === "number") memoryPatch.syncCooldownMs = memorySyncCooldownMs;
-  const memoryToolMode = readExplicitEnvString("WAFFLEBOT_MEMORY_TOOL_MODE");
+  const memoryToolMode = readExplicitEnvString("AGENT_MOCKINGBIRD_MEMORY_TOOL_MODE");
   if (memoryToolMode) memoryPatch.toolMode = memoryToolMode;
-  const memoryInjectionDedupeEnabled = readExplicitEnvBoolean("WAFFLEBOT_MEMORY_INJECTION_DEDUPE_ENABLED");
+  const memoryInjectionDedupeEnabled = readExplicitEnvBoolean("AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_ENABLED");
   if (typeof memoryInjectionDedupeEnabled === "boolean") memoryPatch.injectionDedupeEnabled = memoryInjectionDedupeEnabled;
   const memoryInjectionDedupeFallbackRecallOnly = readExplicitEnvBoolean(
-    "WAFFLEBOT_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY",
+    "AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY",
   );
   if (typeof memoryInjectionDedupeFallbackRecallOnly === "boolean") {
     memoryPatch.injectionDedupeFallbackRecallOnly = memoryInjectionDedupeFallbackRecallOnly;
   }
-  const memoryInjectionDedupeMaxTracked = readExplicitEnvNumber("WAFFLEBOT_MEMORY_INJECTION_DEDUPE_MAX_TRACKED");
+  const memoryInjectionDedupeMaxTracked = readExplicitEnvNumber("AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_MAX_TRACKED");
   if (typeof memoryInjectionDedupeMaxTracked === "number") {
     memoryPatch.injectionDedupeMaxTracked = memoryInjectionDedupeMaxTracked;
   }
@@ -166,14 +166,14 @@ function readLegacyStringListConfig(key: "skills" | "mcps", fallback: string[]) 
   return normalizeStringList(parsed.data);
 }
 
-function readLegacyAgentConfig(fallback: WafflebotConfig["ui"]["agents"]) {
+function readLegacyAgentConfig(fallback: AgentMockingbirdConfig["ui"]["agents"]) {
   const value = readLegacyConfigRow("agents");
   const parsed = legacyAgentListSchema.safeParse(value);
   if (!parsed.success) return fallback;
   return parsed.data;
 }
 
-function readLegacyAgentTypeConfig(fallback: WafflebotConfig["ui"]["agentTypes"]) {
+function readLegacyAgentTypeConfig(fallback: AgentMockingbirdConfig["ui"]["agentTypes"]) {
   const value = readLegacyConfigRow("agent_types");
   const parsed = legacyAgentTypeListSchema.safeParse(value);
   if (!parsed.success) return fallback;
@@ -181,8 +181,8 @@ function readLegacyAgentTypeConfig(fallback: WafflebotConfig["ui"]["agentTypes"]
 }
 
 function mergeAgentTypesWithLegacyAgents(
-  agentTypes: WafflebotConfig["ui"]["agentTypes"],
-  agents: WafflebotConfig["ui"]["agents"],
+  agentTypes: AgentMockingbirdConfig["ui"]["agentTypes"],
+  agents: AgentMockingbirdConfig["ui"]["agents"],
 ) {
   const merged = new Map(agentTypes.map(agentType => [agentType.id, agentType]));
   for (const agent of agents) {
@@ -194,7 +194,7 @@ function mergeAgentTypesWithLegacyAgents(
 }
 
 function buildLegacyBootstrappedConfig() {
-  const candidate: WafflebotConfig = {
+  const candidate: AgentMockingbirdConfig = {
     version: CONFIG_VERSION,
     runtime: {
       opencode: {
@@ -208,7 +208,7 @@ function buildLegacyBootstrappedConfig() {
         promptTimeoutMs: DEFAULT_OPENCODE_PROMPT_TIMEOUT_MS,
         runWaitTimeoutMs: DEFAULT_OPENCODE_RUN_WAIT_TIMEOUT_MS,
         childSessionHideAfterDays: 3,
-        directory: env.WAFFLEBOT_MEMORY_WORKSPACE_DIR,
+        directory: env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
         bootstrap: {
           enabled: true,
           maxCharsPerFile: 20_000,
@@ -226,20 +226,20 @@ function buildLegacyBootstrappedConfig() {
         replayPageSize: 200,
       },
       memory: {
-        enabled: env.WAFFLEBOT_MEMORY_ENABLED,
-        workspaceDir: env.WAFFLEBOT_MEMORY_WORKSPACE_DIR,
-        embedProvider: env.WAFFLEBOT_MEMORY_EMBED_PROVIDER,
-        embedModel: env.WAFFLEBOT_MEMORY_EMBED_MODEL,
-        ollamaBaseUrl: env.WAFFLEBOT_MEMORY_OLLAMA_BASE_URL,
-        chunkTokens: env.WAFFLEBOT_MEMORY_CHUNK_TOKENS,
-        chunkOverlap: env.WAFFLEBOT_MEMORY_CHUNK_OVERLAP,
-        maxResults: env.WAFFLEBOT_MEMORY_MAX_RESULTS,
-        minScore: env.WAFFLEBOT_MEMORY_MIN_SCORE,
-        syncCooldownMs: env.WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS,
-        toolMode: env.WAFFLEBOT_MEMORY_TOOL_MODE,
-        injectionDedupeEnabled: env.WAFFLEBOT_MEMORY_INJECTION_DEDUPE_ENABLED,
-        injectionDedupeFallbackRecallOnly: env.WAFFLEBOT_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY,
-        injectionDedupeMaxTracked: env.WAFFLEBOT_MEMORY_INJECTION_DEDUPE_MAX_TRACKED,
+        enabled: env.AGENT_MOCKINGBIRD_MEMORY_ENABLED,
+        workspaceDir: env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+        embedProvider: env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER,
+        embedModel: env.AGENT_MOCKINGBIRD_MEMORY_EMBED_MODEL,
+        ollamaBaseUrl: env.AGENT_MOCKINGBIRD_MEMORY_OLLAMA_BASE_URL,
+        chunkTokens: env.AGENT_MOCKINGBIRD_MEMORY_CHUNK_TOKENS,
+        chunkOverlap: env.AGENT_MOCKINGBIRD_MEMORY_CHUNK_OVERLAP,
+        maxResults: env.AGENT_MOCKINGBIRD_MEMORY_MAX_RESULTS,
+        minScore: env.AGENT_MOCKINGBIRD_MEMORY_MIN_SCORE,
+        syncCooldownMs: env.AGENT_MOCKINGBIRD_MEMORY_SYNC_COOLDOWN_MS,
+        toolMode: env.AGENT_MOCKINGBIRD_MEMORY_TOOL_MODE,
+        injectionDedupeEnabled: env.AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_ENABLED,
+        injectionDedupeFallbackRecallOnly: env.AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY,
+        injectionDedupeMaxTracked: env.AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_MAX_TRACKED,
         retrieval: {
           engine: "qmd_hybrid",
           strongSignalMinScore: 0.85,
@@ -327,7 +327,7 @@ function buildLegacyBootstrappedConfig() {
     },
   };
   candidate.ui.agentTypes = mergeAgentTypesWithLegacyAgents(candidate.ui.agentTypes, candidate.ui.agents);
-  return wafflebotConfigSchema.parse(candidate);
+  return agentMockingbirdConfigSchema.parse(candidate);
 }
 
 function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
@@ -351,11 +351,11 @@ export function parseConfig(raw: unknown) {
   if (appearsToBeOpencodeConfig(normalized)) {
     throw new ConfigApplyError(
       "schema",
-      "Config file appears to be OpenCode config.json, not wafflebot config. Set WAFFLEBOT_CONFIG_PATH to a wafflebot config file (default: ./data/wafflebot.config.json).",
+      "Config file appears to be OpenCode config.json, not agent-mockingbird config. Set AGENT_MOCKINGBIRD_CONFIG_PATH to a agent-mockingbird config file (default: ./data/agent-mockingbird.config.json).",
     );
   }
   const withExplicitEnvDefaults = deepMerge(buildExplicitEnvConfigDefaultsPatch(), normalized);
-  const parsed = wafflebotConfigSchema.safeParse(withExplicitEnvDefaults);
+  const parsed = agentMockingbirdConfigSchema.safeParse(withExplicitEnvDefaults);
   if (!parsed.success) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }
@@ -371,7 +371,7 @@ export function parseConfig(raw: unknown) {
   return config;
 }
 
-function createSnapshot(configPath: string, config: WafflebotConfig): WafflebotConfigSnapshot {
+function createSnapshot(configPath: string, config: AgentMockingbirdConfig): AgentMockingbirdConfigSnapshot {
   const updatedAt = existsSync(configPath) ? new Date(statSync(configPath).mtimeMs).toISOString() : new Date().toISOString();
   return {
     path: configPath,
@@ -381,7 +381,7 @@ function createSnapshot(configPath: string, config: WafflebotConfig): WafflebotC
   };
 }
 
-function readSnapshotFromDisk(configPath: string): WafflebotConfigSnapshot {
+function readSnapshotFromDisk(configPath: string): AgentMockingbirdConfigSnapshot {
   try {
     const raw = readFileSync(configPath, "utf8");
     const parsed = parseConfig(JSON.parse(raw) as unknown);
@@ -395,7 +395,7 @@ function readSnapshotFromDisk(configPath: string): WafflebotConfigSnapshot {
   }
 }
 
-function writeConfigAtomic(configPath: string, config: WafflebotConfig) {
+function writeConfigAtomic(configPath: string, config: AgentMockingbirdConfig) {
   const directory = path.dirname(configPath);
   mkdirSync(directory, { recursive: true });
 
@@ -433,7 +433,7 @@ export function getConfigPath() {
   return getConfigSnapshot().path;
 }
 
-export function mergeConfigPatch(baseConfig: WafflebotConfig, patch: unknown): unknown {
+export function mergeConfigPatch(baseConfig: AgentMockingbirdConfig, patch: unknown): unknown {
   return deepMerge(baseConfig, patch);
 }
 
@@ -457,7 +457,7 @@ export function assertExpectedHashMatches(currentHash: string, expectedHash?: st
   }
 }
 
-export function persistConfigSnapshot(configPath: string, config: WafflebotConfig): WafflebotConfigSnapshot {
+export function persistConfigSnapshot(configPath: string, config: AgentMockingbirdConfig): AgentMockingbirdConfigSnapshot {
   try {
     writeConfigAtomic(configPath, config);
     return ensureConfigSnapshot();

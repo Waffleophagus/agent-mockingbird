@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { Input } from "@/components/ui/input";
 import { formatCompactTimestamp, relativeFromIso } from "@/frontend/app/chatHelpers";
 import { isBackgroundRunInFlight } from "@/frontend/app/dashboardUtils";
-import type { BackgroundRunSnapshot, SessionSummary } from "@wafflebot/contracts/dashboard";
+import type { BackgroundRunSnapshot, SessionSummary } from "@agent-mockingbird/contracts/dashboard";
 
 function formatTimestampSummary(iso: string) {
   const compact = formatCompactTimestamp(iso);

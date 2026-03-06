@@ -1,4 +1,4 @@
-import type { AppApiServices } from "@wafflebot/api";
+import type { AppApiServices } from "@agent-mockingbird/api";
 import type { RuntimeEngine } from "../contracts/runtime";
 import {
   createSession,

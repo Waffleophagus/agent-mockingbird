@@ -1,6 +1,6 @@
 import type { Part, Session } from "@opencode-ai/sdk/client";
 
-import type { WafflebotConfig } from "./schema";
+import type { AgentMockingbirdConfig } from "./schema";
 import { ConfigApplyError, type ConfigSmokeTestSummary } from "./types";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
 
@@ -12,7 +12,7 @@ function extractAssistantText(parts: Array<Part>) {
     .join("\n\n");
 }
 
-export async function runSmokeTest(config: WafflebotConfig): Promise<ConfigSmokeTestSummary> {
+export async function runSmokeTest(config: AgentMockingbirdConfig): Promise<ConfigSmokeTestSummary> {
   const client = createOpencodeClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
     directory: config.runtime.opencode.directory,
@@ -28,7 +28,7 @@ export async function runSmokeTest(config: WafflebotConfig): Promise<ConfigSmoke
   try {
     const session = unwrapSdkData<Session>(
       await client.session.create({
-        body: { title: "wafflebot-config-smoke" },
+        body: { title: "agent-mockingbird-config-smoke" },
         responseStyle: "data",
         throwOnError: true,
         signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),

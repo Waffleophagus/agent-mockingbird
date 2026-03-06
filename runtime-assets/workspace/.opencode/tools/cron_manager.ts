@@ -2,11 +2,11 @@ import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 
 function resolveApiBaseUrl() {
-  const explicit = process.env.WAFFLEBOT_CRON_API_BASE_URL?.trim();
+  const explicit = process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  const memoryAlias = process.env.WAFFLEBOT_MEMORY_API_BASE_URL?.trim();
+  const memoryAlias = process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim();
   if (memoryAlias) return memoryAlias.replace(/\/+$/, "");
-  const port = process.env.WAFFLEBOT_PORT?.trim() || process.env.PORT?.trim() || "3001";
+  const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001";
   return `http://127.0.0.1:${port}`;
 }
 
@@ -89,7 +89,7 @@ const argsSchema = z.discriminatedUnion("action", [
 ]);
 
 export default tool({
-  description: "Manage Wafflebot cron jobs (list/create/update/run/delete/inspect).",
+  description: "Manage Agent Mockingbird cron jobs (list/create/update/run/delete/inspect).",
   args: {
     action: tool.schema.enum([
       "list_jobs",

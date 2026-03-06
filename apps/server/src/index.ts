@@ -72,7 +72,7 @@ const stopSkillsCatalogWatcher = startSkillsCatalogWatcher({ eventStream });
 
 if (env.NODE_ENV === "production" && !runtimeInfo.opencode.directoryConfigured) {
   console.warn(
-    "[startup] runtime.opencode.directory is not configured in wafflebot config. OpenCode config visibility may differ across workspaces.",
+    "[startup] runtime.opencode.directory is not configured in agent-mockingbird config. OpenCode config visibility may differ across workspaces.",
   );
 }
 
@@ -149,7 +149,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-console.log("[startup] wafflebot runtime", {
+console.log("[startup] agent-mockingbird runtime", {
   nodeEnv: env.NODE_ENV,
   config: {
     path: configSnapshot.path,
@@ -157,9 +157,9 @@ console.log("[startup] wafflebot runtime", {
   },
   opencode: runtimeInfo.opencode,
   cron: {
-    enabled: env.WAFFLEBOT_CRON_ENABLED,
-    schedulerPollMs: env.WAFFLEBOT_CRON_SCHEDULER_POLL_MS,
-    workerPollMs: env.WAFFLEBOT_CRON_WORKER_POLL_MS,
+    enabled: env.AGENT_MOCKINGBIRD_CRON_ENABLED,
+    schedulerPollMs: env.AGENT_MOCKINGBIRD_CRON_SCHEDULER_POLL_MS,
+    workerPollMs: env.AGENT_MOCKINGBIRD_CRON_WORKER_POLL_MS,
   },
 });
-console.log(`Wafflebot dashboard running at ${server.url}`);
+console.log(`Agent Mockingbird dashboard running at ${server.url}`);

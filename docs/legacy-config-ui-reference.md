@@ -3,7 +3,7 @@
 Status: keep this while we clone/adapt Opencode UI; use it to reintroduce non-chat functionality.
 
 ## Goal
-Re-add legacy Wafflebot functionality on top of the Opencode-like React UI after the base shell is stable.
+Re-add legacy Agent Mockingbird functionality on top of the Opencode-like React UI after the base shell is stable.
 
 ## Add Back: Skills
 - Skills list (view/search/sort as needed).

@@ -1,4 +1,4 @@
-# wafflebot
+# agent-mockingbird
 
 Bun-native orchestration dashboard scaffold for a long-running agent stack.
 
@@ -18,13 +18,13 @@ bun run dev
 bun run build:cli
 ```
 
-Run wafflebot + OpenCode together for smoke testing:
+Run agent-mockingbird + OpenCode together for smoke testing:
 
 ```bash
 bun run dev:stack
 ```
 
-`dev:stack` runs `build:cli` first so the local `bin/wafflebot` command stays in sync.
+`dev:stack` runs `build:cli` first so the local `bin/agent-mockingbird` command stays in sync.
 
 Production build and run:
 
@@ -60,7 +60,7 @@ bun run db:migrate
 bun run db:check
 ```
 
-By default the SQLite file is `./data/wafflebot.db`. Override with `WAFFLEBOT_DB_PATH`.
+By default the SQLite file is `./data/agent-mockingbird.db`. Override with `AGENT_MOCKINGBIRD_DB_PATH`.
 
 Reset local database to defaults (including cron job tables):
 
@@ -82,7 +82,7 @@ bun run src/backend/memory/cli.ts activity 20
 bun run memory:lint
 ```
 
-`memory:trace:e2e` auto-selects a model from existing sessions (prefers `main`). Override with `WAFFLEBOT_E2E_MODEL=provider/model`.
+`memory:trace:e2e` auto-selects a model from existing sessions (prefers `main`). Override with `AGENT_MOCKINGBIRD_E2E_MODEL=provider/model`.
 
 Memory operator references:
 
@@ -93,13 +93,13 @@ Memory operator references:
 
 ## Runtime
 
-Wafflebot runs with an OpenCode-backed runtime that forwards prompts to OpenCode and stores mirrored messages locally.
+Agent Mockingbird runs with an OpenCode-backed runtime that forwards prompts to OpenCode and stores mirrored messages locally.
 
-Runtime configuration is stored in JSON (`./data/wafflebot.config.json` by default). On first boot, wafflebot migrates legacy env/DB runtime settings into this file.
-Example config template: `wafflebot.config.example.json`.
-`./config.json` at repo root is OpenCode config, not wafflebot runtime config.
-Runtime behavior is sourced from wafflebot config JSON. OpenCode runtime env vars are no longer accepted for model/provider/timeouts/directory.
-If you still have legacy `WAFFLEBOT_OPENCODE_*` runtime vars, run `bun run config:migrate-opencode-env` once, then unset them.
+Runtime configuration is stored in JSON (`./data/agent-mockingbird.config.json` by default). On first boot, agent-mockingbird migrates legacy env/DB runtime settings into this file.
+Example config template: `agent-mockingbird.config.example.json`.
+`./config.json` at repo root is OpenCode config, not agent-mockingbird runtime config.
+Runtime behavior is sourced from agent-mockingbird config JSON. OpenCode runtime env vars are no longer accepted for model/provider/timeouts/directory.
+If you still have legacy `AGENT_MOCKINGBIRD_OPENCODE_*` runtime vars, run `bun run config:migrate-opencode-env` once, then unset them.
 
 Skill deployment behavior (install/update):
 
@@ -126,7 +126,7 @@ Config API:
 - `PUT /api/config` (full replace with optimistic `expectedHash`)
 - `GET /api/runtime/info` (effective OpenCode connection + directory/config persistence metadata)
 
-After every config change, wafflebot performs:
+After every config change, agent-mockingbird performs:
 
 - schema validation
 - semantic provider/model validation via OpenCode `config/providers`
@@ -136,18 +136,18 @@ If any validation step fails, the config change is not persisted.
 
 Auth and path env variables:
 
-- `WAFFLEBOT_DB_PATH` (default `./data/wafflebot.db`)
-- `WAFFLEBOT_CONFIG_PATH` (default `./data/wafflebot.config.json`)
-- `WAFFLEBOT_OPENCODE_AUTH_HEADER` (optional full `Authorization` header)
-- `WAFFLEBOT_OPENCODE_USERNAME` / `WAFFLEBOT_OPENCODE_PASSWORD` (optional Basic auth fallback)
+- `AGENT_MOCKINGBIRD_DB_PATH` (default `./data/agent-mockingbird.db`)
+- `AGENT_MOCKINGBIRD_CONFIG_PATH` (default `./data/agent-mockingbird.config.json`)
+- `AGENT_MOCKINGBIRD_OPENCODE_AUTH_HEADER` (optional full `Authorization` header)
+- `AGENT_MOCKINGBIRD_OPENCODE_USERNAME` / `AGENT_MOCKINGBIRD_OPENCODE_PASSWORD` (optional Basic auth fallback)
 
 Cron environment variables:
 
-- `WAFFLEBOT_CRON_ENABLED` (default `true`)
-- `WAFFLEBOT_CRON_SCHEDULER_POLL_MS` (default `1000`)
-- `WAFFLEBOT_CRON_WORKER_POLL_MS` (default `1000`)
-- `WAFFLEBOT_CRON_LEASE_MS` (default `30000`)
-- `WAFFLEBOT_CRON_MAX_ENQUEUE_PER_JOB_TICK` (default `25`)
+- `AGENT_MOCKINGBIRD_CRON_ENABLED` (default `true`)
+- `AGENT_MOCKINGBIRD_CRON_SCHEDULER_POLL_MS` (default `1000`)
+- `AGENT_MOCKINGBIRD_CRON_WORKER_POLL_MS` (default `1000`)
+- `AGENT_MOCKINGBIRD_CRON_LEASE_MS` (default `30000`)
+- `AGENT_MOCKINGBIRD_CRON_MAX_ENQUEUE_PER_JOB_TICK` (default `25`)
 
 Signal channel runtime config (JSON config file: `runtime.channels.signal`):
 
@@ -166,20 +166,20 @@ Signal channel runtime config (JSON config file: `runtime.channels.signal`):
 
 Memory mode environment variables:
 
-- `WAFFLEBOT_MEMORY_ENABLED` (default `true`)
-- `WAFFLEBOT_MEMORY_WORKSPACE_DIR` (default `./data/workspace`)
-- `WAFFLEBOT_MEMORY_EMBED_PROVIDER` (`ollama` or `none`, default `ollama`)
-- `WAFFLEBOT_MEMORY_EMBED_MODEL` (default `qwen3-embedding:4b`)
-- `WAFFLEBOT_MEMORY_OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
-- `WAFFLEBOT_MEMORY_CHUNK_TOKENS` (default `400`)
-- `WAFFLEBOT_MEMORY_CHUNK_OVERLAP` (default `80`)
-- `WAFFLEBOT_MEMORY_MAX_RESULTS` (default `6`)
-- `WAFFLEBOT_MEMORY_MIN_SCORE` (default `0.25`)
-- `WAFFLEBOT_MEMORY_SYNC_COOLDOWN_MS` (default `10000`)
-- `WAFFLEBOT_MEMORY_TOOL_MODE` (`hybrid`, `inject_only`, `tool_only`; default `hybrid`)
-- `WAFFLEBOT_MEMORY_INJECTION_DEDUPE_ENABLED` (default `true`)
-- `WAFFLEBOT_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY` (default `true`)
-- `WAFFLEBOT_MEMORY_INJECTION_DEDUPE_MAX_TRACKED` (default `256`)
+- `AGENT_MOCKINGBIRD_MEMORY_ENABLED` (default `true`)
+- `AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR` (default `./data/workspace`)
+- `AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER` (`ollama` or `none`, default `ollama`)
+- `AGENT_MOCKINGBIRD_MEMORY_EMBED_MODEL` (default `qwen3-embedding:4b`)
+- `AGENT_MOCKINGBIRD_MEMORY_OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
+- `AGENT_MOCKINGBIRD_MEMORY_CHUNK_TOKENS` (default `400`)
+- `AGENT_MOCKINGBIRD_MEMORY_CHUNK_OVERLAP` (default `80`)
+- `AGENT_MOCKINGBIRD_MEMORY_MAX_RESULTS` (default `6`)
+- `AGENT_MOCKINGBIRD_MEMORY_MIN_SCORE` (default `0.25`)
+- `AGENT_MOCKINGBIRD_MEMORY_SYNC_COOLDOWN_MS` (default `10000`)
+- `AGENT_MOCKINGBIRD_MEMORY_TOOL_MODE` (`hybrid`, `inject_only`, `tool_only`; default `hybrid`)
+- `AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_ENABLED` (default `true`)
+- `AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY` (default `true`)
+- `AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_MAX_TRACKED` (default `256`)
 
 OpenCode local memory tools:
 
@@ -188,7 +188,7 @@ OpenCode local memory tools:
 - `.opencode/tools/memory_remember.ts`
 - `.opencode/tools/cron_manager.ts`
 
-These tools call Wafflebot APIs. Set `WAFFLEBOT_MEMORY_API_BASE_URL` and/or `WAFFLEBOT_CRON_API_BASE_URL` for the OpenCode process if needed (default `http://127.0.0.1:3001`).
+These tools call Agent Mockingbird APIs. Set `AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL` and/or `AGENT_MOCKINGBIRD_CRON_API_BASE_URL` for the OpenCode process if needed (default `http://127.0.0.1:3001`).
 
 Memory API endpoints used by tools:
 
@@ -232,20 +232,20 @@ Environment variables are parsed and validated at startup via `@t3-oss/env-core`
 
 - `OPENCODE_HOST` (default `127.0.0.1`)
 - `OPENCODE_PORT` (default `4096`)
-- `WAFFLEBOT_PORT` (default `3001`)
+- `AGENT_MOCKINGBIRD_PORT` (default `3001`)
 - `OPENCODE_LOG_LEVEL` (default `INFO`)
 
 ## OpenCode Agent Persistence
 
-Wafflebot now manages OpenCode agents directly in project-scoped OpenCode config.
+Agent Mockingbird now manages OpenCode agents directly in project-scoped OpenCode config.
 
 - Save target is `<workspace>/.opencode/opencode.jsonc`.
-- OpenCode also loads `.opencode/agent/*.md` and `.opencode/agents/*.md`; deleting an agent in Wafflebot removes matching files as well.
+- OpenCode also loads `.opencode/agent/*.md` and `.opencode/agents/*.md`; deleting an agent in Agent Mockingbird removes matching files as well.
 - Agents UI shows `Saving to` and `Bound directory` so you can verify which workspace is authoritative.
 
 ## Workspace Bootstrap Context (OpenClaw-style)
 
-Wafflebot now injects workspace markdown context into runtime system prompts using OpenClaw-style files from your bound workspace root (not `.opencode/`):
+Agent Mockingbird now injects workspace markdown context into runtime system prompts using OpenClaw-style files from your bound workspace root (not `.opencode/`):
 
 - `AGENTS.md`
 - `SOUL.md`
@@ -273,17 +273,17 @@ Behavior:
     - Existing target path: keep target by default.
     - `AGENTS.md` conflicts: attempt model-assisted rewrite/merge; if unavailable/invalid, keep target.
     - Compatibility bridge: if source has no `AGENTS.md` but has `CLAUDE.md`, importer maps `CLAUDE.md -> AGENTS.md` during migration.
-  - Preserves protected Wafflebot runtime files and triggers a memory index sync after import.
+  - Preserves protected Agent Mockingbird runtime files and triggers a memory index sync after import.
 
-CLI migration UX is now integrated into `wafflebot onboard`:
+CLI migration UX is now integrated into `agent-mockingbird onboard`:
 
 - Choose onboarding path: `quickstart`, `model-only`, `memory-only`, `openclaw-only`, or `skip`.
 - OpenClaw migration runs through an onboarding wizard (git clone or local folder source).
 - `AGENTS.md` conflicts go through a model-assisted rewrite/merge pass via OpenCode; on failure, existing target content is kept.
 - If memory is enabled, onboarding runs memory sync after successful migration.
-- Legacy `wafflebot import openclaw ...` commands are removed.
+- Legacy `agent-mockingbird import openclaw ...` commands are removed.
 
-If OpenCode UI/TUI looks different from Wafflebot:
+If OpenCode UI/TUI looks different from Agent Mockingbird:
 
 1. Confirm `GET /api/runtime/info` reports the directory you expect.
 2. Launch/attach OpenCode against the same workspace directory.
@@ -294,14 +294,14 @@ If OpenCode UI/TUI looks different from Wafflebot:
 Recommended production topology is **single VM + systemd sidecar**:
 
 - `opencode.service` running on `127.0.0.1:4096`
-- `wafflebot.service` running on `127.0.0.1:3001`
-- both pinned to one workspace path via `runtime.opencode.directory` in wafflebot config
+- `agent-mockingbird.service` running on `127.0.0.1:3001`
+- both pinned to one workspace path via `runtime.opencode.directory` in agent-mockingbird config
 - `runtime.memory.workspaceDir` must resolve to the same path as `runtime.opencode.directory`
 
 Deployment artifacts:
 
 - `deploy/systemd/opencode.service`
-- `deploy/systemd/wafflebot.service`
+- `deploy/systemd/agent-mockingbird.service`
 - `deploy/systemd/README.md`
 - `deploy/docker-compose.yml` (reference stack)
 
@@ -318,7 +318,7 @@ This repo uses one CI/CD workflow:
 
 Published package artifact:
 
-- `@<scope>/wafflebot@<version>` generated from a single packed `.tgz` built in CI after lint/typecheck/build.
+- `@<scope>/agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after lint/typecheck/build.
 
 Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
 
@@ -327,41 +327,41 @@ Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
 Primary path (interactive by default):
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/wafflebot/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
 Run a different lifecycle command:
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/wafflebot/raw/branch/main/scripts/onboard/bootstrap.sh" | bash -s -- status
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash -s -- status
 ```
 
 Direct package execution from private registry:
 
 ```bash
 npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/wafflebot-installer@latest" install
+  "@waffleophagus/agent-mockingbird-installer@latest" install
 ```
 
 ```bash
 bunx --bun npm exec --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  "@waffleophagus/wafflebot-installer@latest" -- install
+  "@waffleophagus/agent-mockingbird-installer@latest" -- install
 ```
 
-Wafflebot commands:
+Agent Mockingbird commands:
 
 ```bash
-wafflebot install
-wafflebot update
-wafflebot onboard
-wafflebot status
-wafflebot restart
-wafflebot start
-wafflebot stop
-wafflebot uninstall
+agent-mockingbird install
+agent-mockingbird update
+agent-mockingbird onboard
+agent-mockingbird status
+agent-mockingbird restart
+agent-mockingbird start
+agent-mockingbird stop
+agent-mockingbird uninstall
 ```
 
-`wafflebot install` and `wafflebot update` now show a mode-specific action plan before confirmation.
+`agent-mockingbird install` and `agent-mockingbird update` now show a mode-specific action plan before confirmation.
 
 - `install` flow now launches interactive provider/model onboarding immediately (interactive installs).
 - `update` plan explicitly calls out what is refreshed vs what is preserved (data/workspace/config are not reset).
@@ -371,18 +371,18 @@ wafflebot uninstall
 - Onboarding model selection is searchable + paginated (works with providers that expose large model catalogs).
 - During onboarding, provider-auth changes trigger a transparent `opencode.service` refresh before model selection, so newly added providers/models show up immediately.
 - Onboarding can now configure memory embeddings for Ollama: set the Ollama URL, discover `/api/tags` models live, then select an embedding model with searchable pagination.
-- `wafflebot onboard` supports `memory-only` and `openclaw-only` paths for focused setup.
+- `agent-mockingbird onboard` supports `memory-only` and `openclaw-only` paths for focused setup.
 
 Compatibility alias remains available:
 
 ```bash
-wafflebot-installer install
+agent-mockingbird-installer install
 ```
 
-Default install root is `~/.wafflebot`, with systemd **user** services:
+Default install root is `~/.agent-mockingbird`, with systemd **user** services:
 
 - `opencode.service` (local sidecar on `127.0.0.1:4096`)
-- `wafflebot.service` (dashboard/API on `127.0.0.1:3001`)
+- `agent-mockingbird.service` (dashboard/API on `127.0.0.1:3001`)
 
 On Linux, installer attempts `loginctl enable-linger $USER` so services keep running after logout.
 
@@ -400,7 +400,7 @@ bun add -g "github:${OWNER}/${REPO}#${VERSION}"
 2. Run:
 
 ```bash
-wafflebot
+agent-mockingbird
 ```
 
 ## Publish To Package Registry
@@ -411,7 +411,7 @@ wafflebot
 - `PACKAGE_REGISTRY_TOKEN` token with package write permission
 - `PACKAGE_REGISTRY_SCOPE` scope/user/org, example: `matt`
 
-On tag push like `v0.1.0`, CI publishes `@<scope>/wafflebot@0.1.0` to that registry.
+On tag push like `v0.1.0`, CI publishes `@<scope>/agent-mockingbird@0.1.0` to that registry.
 
 Install from that registry with Bun:
 
@@ -424,6 +424,6 @@ registry_no_proto="${REGISTRY_URL#https://}"
 registry_no_proto="${registry_no_proto#http://}"
 printf "@%s:registry=%s\n//%s:_authToken=%s\n" "$SCOPE" "$REGISTRY_URL" "$registry_no_proto" "$TOKEN" >> ~/.npmrc
 
-bun add -g "@${SCOPE}/wafflebot"
-wafflebot
+bun add -g "@${SCOPE}/agent-mockingbird"
+agent-mockingbird
 ```

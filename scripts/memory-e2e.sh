@@ -29,16 +29,16 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
-MEMORY_ENABLED="${WAFFLEBOT_MEMORY_ENABLED:-true}"
-EMBED_PROVIDER="${WAFFLEBOT_MEMORY_EMBED_PROVIDER:-ollama}"
-OLLAMA_BASE_URL="${WAFFLEBOT_MEMORY_OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-EMBED_MODEL="${WAFFLEBOT_MEMORY_EMBED_MODEL:-qwen3-embedding:4b}"
+MEMORY_ENABLED="${AGENT_MOCKINGBIRD_MEMORY_ENABLED:-true}"
+EMBED_PROVIDER="${AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER:-ollama}"
+OLLAMA_BASE_URL="${AGENT_MOCKINGBIRD_MEMORY_OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+EMBED_MODEL="${AGENT_MOCKINGBIRD_MEMORY_EMBED_MODEL:-qwen3-embedding:4b}"
 
 echo "[memory:e2e] starting"
 echo "[memory:e2e] provider=${EMBED_PROVIDER} model=${EMBED_MODEL}"
 
 if [[ "${MEMORY_ENABLED}" != "true" ]]; then
-  echo "[memory:e2e] WAFFLEBOT_MEMORY_ENABLED must be true."
+  echo "[memory:e2e] AGENT_MOCKINGBIRD_MEMORY_ENABLED must be true."
   exit 1
 fi
 
@@ -46,7 +46,7 @@ if [[ "${EMBED_PROVIDER}" == "ollama" ]]; then
   echo "[memory:e2e] checking ollama at ${OLLAMA_BASE_URL}"
   if ! curl -fsS "${OLLAMA_BASE_URL}/api/tags" >/dev/null; then
     echo "[memory:e2e] failed to reach Ollama tags endpoint."
-    echo "[memory:e2e] set WAFFLEBOT_MEMORY_OLLAMA_BASE_URL or run with WAFFLEBOT_MEMORY_EMBED_PROVIDER=none."
+    echo "[memory:e2e] set AGENT_MOCKINGBIRD_MEMORY_OLLAMA_BASE_URL or run with AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER=none."
     exit 1
   fi
 fi
@@ -61,15 +61,15 @@ MARKER="memory-e2e-$(date +%s)-$RANDOM"
 CONTENT="E2E marker ${MARKER} created at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo "[memory:e2e] writing marker"
-bun run src/backend/memory/cli.ts remember fact "${CONTENT}" >/tmp/wafflebot-memory-e2e-remember.json
+bun run src/backend/memory/cli.ts remember fact "${CONTENT}" >/tmp/agent-mockingbird-memory-e2e-remember.json
 
 echo "[memory:e2e] searching marker"
 SEARCH_OUTPUT="$(bun run src/backend/memory/cli.ts search "${MARKER}")"
-printf '%s\n' "${SEARCH_OUTPUT}" >/tmp/wafflebot-memory-e2e-search.json
+printf '%s\n' "${SEARCH_OUTPUT}" >/tmp/agent-mockingbird-memory-e2e-search.json
 
 if [[ "${SEARCH_OUTPUT}" != *"${MARKER}"* ]]; then
   echo "[memory:e2e] marker was not found in retrieval output."
-  echo "[memory:e2e] wrote debug output to /tmp/wafflebot-memory-e2e-search.json"
+  echo "[memory:e2e] wrote debug output to /tmp/agent-mockingbird-memory-e2e-search.json"
   exit 1
 fi
 

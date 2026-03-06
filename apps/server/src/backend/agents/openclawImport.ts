@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 
 
-import type { WafflebotConfig } from "../config/schema";
+import type { AgentMockingbirdConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
 import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
@@ -100,7 +100,7 @@ export type OpenclawImportSource =
 export interface OpenclawMigrationInput {
   source: OpenclawImportSource;
   targetDirectory?: string;
-  config?: WafflebotConfig;
+  config?: AgentMockingbirdConfig;
 }
 
 interface MaterializedImportSource {
@@ -152,12 +152,12 @@ export interface OpenclawMigrationResult {
   };
 }
 
-function resolveWorkspaceDir(config: WafflebotConfig): string {
+function resolveWorkspaceDir(config: AgentMockingbirdConfig): string {
   return resolveOpencodeWorkspaceDir(config);
 }
 
 function importCacheRoot() {
-  return path.join(os.tmpdir(), "wafflebot-openclaw-import");
+  return path.join(os.tmpdir(), "agent-mockingbird-openclaw-import");
 }
 
 function gitCacheRootDir() {
@@ -396,7 +396,7 @@ function discoverMigrationFiles(sourceDirectory: string) {
   return { files, warnings };
 }
 
-function resolveTargetDirectory(input: { targetDirectory?: string; config?: WafflebotConfig }) {
+function resolveTargetDirectory(input: { targetDirectory?: string; config?: AgentMockingbirdConfig }) {
   if (input.targetDirectory?.trim()) {
     return path.resolve(input.targetDirectory.trim());
   }
@@ -527,12 +527,12 @@ function buildLlmMergePrompt(input: {
   opencodeContext: string;
 }) {
   return [
-    "You are migrating an OpenClaw workspace file into a Wafflebot/OpenCode workspace.",
+    "You are migrating an OpenClaw workspace file into a Agent Mockingbird/OpenCode workspace.",
     "Return ONLY valid JSON with this exact shape:",
     '{"decision":"merge|keep_target|keep_source","mergedContent":"...","notes":"optional"}',
     "Rules:",
     "1) Remove or rewrite OpenClaw-specific instructions, names, and references.",
-    "2) Keep existing Wafflebot/OpenCode-specific instructions from target when there is conflict.",
+    "2) Keep existing Agent Mockingbird/OpenCode-specific instructions from target when there is conflict.",
     "3) Preserve useful non-platform-specific content from source.",
     "4) Output full final file in mergedContent (no markdown fences).",
     "5) Prefer merge unless source is clearly incompatible.",
@@ -553,12 +553,12 @@ function buildLlmMergePrompt(input: {
     .join("\n\n");
 }
 
-async function createLlmMerger(config: WafflebotConfig, warnings: string[]): Promise<OpenclawLlmMerger | null> {
+async function createLlmMerger(config: AgentMockingbirdConfig, warnings: string[]): Promise<OpenclawLlmMerger | null> {
   if (process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test") {
     return null;
   }
-  if (process.env.WAFFLEBOT_DISABLE_OPENCLAW_LLM_MERGE === "1") {
-    warnings.push("LLM merge disabled via WAFFLEBOT_DISABLE_OPENCLAW_LLM_MERGE=1");
+  if (process.env.AGENT_MOCKINGBIRD_DISABLE_OPENCLAW_LLM_MERGE === "1") {
+    warnings.push("LLM merge disabled via AGENT_MOCKINGBIRD_DISABLE_OPENCLAW_LLM_MERGE=1");
     return null;
   }
 
@@ -578,7 +578,7 @@ async function createLlmMerger(config: WafflebotConfig, warnings: string[]): Pro
   try {
     const session = unwrapSdkData<Session>(
       await client.session.create({
-        body: { title: "wafflebot-openclaw-merge" },
+        body: { title: "agent-mockingbird-openclaw-merge" },
         responseStyle: "data",
         throwOnError: true,
         signal: AbortSignal.timeout(timeoutMs),

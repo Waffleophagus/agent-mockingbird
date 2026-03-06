@@ -1,6 +1,6 @@
 import { defineConfig } from "drizzle-kit";
 
-const dbPath = process.env.WAFFLEBOT_DB_PATH ?? "./data/wafflebot.db";
+const dbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH ?? "./data/agent-mockingbird.db";
 
 export default defineConfig({
   schema: "./apps/server/src/backend/db/schema.ts",

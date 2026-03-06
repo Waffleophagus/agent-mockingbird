@@ -1,5 +1,5 @@
 {
-  "name": "@wafflebot/api",
+  "name": "@agent-mockingbird/api",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
   "dependencies": {
     "@trpc/client": "^11.7.1",
     "@trpc/server": "^11.7.1",
-    "@wafflebot/contracts": "workspace:*",
+    "@agent-mockingbird/contracts": "workspace:*",
     "zod": "^4.3.6"
   }
 }

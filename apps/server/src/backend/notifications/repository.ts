@@ -1,5 +1,5 @@
 import { sqlite } from "../db/client";
-import type { NotificationDeviceRecord } from "@wafflebot/contracts/dashboard";
+import type { NotificationDeviceRecord } from "@agent-mockingbird/contracts/dashboard";
 
 interface NotificationDeviceRow {
   installation_id: string;

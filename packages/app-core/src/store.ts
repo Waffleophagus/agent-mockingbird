@@ -8,7 +8,7 @@ import type {
   QuestionPromptRequest,
   SessionScreenBootstrapResponse,
   SessionSummary,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 
 export interface AppCoreEnvironment {
   api: {

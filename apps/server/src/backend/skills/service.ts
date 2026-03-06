@@ -14,12 +14,12 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import type { WafflebotConfig } from "../config/schema";
+import type { AgentMockingbirdConfig } from "../config/schema";
 import { createOpencodeClientFromConnection } from "../opencode/client";
 
 const SKILL_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 const MANAGED_SKILLS_RELATIVE = path.join(".agents", "skills");
-const DISABLED_SKILLS_RELATIVE = path.join(".wafflebot", "disabled-skills");
+const DISABLED_SKILLS_RELATIVE = path.join(".agent-mockingbird", "disabled-skills");
 
 type PermissionAction = "allow" | "deny" | "ask";
 
@@ -427,7 +427,7 @@ export function listManagedSkillCatalog(workspaceDir?: string | null): RuntimeSk
   };
 }
 
-export async function disposeOpencodeSkillInstance(config: WafflebotConfig) {
+export async function disposeOpencodeSkillInstance(config: AgentMockingbirdConfig) {
   await createOpencodeClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
     directory: config.runtime.opencode.directory,

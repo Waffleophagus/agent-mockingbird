@@ -68,7 +68,7 @@ export function Titlebar({ model }: { model: SessionScreenTitlebarVM }) {
       </div>
       <div className="oc-global-titlebar-center">
         <div className="oc-titlebar-session-meta">
-          <p className="oc-titlebar-session-title">Wafflebot</p>
+          <p className="oc-titlebar-session-title">Agent Mockingbird</p>
         </div>
       </div>
       <div className="oc-global-titlebar-right">

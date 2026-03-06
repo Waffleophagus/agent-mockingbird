@@ -1,5 +1,5 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { createAppRouter } from "@wafflebot/api";
+import { createAppRouter } from "@agent-mockingbird/api";
 
 import type { RuntimeEngine } from "../contracts/runtime";
 import { createAppApiServices } from "./services";

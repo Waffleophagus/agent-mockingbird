@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 function makePaths() {
-  const root = mkdtempSync(path.join(tmpdir(), "wafflebot-openclaw-import-test-"));
+  const root = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-openclaw-import-test-"));
   testRoots.push(root);
   const sourceDir = path.join(root, "source");
   const targetDir = path.join(root, "target");
@@ -45,7 +45,7 @@ test("migrate copies supported workspace files and maps skills into .agents/skil
 test("migrate keeps existing AGENTS.md when smart merge is unavailable", async () => {
   const { sourceDir, targetDir } = makePaths();
   writeFileSync(path.join(sourceDir, "AGENTS.md"), "# OpenClaw Instructions\nUse OpenClaw auth\nGeneral rule\n", "utf8");
-  writeFileSync(path.join(targetDir, "AGENTS.md"), "# Wafflebot Instructions\nKeep this\n", "utf8");
+  writeFileSync(path.join(targetDir, "AGENTS.md"), "# Agent Mockingbird Instructions\nKeep this\n", "utf8");
 
   const migrated = await migrateOpenclawWorkspace({
     source: { mode: "local", path: sourceDir },
@@ -54,7 +54,7 @@ test("migrate keeps existing AGENTS.md when smart merge is unavailable", async (
 
   expect(migrated.summary.merged).toBe(0);
   expect(migrated.summary.skippedExisting).toBe(1);
-  expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toBe("# Wafflebot Instructions\nKeep this\n");
+  expect(readFileSync(path.join(targetDir, "AGENTS.md"), "utf8")).toBe("# Agent Mockingbird Instructions\nKeep this\n");
 });
 
 test("migrate maps CLAUDE.md into AGENTS.md when source AGENTS.md is absent", async () => {

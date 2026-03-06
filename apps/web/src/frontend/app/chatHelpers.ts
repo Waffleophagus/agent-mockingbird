@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatMessagePart, ChatRole } from "@wafflebot/contracts/dashboard";
+import type { ChatMessage, ChatMessagePart, ChatRole } from "@agent-mockingbird/contracts/dashboard";
 
 export interface LocalTextInputPart {
   type: "text";

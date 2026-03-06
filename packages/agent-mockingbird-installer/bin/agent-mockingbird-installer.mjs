@@ -5,13 +5,13 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 
-const scope = (process.env.WAFFLEBOT_INSTALLER_SCOPE || "waffleophagus").replace(/^@/, "");
-const tag = process.env.WAFFLEBOT_INSTALLER_TAG || "latest";
-const registry = process.env.WAFFLEBOT_REGISTRY_URL || "https://git.waffleophagus.com/api/packages/waffleophagus/npm/";
-const publicRegistry = process.env.WAFFLEBOT_PUBLIC_REGISTRY_URL || "https://registry.npmjs.org/";
-const pkg = `@${scope}/wafflebot@${tag}`;
+const scope = (process.env.AGENT_MOCKINGBIRD_INSTALLER_SCOPE || "waffleophagus").replace(/^@/, "");
+const tag = process.env.AGENT_MOCKINGBIRD_INSTALLER_TAG || "latest";
+const registry = process.env.AGENT_MOCKINGBIRD_REGISTRY_URL || "https://git.waffleophagus.com/api/packages/waffleophagus/npm/";
+const publicRegistry = process.env.AGENT_MOCKINGBIRD_PUBLIC_REGISTRY_URL || "https://registry.npmjs.org/";
+const pkg = `@${scope}/agent-mockingbird@${tag}`;
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wafflebot-installer-"));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-installer-"));
 const npmrcPath = path.join(tmpDir, ".npmrc");
 fs.writeFileSync(
   npmrcPath,

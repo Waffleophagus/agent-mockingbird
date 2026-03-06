@@ -3,7 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type { BackgroundRunsResponse } from "@/frontend/app/dashboardTypes";
 import { mergeBackgroundRunsBySession, sortBackgroundRuns, sortSessionsByActivity } from "@/frontend/app/dashboardUtils";
-import type { BackgroundRunSnapshot, SessionSummary } from "@wafflebot/contracts/dashboard";
+import type { BackgroundRunSnapshot, SessionSummary } from "@agent-mockingbird/contracts/dashboard";
 
 type ConfigPanelTab = "usage" | "memory" | "background";
 

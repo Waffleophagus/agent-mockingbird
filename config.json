@@ -8,7 +8,7 @@
   },
   "skills": {
     "paths": [
-      "/var/home/matt/Documents/random-vibecoded-stuff/wafflebot/.agents/skills"
+      "/var/home/matt/Documents/random-vibecoded-stuff/agent-mockingbird/.agents/skills"
     ]
   },
   "plugin": [

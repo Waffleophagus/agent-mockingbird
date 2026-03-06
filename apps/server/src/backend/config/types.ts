@@ -1,4 +1,4 @@
-import type { WafflebotConfig } from "./schema";
+import type { AgentMockingbirdConfig } from "./schema";
 
 export type ConfigApplyStage =
   | "request"
@@ -22,11 +22,11 @@ export class ConfigApplyError extends Error {
   }
 }
 
-export interface WafflebotConfigSnapshot {
+export interface AgentMockingbirdConfigSnapshot {
   path: string;
   hash: string;
   updatedAt: string;
-  config: WafflebotConfig;
+  config: AgentMockingbirdConfig;
 }
 
 export interface ConfigSemanticSummary {
@@ -63,7 +63,7 @@ export interface ApplyConfigReplaceInput {
 }
 
 export interface ApplyConfigResult {
-  snapshot: WafflebotConfigSnapshot;
+  snapshot: AgentMockingbirdConfigSnapshot;
   semantic: ConfigSemanticSummary;
   smokeTest: ConfigSmokeTestSummary | null;
   policy: ConfigPolicySummary | null;

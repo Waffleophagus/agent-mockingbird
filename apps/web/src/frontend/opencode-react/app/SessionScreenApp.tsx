@@ -34,12 +34,12 @@ import type {
   SessionRunStatusSnapshot,
   SessionSummary,
   UsageSnapshot,
-} from "@wafflebot/contracts/dashboard";
+} from "@agent-mockingbird/contracts/dashboard";
 import "streamdown/styles.css";
 import "@/index.css";
 
-const CHAT_SHOW_THINKING_KEY = "wafflebot.chat.showThinking";
-const CHAT_SHOW_TOOL_CALLS_KEY = "wafflebot.chat.showToolCalls";
+const CHAT_SHOW_THINKING_KEY = "agent-mockingbird.chat.showThinking";
+const CHAT_SHOW_TOOL_CALLS_KEY = "agent-mockingbird.chat.showToolCalls";
 
 function loadBooleanSetting(key: string, fallback: boolean) {
   if (typeof window === "undefined") return fallback;

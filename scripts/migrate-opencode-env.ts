@@ -1,15 +1,15 @@
 import { applyConfigPatch, getConfigSnapshot } from "../src/backend/config/service";
 
 const LEGACY_OPENCODE_ENV_KEYS = [
-  "WAFFLEBOT_OPENCODE_BASE_URL",
-  "WAFFLEBOT_OPENCODE_PROVIDER_ID",
-  "WAFFLEBOT_OPENCODE_MODEL_ID",
-  "WAFFLEBOT_OPENCODE_MODEL_FALLBACKS",
-  "WAFFLEBOT_OPENCODE_SMALL_MODEL",
-  "WAFFLEBOT_OPENCODE_TIMEOUT_MS",
-  "WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS",
-  "WAFFLEBOT_OPENCODE_RUN_WAIT_TIMEOUT_MS",
-  "WAFFLEBOT_OPENCODE_DIRECTORY",
+  "AGENT_MOCKINGBIRD_OPENCODE_BASE_URL",
+  "AGENT_MOCKINGBIRD_OPENCODE_PROVIDER_ID",
+  "AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID",
+  "AGENT_MOCKINGBIRD_OPENCODE_MODEL_FALLBACKS",
+  "AGENT_MOCKINGBIRD_OPENCODE_SMALL_MODEL",
+  "AGENT_MOCKINGBIRD_OPENCODE_TIMEOUT_MS",
+  "AGENT_MOCKINGBIRD_OPENCODE_PROMPT_TIMEOUT_MS",
+  "AGENT_MOCKINGBIRD_OPENCODE_RUN_WAIT_TIMEOUT_MS",
+  "AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY",
 ] as const;
 
 function listLegacyOpencodeRuntimeEnvVars(source: Record<string, string | undefined> = process.env) {
@@ -44,29 +44,29 @@ function trimOrNull(raw: string | undefined) {
 async function main() {
   const present = listLegacyOpencodeRuntimeEnvVars();
   if (present.length === 0) {
-    console.log("[config:migrate-opencode-env] No deprecated WAFFLEBOT_OPENCODE_* runtime vars found.");
+    console.log("[config:migrate-opencode-env] No deprecated AGENT_MOCKINGBIRD_OPENCODE_* runtime vars found.");
     return;
   }
 
   const patch: Record<string, unknown> = {};
 
-  const baseUrl = trimOrNull(process.env.WAFFLEBOT_OPENCODE_BASE_URL);
+  const baseUrl = trimOrNull(process.env.AGENT_MOCKINGBIRD_OPENCODE_BASE_URL);
   if (baseUrl) patch.baseUrl = baseUrl;
-  const providerId = trimOrNull(process.env.WAFFLEBOT_OPENCODE_PROVIDER_ID);
+  const providerId = trimOrNull(process.env.AGENT_MOCKINGBIRD_OPENCODE_PROVIDER_ID);
   if (providerId) patch.providerId = providerId;
-  const modelId = trimOrNull(process.env.WAFFLEBOT_OPENCODE_MODEL_ID);
+  const modelId = trimOrNull(process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID);
   if (modelId) patch.modelId = modelId;
-  const fallbackModels = parseStringList(process.env.WAFFLEBOT_OPENCODE_MODEL_FALLBACKS);
+  const fallbackModels = parseStringList(process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_FALLBACKS);
   if (fallbackModels.length > 0) patch.fallbackModels = fallbackModels;
-  const smallModel = trimOrNull(process.env.WAFFLEBOT_OPENCODE_SMALL_MODEL);
+  const smallModel = trimOrNull(process.env.AGENT_MOCKINGBIRD_OPENCODE_SMALL_MODEL);
   if (smallModel) patch.smallModel = smallModel;
-  const timeoutMs = parsePositiveInt(process.env.WAFFLEBOT_OPENCODE_TIMEOUT_MS);
+  const timeoutMs = parsePositiveInt(process.env.AGENT_MOCKINGBIRD_OPENCODE_TIMEOUT_MS);
   if (timeoutMs) patch.timeoutMs = timeoutMs;
-  const promptTimeoutMs = parsePositiveInt(process.env.WAFFLEBOT_OPENCODE_PROMPT_TIMEOUT_MS);
+  const promptTimeoutMs = parsePositiveInt(process.env.AGENT_MOCKINGBIRD_OPENCODE_PROMPT_TIMEOUT_MS);
   if (promptTimeoutMs) patch.promptTimeoutMs = promptTimeoutMs;
-  const runWaitTimeoutMs = parsePositiveInt(process.env.WAFFLEBOT_OPENCODE_RUN_WAIT_TIMEOUT_MS);
+  const runWaitTimeoutMs = parsePositiveInt(process.env.AGENT_MOCKINGBIRD_OPENCODE_RUN_WAIT_TIMEOUT_MS);
   if (runWaitTimeoutMs) patch.runWaitTimeoutMs = runWaitTimeoutMs;
-  const directory = trimOrNull(process.env.WAFFLEBOT_OPENCODE_DIRECTORY);
+  const directory = trimOrNull(process.env.AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY);
   if (directory) patch.directory = directory;
 
   if (Object.keys(patch).length === 0) {
@@ -85,7 +85,7 @@ async function main() {
     },
   });
 
-  console.log("[config:migrate-opencode-env] Migrated values into wafflebot config.");
+  console.log("[config:migrate-opencode-env] Migrated values into agent-mockingbird config.");
   console.log(
     JSON.stringify(
       {
@@ -99,7 +99,7 @@ async function main() {
       2,
     ),
   );
-  console.log("[config:migrate-opencode-env] Remove deprecated WAFFLEBOT_OPENCODE_* runtime vars before starting wafflebot.");
+  console.log("[config:migrate-opencode-env] Remove deprecated AGENT_MOCKINGBIRD_OPENCODE_* runtime vars before starting agent-mockingbird.");
 }
 
 void main().catch((error) => {
