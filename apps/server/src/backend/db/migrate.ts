@@ -11,6 +11,7 @@ function resolveMigrationsFolder() {
   const candidates = [
     path.resolve(process.cwd(), "drizzle"),
     path.resolve(import.meta.dir, "../../../drizzle"),
+    path.resolve(path.dirname(process.execPath), "drizzle"),
     path.resolve(getBinaryDir(), "drizzle"),
   ];
   for (const candidate of candidates) {
