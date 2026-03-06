@@ -1,4 +1,3 @@
-import type { ChatPageModel } from "@/frontend/app/pages/ChatPage";
 import type {
   BackgroundRunSnapshot,
   ChatMessage,
@@ -9,6 +8,8 @@ import type {
   SessionSummary,
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
+
+import type { ChatPageModel } from "@/frontend/app/pages/ChatPage";
 
 export type SessionScreenMode = "chat" | "skills" | "mcp" | "agents" | "other" | "cron";
 

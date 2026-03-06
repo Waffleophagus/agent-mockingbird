@@ -1,3 +1,22 @@
+import type {
+  AgentTypeDefinition,
+  BackgroundRunSnapshot,
+  ChatMessage,
+  ChatMessagePart,
+  ConfiguredMcpServer,
+  DashboardBootstrap,
+  MemoryStatusSnapshot,
+  MemoryWriteEvent,
+  ModelOption,
+  RuntimeMcp,
+  RuntimeSkillIssue,
+  RuntimeSkill,
+  SessionCompactedSnapshot,
+  SessionRunErrorSnapshot,
+  SessionRunStatusSnapshot,
+  SessionSummary,
+  UsageSnapshot,
+} from "@agent-mockingbird/contracts/dashboard";
 import { useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
@@ -21,25 +40,6 @@ import {
   sortSessionsByActivity,
   upsertSessionList,
 } from "@/frontend/app/dashboardUtils";
-import type {
-  AgentTypeDefinition,
-  BackgroundRunSnapshot,
-  ChatMessage,
-  ChatMessagePart,
-  ConfiguredMcpServer,
-  DashboardBootstrap,
-  MemoryStatusSnapshot,
-  MemoryWriteEvent,
-  ModelOption,
-  RuntimeMcp,
-  RuntimeSkillIssue,
-  RuntimeSkill,
-  SessionCompactedSnapshot,
-  SessionRunErrorSnapshot,
-  SessionRunStatusSnapshot,
-  SessionSummary,
-  UsageSnapshot,
-} from "@agent-mockingbird/contracts/dashboard";
 
 type StreamStatus = "connecting" | "connected" | "reconnecting";
 const IN_FLIGHT_BACKGROUND_STATUSES = new Set<BackgroundRunSnapshot["status"]>([

@@ -29,10 +29,6 @@
     "noPropertyAccessFromIndexSignature": false
   },
   "include": [
-    "apps/**/*.ts",
-    "apps/**/*.tsx",
-    "packages/**/*.ts",
-    "packages/**/*.tsx",
     "scripts/**/*.ts",
     "build.ts",
     "build-bin.ts",

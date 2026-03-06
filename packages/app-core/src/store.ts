@@ -1,6 +1,3 @@
-import { flow, types } from "mobx-state-tree";
-
-import type { Instance } from "mobx-state-tree";
 import type {
   BackgroundRunSnapshot,
   ChatMessage,
@@ -9,6 +6,8 @@ import type {
   SessionScreenBootstrapResponse,
   SessionSummary,
 } from "@agent-mockingbird/contracts/dashboard";
+import { flow, types } from "mobx-state-tree";
+import type { Instance } from "mobx-state-tree";
 
 export interface AppCoreEnvironment {
   api: {
@@ -105,4 +104,4 @@ export const RootStore = types
     }),
   }));
 
-export interface RootStoreApi extends Instance<typeof RootStore> {}
+export type RootStoreApi = Instance<typeof RootStore>;

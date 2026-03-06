@@ -1,3 +1,4 @@
+import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "@agent-mockingbird/contracts/dashboard";
 import type {
   Config,
   Event as OpencodeEvent,
@@ -24,7 +25,6 @@ import {
   isWriteIntentMemoryQuery,
   memoryInjectionResultKey,
 } from "./memoryPromptDedup";
-import type { ChatMessagePart, MemoryToolCallTrace, MessageMemoryTrace } from "@agent-mockingbird/contracts/dashboard";
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import type { ConfiguredMcpServer, AgentMockingbirdConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
@@ -1272,7 +1272,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     const runtimeConfig = this.currentRuntimeConfig();
     const explicit = runtimeConfig?.imageModel?.trim();
     if (explicit) return explicit;
-    return runtimeConfig?.fallbackModels.find(model => model.trim())?.trim() || this.currentSmallModel();
+    return runtimeConfig?.fallbackModels.find((model: string) => model.trim())?.trim() || this.currentSmallModel();
   }
 
   private buildAgentMockingbirdSystemPrompt(input?: { agentId?: string }): string | undefined {

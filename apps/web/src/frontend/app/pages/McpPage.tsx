@@ -1,7 +1,7 @@
+import type { ConfiguredMcpServer, RuntimeMcp } from "@agent-mockingbird/contracts/dashboard";
 import { Cpu, Plus, Trash2 } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 
-import type { ConfiguredMcpServer, RuntimeMcp } from "@agent-mockingbird/contracts/dashboard";
 
 interface McpPageProps {
   mcpInput: string;

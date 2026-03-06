@@ -1,6 +1,3 @@
-import { ChevronDown, ChevronRight, Clock, Copy, List, Play, Save, Timer, Trash2, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-
 import type {
   CronHealthSnapshot,
   CronJobDefinition,
@@ -8,6 +5,9 @@ import type {
   CronJobPatchInput,
   CronJobStep,
 } from "@agent-mockingbird/contracts/cron";
+import { ChevronDown, ChevronRight, Clock, Copy, List, Play, Save, Timer, Trash2, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
 import { formatCompactTimestamp, relativeFromIso } from "@/frontend/app/chatHelpers";
 import {
   createCronJob,

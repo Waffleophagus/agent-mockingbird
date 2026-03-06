@@ -1,3 +1,4 @@
+import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft, normalizeAgentTypeMode } from "@agent-mockingbird/contracts/agentTypes";
 import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
@@ -5,7 +6,6 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import os from "node:os";
 import path from "node:path";
 
-import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft, normalizeAgentTypeMode } from "@agent-mockingbird/contracts/agentTypes";
 import type { AgentTypeDefinition, AgentMockingbirdConfig } from "../config/schema";
 import { agentTypeDefinitionSchema } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";

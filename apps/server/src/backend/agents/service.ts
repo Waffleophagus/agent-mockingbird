@@ -7,6 +7,7 @@ import {
   normalizeLegacySpecialistAgents,
 } from "@agent-mockingbird/contracts/agentTypes";
 import type { RuntimeAgent, SpecialistAgent } from "@agent-mockingbird/contracts/dashboard";
+
 import type { AgentTypeDefinition, AgentMockingbirdConfig } from "../config/schema";
 import { createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";
 

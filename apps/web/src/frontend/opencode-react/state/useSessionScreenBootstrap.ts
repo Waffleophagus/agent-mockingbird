@@ -1,3 +1,14 @@
+import type {
+  BackgroundRunSnapshot,
+  HeartbeatSnapshot,
+  MemoryStatusSnapshot,
+  MemoryWriteEvent,
+  ModelOption,
+  PermissionPromptRequest,
+  QuestionPromptRequest,
+  SessionSummary,
+  UsageSnapshot,
+} from "@agent-mockingbird/contracts/dashboard";
 import { useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
@@ -10,17 +21,6 @@ import {
   sortSessionsByActivity,
 } from "@/frontend/app/dashboardUtils";
 import type { SessionScreenBootstrapResponse } from "@/frontend/opencode-react/types";
-import type {
-  BackgroundRunSnapshot,
-  HeartbeatSnapshot,
-  MemoryStatusSnapshot,
-  MemoryWriteEvent,
-  ModelOption,
-  PermissionPromptRequest,
-  QuestionPromptRequest,
-  SessionSummary,
-  UsageSnapshot,
-} from "@agent-mockingbird/contracts/dashboard";
 
 interface UseSessionScreenBootstrapInput {
   loadedSessionsRef: MutableRefObject<Set<string>>;

@@ -1,7 +1,7 @@
+import type { AgentTypeDefinition, ModelOption } from "@agent-mockingbird/contracts/dashboard";
 import { ChevronsUpDown, Plus, ShieldCheck, Trash2, Users } from "lucide-react";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, RefObject, SetStateAction } from "react";
 
-import type { AgentTypeDefinition, ModelOption } from "@agent-mockingbird/contracts/dashboard";
 
 interface AgentsPageProps {
   refreshAgentCatalog: () => Promise<void>;

@@ -1,15 +1,3 @@
-import { useEffect, useRef } from "react";
-import type { Dispatch, MutableRefObject, SetStateAction } from "react";
-
-import { mergeMessages, upsertChatMessagePart } from "@/frontend/app/chatHelpers";
-import type { ActiveSend, LocalChatMessage } from "@/frontend/app/chatHelpers";
-import type { ConfigSnapshotResponse } from "@/frontend/app/dashboardTypes";
-import {
-  DEFAULT_RUN_WAIT_TIMEOUT_MS,
-  mergeBackgroundRunsBySession,
-  normalizeChildSessionHideAfterDays,
-  upsertSessionList,
-} from "@/frontend/app/dashboardUtils";
 import type {
   BackgroundRunSnapshot,
   ChatMessage,
@@ -24,6 +12,18 @@ import type {
   SessionSummary,
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
+import { useEffect, useRef } from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+
+import { mergeMessages, upsertChatMessagePart } from "@/frontend/app/chatHelpers";
+import type { ActiveSend, LocalChatMessage } from "@/frontend/app/chatHelpers";
+import type { ConfigSnapshotResponse } from "@/frontend/app/dashboardTypes";
+import {
+  DEFAULT_RUN_WAIT_TIMEOUT_MS,
+  mergeBackgroundRunsBySession,
+  normalizeChildSessionHideAfterDays,
+  upsertSessionList,
+} from "@/frontend/app/dashboardUtils";
 
 const IN_FLIGHT_BACKGROUND_STATUSES = new Set<BackgroundRunSnapshot["status"]>([
   "created",

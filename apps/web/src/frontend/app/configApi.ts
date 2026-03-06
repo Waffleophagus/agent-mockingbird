@@ -1,4 +1,3 @@
-import type { OpencodeAgentStorageResponse } from "@/frontend/app/dashboardTypes";
 import { normalizeAgentTypeDraft } from "@agent-mockingbird/contracts/agentTypes";
 import type {
   AgentTypeDefinition,
@@ -7,6 +6,8 @@ import type {
   RuntimeSkillIssue,
   RuntimeSkill,
 } from "@agent-mockingbird/contracts/dashboard";
+
+import type { OpencodeAgentStorageResponse } from "@/frontend/app/dashboardTypes";
 
 interface ApiErrorPayload {
   error?: string;

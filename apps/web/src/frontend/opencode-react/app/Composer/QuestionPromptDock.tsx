@@ -1,6 +1,6 @@
+import type { QuestionPromptInfo, QuestionPromptRequest } from "@agent-mockingbird/contracts/dashboard";
 import { useMemo, useState } from "react";
 
-import type { QuestionPromptInfo, QuestionPromptRequest } from "@agent-mockingbird/contracts/dashboard";
 
 export interface QuestionPromptDockProps {
   request: QuestionPromptRequest;

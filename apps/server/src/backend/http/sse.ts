@@ -1,4 +1,5 @@
 import type { HeartbeatSnapshot, UsageSnapshot } from "@agent-mockingbird/contracts/dashboard";
+
 import {
   createHeartbeatUpdatedEvent,
   createUsageUpdatedEvent,

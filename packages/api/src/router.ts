@@ -1,6 +1,3 @@
-import { initTRPC } from "@trpc/server";
-import { z } from "zod";
-
 import type {
   BackgroundRunSnapshot,
   ChatMessage,
@@ -11,6 +8,9 @@ import type {
   SessionScreenBootstrapResponse,
   SessionSummary,
 } from "@agent-mockingbird/contracts/dashboard";
+import { initTRPC } from "@trpc/server";
+import { z } from "zod";
+
 
 export interface AppApiServices {
   getSessionBootstrap: (input?: { sessionId?: string }) => Promise<SessionScreenBootstrapResponse>;

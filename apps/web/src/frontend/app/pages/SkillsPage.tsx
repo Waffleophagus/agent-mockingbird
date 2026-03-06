@@ -1,6 +1,6 @@
+import type { RuntimeSkill, RuntimeSkillIssue } from "@agent-mockingbird/contracts/dashboard";
 import { AlertTriangle, Plus, Trash2, Wrench } from "lucide-react";
 
-import type { RuntimeSkill, RuntimeSkillIssue } from "@agent-mockingbird/contracts/dashboard";
 
 interface SkillsPageProps {
   skillInput: string;

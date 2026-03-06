@@ -1,9 +1,9 @@
+import { legacySpecialistToAgentType } from "@agent-mockingbird/contracts/agentTypes";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
-import { legacySpecialistToAgentType } from "@agent-mockingbird/contracts/agentTypes";
 import { sqlite } from "../db/client";
 import { DEFAULT_AGENTS, DEFAULT_AGENT_TYPES, DEFAULT_MCPS, DEFAULT_SKILLS } from "../defaults";
 import { env } from "../env";

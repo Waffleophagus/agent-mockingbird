@@ -1,4 +1,5 @@
 import type { SpecialistAgent } from "@agent-mockingbird/contracts/dashboard";
+
 import type { AgentTypeDefinition } from "./config/schema";
 
 export const DEFAULT_SKILLS: string[] = [

@@ -8,8 +8,9 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   {
     ignores: [
-      "dist/**",
-      "node_modules/**",
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/.turbo/**",
       "openclaw/**",
       "opencode/**",
       "opencode-sdk-js/**",
@@ -18,9 +19,10 @@ export default tseslint.config(
       "sandbox-agent/**",
       "data/**",
       "runtime-assets/**",
-      ".turbo/**",
       "apps/mobile/.expo/**",
       "apps/mobile/web-build/**",
+      "apps/server/src/test-embedded.ts",
+      "apps/server/src/test-embedded2.ts",
     ],
   },
   js.configs.recommended,

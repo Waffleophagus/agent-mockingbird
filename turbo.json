@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["tsconfig.json", "eslint.config.mjs"],
   "tasks": {
     "dev": {
       "cache": false,

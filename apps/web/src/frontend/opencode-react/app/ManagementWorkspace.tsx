@@ -1,3 +1,11 @@
+import type {
+  AgentTypeDefinition,
+  ConfiguredMcpServer,
+  ModelOption,
+  RuntimeMcp,
+  RuntimeSkill,
+  RuntimeSkillIssue,
+} from "@agent-mockingbird/contracts/dashboard";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -24,14 +32,6 @@ import { McpPage } from "@/frontend/app/pages/McpPage";
 import { OtherConfigPage } from "@/frontend/app/pages/OtherConfigPage";
 import { SkillsPage } from "@/frontend/app/pages/SkillsPage";
 import type { SessionScreenMode } from "@/frontend/opencode-react/types";
-import type {
-  AgentTypeDefinition,
-  ConfiguredMcpServer,
-  ModelOption,
-  RuntimeMcp,
-  RuntimeSkill,
-  RuntimeSkillIssue,
-} from "@agent-mockingbird/contracts/dashboard";
 
 interface ManagementWorkspaceProps {
   activeScreen: SessionScreenMode;

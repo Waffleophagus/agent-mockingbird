@@ -1,7 +1,7 @@
+import type { BackgroundRunSnapshot, SessionSummary } from "@agent-mockingbird/contracts/dashboard";
 import { useMemo } from "react";
 
 import { DAY_MS, isBackgroundRunInFlight, sortBackgroundRuns, sortSessionsByActivity } from "@/frontend/app/dashboardUtils";
-import type { BackgroundRunSnapshot, SessionSummary } from "@agent-mockingbird/contracts/dashboard";
 
 interface UseSessionHierarchyInput {
   activeSessionId: string;

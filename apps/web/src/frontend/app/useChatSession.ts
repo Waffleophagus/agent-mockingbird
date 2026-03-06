@@ -1,3 +1,8 @@
+import type {
+  ChatMessage,
+  SessionRunStatusSnapshot,
+  SessionSummary,
+} from "@agent-mockingbird/contracts/dashboard";
 import { useState } from "react";
 import type {
   ClipboardEvent as ReactClipboardEvent,
@@ -12,11 +17,6 @@ import type {
 import { mergeMessages, normalizeRequestError } from "@/frontend/app/chatHelpers";
 import type { ActiveSend, LocalChatMessage, LocalInputPart } from "@/frontend/app/chatHelpers";
 import { extractRunErrorMessage, RUN_POLL_INTERVAL_MS, upsertSessionList } from "@/frontend/app/dashboardUtils";
-import type {
-  ChatMessage,
-  SessionRunStatusSnapshot,
-  SessionSummary,
-} from "@agent-mockingbird/contracts/dashboard";
 
 interface AgentRunSnapshot {
   id: string;

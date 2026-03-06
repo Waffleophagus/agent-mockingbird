@@ -1,3 +1,15 @@
+import type {
+  BackgroundRunSnapshot,
+  ChatMessage,
+  MemoryStatusSnapshot,
+  MemoryWriteEvent,
+  ModelOption,
+  PermissionPromptRequest,
+  QuestionPromptRequest,
+  SessionRunStatusSnapshot,
+  SessionSummary,
+  UsageSnapshot,
+} from "@agent-mockingbird/contracts/dashboard";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -23,18 +35,6 @@ import { useSessionEvents } from "@/frontend/opencode-react/state/useSessionEven
 import { useSessionScreenBootstrap } from "@/frontend/opencode-react/state/useSessionScreenBootstrap";
 import { useSessionScreenController } from "@/frontend/opencode-react/state/useSessionScreenController";
 import type { SessionScreenMode } from "@/frontend/opencode-react/types";
-import type {
-  BackgroundRunSnapshot,
-  ChatMessage,
-  MemoryStatusSnapshot,
-  MemoryWriteEvent,
-  ModelOption,
-  PermissionPromptRequest,
-  QuestionPromptRequest,
-  SessionRunStatusSnapshot,
-  SessionSummary,
-  UsageSnapshot,
-} from "@agent-mockingbird/contracts/dashboard";
 import "streamdown/styles.css";
 import "@/index.css";
 

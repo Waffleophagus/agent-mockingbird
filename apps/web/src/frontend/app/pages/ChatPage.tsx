@@ -1,3 +1,13 @@
+import type {
+  BackgroundRunSnapshot,
+  MemoryStatusSnapshot,
+  MemoryWriteEvent,
+  ModelOption,
+  PermissionPromptRequest,
+  QuestionPromptRequest,
+  SessionSummary,
+  UsageSnapshot,
+} from "@agent-mockingbird/contracts/dashboard";
 import {
   Brain,
   ChevronLeft,
@@ -28,16 +38,6 @@ import { RightFlyout } from "@/frontend/opencode-react/app/Flyout/RightFlyout";
 import { SessionTree } from "@/frontend/opencode-react/app/Sidebar/SessionTree";
 import { MessageTimeline } from "@/frontend/opencode-react/app/Timeline/MessageTimeline";
 import type { SessionScreenLayoutVM } from "@/frontend/opencode-react/types";
-import type {
-  BackgroundRunSnapshot,
-  MemoryStatusSnapshot,
-  MemoryWriteEvent,
-  ModelOption,
-  PermissionPromptRequest,
-  QuestionPromptRequest,
-  SessionSummary,
-  UsageSnapshot,
-} from "@agent-mockingbird/contracts/dashboard";
 
 type ConfigPanelTab = "usage" | "memory" | "background";
 

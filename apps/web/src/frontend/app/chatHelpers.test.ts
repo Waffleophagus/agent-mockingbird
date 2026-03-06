@@ -1,3 +1,4 @@
+import type { ChatMessage } from "@agent-mockingbird/contracts/dashboard";
 import { describe, expect, test } from "bun:test";
 
 import {
@@ -6,7 +7,6 @@ import {
   shouldHideMirroredAssistantContent,
   type LocalChatMessage,
 } from "@/frontend/app/chatHelpers";
-import type { ChatMessage } from "@agent-mockingbird/contracts/dashboard";
 
 function assistantMessage(input?: Partial<ChatMessage>): ChatMessage {
   return {

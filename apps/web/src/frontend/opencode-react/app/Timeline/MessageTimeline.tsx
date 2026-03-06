@@ -1,3 +1,4 @@
+import type { BackgroundRunSnapshot, ChatMessagePart } from "@agent-mockingbird/contracts/dashboard";
 import { AlertTriangle, ArrowRight, ChevronDown, LoaderCircle, RefreshCcw, Sparkles, Wrench } from "lucide-react";
 import type { RefObject } from "react";
 
@@ -12,7 +13,6 @@ import {
   shouldHideMirroredAssistantContent,
 } from "@/frontend/app/chatHelpers";
 import { MarkdownMessage } from "@/frontend/app/components/MarkdownMessage";
-import type { BackgroundRunSnapshot, ChatMessagePart } from "@agent-mockingbird/contracts/dashboard";
 
 function stringifyToolInput(input: Record<string, unknown> | undefined): string {
   if (!input) return "";

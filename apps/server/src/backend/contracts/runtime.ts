@@ -1,5 +1,7 @@
-import type { RuntimeEvent } from "./events";
 import type { ChatMessage } from "@agent-mockingbird/contracts/dashboard";
+
+import type { RuntimeEvent } from "./events";
+
 
 export interface RuntimeTextInputPart {
   type: "text";

@@ -1,6 +1,3 @@
-import type { SQLQueryBindings } from "bun:sqlite";
-
-import { sqlite } from "./client";
 import type {
   ChatMessage,
   ChatMessagePart,
@@ -10,6 +7,9 @@ import type {
   SessionSummary,
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
+import type { SQLQueryBindings } from "bun:sqlite";
+
+import { sqlite } from "./client";
 import { toLegacySpecialistAgent } from "../agents/service";
 import { getConfig as getManagedConfig } from "../config/service";
 import { clearCronTables } from "../cron/storage";

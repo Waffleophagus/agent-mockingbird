@@ -1,3 +1,10 @@
+import type {
+  BackgroundRunSnapshot,
+  MemoryStatusSnapshot,
+  MemoryWriteEvent,
+  SessionSummary,
+  UsageSnapshot,
+} from "@agent-mockingbird/contracts/dashboard";
 import { Plus, X } from "lucide-react";
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
 
@@ -6,13 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { relativeFromIso } from "@/frontend/app/chatHelpers";
 import type { SessionContextResponse } from "@/frontend/opencode-react/types";
-import type {
-  BackgroundRunSnapshot,
-  MemoryStatusSnapshot,
-  MemoryWriteEvent,
-  SessionSummary,
-  UsageSnapshot,
-} from "@agent-mockingbird/contracts/dashboard";
 
 export interface RightFlyoutProps {
   activeSession?: SessionSummary;
