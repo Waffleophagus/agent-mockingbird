@@ -641,10 +641,34 @@ function removeOpencodeShim(paths) {
   return true;
 }
 
-function unitContents(paths, bunBin, opencodeBin, agentMockingbirdAppDir, agentMockingbirdEntrypoint) {
+function shellEscapeSystemdArg(value) {
+  return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
+  const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
+  if (fs.existsSync(compiledBinary)) {
+    return {
+      execStart: compiledBinary,
+      mode: "compiled",
+    };
+  }
+
+  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
+  if (!entrypoint) {
+    return null;
+  }
+
+  return {
+    execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
+    mode: "source",
+  };
+}
+
+function unitContents(paths, opencodeBin, agentMockingbirdExecStart) {
   const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${agentMockingbirdAppDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nExecStart=${bunBin} ${agentMockingbirdEntrypoint}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   return { opencode, agentMockingbird };
 }
@@ -1770,10 +1794,10 @@ async function installOrUpdate(args, mode) {
     }
     must(bunBin, installArgs, { cwd: workspaceOpencodeDir });
   }
-  const agentMockingbirdEntrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
-  if (!agentMockingbirdEntrypoint) {
+  const agentMockingbirdRuntime = resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin);
+  if (!agentMockingbirdRuntime) {
     throw new Error(
-      `agent-mockingbird runtime entrypoint missing in ${agentMockingbirdAppDir} (checked package module/main and common entry files).`,
+      `agent-mockingbird runtime missing in ${agentMockingbirdAppDir} (checked dist binary plus package module/main and common entry files).`,
     );
   }
   const opencodeBin = resolveOpencodeBin(paths);
@@ -1784,7 +1808,7 @@ async function installOrUpdate(args, mode) {
   }
   const opencodeShimPath = writeOpencodeShim(paths, opencodeBin);
 
-  const units = unitContents(paths, bunBin, opencodeBin, agentMockingbirdAppDir, agentMockingbirdEntrypoint);
+  const units = unitContents(paths, opencodeBin, agentMockingbirdRuntime.execStart);
   writeFile(paths.opencodeUnitPath, units.opencode);
   writeFile(paths.agentMockingbirdUnitPath, units.agentMockingbird);
 
@@ -1827,6 +1851,7 @@ async function installOrUpdate(args, mode) {
     registryUrl: args.registryUrl,
     agentMockingbirdVersion: readInstalledVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
+    runtimeMode: agentMockingbirdRuntime.mode,
     shimPath,
     opencodeShimPath,
     pathSetup,

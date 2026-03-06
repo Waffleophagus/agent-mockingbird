@@ -58,6 +58,9 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Build standalone runtime
+        run: bun run build:bin
+
       - name: Resolve publish metadata
         id: meta
         run: |
@@ -187,6 +190,7 @@ jobs:
           grep -Fqx -- "package/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-assets.mjs" <<<"${tar_contents}"
+          grep -Fqx -- "package/dist/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/apps/server/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/apps/server/src/index.ts" <<<"${tar_contents}"
           grep -Fqx -- "package/packages/api/package.json" <<<"${tar_contents}"

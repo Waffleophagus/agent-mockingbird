@@ -4,17 +4,22 @@ import path from "node:path";
 
 const repoRoot = import.meta.dir;
 const outdir = path.join(repoRoot, "dist");
+const outfile = path.join(outdir, "agent-mockingbird");
+const drizzleOutdir = path.join(outdir, "drizzle");
 
-if (existsSync(outdir)) {
-  rmSync(outdir, { recursive: true, force: true });
-}
 mkdirSync(outdir, { recursive: true });
+if (existsSync(outfile)) {
+  rmSync(outfile, { force: true });
+}
+if (existsSync(drizzleOutdir)) {
+  rmSync(drizzleOutdir, { recursive: true, force: true });
+}
 
 console.log("Building standalone binary...");
 const result = await Bun.build({
   entrypoints: [path.join(repoRoot, "apps/server/src/index.ts")],
   compile: {
-    outfile: path.join(repoRoot, "dist/agent-mockingbird"),
+    outfile,
   },
   minify: true,
   sourcemap: "linked",
@@ -28,7 +33,7 @@ if (!result.success) {
 }
 
 console.log("Copying migrations...");
-cpSync(path.join(repoRoot, "drizzle"), path.join(outdir, "drizzle"), { recursive: true });
+cpSync(path.join(repoRoot, "drizzle"), drizzleOutdir, { recursive: true });
 
 console.log(`Build complete: ${outdir}/agent-mockingbird`);
 console.log("\nTo deploy, copy the entire 'dist' folder to your target location.");
