@@ -134,6 +134,8 @@ jobs:
             pkg.name = `@${scope}/agent-mockingbird`;
             pkg.private = false;
             pkg.version = version;
+            pkg.module = "apps/server/src/index.ts";
+            pkg.main = "apps/server/src/index.ts";
             pkg.publishConfig = { registry: process.env.REGISTRY_URL };
             pkg.files = [
               "bin",

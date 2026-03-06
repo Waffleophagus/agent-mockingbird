@@ -486,7 +486,15 @@ function resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir) {
     }
   }
 
-  candidates.push("src/index.ts", "src/index.js", "dist/index.js", "index.js");
+  candidates.push(
+    "src/index.ts",
+    "src/index.js",
+    "dist/index.js",
+    "index.js",
+    "apps/server/src/index.ts",
+    "apps/server/src/index.js",
+    "apps/server/dist/index.js",
+  );
   for (const relPath of candidates) {
     const absolutePath = path.join(agentMockingbirdAppDir, relPath);
     if (fs.existsSync(absolutePath)) {
