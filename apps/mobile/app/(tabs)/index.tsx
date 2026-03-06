@@ -5,14 +5,25 @@ import { ScrollView, Text, View } from "react-native";
 import { PanelCard } from "@/components/panel-card";
 import { ScreenFrame } from "@/components/screen-frame";
 import { signalSessions, summaryStats } from "@/data/mock";
+import { useBootstrapStore } from "@/lib/bootstrap";
 
 export default function ChatsTab() {
+  const store = useBootstrapStore();
+  const connectionLabel =
+    store.connectionStatus === "online"
+      ? "backend online"
+      : store.connectionStatus === "checking"
+        ? "checking backend"
+        : store.connectionStatus === "offline"
+          ? "backend offline"
+          : "backend idle";
+
   return (
     <ScreenFrame
       eyebrow="Operations Deck"
       title="Chats"
-      subtitle="The mobile shell keeps the desktop rhythm, but compresses it into a field console built for one hand."
-      accentLabel="Runtime online"
+      subtitle="The mobile shell keeps the desktop rhythm, but now remembers which backend it should talk to when the app boots."
+      accentLabel={connectionLabel}
     >
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
         <PanelCard className="mb-4 overflow-hidden">
@@ -29,11 +40,19 @@ export default function ChatsTab() {
           </View>
         </PanelCard>
 
+        <PanelCard className="mb-4">
+          <Text className="text-xs font-semibold uppercase tracking-[2px] text-haze">Configured backend</Text>
+          <Text className="mt-3 text-base font-semibold text-bone">{store.apiBaseUrl || "Not configured"}</Text>
+          <Text className="mt-2 text-sm leading-6 text-brass">
+            {store.connectionMessage ?? "Save a backend URL in onboarding or settings to connect this shell to a real server."}
+          </Text>
+        </PanelCard>
+
         <View className="mb-3 flex-row items-center justify-between">
           <Text className="text-xs font-semibold uppercase tracking-[2px] text-haze">Sessions</Text>
           <View className="flex-row items-center gap-2 rounded-full border border-moss/30 bg-moss/10 px-3 py-1.5">
             <Radio size={12} color="#79936C" />
-            <Text className="text-[11px] font-semibold uppercase tracking-[1.6px] text-moss">SSE placeholder</Text>
+            <Text className="text-[11px] font-semibold uppercase tracking-[1.6px] text-moss">{connectionLabel}</Text>
           </View>
         </View>
 

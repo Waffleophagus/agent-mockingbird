@@ -1,14 +1,20 @@
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { ArrowUpRight, Bot, ChevronLeft, FolderTree, Layers3, SendHorizontal } from "lucide-react-native";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import { PanelCard } from "@/components/panel-card";
 import { signalSessions, transcriptBySessionId } from "@/data/mock";
+import { useBootstrapStore } from "@/lib/bootstrap";
 
 export default function SessionDetailScreen() {
+  const store = useBootstrapStore();
   const params = useLocalSearchParams<{ sessionId: string }>();
   const session = signalSessions.find(entry => entry.id === params.sessionId) ?? signalSessions[0];
   const transcript = transcriptBySessionId[session.id] ?? [];
+
+  if (store.hydrated && !store.apiBaseUrl.trim()) {
+    return <Redirect href="/onboarding" />;
+  }
 
   return (
     <>

@@ -1,9 +1,20 @@
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import { Activity, BellRing, MessageCircleMore, SlidersHorizontal } from "lucide-react-native";
 
+import { useBootstrapStore } from "@/lib/bootstrap";
 import { chromePalette } from "@/theme/palette";
 
 export default function TabsLayout() {
+  const store = useBootstrapStore();
+
+  if (!store.hydrated || store.hydrating) {
+    return null;
+  }
+
+  if (!store.apiBaseUrl.trim()) {
+    return <Redirect href="/onboarding" />;
+  }
+
   return (
     <Tabs
       screenOptions={{
