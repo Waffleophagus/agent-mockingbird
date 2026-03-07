@@ -789,7 +789,7 @@ async function verifyFrontendAssets(baseUrl) {
       };
     }
 
-    const cssUrl = new URL(stylesheetMatch[1], baseUrl).toString();
+    const cssUrl = new globalThis.URL(stylesheetMatch[1], baseUrl).toString();
     const cssResponse = await fetch(cssUrl, { method: "GET" });
     const cssText = await cssResponse.text();
     const missingSelectors = requiredSelectors.filter(selector => !cssText.includes(selector));
