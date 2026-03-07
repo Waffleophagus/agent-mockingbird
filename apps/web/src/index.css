@@ -806,8 +806,8 @@ body {
 }
 
 .oc-inline-btn[data-active="true"] {
-  border-color: color-mix(in srgb, var(--border-selected) 62%, var(--border-weak-base));
-  background: color-mix(in srgb, var(--surface-interactive-base) 18%, transparent);
+  border-color: var(--border-weak-selected);
+  background: var(--surface-base-interactive-active);
   color: var(--text-strong);
 }
 
