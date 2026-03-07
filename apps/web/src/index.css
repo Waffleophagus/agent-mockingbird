@@ -153,13 +153,13 @@ body {
 }
 
 .oc-titlebar-menu-item:hover {
-  background: color-mix(in srgb, var(--surface-panel) 74%, var(--surface-raised-base) 26%);
+  background: var(--surface-raised-base-hover);
   color: var(--text-strong);
 }
 
 .oc-titlebar-menu-item[data-active="true"] {
-  border-color: color-mix(in srgb, var(--border-selected) 34%, var(--border-weak-base));
-  background: color-mix(in srgb, var(--surface-interactive-base) 12%, transparent);
+  border-color: var(--border-weak-selected);
+  background: var(--surface-base-interactive-active);
   color: var(--text-strong);
 }
 
@@ -430,9 +430,9 @@ body {
 
 .oc-session-row,
 .oc-child-row {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 82%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--surface-panel) 36%, transparent);
+  background: var(--surface-panel);
   padding: 10px 11px;
   display: flex;
   flex-direction: column;
@@ -442,14 +442,14 @@ body {
 
 .oc-session-row[data-active="true"],
 .oc-child-row[data-active="true"] {
-  border-color: color-mix(in srgb, var(--border-selected) 62%, var(--border-weak-base));
-  background: color-mix(in srgb, var(--surface-raised-base) 88%, transparent);
+  border-color: var(--border-weak-selected);
+  background: var(--surface-raised-base-hover);
 }
 
 .oc-session-row:hover,
 .oc-child-row:hover {
   transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--border-selected) 36%, var(--border-weak-base));
+  border-color: var(--border-weak-selected);
 }
 
 .oc-session-row-main,
@@ -489,7 +489,7 @@ body {
 }
 
 .oc-child-list {
-  border-left: 1px solid color-mix(in srgb, var(--border-weak-base) 75%, transparent);
+  border-left: 1px solid var(--border-weak-base);
   padding-left: 10px;
   display: flex;
   flex-direction: column;
@@ -526,9 +526,9 @@ body {
 .oc-turn-user-card {
   align-self: flex-end;
   width: min(560px, 100%);
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 74%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 18px;
-  background: color-mix(in srgb, var(--surface-interactive-weak) 82%, transparent);
+  background: var(--surface-interactive-weak);
   padding: 12px 14px;
 }
 
@@ -594,16 +594,16 @@ body {
   gap: 1rem;
   width: 100%;
   padding: 0.85rem 1rem;
-  border: 1px solid color-mix(in srgb, var(--border-base) 82%, transparent);
+  border: 1px solid var(--border-base);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--surface-panel) 74%, var(--surface-raised-base) 26%);
+  background: var(--surface-panel);
   text-align: left;
   transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
 }
 
 .oc-subagent-link-card:hover {
-  border-color: color-mix(in srgb, var(--surface-interactive-base) 42%, var(--border-base) 58%);
-  background: color-mix(in srgb, var(--surface-panel) 60%, var(--surface-raised-base) 40%);
+  border-color: var(--border-interactive-base);
+  background: var(--surface-raised-base-hover);
   transform: translateY(-1px);
 }
 
@@ -646,22 +646,22 @@ body {
 }
 
 .oc-turn-part {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 78%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 14px;
   padding: 10px 12px;
 }
 
 .oc-turn-part-thinking {
-  background: color-mix(in srgb, var(--surface-raised-base) 68%, transparent);
+  background: var(--surface-raised-base-hover);
 }
 
 .oc-turn-part-tool {
-  background: color-mix(in srgb, var(--surface-panel) 62%, transparent);
+  background: var(--surface-panel);
 }
 
 .oc-turn-tool-details {
   margin-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--border-weak-base) 72%, transparent);
+  border-top: 1px solid var(--border-weak-base);
   padding-top: 8px;
 }
 
@@ -767,7 +767,7 @@ body {
 
 .oc-composer-footer {
   width: 100%;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 88%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-top: 0;
   border-radius: 0 0 18px 18px;
   background: color-mix(in srgb, var(--background-base) 88%, black 12%);
@@ -793,10 +793,10 @@ body {
 
 .oc-inline-btn {
   height: 28px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 82%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 999px;
   padding: 0 10px;
-  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  background: var(--surface-panel);
   color: var(--text-base);
   font-size: 12px;
   display: inline-flex;
@@ -816,7 +816,7 @@ body {
 }
 
 .oc-inline-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-panel) 72%, var(--surface-raised-base) 28%);
+  background: var(--surface-raised-base-hover);
 }
 
 .oc-model-picker {
@@ -953,7 +953,7 @@ body {
 
 .oc-question-option[data-selected="true"] {
   border-color: var(--border-selected);
-  background: color-mix(in srgb, var(--surface-interactive-base) 16%, transparent);
+  background: var(--surface-base-interactive-active);
 }
 
 .oc-question-option-dot {
@@ -1039,13 +1039,13 @@ body {
 }
 
 .oc-panel-toggle[data-active="true"] {
-  border-color: color-mix(in srgb, var(--border-selected) 34%, var(--border-weak-base));
-  background: color-mix(in srgb, var(--surface-raised-base) 70%, transparent);
+  border-color: var(--border-weak-selected);
+  background: var(--surface-raised-base-hover);
   color: var(--text-strong);
 }
 
 .oc-titlebar-action:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-panel) 82%, var(--surface-raised-base) 18%);
+  background: var(--surface-raised-base-hover);
 }
 
 .oc-flyout-panel {
@@ -1136,7 +1136,7 @@ body {
 
 .oc-background-input {
   min-height: 58px;
-  background: color-mix(in srgb, var(--surface-base) 85%, transparent);
+  background: var(--surface-base);
   border-radius: 12px;
   font-size: 12px;
 }
@@ -1147,7 +1147,7 @@ body {
 }
 
 .oc-background-run {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 75%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 12px;
   background: transparent;
   padding: 8px;
@@ -1186,13 +1186,13 @@ body {
 }
 
 .oc-status-pill[data-status="active"] {
-  color: color-mix(in srgb, var(--text-on-success-base) 70%, var(--text-base));
-  border-color: color-mix(in srgb, var(--surface-success-strong) 25%, var(--border-weak-base));
+  color: var(--text-on-success-base);
+  border-color: var(--surface-success-strong);
 }
 
 .oc-status-pill[data-status="warning"] {
-  color: color-mix(in srgb, var(--text-on-warning-base) 70%, var(--text-base));
-  border-color: color-mix(in srgb, var(--surface-warning-strong) 24%, var(--border-weak-base));
+  color: var(--text-on-warning-base);
+  border-color: var(--surface-warning-strong);
 }
 
 .oc-status-pill[data-status="idle"] {
@@ -1206,7 +1206,7 @@ body {
 }
 
 .oc-status-pill-action:hover {
-  background: color-mix(in srgb, var(--surface-raised-base) 60%, transparent);
+  background: var(--surface-raised-base-hover);
 }
 
 .oc-turn-tool-summary {
@@ -1584,9 +1584,9 @@ body {
 }
 
 .mgmt-panel {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 78%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--surface-raised-base) 42%, transparent);
+  background: var(--surface-raised-base);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1595,8 +1595,8 @@ body {
 
 .mgmt-panel-header {
   padding: 16px 18px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-weak-base) 60%, transparent);
-  background: color-mix(in srgb, var(--surface-raised-base) 30%, transparent);
+  border-bottom: 1px solid var(--border-weak-base);
+  background: var(--surface-raised-base-hover);
 }
 
 .mgmt-panel-header-row {
@@ -1634,9 +1634,9 @@ body {
 }
 
 .mgmt-card {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 75%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--surface-panel) 38%, transparent);
+  background: var(--surface-panel);
   padding: 12px 14px;
   transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
 }
@@ -1646,14 +1646,14 @@ body {
 }
 
 .mgmt-card-interactive:hover {
-  border-color: color-mix(in srgb, var(--border-selected) 30%, var(--border-weak-base));
+  border-color: var(--border-weak-selected);
   transform: translateY(-1px);
 }
 
 .mgmt-card[data-active="true"] {
-  border-color: color-mix(in srgb, var(--border-selected) 58%, var(--border-weak-base));
-  background: color-mix(in srgb, var(--surface-panel) 38%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface-interactive-base) 35%, transparent);
+  border-color: var(--border-weak-selected);
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--border-weak-selected);
 }
 
 .mgmt-card-header {
@@ -1710,10 +1710,10 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px 14px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 70%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 12px;
   padding: 10px 12px;
-  background: color-mix(in srgb, var(--surface-raised-base) 28%, transparent);
+  background: var(--surface-raised-base);
 }
 
 .mgmt-stat-label {
@@ -1754,9 +1754,9 @@ body {
 .mgmt-detail-value pre {
   margin: 0;
   padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 60%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-inset-base) 70%, transparent);
+  background: var(--surface-inset-base);
   font-family: "Geist Mono", monospace;
   font-size: 11px;
   overflow-x: auto;
@@ -1765,10 +1765,10 @@ body {
 }
 
 .mgmt-section {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 70%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 14px;
   padding: 14px;
-  background: color-mix(in srgb, var(--surface-raised-base) 24%, transparent);
+  background: var(--surface-raised-base);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1824,10 +1824,10 @@ body {
 
 .mgmt-pill-btn {
   height: 30px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 80%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 999px;
   padding: 0 12px;
-  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  background: var(--surface-panel);
   color: var(--text-base);
   font-size: 12px;
   font-weight: 500;
@@ -1839,7 +1839,7 @@ body {
 }
 
 .mgmt-pill-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-panel) 62%, var(--surface-raised-base) 38%);
+  background: var(--surface-raised-base-hover);
   transform: translateY(-0.5px);
 }
 
@@ -1855,7 +1855,7 @@ body {
 }
 
 .mgmt-pill-btn-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-interactive-base) 88%, black 12%);
+  background: var(--surface-interactive-hover);
 }
 
 .mgmt-pill-btn-danger {
@@ -1863,8 +1863,8 @@ body {
 }
 
 .mgmt-pill-btn-danger:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--surface-danger-strong, #dc2626) 28%, var(--border-weak-base));
-  background: color-mix(in srgb, var(--surface-danger-strong, #dc2626) 8%, transparent);
+  border-color: var(--border-critical-selected);
+  background: var(--surface-critical-weak);
 }
 
 .mgmt-pill-btn-ghost {
@@ -1873,15 +1873,15 @@ body {
 }
 
 .mgmt-pill-btn-ghost:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--surface-panel) 58%, transparent);
-  border-color: color-mix(in srgb, var(--border-weak-base) 60%, transparent);
+  background: var(--surface-panel);
+  border-color: var(--border-weak-base);
 }
 
 .mgmt-select {
   height: 36px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 80%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-panel) 65%, transparent);
+  background: var(--surface-panel);
   color: var(--text-base);
   padding: 0 10px;
   font-size: 13px;
@@ -1895,9 +1895,9 @@ body {
 
 .mgmt-input {
   height: 36px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 80%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-panel) 50%, transparent);
+  background: var(--surface-panel);
   color: var(--text-base);
   padding: 0 12px;
   font-size: 13px;
@@ -1914,9 +1914,9 @@ body {
 }
 
 .mgmt-textarea {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 80%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-panel) 50%, transparent);
+  background: var(--surface-panel);
   color: var(--text-base);
   padding: 10px 12px;
   font-size: 13px;
@@ -1948,7 +1948,7 @@ body {
 }
 
 .mgmt-empty {
-  border: 1px dashed color-mix(in srgb, var(--border-weak-base) 70%, transparent);
+  border: 1px dashed var(--border-weak-base);
   border-radius: 14px;
   padding: 18px;
   text-align: center;
@@ -1957,10 +1957,10 @@ body {
 }
 
 .mgmt-error {
-  border: 1px solid color-mix(in srgb, var(--surface-danger-strong, #dc2626) 24%, var(--border-weak-base));
+  border: 1px solid var(--border-critical-selected);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-panel) 78%, var(--surface-danger-strong, #dc2626) 22%);
-  color: color-mix(in srgb, var(--surface-danger-strong, #dc2626) 18%, var(--text-strong));
+  background: var(--surface-critical-weak);
+  color: var(--text-on-critical-base);
   font-size: 12px;
   line-height: 1.5;
   padding: 10px 14px;
@@ -1969,18 +1969,18 @@ body {
 }
 
 .mgmt-notice {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 70%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-raised-base) 40%, transparent);
+  background: var(--surface-raised-base);
   color: var(--text-weak);
   font-size: 12px;
   padding: 10px 14px;
 }
 
 .mgmt-loading {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 50%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-raised-base) 20%, transparent);
+  background: var(--surface-raised-base);
   color: var(--text-weaker);
   font-size: 12px;
   padding: 10px 14px;
@@ -2001,7 +2001,7 @@ body {
 
 .mgmt-tab {
   height: 32px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 72%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 999px;
   padding: 0 14px;
   background: transparent;
@@ -2016,12 +2016,12 @@ body {
 }
 
 .mgmt-tab:hover {
-  background: color-mix(in srgb, var(--surface-panel) 50%, transparent);
+  background: var(--surface-panel);
 }
 
 .mgmt-tab[data-active="true"] {
-  border-color: color-mix(in srgb, var(--border-selected) 55%, var(--border-weak-base));
-  background: color-mix(in srgb, var(--surface-interactive-base) 14%, transparent);
+  border-color: var(--border-weak-selected);
+  background: var(--surface-base-interactive-active);
   color: var(--text-strong);
 }
 
@@ -2041,17 +2041,17 @@ body {
 }
 
 .mgmt-badge-success {
-  border-color: color-mix(in srgb, var(--surface-success-strong) 30%, var(--border-weak-base));
+  border-color: var(--surface-success-strong);
   color: var(--surface-success-strong);
 }
 
 .mgmt-badge-warning {
-  border-color: color-mix(in srgb, var(--surface-warning-strong) 30%, var(--border-weak-base));
+  border-color: var(--surface-warning-strong);
   color: var(--surface-warning-strong);
 }
 
 .mgmt-badge-info {
-  border-color: color-mix(in srgb, var(--surface-interactive-base) 30%, var(--border-weak-base));
+  border-color: var(--border-interactive-base);
   color: var(--text-interactive-base);
 }
 
@@ -2065,29 +2065,29 @@ body {
   display: inline-flex;
   align-items: center;
   height: 22px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 65%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 999px;
   padding: 0 8px;
   font-size: 10px;
   font-family: "Geist Mono", monospace;
   color: var(--text-weak);
-  background: color-mix(in srgb, var(--surface-raised-base) 30%, transparent);
+  background: var(--surface-raised-base);
 }
 
 .mgmt-step-card {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 65%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 12px;
   padding: 10px 12px;
-  background: color-mix(in srgb, var(--surface-panel) 28%, transparent);
+  background: var(--surface-panel);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .mgmt-instance-card {
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 75%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--surface-panel) 38%, transparent);
+  background: var(--surface-panel);
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -2096,7 +2096,7 @@ body {
 }
 
 .mgmt-instance-card:hover {
-  border-color: color-mix(in srgb, var(--border-selected) 22%, var(--border-weak-base));
+  border-color: var(--border-weak-selected);
 }
 
 .mgmt-model-picker-dropdown {
@@ -2157,9 +2157,9 @@ body {
   gap: 8px;
   width: 100%;
   height: 36px;
-  border: 1px solid color-mix(in srgb, var(--border-weak-base) 80%, transparent);
+  border: 1px solid var(--border-weak-base);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-panel) 50%, transparent);
+  background: var(--surface-panel);
   padding: 0 10px;
   font-size: 13px;
   color: var(--text-base);
@@ -2174,9 +2174,9 @@ body {
 }
 
 .mgmt-warn-card {
-  border: 1px solid color-mix(in srgb, var(--surface-warning-strong) 18%, var(--border-weak-base));
+  border: 1px solid var(--surface-warning-strong);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-panel) 86%, var(--surface-warning-strong) 14%);
+  background: var(--surface-warning-weak);
   padding: 10px 14px;
   font-size: 12px;
 }
@@ -2185,13 +2185,13 @@ body {
   margin: 0;
   font-size: 12px;
   font-weight: 600;
-  color: color-mix(in srgb, var(--surface-warning-strong) 68%, var(--text-strong));
+  color: var(--text-on-warning-base);
 }
 
 .mgmt-warn-card-text {
   margin: 2px 0 0;
   font-size: 11px;
-  color: color-mix(in srgb, var(--surface-warning-strong) 34%, var(--text-base));
+  color: var(--text-on-warning-weak);
 }
 
 .mgmt-count-note {
