@@ -645,22 +645,28 @@ function shellEscapeSystemdArg(value) {
   return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
-function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
-  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
-  if (entrypoint) {
-    // Prefer source mode when available: Bun's packaged web build can diverge from
-    // the HTML-import runtime path that the dashboard uses during normal development.
-    return {
-      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
-      mode: "source",
-    };
+function canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint) {
+  if (!entrypoint) {
+    return false;
   }
+  const webHtml = path.join(agentMockingbirdAppDir, "apps", "web", "index.html");
+  return fs.existsSync(webHtml);
+}
 
+function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
   if (fs.existsSync(compiledBinary)) {
     return {
       execStart: compiledBinary,
       mode: "compiled",
+    };
+  }
+
+  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
+  if (canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint)) {
+    return {
+      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
+      mode: "source",
     };
   }
 
