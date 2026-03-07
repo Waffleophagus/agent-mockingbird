@@ -814,7 +814,7 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
   }
 
   function setActiveSessionId(sessionId: string) {
-    setActiveSessionIdState(sessionId);
+    setActiveSessionIdState(current => (current === sessionId ? current : sessionId));
     activeSessionIdRef.current = sessionId;
   }
 

@@ -1,4 +1,4 @@
-import { Redirect, Stack, useLocalSearchParams } from "expo-router";
+import { Redirect, useLocalSearchParams } from "expo-router";
 import type { ModelOption } from "@agent-mockingbird/contracts/dashboard";
 import { ArrowLeft, Brain, ChevronDown, SendHorizontal, Wrench } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -36,7 +36,7 @@ export default function SessionDetailScreen() {
     if (!sessionId) return;
     chat.setActiveSessionId(sessionId);
     void chat.ensureSessionLoaded(sessionId);
-  }, [chat, sessionId]);
+  }, [sessionId]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -128,11 +128,6 @@ export default function SessionDetailScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: false,
-        }}
-      />
       <View className="flex-1 bg-ink">
         <View className="border-b border-bone/10 px-5 pb-5 pt-16">
           <View className="mb-4 flex-row items-center justify-between gap-3">
