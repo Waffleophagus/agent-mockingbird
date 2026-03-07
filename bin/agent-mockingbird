@@ -646,6 +646,14 @@ function shellEscapeSystemdArg(value) {
 }
 
 function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
+  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
+  if (entrypoint) {
+    return {
+      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
+      mode: "source",
+    };
+  }
+
   const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
   if (fs.existsSync(compiledBinary)) {
     return {
@@ -654,15 +662,7 @@ function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
     };
   }
 
-  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
-  if (!entrypoint) {
-    return null;
-  }
-
-  return {
-    execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
-    mode: "source",
-  };
+  return null;
 }
 
 function unitContents(paths, opencodeBin, agentMockingbirdExecStart) {
