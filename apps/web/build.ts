@@ -3,11 +3,13 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const rootDir = import.meta.dir;
+const workspaceRoot = path.resolve(rootDir, "..", "..");
 const outDir = path.join(rootDir, "dist");
 const frontendEntry = path.join(rootDir, "src", "frontend.tsx");
 const cssEntry = path.join(rootDir, "src", "index.css");
 const cssOutfile = path.join(outDir, "index.css");
 const htmlOutfile = path.join(outDir, "index.html");
+const tailwindCliEntry = path.join(workspaceRoot, "node_modules", "@tailwindcss", "cli", "dist", "index.mjs");
 const requiredSelectors = [".text-muted-foreground", ".bg-card", ".animate-pulse"];
 const forbiddenDirectives = ["@theme", "@source", "@utility", "@tailwind"];
 
@@ -16,7 +18,10 @@ if (existsSync(outDir)) {
 }
 mkdirSync(outDir, { recursive: true });
 
-await Bun.$`bunx @tailwindcss/cli -i ${cssEntry} -o ${cssOutfile} --minify`.cwd(rootDir).quiet();
+if (!existsSync(tailwindCliEntry)) {
+  console.error(`Missing Tailwind CLI at ${tailwindCliEntry}. Run bun install before building.`);
+  process.exit(1);
+}
 
 const frontendBuild = await Bun.build({
   entrypoints: [frontendEntry],
@@ -39,6 +44,17 @@ if (!frontendBuild.success) {
 const jsOutput = frontendBuild.outputs.find(output => output.path.endsWith(".js"));
 if (!jsOutput) {
   console.error("Expected a JavaScript bundle for the web frontend build.");
+  process.exit(1);
+}
+
+const tailwindProcess = Bun.spawn([process.execPath, tailwindCliEntry, "-i", cssEntry, "-o", cssOutfile, "--minify"], {
+  cwd: rootDir,
+  stdout: "inherit",
+  stderr: "inherit",
+});
+
+if ((await tailwindProcess.exited) !== 0) {
+  console.error("Tailwind CSS compilation failed.");
   process.exit(1);
 }
 
