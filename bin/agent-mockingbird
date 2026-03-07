@@ -648,6 +648,8 @@ function shellEscapeSystemdArg(value) {
 function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
   if (entrypoint) {
+    // Prefer source mode when available: Bun's packaged web build can diverge from
+    // the HTML-import runtime path that the dashboard uses during normal development.
     return {
       execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
       mode: "source",
