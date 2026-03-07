@@ -654,19 +654,21 @@ function canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint) {
 }
 
 function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
+  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
+  if (canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint)) {
+    // Prefer source mode when available: packaged/dist dashboard assets have
+    // diverged from the Bun HTML-import runtime path used during development.
+    return {
+      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
+      mode: "source",
+    };
+  }
+
   const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
   if (fs.existsSync(compiledBinary)) {
     return {
       execStart: compiledBinary,
       mode: "compiled",
-    };
-  }
-
-  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
-  if (canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint)) {
-    return {
-      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
-      mode: "source",
     };
   }
 
@@ -1018,6 +1020,31 @@ function readInstalledOpenCodeVersion(paths) {
     return null;
   }
   return readJson(pkgPath).version ?? null;
+}
+
+function readInstalledRuntimeMode(paths) {
+  if (!fs.existsSync(paths.agentMockingbirdUnitPath)) {
+    return null;
+  }
+  const execStartLine = fs
+    .readFileSync(paths.agentMockingbirdUnitPath, "utf8")
+    .split("\n")
+    .find(line => line.startsWith("ExecStart="));
+  if (!execStartLine) {
+    return null;
+  }
+  if (execStartLine.includes("/dist/agent-mockingbird")) {
+    return "compiled";
+  }
+  if (
+    execStartLine.includes("apps/server/src/index.ts") ||
+    execStartLine.includes("apps/server/src/index.js") ||
+    execStartLine.includes("apps/server/dist/index.js") ||
+    execStartLine.includes("/dist/index.js")
+  ) {
+    return "source";
+  }
+  return null;
 }
 
 async function fetchRuntimeDefaultModel() {
@@ -1887,6 +1914,7 @@ async function status(args) {
     rootDir: paths.rootDir,
     agentMockingbirdVersion: readInstalledVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
+    runtimeMode: readInstalledRuntimeMode(paths),
     unitStates,
     health,
   };
@@ -1982,6 +2010,7 @@ function printResult(result, asJson) {
     console.log(`root: ${result.rootDir}`);
     console.log(`registry: ${result.registryUrl}`);
     console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "unknown"}`);
+    console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "unknown"}`);
     console.log(`cli: ${result.shimPath ?? "unavailable"}`);
     if (result.opencodeShimPath) {
@@ -2088,6 +2117,7 @@ function printResult(result, asJson) {
     console.log("status");
     console.log(`root: ${result.rootDir}`);
     console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`);
+    console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
     console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
     console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
@@ -2098,6 +2128,7 @@ function printResult(result, asJson) {
     console.log(`${result.mode} complete`);
     console.log(`root: ${result.rootDir}`);
     console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`);
+    console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
     console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
     console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);

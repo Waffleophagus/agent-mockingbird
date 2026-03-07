@@ -17,11 +17,11 @@ import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
 import { NotificationService } from "./backend/notifications/service";
+import { resolveWebDistDir } from "./backend/paths";
 import { initLaneQueue, getLaneQueue } from "./backend/queue/service";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
 import { startSkillsCatalogWatcher } from "./backend/skills/watcher";
-import { resolveWebDistDir } from "./backend/paths";
 
 ensureSeedData();
 ensureConfigFile();

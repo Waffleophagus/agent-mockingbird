@@ -200,6 +200,37 @@ jobs:
           echo "AGENT_MOCKINGBIRD_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
+      - name: Verify packaged runtime prefers source mode
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "${tmpdir}"' EXIT
+          tar -xzf "${AGENT_MOCKINGBIRD_TARBALL}" -C "${tmpdir}"
+          RUNTIME_IMPL_PATH="${tmpdir}/package/bin/agent-mockingbird" bun -e '
+            const fs = require("fs");
+            const path = process.env.RUNTIME_IMPL_PATH;
+            if (!path || !fs.existsSync(path)) {
+              throw new Error("Packaged CLI missing from tarball.");
+            }
+            const text = fs.readFileSync(path, "utf8");
+            const start = text.indexOf("function resolveAgentMockingbirdRuntimeCommand");
+            const end = text.indexOf("\nfunction unitContents", start);
+            if (start < 0 || end < 0) {
+              throw new Error("Could not locate packaged runtime resolver.");
+            }
+            const snippet = text.slice(start, end);
+            const sourceIndex = snippet.indexOf("const entrypoint = resolveAgentMockingbirdServiceEntrypoint");
+            const compiledIndex = snippet.indexOf("const compiledBinary = path.join");
+            if (sourceIndex < 0 || compiledIndex < 0) {
+              throw new Error("Packaged runtime resolver is missing source/compiled branches.");
+            }
+            if (sourceIndex > compiledIndex) {
+              throw new Error("Packaged runtime still prefers compiled mode.");
+            }
+            console.log("Packaged runtime prefers source mode.");
+          '
+
       - name: Pack agent-mockingbird-installer artifact
         if: steps.meta.outputs.should_publish == 'true'
         run: |
@@ -273,3 +304,18 @@ jobs:
             exit 0
           fi
           bunx npm publish "${AGENT_MOCKINGBIRD_INSTALLER_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
+
+      - name: Verify published dist-tags
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          package_name="@${REGISTRY_SCOPE}/agent-mockingbird"
+          installer_name="@${REGISTRY_SCOPE}/agent-mockingbird-installer"
+          expected_version="${{ steps.meta.outputs.package_version }}"
+          npm_tag="${{ steps.meta.outputs.npm_tag }}"
+          bunx npm view "${package_name}" dist-tags version --registry "${REGISTRY_URL%/}/" --json
+          bunx npm view "${installer_name}" dist-tags version --registry "${REGISTRY_URL%/}/" --json
+          actual_pkg_tag="$(bunx npm view "${package_name}" "dist-tags.${npm_tag}" --registry "${REGISTRY_URL%/}/")"
+          actual_installer_tag="$(bunx npm view "${installer_name}" "dist-tags.${npm_tag}" --registry "${REGISTRY_URL%/}/")"
+          test "${actual_pkg_tag}" = "${expected_version}"
+          test "${actual_installer_tag}" = "${expected_version}"
