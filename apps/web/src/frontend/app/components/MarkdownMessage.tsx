@@ -6,6 +6,21 @@ import { cn } from "@/lib/utils";
 
 const STREAMDOWN_PLUGINS = { code };
 
+function normalizeMarkdownContent(content: string): string {
+  const normalizedLineEndings = content.replace(/\r\n?/g, "\n");
+  const hasRealNewlines = normalizedLineEndings.includes("\n");
+  const escapedNewlineCount = normalizedLineEndings.match(/\\n/g)?.length ?? 0;
+  const hasEscapedFence = normalizedLineEndings.includes("\\`\\`\\`");
+  if (!hasRealNewlines && escapedNewlineCount < 2 && !hasEscapedFence) {
+    return normalizedLineEndings;
+  }
+  return normalizedLineEndings
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\`/g, "`");
+}
+
 interface MarkdownMessageProps {
   content: string;
   isStreaming: boolean;
@@ -19,7 +34,8 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   variant = "message",
   className,
 }: MarkdownMessageProps) {
-  if (!content.trim()) return null;
+  const displayContent = normalizeMarkdownContent(content);
+  if (!displayContent.trim()) return null;
   return (
     <Streamdown
       className={cn("chat-markdown", variant === "thinking" && "chat-markdown-thinking", className)}
@@ -29,7 +45,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
       animated={isStreaming}
       plugins={STREAMDOWN_PLUGINS}
     >
-      {content}
+      {displayContent}
     </Streamdown>
   );
 });

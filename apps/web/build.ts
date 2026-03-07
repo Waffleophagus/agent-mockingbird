@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const rootDir = import.meta.dir;
@@ -9,6 +9,8 @@ const frontendEntry = path.join(rootDir, "src", "frontend.tsx");
 const cssEntry = path.join(rootDir, "src", "index.css");
 const cssOutfile = path.join(outDir, "index.css");
 const htmlOutfile = path.join(outDir, "index.html");
+const vendorSrcDir = path.join(rootDir, "src", "vendor");
+const vendorOutDir = path.join(outDir, "vendor");
 const tailwindCliEntry = path.join(workspaceRoot, "node_modules", "@tailwindcss", "cli", "dist", "index.mjs");
 const requiredCssMarkers = [
   "counter(line)",
@@ -86,5 +88,9 @@ const html = `<!doctype html>
 `;
 
 await Bun.write(htmlOutfile, html);
+
+if (existsSync(vendorSrcDir)) {
+  cpSync(vendorSrcDir, vendorOutDir, { recursive: true });
+}
 
 console.log(`Built web assets into ${outDir}`);

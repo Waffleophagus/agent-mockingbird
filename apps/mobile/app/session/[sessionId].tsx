@@ -2,7 +2,7 @@ import { Redirect, useLocalSearchParams } from "expo-router";
 import type { ModelOption } from "@agent-mockingbird/contracts/dashboard";
 import { ArrowLeft, Brain, ChevronDown, SendHorizontal, Wrench } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LayoutChangeEvent, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ModelPickerOverlay } from "@/features/chat/model-picker-overlay";
@@ -18,10 +18,11 @@ export default function SessionDetailScreen() {
   const chat = useMobileChat();
   const params = useLocalSearchParams<{ sessionId: string }>();
   const [draftMessage, setDraftMessage] = useState("");
-  const [composerHeight, setComposerHeight] = useState(0);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const scrollRef = useRef<ScrollView>(null);
+  const hasInitialBottomScrollRef = useRef(false);
+  const shouldFollowLatestRef = useRef(true);
   const insets = useSafeAreaInsets();
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : "";
   const session = chat.sessions.find(entry => entry.id === sessionId);
@@ -39,10 +40,23 @@ export default function SessionDetailScreen() {
   }, [sessionId]);
 
   useEffect(() => {
-    const timeout = setTimeout(() => {
+    hasInitialBottomScrollRef.current = false;
+    shouldFollowLatestRef.current = true;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    if (!hasInitialBottomScrollRef.current) {
+      hasInitialBottomScrollRef.current = true;
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollToEnd({ animated: false });
+      });
+      return;
+    }
+    if (!shouldFollowLatestRef.current) return;
+    requestAnimationFrame(() => {
       scrollRef.current?.scrollToEnd({ animated: true });
-    }, 80);
-    return () => clearTimeout(timeout);
+    });
   }, [messages.length, activeQuestionRequest?.id, activePermissionRequest?.id]);
 
   if (store.hydrated && !store.apiBaseUrl.trim()) {
@@ -116,9 +130,10 @@ export default function SessionDetailScreen() {
     [chat],
   );
 
-  function handleComposerLayout(event: LayoutChangeEvent) {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setComposerHeight(current => (current === nextHeight ? current : nextHeight));
+  function handleTimelineScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    shouldFollowLatestRef.current = distanceFromBottom < 140;
   }
 
   useEffect(() => {
@@ -128,7 +143,11 @@ export default function SessionDetailScreen() {
 
   return (
     <>
-      <View className="flex-1 bg-ink">
+      <KeyboardAvoidingView
+        className="flex-1 bg-ink"
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
         <View className="border-b border-bone/10 px-5 pb-5 pt-16">
           <View className="mb-4 flex-row items-center justify-between gap-3">
             <Pressable
@@ -196,10 +215,16 @@ export default function SessionDetailScreen() {
         <ScrollView
           ref={scrollRef}
           className="flex-1 px-5 pt-5"
-          contentContainerStyle={{ paddingBottom: composerHeight + 20 }}
-          scrollIndicatorInsets={{ bottom: composerHeight }}
+          contentContainerStyle={{ paddingBottom: 20 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={handleTimelineScroll}
+          onContentSizeChange={() => {
+            if (!hasInitialBottomScrollRef.current || shouldFollowLatestRef.current) {
+              scrollRef.current?.scrollToEnd({ animated: hasInitialBottomScrollRef.current });
+            }
+          }}
         >
           <SessionTimeline
             loading={loadingMessages}
@@ -212,11 +237,7 @@ export default function SessionDetailScreen() {
           />
         </ScrollView>
 
-        <View
-          onLayout={handleComposerLayout}
-          className="absolute bottom-0 left-0 right-0 border-t border-bone/10 bg-ash/95 px-5 pt-4"
-          style={{ paddingBottom: insets.bottom + 8 }}
-        >
+        <View className="border-t border-bone/10 bg-ash/95 px-5 pt-4" style={{ paddingBottom: insets.bottom + 8 }}>
           <View className="flex-row items-end gap-3 rounded-[28px] border border-bone/10 bg-bone/5 px-4 py-3">
             <TextInput
               value={draftMessage}
@@ -281,7 +302,7 @@ export default function SessionDetailScreen() {
             selectedModelId={session?.model ?? ""}
           />
         ) : null}
-      </View>
+      </KeyboardAvoidingView>
     </>
   );
 }

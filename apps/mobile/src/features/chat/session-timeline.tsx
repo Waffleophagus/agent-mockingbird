@@ -3,6 +3,7 @@ import { AlertTriangle, Brain, ChevronDown, LoaderCircle, RefreshCcw, Wrench } f
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
+import { MarkdownMessage } from "@/components/markdown-message";
 import {
   buildTurns,
   formatCompactTimestamp,
@@ -65,8 +66,8 @@ function ToolCallCard({ part }: { part: Extract<ChatMessagePart, { type: "tool_c
       {expanded && hasDetails ? (
         <View className="mt-4 gap-3">
           {detailsInput ? <Text selectable className="font-mono text-[12px] leading-5 text-brass">{detailsInput}</Text> : null}
-          {part.output ? <Text selectable className="text-[13px] leading-6 text-brass">{part.output}</Text> : null}
-          {part.error ? <Text selectable className="text-[13px] leading-6 text-emberSoft">{part.error}</Text> : null}
+          {part.output ? <MarkdownMessage content={part.output} /> : null}
+          {part.error ? <MarkdownMessage content={part.error} /> : null}
         </View>
       ) : null}
     </PanelCard>
@@ -110,9 +111,9 @@ export function SessionTimeline({
               <Text className="text-[11px] font-bold uppercase tracking-[1.8px] text-emberSoft">
                 You · {formatCompactTimestamp(turn.user.at) || relativeFromIso(turn.user.at)}
               </Text>
-              <Text selectable className="mt-2 text-[15px] leading-7 text-bone">
-                {sanitizeMessageContentForDisplay(turn.user.role, turn.user.content)}
-              </Text>
+              <View className="mt-2">
+                <MarkdownMessage content={sanitizeMessageContentForDisplay(turn.user.role, turn.user.content)} />
+              </View>
             </View>
           ) : null}
 
@@ -135,9 +136,9 @@ export function SessionTimeline({
                 </Text>
 
                 {!hideMirroredAssistantContent && message.content.trim() ? (
-                  <Text selectable className="mt-3 text-[15px] leading-7 text-bone">
-                    {message.content}
-                  </Text>
+                  <View className="mt-3">
+                    <MarkdownMessage content={sanitizeMessageContentForDisplay(message.role, message.content)} />
+                  </View>
                 ) : null}
 
                 {visibleParts.map(part =>
@@ -147,7 +148,9 @@ export function SessionTimeline({
                         <Brain color="#79936C" size={14} />
                         <Text className="text-xs font-bold uppercase tracking-[1.4px] text-moss">Thinking</Text>
                       </View>
-                      <Text selectable className="mt-3 text-[14px] leading-6 text-bone">{part.text}</Text>
+                      <View className="mt-3">
+                        <MarkdownMessage content={part.text} />
+                      </View>
                     </PanelCard>
                   ) : (
                     <ToolCallCard key={part.id} part={part} />
@@ -189,4 +192,3 @@ export function SessionTimeline({
     </View>
   );
 }
-
