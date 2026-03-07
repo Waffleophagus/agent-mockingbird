@@ -20,7 +20,9 @@ export function resolveDataPath(...segments: string[]): string {
 export function resolveWebDistDir(): string | null {
   const candidates = [
     path.resolve(process.cwd(), "dist", "web"),
+    path.resolve(process.cwd(), "apps", "web", "dist"),
     path.resolve(sourceRoot(), "dist", "web"),
+    path.resolve(sourceRoot(), "apps", "web", "dist"),
     path.resolve(path.dirname(process.execPath), "web"),
   ];
   for (const candidate of candidates) {

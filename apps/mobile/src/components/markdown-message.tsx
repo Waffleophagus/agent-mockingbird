@@ -1,7 +1,5 @@
 import { Image, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 import Markdown, { type RenderRules } from "react-native-markdown-display";
-import SyntaxHighlighter from "react-native-syntax-highlighter";
-import { atomOneDark } from "react-syntax-highlighter/styles/hljs";
 
 import { chromePalette } from "@/theme/palette";
 
@@ -125,12 +123,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
   },
-  syntaxRoot: {
-    backgroundColor: "transparent",
-    margin: 0,
-    padding: 0,
-    minWidth: "100%",
-  },
   image: {
     width: "100%",
     minHeight: 140,
@@ -172,16 +164,9 @@ const markdownRules: RenderRules = {
           </View>
         ) : null}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.codeBlockScroll}>
-          <SyntaxHighlighter
-            language={language || "text"}
-            style={atomOneDark}
-            highlighter="hljs"
-            customStyle={styles.syntaxRoot}
-            fontFamily="monospace"
-            fontSize={13}
-          >
+          <Text selectable style={styles.codeBlockText}>
             {rawContent}
-          </SyntaxHighlighter>
+          </Text>
         </ScrollView>
       </View>
     );

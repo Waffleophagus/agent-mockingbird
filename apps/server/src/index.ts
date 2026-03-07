@@ -127,6 +127,11 @@ async function serveDashboard(req: Request) {
     return new Response(candidate);
   }
 
+  // For explicit asset requests, avoid returning index.html, which causes confusing parse errors.
+  if (relativePath.includes(".")) {
+    return new Response("Not found", { status: 404 });
+  }
+
   return new Response(Bun.file(`${webDistDir}/index.html`));
 }
 
