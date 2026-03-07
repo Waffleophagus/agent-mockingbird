@@ -16,7 +16,7 @@
     "dev:server": "turbo run dev --filter=@agent-mockingbird/server",
     "dev:web": "turbo run dev --filter=@agent-mockingbird/server",
     "dev:mobile": "turbo run dev --filter=@agent-mockingbird/mobile",
-    "dev:stack": "bun run build:cli && bash scripts/dev-stack.sh",
+    "dev:stack": "bun run build:web && bun run build:cli && bash scripts/dev-stack.sh",
     "build:cli": "bun run ./build-cli.mjs",
     "build:bin": "bun run ./build-bin.ts",
     "build:android": "bash ./apps/mobile/build-android.sh",

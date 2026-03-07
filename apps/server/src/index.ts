@@ -130,8 +130,7 @@ async function serveDashboard(req: Request) {
   return new Response(Bun.file(`${webDistDir}/index.html`));
 }
 
-const dashboardRoute =
-  env.NODE_ENV === "production" ? serveDashboard : (await import("../../web/index.html")).default;
+const dashboardRoute = serveDashboard;
 
 const server: BunServer<MobileRealtimeSocketData> = serve({
   idleTimeout: 120,

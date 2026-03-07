@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const rootDir = import.meta.dir;
@@ -15,47 +15,6 @@ const requiredCssMarkers = [
   "sdm-c",
   "muted\\/80",
 ];
-const hoistedDeps = [
-  "@agent-mockingbird/contracts",
-  "@base-ui/react",
-  "@streamdown/code",
-  "class-variance-authority",
-  "clsx",
-  "lucide-react",
-  "react",
-  "react-dom",
-  "streamdown",
-  "tailwind-merge",
-  "tailwindcss",
-  "tw-animate-css",
-];
-
-function ensureHoistedDependencyLinks() {
-  const packageNodeModules = path.join(rootDir, "node_modules");
-  mkdirSync(packageNodeModules, { recursive: true });
-
-  for (const dep of hoistedDeps) {
-    const source = path.join(workspaceRoot, "node_modules", dep);
-    if (!existsSync(source)) {
-      throw new Error(`Missing hoisted dependency at ${source}`);
-    }
-
-    const target = path.join(packageNodeModules, dep);
-    mkdirSync(path.dirname(target), { recursive: true });
-
-    const shouldLink = !existsSync(target);
-    if (!shouldLink) continue;
-
-    try {
-      lstatSync(target);
-      rmSync(target, { recursive: true, force: true });
-    } catch {
-      // Nothing to remove.
-    }
-
-    symlinkSync(source, target, "dir");
-  }
-}
 
 if (existsSync(outDir)) {
   rmSync(outDir, { recursive: true, force: true });
@@ -66,9 +25,6 @@ if (!existsSync(tailwindCliEntry)) {
   console.error(`Missing Tailwind CLI at ${tailwindCliEntry}. Run bun install before building.`);
   process.exit(1);
 }
-
-process.chdir(workspaceRoot);
-ensureHoistedDependencyLinks();
 
 const build = await Bun.build({
   entrypoints: [frontendEntry],
@@ -95,7 +51,7 @@ if (!jsOutput) {
 }
 
 const tailwindProcess = Bun.spawn([process.execPath, tailwindCliEntry, "-i", cssEntry, "-o", cssOutfile, "--minify"], {
-  cwd: workspaceRoot,
+  cwd: rootDir,
   stdout: "inherit",
   stderr: "inherit",
 });
