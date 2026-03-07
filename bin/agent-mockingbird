@@ -663,18 +663,18 @@ function hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) {
 
 function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
-  if (hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) && hasCompiledDashboardAssets(agentMockingbirdAppDir)) {
-    return {
-      execStart: compiledBinary,
-      mode: "compiled",
-    };
-  }
-
   const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
   if (canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint)) {
     return {
       execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
       mode: "source",
+    };
+  }
+
+  if (hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) && hasCompiledDashboardAssets(agentMockingbirdAppDir)) {
+    return {
+      execStart: compiledBinary,
+      mode: "compiled",
     };
   }
 
@@ -688,10 +688,10 @@ function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   return null;
 }
 
-function unitContents(paths, opencodeBin, agentMockingbirdExecStart) {
+function unitContents(paths, opencodeBin, agentMockingbirdExecStart, runtimeMode) {
   const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   return { opencode, agentMockingbird };
 }
@@ -759,7 +759,12 @@ async function healthCheckWithRetry(url, input = {}) {
 }
 
 async function verifyFrontendAssets(baseUrl) {
-  const requiredSelectors = [".text-muted-foreground", ".bg-card", ".animate-pulse"];
+  const requiredCssMarkers = [
+    ".chat-markdown",
+    "[data-streamdown=code-block]",
+    "counter(line)",
+    "sdm-c",
+  ];
   try {
     const htmlResponse = await fetch(baseUrl, { method: "GET" });
     const html = await htmlResponse.text();
@@ -771,8 +776,11 @@ async function verifyFrontendAssets(baseUrl) {
         cssOk: false,
         pageStatus: htmlResponse.status,
         cssStatus: 0,
+        fontStatus: 0,
         cssUrl: "",
-        missingSelectors: requiredSelectors,
+        fontUrl: "",
+        fontSignature: "",
+        missingCssMarkers: requiredCssMarkers,
         error: `dashboard page returned ${htmlResponse.status}`,
       };
     }
@@ -783,8 +791,11 @@ async function verifyFrontendAssets(baseUrl) {
         cssOk: false,
         pageStatus: htmlResponse.status,
         cssStatus: 0,
+        fontStatus: 0,
         cssUrl: "",
-        missingSelectors: requiredSelectors,
+        fontUrl: "",
+        fontSignature: "",
+        missingCssMarkers: requiredCssMarkers,
         error: "dashboard HTML did not include a stylesheet link",
       };
     }
@@ -792,31 +803,54 @@ async function verifyFrontendAssets(baseUrl) {
     const cssUrl = new globalThis.URL(stylesheetMatch[1], baseUrl).toString();
     const cssResponse = await fetch(cssUrl, { method: "GET" });
     const cssText = await cssResponse.text();
-    const missingSelectors = requiredSelectors.filter(selector => !cssText.includes(selector));
+    const missingCssMarkers = requiredCssMarkers.filter(selector => !cssText.includes(selector));
+    const fontMatch = cssText.match(/url\((['"]?)([^'")]*geist\.woff2)\1\)/i);
+    const fontUrl = fontMatch?.[2] ? new globalThis.URL(fontMatch[2], cssUrl).toString() : "";
+    let fontStatus = 0;
+    let fontSignature = "";
+    if (fontUrl) {
+      const fontResponse = await fetch(fontUrl, { method: "GET" });
+      fontStatus = fontResponse.status;
+      const bytes = new Uint8Array(await fontResponse.arrayBuffer());
+      fontSignature = String.fromCharCode(...bytes.slice(0, 4));
+    }
+    const fontOk = fontStatus === 200 && fontSignature === "wOF2";
     return {
-      ok: htmlResponse.ok && cssResponse.ok && missingSelectors.length === 0,
+      ok: htmlResponse.ok && cssResponse.ok && missingCssMarkers.length === 0 && fontOk,
       pageOk: htmlResponse.ok,
-      cssOk: cssResponse.ok && missingSelectors.length === 0,
+      cssOk: cssResponse.ok && missingCssMarkers.length === 0,
+      fontOk,
       pageStatus: htmlResponse.status,
       cssStatus: cssResponse.status,
+      fontStatus,
       cssUrl,
-      missingSelectors,
+      fontUrl,
+      fontSignature,
+      missingCssMarkers,
       error:
         !cssResponse.ok
           ? `stylesheet returned ${cssResponse.status}`
-          : missingSelectors.length > 0
-            ? `stylesheet missing selectors: ${missingSelectors.join(", ")}`
-            : "",
+          : missingCssMarkers.length > 0
+            ? `stylesheet missing markers: ${missingCssMarkers.join(", ")}`
+            : !fontUrl
+              ? "could not resolve geist.woff2 url from stylesheet"
+              : !fontOk
+                ? `font validation failed (status=${fontStatus}, signature=${fontSignature || "none"})`
+                : "",
     };
   } catch (error) {
     return {
       ok: false,
       pageOk: false,
       cssOk: false,
+      fontOk: false,
       pageStatus: 0,
       cssStatus: 0,
+      fontStatus: 0,
       cssUrl: "",
-      missingSelectors: requiredSelectors,
+      fontUrl: "",
+      fontSignature: "",
+      missingCssMarkers: requiredCssMarkers,
       error: error instanceof Error ? error.message : String(error),
     };
   }
@@ -1923,7 +1957,7 @@ async function installOrUpdate(args, mode) {
   }
   const opencodeShimPath = writeOpencodeShim(paths, opencodeBin);
 
-  const units = unitContents(paths, opencodeBin, agentMockingbirdRuntime.execStart);
+  const units = unitContents(paths, opencodeBin, agentMockingbirdRuntime.execStart, agentMockingbirdRuntime.mode);
   writeFile(paths.opencodeUnitPath, units.opencode);
   writeFile(paths.agentMockingbirdUnitPath, units.agentMockingbird);
 
@@ -1948,6 +1982,10 @@ async function installOrUpdate(args, mode) {
           skills: [],
         };
   const verify = await runPostInstallVerification();
+  if (!verify.frontendAssetsOk) {
+    const detail = verify.frontendAssets?.error || "frontend asset verification failed";
+    throw new Error(`Frontend asset verification failed after ${mode}: ${detail}`);
+  }
   let onboarding = null;
   if (mode === "install" && !args.yes) {
     try {

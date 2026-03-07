@@ -180,6 +180,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 console.log("[startup] agent-mockingbird runtime", {
   nodeEnv: env.NODE_ENV,
   webDistDir,
+  runtimeMode: process.env.AGENT_MOCKINGBIRD_RUNTIME_MODE || "unknown",
   config: {
     path: configSnapshot.path,
     hash: configSnapshot.hash,

@@ -145,6 +145,7 @@ jobs:
               "runtime-assets",
               ".agents",
               "apps/server",
+              "apps/web",
               "packages/api",
               "packages/contracts",
               "dist",
@@ -195,10 +196,39 @@ jobs:
           grep -Fqx -- "package/apps/server/src/index.ts" <<<"${tar_contents}"
           grep -Fqx -- "package/packages/api/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/packages/contracts/package.json" <<<"${tar_contents}"
+          grep -Fqx -- "package/apps/web/index.html" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/web/index.html" <<<"${tar_contents}"
+          grep -Fqx -- "package/dist/web/vendor/opencode-ui/fonts/geist.woff2" <<<"${tar_contents}"
           grep -Fqx -- "package/drizzle/meta/_journal.json" <<<"${tar_contents}"
           echo "AGENT_MOCKINGBIRD_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
+
+      - name: Verify packaged frontend markdown assets
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "${tmpdir}"' EXIT
+          tar -xzf "${AGENT_MOCKINGBIRD_TARBALL}" -C "${tmpdir}"
+          PACKAGE_ROOT="${tmpdir}/package" bun -e '
+            const path = require("path");
+            const pkgRoot = process.env.PACKAGE_ROOT;
+            const cssPath = path.join(pkgRoot, "dist", "web", "index.css");
+            const fontPath = path.join(pkgRoot, "dist", "web", "vendor", "opencode-ui", "fonts", "geist.woff2");
+            const css = require("fs").readFileSync(cssPath, "utf8");
+            const markers = [".chat-markdown", "[data-streamdown=code-block]", "counter(line)", "sdm-c"];
+            for (const marker of markers) {
+              if (!css.includes(marker)) {
+                throw new Error(`Packaged CSS missing marker: ${marker}`);
+              }
+            }
+            const font = require("fs").readFileSync(fontPath);
+            const sig = font.subarray(0, 4).toString("ascii");
+            if (sig !== "wOF2") {
+              throw new Error(`Packaged font signature invalid: ${sig || "<empty>"}`);
+            }
+            console.log("Packaged frontend markdown assets validated.");
+          '
 
       - name: Verify packaged runtime prefers source mode
         if: steps.meta.outputs.should_publish == 'true'
