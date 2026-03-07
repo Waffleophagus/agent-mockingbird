@@ -3,13 +3,14 @@ import "@/styles/global-import";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 
+import { MobileChatProvider } from "@/features/chat/provider";
 import { useBootstrapScaffold } from "@/lib/bootstrap";
 
 export default function RootLayout() {
   useBootstrapScaffold();
 
   return (
-    <>
+    <MobileChatProvider>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -18,6 +19,6 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: "#13100F" },
         }}
       />
-    </>
+    </MobileChatProvider>
   );
 }

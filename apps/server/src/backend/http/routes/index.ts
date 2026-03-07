@@ -36,7 +36,7 @@ export function createApiRoutes(input: {
     ...createEventRoutes(input.eventStream),
     ...createSignalRoutes(input.signalService),
     ...createPromptRoutes(),
-    ...createUiRoutes(input.runtime),
-    ...createTrpcRoutes(input.runtime),
+    ...createUiRoutes(input.runtime, input.eventStream),
+    ...createTrpcRoutes(input.runtime, input.eventStream.getLatestSeq),
   };
 }

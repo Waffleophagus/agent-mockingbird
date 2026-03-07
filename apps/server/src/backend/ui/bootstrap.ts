@@ -8,6 +8,7 @@ import { listPendingPrompts } from "../prompts/service";
 
 export async function createRuntimeSessionBootstrap(
   runtime: RuntimeEngine,
+  latestSeq: number,
   requestedSessionId?: string,
 ): Promise<SessionScreenBootstrapResponse> {
   const sessions = listSessions();
@@ -67,6 +68,9 @@ export async function createRuntimeSessionBootstrap(
     },
     featureFlags: {
       reviewEnabled: false,
+    },
+    realtime: {
+      latestSeq,
     },
   };
 }

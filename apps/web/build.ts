@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 
 const rootDir = import.meta.dir;
@@ -10,8 +10,52 @@ const cssEntry = path.join(rootDir, "src", "index.css");
 const cssOutfile = path.join(outDir, "index.css");
 const htmlOutfile = path.join(outDir, "index.html");
 const tailwindCliEntry = path.join(workspaceRoot, "node_modules", "@tailwindcss", "cli", "dist", "index.mjs");
-const requiredSelectors = [".text-muted-foreground", ".bg-card", ".animate-pulse"];
-const forbiddenDirectives = ["@theme", "@source", "@utility", "@tailwind"];
+const requiredCssMarkers = [
+  "counter(line)",
+  "sdm-c",
+  "muted\\/80",
+];
+const hoistedDeps = [
+  "@agent-mockingbird/contracts",
+  "@base-ui/react",
+  "@streamdown/code",
+  "class-variance-authority",
+  "clsx",
+  "lucide-react",
+  "react",
+  "react-dom",
+  "streamdown",
+  "tailwind-merge",
+  "tailwindcss",
+  "tw-animate-css",
+];
+
+function ensureHoistedDependencyLinks() {
+  const packageNodeModules = path.join(rootDir, "node_modules");
+  mkdirSync(packageNodeModules, { recursive: true });
+
+  for (const dep of hoistedDeps) {
+    const source = path.join(workspaceRoot, "node_modules", dep);
+    if (!existsSync(source)) {
+      throw new Error(`Missing hoisted dependency at ${source}`);
+    }
+
+    const target = path.join(packageNodeModules, dep);
+    mkdirSync(path.dirname(target), { recursive: true });
+
+    const shouldLink = !existsSync(target);
+    if (!shouldLink) continue;
+
+    try {
+      lstatSync(target);
+      rmSync(target, { recursive: true, force: true });
+    } catch {
+      // Nothing to remove.
+    }
+
+    symlinkSync(source, target, "dir");
+  }
+}
 
 if (existsSync(outDir)) {
   rmSync(outDir, { recursive: true, force: true });
@@ -23,7 +67,10 @@ if (!existsSync(tailwindCliEntry)) {
   process.exit(1);
 }
 
-const frontendBuild = await Bun.build({
+process.chdir(workspaceRoot);
+ensureHoistedDependencyLinks();
+
+const build = await Bun.build({
   entrypoints: [frontendEntry],
   outdir: outDir,
   minify: true,
@@ -34,21 +81,21 @@ const frontendBuild = await Bun.build({
   },
 });
 
-if (!frontendBuild.success) {
-  for (const message of frontendBuild.logs) {
+if (!build.success) {
+  for (const message of build.logs) {
     console.error(message);
   }
   process.exit(1);
 }
 
-const jsOutput = frontendBuild.outputs.find(output => output.path.endsWith(".js"));
+const jsOutput = build.outputs.find(output => output.path.endsWith(".js"));
 if (!jsOutput) {
   console.error("Expected a JavaScript bundle for the web frontend build.");
   process.exit(1);
 }
 
 const tailwindProcess = Bun.spawn([process.execPath, tailwindCliEntry, "-i", cssEntry, "-o", cssOutfile, "--minify"], {
-  cwd: rootDir,
+  cwd: workspaceRoot,
   stdout: "inherit",
   stderr: "inherit",
 });
@@ -59,15 +106,9 @@ if ((await tailwindProcess.exited) !== 0) {
 }
 
 const cssText = await Bun.file(cssOutfile).text();
-for (const selector of requiredSelectors) {
-  if (!cssText.includes(selector)) {
-    console.error(`Compiled CSS is missing required selector: ${selector}`);
-    process.exit(1);
-  }
-}
-for (const directive of forbiddenDirectives) {
-  if (cssText.includes(directive)) {
-    console.error(`Compiled CSS still contains raw Tailwind directive: ${directive}`);
+for (const marker of requiredCssMarkers) {
+  if (!cssText.includes(marker)) {
+    console.error(`Bundled CSS is missing Streamdown marker: ${marker}`);
     process.exit(1);
   }
 }

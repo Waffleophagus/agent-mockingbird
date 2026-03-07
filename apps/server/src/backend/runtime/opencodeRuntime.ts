@@ -206,6 +206,7 @@ const OPENCODE_RUNTIME_ID = "opencode";
 const BACKGROUND_SYNC_INTERVAL_MS = 8_000;
 const BACKGROUND_SYNC_BATCH_LIMIT = 200;
 const BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS = 3_000;
+const SESSION_SYNC_MESSAGE_LIMIT = 10_000;
 const QUEUE_DRAIN_METADATA_KEY = "__queueDrain";
 const DEFAULT_RUNTIME_TIMEOUT_MS = 120_000;
 const DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS = 300_000;
@@ -2079,7 +2080,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       messages = unwrapSdkData<Array<{ info: Message; parts: Array<Part> }>>(
         await this.getClient().session.messages({
           path: { id: externalSessionId },
-          query: { limit: 200 },
+          query: { limit: SESSION_SYNC_MESSAGE_LIMIT },
           responseStyle: "data",
           throwOnError: true,
           signal: this.defaultRequestSignal(),

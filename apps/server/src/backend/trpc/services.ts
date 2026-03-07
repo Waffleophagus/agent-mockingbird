@@ -1,4 +1,9 @@
 import type { AppApiServices } from "@agent-mockingbird/api";
+import type {
+  ChatMessage,
+  SessionMessageCheckpoint,
+  SessionMessagesDeltaResponse,
+} from "@agent-mockingbird/contracts/dashboard";
 
 import type { RuntimeEngine } from "../contracts/runtime";
 import {
@@ -24,17 +29,74 @@ function ensureSession(sessionId: string) {
   return session;
 }
 
-export function createAppApiServices(runtime: RuntimeEngine): AppApiServices {
+function compareMessageToCheckpoint(message: ChatMessage, checkpoint: SessionMessageCheckpoint) {
+  const messageAt = Date.parse(message.at);
+  const checkpointAt = Date.parse(checkpoint.lastMessageAt);
+  const normalizedMessageAt = Number.isFinite(messageAt) ? messageAt : 0;
+  const normalizedCheckpointAt = Number.isFinite(checkpointAt) ? checkpointAt : 0;
+
+  if (normalizedMessageAt !== normalizedCheckpointAt) {
+    return normalizedMessageAt - normalizedCheckpointAt;
+  }
+
+  return message.id.localeCompare(checkpoint.lastMessageId);
+}
+
+function checkpointFromMessages(messages: ChatMessage[]): SessionMessageCheckpoint | null {
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage) return null;
   return {
-    getSessionBootstrap: input => createRuntimeSessionBootstrap(runtime, input?.sessionId),
+    lastMessageAt: lastMessage.at,
+    lastMessageId: lastMessage.id,
+  };
+}
+
+function buildSessionMessagesDeltaResponse(
+  messages: ChatMessage[],
+  checkpoint?: SessionMessageCheckpoint,
+): SessionMessagesDeltaResponse {
+  const latestCheckpoint = checkpointFromMessages(messages);
+  if (!checkpoint) {
+    return {
+      messages,
+      checkpoint: latestCheckpoint,
+    };
+  }
+
+  const latestMessage = messages[messages.length - 1];
+  if (!latestMessage) {
+    return {
+      messages,
+      checkpoint: null,
+      requiresReset: true,
+    };
+  }
+
+  if (latestMessage && compareMessageToCheckpoint(latestMessage, checkpoint) < 0) {
+    return {
+      messages,
+      checkpoint: latestCheckpoint,
+      requiresReset: true,
+    };
+  }
+
+  return {
+    messages: messages.filter(message => compareMessageToCheckpoint(message, checkpoint) > 0),
+    checkpoint: latestCheckpoint,
+  };
+}
+
+export function createAppApiServices(runtime: RuntimeEngine, getLatestSeq: () => number): AppApiServices {
+  return {
+    getSessionBootstrap: input => createRuntimeSessionBootstrap(runtime, getLatestSeq(), input?.sessionId),
     listSessions: async () => listSessions(),
     createSession: async input => createSession(input),
-    getSessionMessages: async sessionId => {
-      ensureSession(sessionId);
+    getSessionMessages: async input => {
+      ensureSession(input.sessionId);
       if (runtime.syncSessionMessages) {
-        await runtime.syncSessionMessages(sessionId).catch(() => undefined);
+        await runtime.syncSessionMessages(input.sessionId).catch(() => undefined);
       }
-      return listMessagesForSession(sessionId);
+      return buildSessionMessagesDeltaResponse(listMessagesForSession(input.sessionId), input.checkpoint);
     },
     sendChat: async input => {
       ensureSession(input.sessionId);

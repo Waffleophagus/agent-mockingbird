@@ -1,4 +1,4 @@
-import { serve } from "bun";
+import { serve, type Server as BunServer } from "bun";
 
 import { SignalChannelService } from "./backend/channels/signal/service";
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
@@ -15,6 +15,7 @@ import { env } from "./backend/env";
 import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
+import type { MobileRealtimeSocketData } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
 import { NotificationService } from "./backend/notifications/service";
 import { resolveWebDistDir } from "./backend/paths";
@@ -132,7 +133,7 @@ async function serveDashboard(req: Request) {
 const dashboardRoute =
   env.NODE_ENV === "production" ? serveDashboard : (await import("../../web/index.html")).default;
 
-const server = serve({
+const server: BunServer<MobileRealtimeSocketData> = serve({
   idleTimeout: 120,
   routes: {
     "/*": dashboardRoute,
@@ -148,6 +149,7 @@ const server = serve({
     hmr: true,
     console: true,
   },
+  websocket: eventStream.websocket,
 });
 
 const shutdown = () => {

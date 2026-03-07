@@ -3,6 +3,8 @@ import type {
   ChatMessage,
   PermissionPromptRequest,
   QuestionPromptRequest,
+  SessionMessageCheckpoint,
+  SessionMessagesDeltaResponse,
   SessionScreenBootstrapResponse,
   SessionSummary,
 } from "@agent-mockingbird/contracts/dashboard";
@@ -14,7 +16,7 @@ export interface AppCoreEnvironment {
     sessions: {
       bootstrap: (input?: { sessionId?: string }) => Promise<SessionScreenBootstrapResponse>;
       create: (input?: { title?: string; model?: string }) => Promise<SessionSummary>;
-      messages: (input: { sessionId: string }) => Promise<ChatMessage[]>;
+      messages: (input: { sessionId: string; checkpoint?: SessionMessageCheckpoint }) => Promise<SessionMessagesDeltaResponse>;
     };
     chat: {
       send: (input: { sessionId: string; content: string }) => Promise<{
@@ -94,8 +96,8 @@ export const RootStore = types
       return session;
     }),
     loadMessages: flow(function* loadMessages(env: AppCoreEnvironment, sessionId: string) {
-      const messages: ChatMessage[] = yield env.api.sessions.messages({ sessionId });
-      self.setSessionMessages(sessionId, messages);
+      const response: SessionMessagesDeltaResponse = yield env.api.sessions.messages({ sessionId });
+      self.setSessionMessages(sessionId, response.messages);
     }),
     sendMessage: flow(function* sendMessage(env: AppCoreEnvironment, input: { sessionId: string; content: string }) {
       const result: { session: SessionSummary; messages: ChatMessage[] } = yield env.api.chat.send(input);

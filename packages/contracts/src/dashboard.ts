@@ -53,6 +53,17 @@ export interface ChatMessage {
   parts?: ChatMessagePart[];
 }
 
+export interface SessionMessageCheckpoint {
+  lastMessageAt: string;
+  lastMessageId: string;
+}
+
+export interface SessionMessagesDeltaResponse {
+  messages: ChatMessage[];
+  checkpoint: SessionMessageCheckpoint | null;
+  requiresReset?: boolean;
+}
+
 export interface SessionSummary {
   id: string;
   title: string;
@@ -288,6 +299,10 @@ export interface DashboardBootstrap {
   heartbeat: HeartbeatSnapshot;
 }
 
+export interface RealtimeCursorSnapshot {
+  latestSeq: number;
+}
+
 export interface SessionScreenBootstrapResponse {
   sessions: SessionSummary[];
   activeSessionId: string;
@@ -318,6 +333,7 @@ export interface SessionScreenBootstrapResponse {
   featureFlags?: {
     reviewEnabled?: boolean;
   };
+  realtime: RealtimeCursorSnapshot;
 }
 
 export interface NotificationDeviceRecord {
@@ -356,3 +372,27 @@ export type DashboardEvent =
   | { event: "question-resolved"; payload: QuestionPromptResolved }
   | { event: "background-run"; payload: BackgroundRunSnapshot }
   | { event: "skills-catalog-updated"; payload: { revision: string } };
+
+export interface DashboardRealtimeHelloFrame {
+  type: "hello";
+  latestSeq: number;
+  replayWindowSize: number;
+}
+
+export interface DashboardRealtimeEventFrame {
+  type: "event";
+  seq: number;
+  event: DashboardEvent["event"];
+  payload: DashboardEvent["payload"];
+}
+
+export interface DashboardRealtimeResyncRequiredFrame {
+  type: "resync_required";
+  latestSeq: number;
+  reason: "gap" | "invalid_cursor" | "server_restart";
+}
+
+export type DashboardRealtimeFrame =
+  | DashboardRealtimeHelloFrame
+  | DashboardRealtimeEventFrame
+  | DashboardRealtimeResyncRequiredFrame;

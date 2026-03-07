@@ -5,6 +5,8 @@ import type {
   NotificationDeviceRecord,
   PermissionPromptRequest,
   QuestionPromptRequest,
+  SessionMessageCheckpoint,
+  SessionMessagesDeltaResponse,
   SessionScreenBootstrapResponse,
   SessionSummary,
 } from "@agent-mockingbird/contracts/dashboard";
@@ -16,7 +18,10 @@ export interface AppApiServices {
   getSessionBootstrap: (input?: { sessionId?: string }) => Promise<SessionScreenBootstrapResponse>;
   listSessions: () => Promise<SessionSummary[]>;
   createSession: (input?: { title?: string; model?: string }) => Promise<SessionSummary>;
-  getSessionMessages: (sessionId: string) => Promise<ChatMessage[]>;
+  getSessionMessages: (input: {
+    sessionId: string;
+    checkpoint?: SessionMessageCheckpoint;
+  }) => Promise<SessionMessagesDeltaResponse>;
   sendChat: (input: { sessionId: string; content: string }) => Promise<{ session: SessionSummary; messages: ChatMessage[] }>;
   abortChat: (sessionId: string) => Promise<{ aborted: boolean }>;
   listBackgroundRuns: (input?: {
@@ -61,6 +66,10 @@ const t = initTRPC.context<AppRouterContext>().create();
 const sessionIdSchema = z.string().trim().min(1);
 const runIdSchema = z.string().trim().min(1);
 const requestIdSchema = z.string().trim().min(1);
+const checkpointSchema = z.object({
+  lastMessageAt: z.string().trim().min(1),
+  lastMessageId: z.string().trim().min(1),
+});
 
 export const createAppRouter = () =>
   t.router({
@@ -85,9 +94,14 @@ export const createAppRouter = () =>
             .optional(),
         )
         .mutation(({ ctx, input }) => ctx.services.createSession(input)),
-      messages: t.procedure.input(z.object({ sessionId: sessionIdSchema })).query(({ ctx, input }) =>
-        ctx.services.getSessionMessages(input.sessionId),
-      ),
+      messages: t.procedure
+        .input(
+          z.object({
+            sessionId: sessionIdSchema,
+            checkpoint: checkpointSchema.optional(),
+          }),
+        )
+        .query(({ ctx, input }) => ctx.services.getSessionMessages(input)),
     }),
     chat: t.router({
       send: t.procedure

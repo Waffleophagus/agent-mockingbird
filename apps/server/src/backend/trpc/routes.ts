@@ -1,4 +1,4 @@
-import { createAppRouter } from "@agent-mockingbird/api";
+import { createAppRouter } from "@agent-mockingbird/api/server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
 import { createAppApiServices } from "./services";
@@ -16,9 +16,9 @@ function withCors(response: Response) {
   });
 }
 
-export function createTrpcRoutes(runtime: RuntimeEngine) {
+export function createTrpcRoutes(runtime: RuntimeEngine, getLatestSeq: () => number) {
   const router = createAppRouter();
-  const services = createAppApiServices(runtime);
+  const services = createAppApiServices(runtime, getLatestSeq);
 
   const handler = async (req: Request) =>
     withCors(

@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@source "../node_modules/streamdown/dist/*.js";
+@source "../../../node_modules/streamdown/dist/*.js";
 
 @import "./vendor/opencode-ui/styles/colors.css";
 @import "./vendor/opencode-ui/styles/theme.css";
@@ -1310,7 +1310,7 @@ body {
   text-underline-offset: 2px;
 }
 
-.chat-markdown code {
+.chat-markdown :not(pre) > code {
   border: 1px solid var(--border-weak-base);
   border-radius: 0.35rem;
   background: var(--surface-inset-base);
@@ -1334,21 +1334,54 @@ body {
   font-size: 0.9rem;
 }
 
+.chat-markdown [data-streamdown="code-block"] {
+  margin: 0.65rem 0;
+}
+
+.chat-markdown [data-streamdown="code-block-body"] {
+  border-color: var(--border-weak-base);
+  background: var(--surface-inset-base);
+}
+
+.chat-markdown [data-streamdown="code-block-body"] pre {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.chat-markdown [data-streamdown="code-block-actions"] {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-markdown [data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"] {
+  opacity: 1;
+}
+
 .chat-markdown blockquote {
   border-left: 2px solid var(--border-selected);
   color: var(--text-weak);
   padding-left: 0.7rem;
 }
 
-.chat-markdown table {
-  display: block;
-  width: 100%;
+.chat-markdown [data-streamdown="table-wrapper"] {
+  max-width: 100%;
+  margin: 0.65rem 0;
+}
+
+.chat-markdown [data-streamdown="table-wrapper"] > div:last-child {
   overflow-x: auto;
+}
+
+.chat-markdown [data-streamdown="table"] {
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
 }
 
-.chat-markdown th,
-.chat-markdown td {
+.chat-markdown [data-streamdown="table-header-cell"],
+.chat-markdown [data-streamdown="table-cell"] {
   border: 1px solid var(--border-weak-base);
   padding: 0.35rem 0.5rem;
   white-space: nowrap;
