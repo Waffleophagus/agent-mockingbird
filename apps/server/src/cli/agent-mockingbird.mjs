@@ -650,7 +650,19 @@ function canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint) {
     return false;
   }
   const webHtml = path.join(agentMockingbirdAppDir, "apps", "web", "index.html");
-  return fs.existsSync(webHtml);
+  if (!fs.existsSync(webHtml)) {
+    return false;
+  }
+  const nodeModulesDir = path.join(agentMockingbirdAppDir, "node_modules");
+  if (!fs.existsSync(nodeModulesDir)) {
+    return false;
+  }
+  const requiredModuleEntries = [
+    path.join(nodeModulesDir, "drizzle-orm"),
+    path.join(nodeModulesDir, "@t3-oss", "env-core"),
+    path.join(nodeModulesDir, "sqlite-vec"),
+  ];
+  return requiredModuleEntries.every(entry => fs.existsSync(entry));
 }
 
 function hasCompiledDashboardAssets(agentMockingbirdAppDir) {
