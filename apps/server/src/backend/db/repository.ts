@@ -1976,7 +1976,9 @@ export function upsertSessionMessages(input: {
     const updatedInputs = candidates.filter(message => {
       const existingContent = existingContentById.get(message.id);
       if (typeof existingContent !== "string") return false;
-      return !existingContent.trim() && Boolean(message.content.trim());
+      const nextContent = message.content.trim();
+      if (!nextContent) return false;
+      return existingContent.trim() !== nextContent;
     });
     for (const message of updatedInputs) {
       sqlite

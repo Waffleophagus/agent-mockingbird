@@ -1603,6 +1603,79 @@ describe("opencode runtime failover contract", () => {
     ).toBe(true);
   });
 
+  test("syncSessionMessages replaces stale reasoning content when final text arrives for same message id", async () => {
+    let createCount = 0;
+    let syncCount = 0;
+    const reconciledMessageId = "msg-sync-reconcile-1";
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        create: async () => {
+          createCount += 1;
+          return {
+            data: {
+              id: `ses-${createCount}`,
+              title: createCount === 1 ? "main" : "child",
+            },
+          };
+        },
+        prompt: async (request) => assistantResponse(request.path.id, "Initial response"),
+        messages: async () => {
+          syncCount += 1;
+          if (syncCount === 1) {
+            const now = Date.now();
+            return {
+              data: [
+                {
+                  info: {
+                    id: reconciledMessageId,
+                    sessionID: "ses-2",
+                    role: "assistant",
+                    summary: false,
+                    mode: "build",
+                    finish: "stop",
+                    time: {
+                      created: now,
+                      completed: now,
+                    },
+                    tokens: {
+                      input: 10,
+                      output: 20,
+                    },
+                    cost: 0,
+                  },
+                  parts: [
+                    {
+                      type: "reasoning",
+                      text: "Planning the response before emitting final text.",
+                      time: { start: now, end: now },
+                    },
+                  ],
+                },
+              ],
+            };
+          }
+          return {
+            data: [assistantResponseWithId("ses-2", reconciledMessageId, "```ts\nconst ok = true;\n```").data],
+          };
+        },
+      }),
+    );
+
+    const spawned = await runtime.spawnBackgroundSession({
+      parentSessionId: "main",
+      title: "Reasoning child",
+    });
+    expect(spawned.childSessionId).toBeTruthy();
+
+    await runtime.syncSessionMessages(spawned.childSessionId as string);
+    await runtime.syncSessionMessages(spawned.childSessionId as string);
+
+    const messages = repository.listMessagesForSession(spawned.childSessionId as string);
+    const reconciled = messages.find(message => message.id === reconciledMessageId);
+    expect(reconciled?.content).toContain("const ok = true;");
+    expect(reconciled?.content).not.toContain("Planning the response before emitting final text.");
+  });
+
   test("syncSessionMessages reconciles parent session transcripts", async () => {
     const runtime = createRuntimeWithClient(
       createMockClient({
