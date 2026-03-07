@@ -653,19 +653,32 @@ function canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint) {
   return fs.existsSync(webHtml);
 }
 
+function hasCompiledDashboardAssets(agentMockingbirdAppDir) {
+  return fs.existsSync(path.join(agentMockingbirdAppDir, "dist", "web", "index.html"));
+}
+
+function hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) {
+  return fs.existsSync(path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird"));
+}
+
 function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
+  const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
+  if (hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) && hasCompiledDashboardAssets(agentMockingbirdAppDir)) {
+    return {
+      execStart: compiledBinary,
+      mode: "compiled",
+    };
+  }
+
   const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
   if (canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint)) {
-    // Prefer source mode when available: packaged/dist dashboard assets have
-    // diverged from the Bun HTML-import runtime path used during development.
     return {
       execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
       mode: "source",
     };
   }
 
-  const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
-  if (fs.existsSync(compiledBinary)) {
+  if (hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir)) {
     return {
       execStart: compiledBinary,
       mode: "compiled",
@@ -745,14 +758,81 @@ async function healthCheckWithRetry(url, input = {}) {
   return last;
 }
 
-function runPostInstallVerification() {
+async function verifyFrontendAssets(baseUrl) {
+  const requiredSelectors = [".text-muted-foreground", ".bg-card", ".animate-pulse"];
+  try {
+    const htmlResponse = await fetch(baseUrl, { method: "GET" });
+    const html = await htmlResponse.text();
+    const stylesheetMatch = html.match(/<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/i);
+    if (!htmlResponse.ok) {
+      return {
+        ok: false,
+        pageOk: false,
+        cssOk: false,
+        pageStatus: htmlResponse.status,
+        cssStatus: 0,
+        cssUrl: "",
+        missingSelectors: requiredSelectors,
+        error: `dashboard page returned ${htmlResponse.status}`,
+      };
+    }
+    if (!stylesheetMatch) {
+      return {
+        ok: false,
+        pageOk: true,
+        cssOk: false,
+        pageStatus: htmlResponse.status,
+        cssStatus: 0,
+        cssUrl: "",
+        missingSelectors: requiredSelectors,
+        error: "dashboard HTML did not include a stylesheet link",
+      };
+    }
+
+    const cssUrl = new URL(stylesheetMatch[1], baseUrl).toString();
+    const cssResponse = await fetch(cssUrl, { method: "GET" });
+    const cssText = await cssResponse.text();
+    const missingSelectors = requiredSelectors.filter(selector => !cssText.includes(selector));
+    return {
+      ok: htmlResponse.ok && cssResponse.ok && missingSelectors.length === 0,
+      pageOk: htmlResponse.ok,
+      cssOk: cssResponse.ok && missingSelectors.length === 0,
+      pageStatus: htmlResponse.status,
+      cssStatus: cssResponse.status,
+      cssUrl,
+      missingSelectors,
+      error:
+        !cssResponse.ok
+          ? `stylesheet returned ${cssResponse.status}`
+          : missingSelectors.length > 0
+            ? `stylesheet missing selectors: ${missingSelectors.join(", ")}`
+            : "",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      pageOk: false,
+      cssOk: false,
+      pageStatus: 0,
+      cssStatus: 0,
+      cssUrl: "",
+      missingSelectors: requiredSelectors,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function runPostInstallVerification() {
   const agentMockingbirdStatus = shell("systemctl", ["--user", "status", UNIT_AGENT_MOCKINGBIRD, "--no-pager"]);
   const opencodeStatus = shell("systemctl", ["--user", "status", UNIT_OPENCODE, "--no-pager"]);
   const linger = shell("loginctl", ["show-user", userName(), "-p", "Linger"]);
+  const frontendAssets = await verifyFrontendAssets("http://127.0.0.1:3001/");
   return {
     agentMockingbirdServiceOk: agentMockingbirdStatus.code === 0,
     opencodeServiceOk: opencodeStatus.code === 0,
     lingerOk: linger.code === 0 && linger.stdout.toLowerCase().includes("linger=yes"),
+    frontendAssetsOk: frontendAssets.ok,
+    frontendAssets,
     commandOutput: {
       agentMockingbirdStatus: (agentMockingbirdStatus.stdout || agentMockingbirdStatus.stderr).trim(),
       opencodeStatus: (opencodeStatus.stdout || opencodeStatus.stderr).trim(),
@@ -1867,7 +1947,7 @@ async function installOrUpdate(args, mode) {
           reason: "skipped (runtime health failed)",
           skills: [],
         };
-  const verify = runPostInstallVerification();
+  const verify = await runPostInstallVerification();
   let onboarding = null;
   if (mode === "install" && !args.yes) {
     try {
@@ -2055,11 +2135,23 @@ function printResult(result, asJson) {
       console.log(`verify: agent-mockingbird.service=${result.verify.agentMockingbirdServiceOk ? "ok" : "failed"}`);
       console.log(`verify: opencode.service=${result.verify.opencodeServiceOk ? "ok" : "failed"}`);
       console.log(`verify: linger=${result.verify.lingerOk ? "yes" : "no"}`);
-      if (!result.verify.agentMockingbirdServiceOk || !result.verify.opencodeServiceOk || !result.verify.lingerOk) {
+      console.log(`verify: frontend-assets=${result.verify.frontendAssetsOk ? "ok" : "failed"}`);
+      if (result.verify.frontendAssets?.cssUrl) {
+        console.log(`verify: frontend-css=${result.verify.frontendAssets.cssUrl}`);
+      }
+      if (
+        !result.verify.agentMockingbirdServiceOk ||
+        !result.verify.opencodeServiceOk ||
+        !result.verify.lingerOk ||
+        !result.verify.frontendAssetsOk
+      ) {
         console.log("verify-details:");
         console.log(result.verify.commandOutput.agentMockingbirdStatus || "(no output)");
         console.log(result.verify.commandOutput.opencodeStatus || "(no output)");
         console.log(result.verify.commandOutput.linger || "(no output)");
+        if (result.verify.frontendAssets?.error) {
+          console.log(result.verify.frontendAssets.error);
+        }
       }
     }
     if (result.mode === "install" && result.onboarding) {
@@ -2203,7 +2295,12 @@ function evaluateResult(result) {
   const isActive =
     result?.unitStates?.[UNIT_OPENCODE] === "active" && result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] === "active";
   if (result.mode === "install" || result.mode === "update") {
-    if (!result.health?.ok || !result.verify?.agentMockingbirdServiceOk || !result.verify?.opencodeServiceOk) {
+    if (
+      !result.health?.ok ||
+      !result.verify?.agentMockingbirdServiceOk ||
+      !result.verify?.opencodeServiceOk ||
+      !result.verify?.frontendAssetsOk
+    ) {
       return 2;
     }
     return 0;

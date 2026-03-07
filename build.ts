@@ -1,36 +1,25 @@
 #!/usr/bin/env bun
-import { existsSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
 const repoRoot = import.meta.dir;
 const outdir = path.join(repoRoot, "dist");
+const webSourceDir = path.join(repoRoot, "apps", "web", "dist");
+const webOutdir = path.join(outdir, "web");
 
 if (existsSync(outdir)) {
   await rm(outdir, { recursive: true, force: true });
 }
+mkdirSync(outdir, { recursive: true });
 
-const webRoot = path.join(repoRoot, "apps", "web");
-const webOutdir = path.join(outdir, "web");
+await Bun.$`bun run ./build.ts`.cwd(path.join(repoRoot, "apps", "web")).quiet();
 
-const entrypoints = [path.join(webRoot, "index.html")];
+cpSync(webSourceDir, webOutdir, { recursive: true });
 
-const result = await Bun.build({
-  entrypoints,
-  outdir: webOutdir,
-  minify: true,
-  target: "browser",
-  sourcemap: "linked",
-  define: {
-    "process.env.NODE_ENV": JSON.stringify("production"),
-  },
-});
-
-if (!result.success) {
-  for (const message of result.logs) {
-    console.error(message);
-  }
+if (!existsSync(path.join(webOutdir, "index.html"))) {
+  console.error(`Missing built dashboard assets in ${webOutdir}`);
   process.exit(1);
 }
 
-console.log(`Built ${result.outputs.length} assets into ${webOutdir}`);
+console.log(`Copied built web assets into ${webOutdir}`);

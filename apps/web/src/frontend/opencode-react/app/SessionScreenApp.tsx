@@ -36,7 +36,6 @@ import { useSessionScreenBootstrap } from "@/frontend/opencode-react/state/useSe
 import { useSessionScreenController } from "@/frontend/opencode-react/state/useSessionScreenController";
 import type { SessionScreenMode } from "@/frontend/opencode-react/types";
 import "streamdown/styles.css";
-import "@/index.css";
 
 const CHAT_SHOW_THINKING_KEY = "agent-mockingbird.chat.showThinking";
 const CHAT_SHOW_TOOL_CALLS_KEY = "agent-mockingbird.chat.showToolCalls";
