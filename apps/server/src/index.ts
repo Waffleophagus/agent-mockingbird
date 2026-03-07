@@ -21,7 +21,7 @@ import { initLaneQueue, getLaneQueue } from "./backend/queue/service";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
 import { startSkillsCatalogWatcher } from "./backend/skills/watcher";
-import index from "../../web/index.html";
+import { resolveWebDistDir } from "./backend/paths";
 
 ensureSeedData();
 ensureConfigFile();
@@ -110,10 +110,32 @@ const heartbeatTimer = setInterval(() => {
   eventStream.publish(createUsageUpdatedEvent(getUsageSnapshot(), "scheduler"));
 }, 12_000);
 
+const webDistDir = resolveWebDistDir();
+
+async function serveDashboard(req: Request) {
+  if (!webDistDir) {
+    return new Response("Missing built dashboard assets (dist/web).", { status: 500 });
+  }
+
+  const url = new URL(req.url);
+  const requestPath = decodeURIComponent(url.pathname);
+  const normalizedPath = requestPath.replace(/^\/+/, "");
+  const relativePath = normalizedPath === "" ? "index.html" : normalizedPath;
+  const candidate = Bun.file(`${webDistDir}/${relativePath}`);
+  if (await candidate.exists()) {
+    return new Response(candidate);
+  }
+
+  return new Response(Bun.file(`${webDistDir}/index.html`));
+}
+
+const dashboardRoute =
+  env.NODE_ENV === "production" ? serveDashboard : (await import("../../web/index.html")).default;
+
 const server = serve({
   idleTimeout: 120,
   routes: {
-    "/*": index,
+    "/*": dashboardRoute,
     ...createApiRoutes({
       runtime,
       cronService,
@@ -151,6 +173,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 console.log("[startup] agent-mockingbird runtime", {
   nodeEnv: env.NODE_ENV,
+  webDistDir,
   config: {
     path: configSnapshot.path,
     hash: configSnapshot.hash,
