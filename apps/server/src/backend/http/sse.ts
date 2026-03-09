@@ -170,10 +170,10 @@ export function createRuntimeEventStream(input: {
   let latestSeq = 0;
 
   const publish = (event: RuntimeEvent) => {
-    latestSeq += 1;
     const frame = toSseFrame(event);
     const realtimeEvent = toMobileDashboardEvent(event);
     if (realtimeEvent) {
+      latestSeq += 1;
       const realtimeFrame: DashboardRealtimeEventFrame = {
         type: "event",
         seq: latestSeq,
