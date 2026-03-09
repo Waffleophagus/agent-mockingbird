@@ -29,9 +29,9 @@
         "@agent-mockingbird/app-core": "workspace:*",
         "@agent-mockingbird/contracts": "workspace:*",
         "@expo/vector-icons": "^15.0.3",
-        "@streamdown/code-native": "0.1.1",
-        "@streamdown/core": "0.1.1",
-        "@streamdown/react-native": "0.1.1",
+        "@streamdown/code-native": "0.1.2",
+        "@streamdown/core": "0.1.2",
+        "@streamdown/react-native": "0.1.2",
         "expo": "~54.0.0",
         "expo-constants": "~18.0.13",
         "expo-dev-client": "~6.0.20",
@@ -143,11 +143,11 @@
   "overrides": {
     "@streamdown/cjk": "1.0.3",
     "@streamdown/code": "1.1.1",
-    "@streamdown/code-native": "0.1.1",
-    "@streamdown/core": "0.1.1",
+    "@streamdown/code-native": "0.1.2",
+    "@streamdown/core": "0.1.2",
     "@streamdown/math": "1.0.3",
     "@streamdown/mermaid": "1.0.3",
-    "@streamdown/react-native": "0.1.1",
+    "@streamdown/react-native": "0.1.2",
     "remend": "1.2.2",
   },
   "packages": {
@@ -681,11 +681,11 @@
 
     "@streamdown/code": ["@streamdown/code@1.1.1", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcode/-/1.1.1/code-1.1.1.tgz", { "dependencies": { "shiki": "^3.19.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-vwf1WJB5UbKEsJ2UssC+SwDgQR0GwCol1c6iylv26O4+Z8X2iAGhxnN8EqrnPRT9R6heQYa2q+sJEGUaqU0TTQ=="],
 
-    "@streamdown/code-native": ["@streamdown/code-native@0.1.1", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcode-native/-/0.1.1/code-native-0.1.1.tgz", { "dependencies": { "@shikijs/core": "^3.21.0", "react-native-shiki-engine": "^0.3.9", "shiki": "^3.23.0" } }, "sha512-Q99T5TDO4llzVJuRxSJMY3clCPP7gCZ1bIGpV1ohOt+dOZ8pY1ZVDuyWAUoVhLDboYWmFvfElZomZI2LjTnzqA=="],
+    "@streamdown/code-native": ["@streamdown/code-native@0.1.2", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcode-native/-/0.1.2/code-native-0.1.2.tgz", { "dependencies": { "@shikijs/core": "^3.21.0", "react-native-shiki-engine": "^0.3.9", "shiki": "^3.23.0" } }, "sha512-xLTEM0WTDl4Brd03yb5sY+OuXNzB6zFkY1yaMgUKadOQ+oIi8HNkBxKyxeo4b9JdNyId4VqOZLDORbSbxWSFKA=="],
 
-    "@streamdown/core": ["@streamdown/core@0.1.1", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcore/-/0.1.1/core-0.1.1.tgz", { "dependencies": { "marked": "^17.0.1", "remend": "^1.2.2" } }, "sha512-phXLmvwkr6q6cKSD0qMM5IzZX35UYhiwyuCu5AfQPa9OrEiAZDfb13Owyit+DEbotp8PvJO+dpXemM8HDwFUbQ=="],
+    "@streamdown/core": ["@streamdown/core@0.1.2", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcore/-/0.1.2/core-0.1.2.tgz", { "dependencies": { "marked": "^17.0.1", "remend": "1.2.4" } }, "sha512-s0tlqIdh1mu/AbXRKKULoEZKJ/aPOMluEEx8NW9P6v6NYHiBt+ckGoUispBr3LOYp++KekURJD0eXUThi4Y5GQ=="],
 
-    "@streamdown/react-native": ["@streamdown/react-native@0.1.1", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Freact-native/-/0.1.1/react-native-0.1.1.tgz", { "dependencies": { "@streamdown/core": "workspace:*", "react-native-url-polyfill": "^2.0.0", "remark-gfm": "^4.0.1", "remark-parse": "^11.0.0", "remark-rehype": "^11.1.2", "unified": "^11.0.5" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-native": ">=0.74.0", "react-native-reanimated": "~4.0.1", "react-native-worklets": "0.5.1" } }, "sha512-ysXSJLh1kL6kBqmmymG8fD9DGRqJSjk95dgeQJyF/ahvxRoW1g1eoZZBpSmSMRF5xrpqqeLSuHt9f/8CiDdS2g=="],
+    "@streamdown/react-native": ["@streamdown/react-native@0.1.2", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Freact-native/-/0.1.2/react-native-0.1.2.tgz", { "dependencies": { "@streamdown/core": "0.1.2", "react-native-url-polyfill": "^2.0.0", "remark-gfm": "^4.0.1", "remark-parse": "^11.0.0", "remark-rehype": "^11.1.2", "unified": "^11.0.5" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-native": ">=0.74.0", "react-native-reanimated": "~4.0.1", "react-native-worklets": "0.5.1" } }, "sha512-5EMKClpyCcesT6BE7YTqO11JpOyXSp/5nParMbSCIEDQkDXKCFyF2zUnp0nBX9u4QREkkw/K3r14nt8830CHmA=="],
 
     "@t3-oss/env-core": ["@t3-oss/env-core@0.13.10", "", { "peerDependencies": { "arktype": "^2.1.0", "typescript": ">=5.0.0", "valibot": "^1.0.0-beta.7 || ^1.0.0", "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["arktype", "typescript", "valibot", "zod"] }, "sha512-NNFfdlJ+HmPHkLi2HKy7nwuat9SIYOxei9K10lO2YlcSObDILY7mHZNSHsieIM3A0/5OOzw/P/b+yLvPdaG52g=="],
 

@@ -23,6 +23,7 @@
     "build": "turbo run build",
     "build:server": "turbo run build --filter=@agent-mockingbird/server",
     "build:web": "turbo run build --filter=@agent-mockingbird/web",
+    "refresh:streamdown": "bash ./scripts/refresh-streamdown.sh",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
@@ -35,11 +36,11 @@
   "overrides": {
     "@streamdown/cjk": "1.0.3",
     "@streamdown/code": "1.1.1",
-    "@streamdown/code-native": "0.1.1",
-    "@streamdown/core": "0.1.1",
+    "@streamdown/code-native": "0.1.2",
+    "@streamdown/core": "0.1.2",
     "@streamdown/math": "1.0.3",
     "@streamdown/mermaid": "1.0.3",
-    "@streamdown/react-native": "0.1.1",
+    "@streamdown/react-native": "0.1.2",
     "remend": "1.2.2"
   },
   "devDependencies": {
