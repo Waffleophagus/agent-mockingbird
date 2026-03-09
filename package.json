@@ -33,11 +33,14 @@
     "config:migrate-opencode-env": "bun run ./scripts/migrate-opencode-env.ts"
   },
   "overrides": {
-    "@streamdown/cjk": "file:./vendor/streamdown/packages/streamdown-cjk",
-    "@streamdown/core": "file:./vendor/streamdown/packages/streamdown-core",
-    "@streamdown/math": "file:./vendor/streamdown/packages/streamdown-math",
-    "@streamdown/mermaid": "file:./vendor/streamdown/packages/streamdown-mermaid",
-    "remend": "file:./vendor/streamdown/packages/remend"
+    "@streamdown/cjk": "1.0.3",
+    "@streamdown/code": "1.1.1",
+    "@streamdown/code-native": "0.1.1",
+    "@streamdown/core": "0.1.1",
+    "@streamdown/math": "1.0.3",
+    "@streamdown/mermaid": "1.0.3",
+    "@streamdown/react-native": "0.1.1",
+    "remend": "1.2.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",
