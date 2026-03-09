@@ -23,11 +23,11 @@
       "@agent-mockingbird/api/*": ["./packages/api/src/*"],
       "@agent-mockingbird/app-core": ["./packages/app-core/src/index.ts"],
       "@agent-mockingbird/app-core/*": ["./packages/app-core/src/*"],
-      "@streamdown/code": ["./vendor/streamdown/packages/streamdown-code/index.ts"],
-      "@streamdown/code-native": ["./vendor/streamdown/packages/streamdown-code-native/index.ts"],
-      "@streamdown/core": ["./vendor/streamdown/packages/streamdown-core/src/index.ts"],
-      "@streamdown/react-native": ["./vendor/streamdown/packages/streamdown-react-native/index.tsx"],
-      "streamdown": ["./vendor/streamdown/packages/streamdown/index.tsx"]
+      "@streamdown/code": ["./vendor/streamdown/packages/streamdown-code/dist/index.d.ts"],
+      "@streamdown/code-native": ["./vendor/streamdown/packages/streamdown-code-native/dist/index.d.ts"],
+      "@streamdown/core": ["./vendor/streamdown/packages/streamdown-core/dist/index.d.ts"],
+      "@streamdown/react-native": ["./vendor/streamdown/packages/streamdown-react-native/dist/index.d.ts"],
+      "streamdown": ["./vendor/streamdown/packages/streamdown/dist/index.d.ts"]
     },
     "noUnusedLocals": false,
     "noUnusedParameters": false,
