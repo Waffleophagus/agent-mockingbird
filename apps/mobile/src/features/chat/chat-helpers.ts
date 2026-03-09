@@ -257,13 +257,40 @@ export function reconcileIncomingMessage(messages: LocalChatMessage[], message: 
   const optimisticUserIndex = findMatchingOptimisticUser(messages, message);
   const pendingIndexByRuntimeId = findPendingAssistant(messages, message.id);
   const pendingIndex = pendingIndexByRuntimeId >= 0 ? pendingIndexByRuntimeId : findPendingAssistant(messages);
+  const pendingMessage =
+    message.role === "assistant" && pendingIndex >= 0 ? messages[pendingIndex] : undefined;
   const nextMessages =
     message.role === "assistant" && pendingIndex >= 0
       ? messages.filter((_, index) => index !== pendingIndex)
       : optimisticUserIndex >= 0
         ? messages.filter((_, index) => index !== optimisticUserIndex)
         : messages;
-  return mergeMessages(nextMessages, [message]);
+  const nextMessage =
+    pendingMessage?.uiMeta?.type === "assistant-pending"
+      ? {
+          ...message,
+          uiMeta: {
+            ...pendingMessage.uiMeta,
+            runtimeMessageId: message.id,
+          },
+        }
+      : message;
+  return mergeMessages(nextMessages, [nextMessage]);
+}
+
+export function clearPendingAssistantUiMeta(messages: LocalChatMessage[]): LocalChatMessage[] {
+  let changed = false;
+  const nextMessages = messages.map(message => {
+    if (message.uiMeta?.type !== "assistant-pending") {
+      return message;
+    }
+    changed = true;
+    return {
+      ...message,
+      uiMeta: undefined,
+    };
+  });
+  return changed ? nextMessages : messages;
 }
 
 export function applyMessageDelta(

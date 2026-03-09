@@ -21,6 +21,7 @@ import {
   applyMessageDelta,
   applyMessageRenderSnapshot,
   applyMessagePart,
+  clearPendingAssistantUiMeta,
   type LocalChatMessage,
   groupPromptRequests,
   markPendingAssistantFailed,
@@ -420,6 +421,17 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
           import("@agent-mockingbird/contracts/dashboard").DashboardEvent,
           { event: "session-status" }
         >["payload"];
+        if (payload.status === "idle") {
+          setMessagesBySession(current => ({
+            ...current,
+            [payload.sessionId]: (() => {
+              const nextMessages = clearPendingAssistantUiMeta(current[payload.sessionId] ?? []);
+              writeCachedSessionMessages(payload.sessionId, nextMessages);
+              writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
+              return nextMessages;
+            })(),
+          }));
+        }
         setRunStatusBySession(current => ({
           ...current,
           [payload.sessionId]: payload,

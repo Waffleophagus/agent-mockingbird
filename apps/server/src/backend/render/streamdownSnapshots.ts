@@ -10,9 +10,25 @@ const highlighter = createServerCodeHighlighter({
   themes: ["github-dark", "github-dark"],
 });
 
+function normalizeMarkdownContent(content: string): string {
+  const normalizedLineEndings = content.replace(/\r\n?/g, "\n");
+  const hasRealNewlines = normalizedLineEndings.includes("\n");
+  const escapedNewlineCount = normalizedLineEndings.match(/\\n/g)?.length ?? 0;
+  const hasEscapedFence = normalizedLineEndings.includes("\\`\\`\\`");
+  if (!hasRealNewlines && escapedNewlineCount < 2 && !hasEscapedFence) {
+    return normalizedLineEndings;
+  }
+  return normalizedLineEndings
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\`/g, "`");
+}
+
 export async function buildStreamdownRenderSnapshot(markdown: string): Promise<StreamdownRenderSnapshot | undefined> {
+  const normalizedMarkdown = normalizeMarkdownContent(markdown);
   const extracted = extractStreamdownCodeBlocks({
-    markdown,
+    markdown: normalizedMarkdown,
     parseIncompleteMarkdown: true,
   });
 
