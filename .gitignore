@@ -4,6 +4,8 @@ node_modules
 # output
 out
 dist
+!vendor/streamdown/packages/*/dist/
+!vendor/streamdown/packages/*/dist/**
 *.tgz
 data/*
 data/*
