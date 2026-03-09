@@ -19,6 +19,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type P
 import {
   appendOptimisticRequest,
   applyMessageDelta,
+  applyMessageRenderSnapshot,
   applyMessagePart,
   type LocalChatMessage,
   groupPromptRequests,
@@ -384,6 +385,28 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
           ...current,
           [payload.sessionId]: (() => {
             const nextMessages = applyMessagePart(current[payload.sessionId] ?? [], payload.messageId, payload.part);
+            writeCachedSessionMessages(payload.sessionId, nextMessages);
+            writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
+            return nextMessages;
+          })(),
+        }));
+        return;
+      }
+      case "session-message-render-snapshot": {
+        setLastServerActivityAt(markActivity());
+        const payload = frame.payload as Extract<
+          import("@agent-mockingbird/contracts/dashboard").DashboardEvent,
+          { event: "session-message-render-snapshot" }
+        >["payload"];
+        loadedSessionIdsRef.current.add(payload.sessionId);
+        setMessagesBySession(current => ({
+          ...current,
+          [payload.sessionId]: (() => {
+            const nextMessages = applyMessageRenderSnapshot(
+              current[payload.sessionId] ?? [],
+              payload.messageId,
+              payload.renderSnapshot,
+            );
             writeCachedSessionMessages(payload.sessionId, nextMessages);
             writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
             return nextMessages;

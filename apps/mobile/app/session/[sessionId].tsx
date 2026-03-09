@@ -238,7 +238,6 @@ export default function SessionDetailScreen() {
             onRetryRequest={(requestId, content) => {
               void chat.retryMessage(sessionId, requestId, content);
             }}
-            sessionId={sessionId}
             showThinkingDetails={chat.showThinkingDetails}
             showToolCallDetails={chat.showToolCallDetails}
           />

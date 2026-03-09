@@ -1,3 +1,4 @@
+import type { StreamdownRenderSnapshot } from "@agent-mockingbird/contracts/dashboard";
 import { code } from "@streamdown/code";
 import { memo } from "react";
 import { Streamdown } from "streamdown";
@@ -26,6 +27,7 @@ interface MarkdownMessageProps {
   isStreaming: boolean;
   variant?: "message" | "thinking";
   className?: string;
+  renderSnapshot?: StreamdownRenderSnapshot;
 }
 
 export const MarkdownMessage = memo(function MarkdownMessage({
@@ -33,6 +35,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   isStreaming,
   variant = "message",
   className,
+  renderSnapshot,
 }: MarkdownMessageProps) {
   const displayContent = normalizeMarkdownContent(content);
   if (!displayContent.trim()) return null;
@@ -44,6 +47,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
       isAnimating={isStreaming}
       animated={isStreaming}
       plugins={STREAMDOWN_PLUGINS}
+      renderSnapshot={renderSnapshot}
     >
       {displayContent}
     </Streamdown>

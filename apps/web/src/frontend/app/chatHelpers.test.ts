@@ -4,63 +4,8 @@ import { describe, expect, test } from "bun:test";
 import {
   extractBackgroundAnnouncements,
   mergeMessages,
-  shouldHideMirroredAssistantContent,
   type LocalChatMessage,
 } from "@/frontend/app/chatHelpers";
-
-function assistantMessage(input?: Partial<ChatMessage>): ChatMessage {
-  return {
-    id: "assistant-1",
-    role: "assistant",
-    content: "Thinking text",
-    at: new Date().toISOString(),
-    ...input,
-  };
-}
-
-describe("shouldHideMirroredAssistantContent", () => {
-  test("returns true when assistant content mirrors a visible thinking part", () => {
-    const message = assistantMessage({
-      content: "Think this through carefully",
-      parts: [
-        {
-          id: "thinking-1",
-          type: "thinking",
-          text: "Think this through carefully",
-        },
-      ],
-    });
-    expect(shouldHideMirroredAssistantContent(message, true)).toBe(true);
-  });
-
-  test("returns false when thinking details are hidden", () => {
-    const message = assistantMessage({
-      content: "Think this through carefully",
-      parts: [
-        {
-          id: "thinking-1",
-          type: "thinking",
-          text: "Think this through carefully",
-        },
-      ],
-    });
-    expect(shouldHideMirroredAssistantContent(message, false)).toBe(false);
-  });
-
-  test("returns false when content does not mirror thinking text", () => {
-    const message = assistantMessage({
-      content: "Final answer for the user",
-      parts: [
-        {
-          id: "thinking-1",
-          type: "thinking",
-          text: "Internal chain of thought",
-        },
-      ],
-    });
-    expect(shouldHideMirroredAssistantContent(message, true)).toBe(false);
-  });
-});
 
 describe("mergeMessages", () => {
   test("sorts merged messages chronologically with deterministic user-first tie breaks", () => {

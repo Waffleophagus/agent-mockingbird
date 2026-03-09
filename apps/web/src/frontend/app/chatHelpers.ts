@@ -1,4 +1,9 @@
-import type { ChatMessage, ChatMessagePart, ChatRole } from "@agent-mockingbird/contracts/dashboard";
+import type {
+  ChatMessage,
+  ChatMessagePart,
+  ChatRole,
+  StreamdownRenderSnapshot,
+} from "@agent-mockingbird/contracts/dashboard";
 
 export interface LocalTextInputPart {
   type: "text";
@@ -79,7 +84,6 @@ export function formatElapsedFrom(startIso: string, endIso: string): string {
 }
 
 const MEMORY_USER_MESSAGE_BLOCK_RE = /\[User Message\]\s*([\s\S]*?)\s*\[\/User Message\]/i;
-const NORMALIZED_WHITESPACE_RE = /\s+/g;
 
 export function sanitizeMessageContentForDisplay(role: ChatRole, content: string): string {
   if (role !== "user") return content;
@@ -90,25 +94,6 @@ export function sanitizeMessageContentForDisplay(role: ChatRole, content: string
   const extracted = matched?.[1]?.trim();
   if (!extracted) return content;
   return extracted;
-}
-
-function normalizeComparableText(content: string): string {
-  return content
-    .replace(NORMALIZED_WHITESPACE_RE, " ")
-    .trim()
-    .toLowerCase();
-}
-
-export function shouldHideMirroredAssistantContent(message: ChatMessage, showThinkingDetails: boolean): boolean {
-  if (!showThinkingDetails) return false;
-  if (message.role !== "assistant") return false;
-  const normalizedContent = normalizeComparableText(message.content);
-  if (!normalizedContent) return false;
-  const thinkingParts = (message.parts ?? []).filter(
-    (part): part is Extract<ChatMessagePart, { type: "thinking" }> => part.type === "thinking",
-  );
-  if (thinkingParts.length === 0) return false;
-  return thinkingParts.some(part => normalizeComparableText(part.text) === normalizedContent);
 }
 
 export interface BackgroundAnnouncement {
@@ -198,6 +183,47 @@ export function mergeMessages(current: LocalChatMessage[], incoming: ChatMessage
     }
     return left.id.localeCompare(right.id);
   });
+}
+
+function findPendingAssistant(messages: LocalChatMessage[], runtimeMessageId?: string): number {
+  return messages.findIndex(message => {
+    if (message.uiMeta?.type !== "assistant-pending") return false;
+    if (runtimeMessageId) {
+      return message.uiMeta.runtimeMessageId === runtimeMessageId;
+    }
+    return true;
+  });
+}
+
+export function applyMessageRenderSnapshot(
+  messages: LocalChatMessage[],
+  messageId: string,
+  renderSnapshot: StreamdownRenderSnapshot,
+): LocalChatMessage[] {
+  const next = [...messages];
+  const targetIndex = next.findIndex(message => message.id === messageId);
+  const pendingIndex = targetIndex >= 0 ? -1 : findPendingAssistant(next, messageId);
+  const fallbackPendingIndex = targetIndex >= 0 || pendingIndex >= 0 ? -1 : findPendingAssistant(next);
+  const resolvedIndex = targetIndex >= 0 ? targetIndex : pendingIndex >= 0 ? pendingIndex : fallbackPendingIndex;
+  if (resolvedIndex < 0) return messages;
+
+  const target = next[resolvedIndex];
+  if (!target) return messages;
+
+  const nextMeta =
+    target.uiMeta?.type === "assistant-pending"
+      ? {
+          ...target.uiMeta,
+          runtimeMessageId: messageId,
+        }
+      : target.uiMeta;
+
+  next[resolvedIndex] = {
+    ...target,
+    renderSnapshot,
+    uiMeta: nextMeta,
+  };
+  return next;
 }
 
 export function normalizeRequestError(error: unknown): string {

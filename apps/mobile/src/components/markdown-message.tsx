@@ -1,13 +1,8 @@
-import type { StreamdownFrozenSnapshot } from "@streamdown/react-native";
+import type { StreamdownRenderSnapshot } from "@streamdown/react-native";
 import { Streamdown } from "@streamdown/react-native";
-import { useEffect, useState } from "react";
 import { Linking, StyleSheet, View } from "react-native";
 
-import {
-  readCachedMarkdownSnapshot,
-  writeCachedMarkdownSnapshot,
-} from "@/features/chat/cache";
-import { getStreamdownCodePlugin } from "@/lib/streamdown-code-plugin";
+import { chromePalette } from "@/theme/palette";
 
 const styles = StyleSheet.create({
   container: {
@@ -39,67 +34,40 @@ function onLinkPress(url: string) {
 export function MarkdownMessage({
   content,
   isStreaming = false,
-  snapshotCacheKey,
+  renderSnapshot,
 }: {
   content: string;
   isStreaming?: boolean;
-  snapshotCacheKey?: {
-    entryId: string;
-    sessionId: string;
-  };
+  renderSnapshot?: StreamdownRenderSnapshot;
 }) {
   const displayContent = normalizeMarkdownContent(content);
   if (!displayContent.trim()) return null;
 
-  const codePlugin = getStreamdownCodePlugin();
-  const [frozenSnapshot, setFrozenSnapshot] = useState<
-    StreamdownFrozenSnapshot | undefined
-  >(() =>
-    snapshotCacheKey
-      ? readCachedMarkdownSnapshot(
-          snapshotCacheKey.sessionId,
-          snapshotCacheKey.entryId
-        )
-      : undefined
-  );
-
-  useEffect(() => {
-    if (!snapshotCacheKey) {
-      setFrozenSnapshot(undefined);
-      return;
-    }
-    setFrozenSnapshot(
-      readCachedMarkdownSnapshot(
-        snapshotCacheKey.sessionId,
-        snapshotCacheKey.entryId
-      )
-    );
-  }, [snapshotCacheKey?.entryId, snapshotCacheKey?.sessionId]);
-
-  const handleFrozenSnapshot = (snapshot: StreamdownFrozenSnapshot) => {
-    setFrozenSnapshot(snapshot);
-    if (!snapshotCacheKey) {
-      return;
-    }
-    writeCachedMarkdownSnapshot(
-      snapshotCacheKey.sessionId,
-      snapshotCacheKey.entryId,
-      snapshot
-    );
-  };
-
   return (
     <View style={styles.container}>
       <Streamdown
-        frozenSnapshot={frozenSnapshot}
         mode={isStreaming ? "streaming" : "static"}
-        onFrozenSnapshot={handleFrozenSnapshot}
         parseIncompleteMarkdown={isStreaming}
         isAnimating={isStreaming}
         animated={isStreaming ? { animation: "fadeIn", sep: "word" } : false}
         onLinkPress={onLinkPress}
-        plugins={codePlugin ? { code: codePlugin } : undefined}
-        staticCodeStrategy="freeze"
+        renderSnapshot={renderSnapshot}
+        staticCodeStrategy="plain"
+        theme={{
+          blockquoteBorderColor: chromePalette.haze,
+          codeBlockBackgroundColor: chromePalette.ink,
+          codeBlockBorderColor: "rgba(246, 239, 228, 0.10)",
+          codeTextColor: chromePalette.bone,
+          imageBackgroundColor: chromePalette.ash,
+          inlineCodeBackgroundColor: "rgba(246, 239, 228, 0.10)",
+          inlineCodeTextColor: chromePalette.bone,
+          linkColor: chromePalette.ocean,
+          mutedTextColor: chromePalette.brass,
+          ruleColor: "rgba(141, 138, 132, 0.35)",
+          tableBorderColor: "rgba(141, 138, 132, 0.35)",
+          tableHeaderBackgroundColor: chromePalette.ash,
+          textColor: chromePalette.bone,
+        }}
       >
         {displayContent}
       </Streamdown>

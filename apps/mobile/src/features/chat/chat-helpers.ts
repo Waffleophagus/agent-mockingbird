@@ -5,6 +5,7 @@ import type {
   PermissionPromptRequest,
   QuestionPromptRequest,
   SessionSummary,
+  StreamdownRenderSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
 
 export interface OptimisticUserMeta {
@@ -82,18 +83,6 @@ function normalizeComparableText(content: string): string {
     .replace(NORMALIZED_WHITESPACE_RE, " ")
     .trim()
     .toLowerCase();
-}
-
-export function shouldHideMirroredAssistantContent(message: ChatMessage, showThinkingDetails: boolean): boolean {
-  if (!showThinkingDetails) return false;
-  if (message.role !== "assistant") return false;
-  const normalizedContent = normalizeComparableText(message.content);
-  if (!normalizedContent) return false;
-  const thinkingParts = (message.parts ?? []).filter(
-    (part): part is Extract<ChatMessagePart, { type: "thinking" }> => part.type === "thinking",
-  );
-  if (thinkingParts.length === 0) return false;
-  return thinkingParts.some(part => normalizeComparableText(part.text) === normalizedContent);
 }
 
 export function mergeMessages(current: LocalChatMessage[], incoming: ChatMessage[]): LocalChatMessage[] {
@@ -336,6 +325,37 @@ export function applyMessagePart(
   next[resolvedIndex] = {
     ...target,
     parts: upsertChatMessagePart(target.parts, part),
+    uiMeta: nextMeta,
+  };
+  return next;
+}
+
+export function applyMessageRenderSnapshot(
+  messages: LocalChatMessage[],
+  messageId: string,
+  renderSnapshot: StreamdownRenderSnapshot,
+): LocalChatMessage[] {
+  const next = [...messages];
+  const targetIndex = next.findIndex(message => message.id === messageId);
+  const pendingIndex = targetIndex >= 0 ? -1 : findPendingAssistant(next, messageId);
+  const fallbackPendingIndex = targetIndex >= 0 || pendingIndex >= 0 ? -1 : findPendingAssistant(next);
+  const resolvedIndex = targetIndex >= 0 ? targetIndex : pendingIndex >= 0 ? pendingIndex : fallbackPendingIndex;
+  if (resolvedIndex < 0) return messages;
+
+  const target = next[resolvedIndex];
+  if (!target) return messages;
+
+  const nextMeta =
+    target.uiMeta?.type === "assistant-pending"
+      ? {
+          ...target.uiMeta,
+          runtimeMessageId: messageId,
+        }
+      : target.uiMeta;
+
+  next[resolvedIndex] = {
+    ...target,
+    renderSnapshot,
     uiMeta: nextMeta,
   };
   return next;

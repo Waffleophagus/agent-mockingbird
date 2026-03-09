@@ -1,5 +1,7 @@
-import { createNativeCodePlugin } from "@streamdown/code-native";
-import type { CodeHighlighterPlugin } from "@streamdown/react-native";
+import {
+  createNativeCodePlugin,
+  type NativeCodeHighlighterPlugin,
+} from "@streamdown/code-native";
 import githubDark from "@shikijs/themes/github-dark";
 import { bundledLanguagesInfo } from "shiki/langs";
 
@@ -55,10 +57,10 @@ const codeLanguageAliases: Record<string, string> = {
   yml: "yaml",
 };
 
-let plugin: CodeHighlighterPlugin | null = null;
+let plugin: NativeCodeHighlighterPlugin | null = null;
 let didWarn = false;
 
-export function getStreamdownCodePlugin(): CodeHighlighterPlugin | undefined {
+export function getStreamdownCodePlugin(): NativeCodeHighlighterPlugin | undefined {
   if (plugin) return plugin;
 
   try {
@@ -67,7 +69,7 @@ export function getStreamdownCodePlugin(): CodeHighlighterPlugin | undefined {
       themes: [githubDark],
       languageAliases: codeLanguageAliases,
       strictNativeEngine: true,
-    }) as unknown as CodeHighlighterPlugin;
+    });
     return plugin;
   } catch (error) {
     if (!didWarn) {

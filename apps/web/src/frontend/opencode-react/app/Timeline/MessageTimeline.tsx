@@ -10,7 +10,6 @@ import {
   type LocalChatMessage,
   relativeFromIso,
   sanitizeMessageContentForDisplay,
-  shouldHideMirroredAssistantContent,
 } from "@/frontend/app/chatHelpers";
 import { MarkdownMessage } from "@/frontend/app/components/MarkdownMessage";
 
@@ -131,7 +130,12 @@ export function MessageTimeline(props: MessageTimelineProps) {
                 <p>You</p>
                 <p>{formatCompactTimestamp(turn.user.at) || relativeFromIso(turn.user.at)}</p>
               </div>
-              <MarkdownMessage content={sanitizeMessageContentForDisplay(turn.user.role, turn.user.content)} isStreaming={false} variant="message" />
+              <MarkdownMessage
+                content={sanitizeMessageContentForDisplay(turn.user.role, turn.user.content)}
+                isStreaming={false}
+                renderSnapshot={turn.user.renderSnapshot}
+                variant="message"
+              />
             </article>
           ) : null}
 
@@ -139,8 +143,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
             {turn.assistantMessages.map(message => {
               const messageContent = sanitizeMessageContentForDisplay(message.role, message.content);
               const backgroundContent = extractBackgroundAnnouncements(messageContent);
-              const hideMirroredAssistantContent = shouldHideMirroredAssistantContent(message, showThinkingDetails);
-              const renderedMessageContent = hideMirroredAssistantContent ? "" : backgroundContent.remainingContent;
+              const renderedMessageContent = backgroundContent.remainingContent;
               const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
               const isPending = pendingMeta?.status === "pending";
               const isQueued = pendingMeta?.status === "queued";
@@ -262,7 +265,13 @@ export function MessageTimeline(props: MessageTimelineProps) {
                     <p className="text-xs text-muted-foreground">{pendingMeta.errorMessage}</p>
                   ) : null}
                   {renderedMessageContent.trim() ? (
-                    <MarkdownMessage className="mt-1" content={renderedMessageContent} isStreaming={Boolean(isPending)} variant="message" />
+                    <MarkdownMessage
+                      className="mt-1"
+                      content={renderedMessageContent}
+                      isStreaming={Boolean(isPending)}
+                      renderSnapshot={message.renderSnapshot}
+                      variant="message"
+                    />
                   ) : null}
                 </article>
               );

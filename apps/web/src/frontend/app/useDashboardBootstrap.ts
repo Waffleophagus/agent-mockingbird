@@ -15,12 +15,17 @@ import type {
   SessionRunErrorSnapshot,
   SessionRunStatusSnapshot,
   SessionSummary,
+  StreamdownRenderSnapshot,
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
 import { useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import { mergeMessages, upsertChatMessagePart } from "@/frontend/app/chatHelpers";
+import {
+  applyMessageRenderSnapshot,
+  mergeMessages,
+  upsertChatMessagePart,
+} from "@/frontend/app/chatHelpers";
 import type {
   ActiveSend,
   LocalChatMessage,
@@ -645,6 +650,34 @@ export function useDashboardBootstrap(input: UseDashboardBootstrapInput) {
         }
 
         if (!updated) return current;
+        return {
+          ...current,
+          [sessionId]: nextMessages,
+        };
+      });
+    });
+
+    events.addEventListener("session-message-render-snapshot", event => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as {
+        sessionId?: string;
+        messageId?: string;
+        renderSnapshot?: StreamdownRenderSnapshot;
+      };
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+      const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
+      const renderSnapshot = payload.renderSnapshot;
+      if (!sessionId || !messageId || !renderSnapshot) return;
+
+      input.loadedSessionsRef.current.add(sessionId);
+      input.setMessagesBySession(current => {
+        const existing = current[sessionId] ?? [];
+        if (!existing.length) return current;
+        const nextMessages = applyMessageRenderSnapshot(
+          existing,
+          messageId,
+          renderSnapshot,
+        );
+        if (nextMessages === existing) return current;
         return {
           ...current,
           [sessionId]: nextMessages,

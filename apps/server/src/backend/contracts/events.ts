@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   ChatMessagePart,
   HeartbeatSnapshot,
+  StreamdownRenderSnapshot,
   SessionMessagePartPhase,
   SessionSummary,
   UsageSnapshot,
@@ -44,6 +45,17 @@ export interface SessionMessageDeltaPayload {
   observedAt: string;
 }
 export type SessionMessageDeltaEvent = RuntimeEventBase<"session.message.delta", SessionMessageDeltaPayload>;
+
+export interface SessionMessageRenderSnapshotPayload {
+  sessionId: string;
+  messageId: string;
+  renderSnapshot: StreamdownRenderSnapshot;
+  observedAt: string;
+}
+export type SessionMessageRenderSnapshotEvent = RuntimeEventBase<
+  "session.message.render_snapshot",
+  SessionMessageRenderSnapshotPayload
+>;
 
 export interface SessionRunStatusPayload {
   sessionId: string;
@@ -219,6 +231,7 @@ export type RuntimeEvent =
   | SessionMessageCreatedEvent
   | SessionMessagePartUpdatedEvent
   | SessionMessageDeltaEvent
+  | SessionMessageRenderSnapshotEvent
   | SessionRunStatusUpdatedEvent
   | SessionCompactedEvent
   | SessionRunErrorEvent
@@ -282,6 +295,13 @@ export function createSessionMessageDeltaEvent(
   source: RuntimeEventSource,
 ): SessionMessageDeltaEvent {
   return baseRuntimeEvent("session.message.delta", payload, source);
+}
+
+export function createSessionMessageRenderSnapshotEvent(
+  payload: SessionMessageRenderSnapshotPayload,
+  source: RuntimeEventSource,
+): SessionMessageRenderSnapshotEvent {
+  return baseRuntimeEvent("session.message.render_snapshot", payload, source);
 }
 
 export function createSessionRunStatusUpdatedEvent(

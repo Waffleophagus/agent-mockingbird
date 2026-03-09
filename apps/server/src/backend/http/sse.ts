@@ -52,6 +52,8 @@ function toMobileDashboardEvent(event: RuntimeEvent): DashboardEvent | null {
       return { event: "session-message-part", payload: event.payload };
     case "session.message.delta":
       return { event: "session-message-delta", payload: event.payload };
+    case "session.message.render_snapshot":
+      return { event: "session-message-render-snapshot", payload: event.payload };
     case "session.run.status.updated":
       return { event: "session-status", payload: event.payload };
     case "session.compacted":
@@ -89,6 +91,8 @@ function toSseEventName(event: RuntimeEvent): string {
       return "session-message-part";
     case "session.message.delta":
       return "session-message-delta";
+    case "session.message.render_snapshot":
+      return "session-message-render-snapshot";
     case "session.run.status.updated":
       return "session-status";
     case "session.compacted":

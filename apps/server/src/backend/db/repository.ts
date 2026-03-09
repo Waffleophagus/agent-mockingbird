@@ -5,6 +5,7 @@ import type {
   HeartbeatSnapshot,
   MessageMemoryTrace,
   SessionSummary,
+  StreamdownRenderSnapshot,
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
 import type { SQLQueryBindings } from "bun:sqlite";
@@ -44,6 +45,11 @@ interface MessageMemoryTraceRow {
 interface MessagePartsRow {
   message_id: string;
   parts_json: string;
+}
+
+interface MessageRenderSnapshotRow {
+  message_id: string;
+  snapshot_json: string;
 }
 
 interface HeartbeatRow {
@@ -357,6 +363,58 @@ function normalizeChatMessageParts(value: unknown): ChatMessagePart[] {
     .filter((part): part is ChatMessagePart => Boolean(part));
 }
 
+function normalizeStreamdownRenderSnapshot(value: unknown): StreamdownRenderSnapshot | null {
+  if (!isRecord(value)) return null;
+  if (value.version !== 1) return null;
+  if (typeof value.contentHash !== "string" || !value.contentHash.trim()) return null;
+  if (typeof value.themeId !== "string" || !value.themeId.trim()) return null;
+  if (!Array.isArray(value.codeBlocks)) return null;
+
+  const codeBlocks = value.codeBlocks
+    .map((block): StreamdownRenderSnapshot["codeBlocks"][number] | null => {
+      if (!isRecord(block)) return null;
+      if (typeof block.blockIndex !== "number" || !Number.isInteger(block.blockIndex) || block.blockIndex < 0) {
+        return null;
+      }
+      if (typeof block.codeHash !== "string" || !block.codeHash.trim()) return null;
+      if (typeof block.language !== "string") return null;
+      if (!Array.isArray(block.tokens)) return null;
+
+      const tokens = block.tokens
+        .map((row) => {
+          if (!Array.isArray(row)) return null;
+          const normalizedRow = row
+            .map((token) => {
+              if (!isRecord(token)) return null;
+              if (typeof token.content !== "string") return null;
+              return {
+                bgColor: typeof token.bgColor === "string" ? token.bgColor : undefined,
+                color: typeof token.color === "string" ? token.color : undefined,
+                content: token.content,
+              };
+            })
+            .filter((token): token is NonNullable<typeof token> => Boolean(token));
+          return normalizedRow;
+        })
+        .filter((row): row is NonNullable<typeof row> => Array.isArray(row));
+
+      return {
+        blockIndex: block.blockIndex,
+        codeHash: block.codeHash,
+        language: block.language,
+        tokens,
+      };
+    })
+    .filter((block): block is NonNullable<typeof block> => Boolean(block));
+
+  return {
+    codeBlocks,
+    contentHash: value.contentHash,
+    themeId: value.themeId,
+    version: 1,
+  };
+}
+
 function ensureAuxiliaryTables() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS message_memory_traces (
@@ -379,6 +437,17 @@ function ensureAuxiliaryTables() {
 
     CREATE INDEX IF NOT EXISTS message_parts_session_updated_idx
       ON message_parts(session_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS message_render_snapshots (
+      message_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS message_render_snapshots_session_updated_idx
+      ON message_render_snapshots(session_id, updated_at DESC);
   `);
 }
 
@@ -643,10 +712,34 @@ export function listMessagesForSession(sessionId: string): ChatMessage[] {
     }
   }
 
+  const renderSnapshotRows = sqlite
+    .query(
+      `
+      SELECT message_id, snapshot_json
+      FROM message_render_snapshots
+      WHERE session_id = ?1
+        AND message_id IN (${placeholders})
+    `,
+    )
+    .all(sessionId, ...messageIds) as MessageRenderSnapshotRow[];
+  const renderSnapshotMap = new Map<string, StreamdownRenderSnapshot>();
+  for (const row of renderSnapshotRows) {
+    try {
+      const parsed = JSON.parse(row.snapshot_json) as unknown;
+      const renderSnapshot = normalizeStreamdownRenderSnapshot(parsed);
+      if (renderSnapshot) {
+        renderSnapshotMap.set(row.message_id, renderSnapshot);
+      }
+    } catch {
+      // ignore malformed snapshot rows
+    }
+  }
+
   return messages.map(message => ({
     ...message,
     memoryTrace: traceMap.get(message.id),
     parts: partMap.get(message.id),
+    renderSnapshot: renderSnapshotMap.get(message.id),
   }));
 }
 
@@ -695,6 +788,36 @@ export function setMessageParts(input: {
     `,
     )
     .run(input.messageId, input.sessionId, JSON.stringify(parts), createdAt, updatedAt);
+}
+
+export function setMessageRenderSnapshot(input: {
+  createdAt?: number;
+  messageId: string;
+  renderSnapshot: StreamdownRenderSnapshot;
+  sessionId: string;
+  updatedAt?: number;
+}) {
+  ensureAuxiliaryTables();
+  const createdAt = input.createdAt ?? nowMs();
+  const updatedAt = input.updatedAt ?? createdAt;
+  sqlite
+    .query(
+      `
+      INSERT INTO message_render_snapshots (message_id, session_id, snapshot_json, created_at, updated_at)
+      VALUES (?1, ?2, ?3, ?4, ?5)
+      ON CONFLICT(message_id) DO UPDATE SET
+        session_id = excluded.session_id,
+        snapshot_json = excluded.snapshot_json,
+        updated_at = excluded.updated_at
+    `,
+    )
+    .run(
+      input.messageId,
+      input.sessionId,
+      JSON.stringify(input.renderSnapshot),
+      createdAt,
+      updatedAt,
+    );
 }
 
 export function getUsageSnapshot(): UsageSnapshot {

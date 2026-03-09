@@ -34,6 +34,7 @@ import {
   createSessionCompactedEvent,
   createSessionMessageCreatedEvent,
   createSessionMessageDeltaEvent,
+  createSessionMessageRenderSnapshotEvent,
   createSessionMessagePartUpdatedEvent,
   createSessionPermissionRequestedEvent,
   createSessionPermissionResolvedEvent,
@@ -77,12 +78,14 @@ import {
   getSessionById,
   setBackgroundRunStatus,
   setMessageMemoryTrace,
+  setMessageRenderSnapshot,
   setSessionTitle,
   setRuntimeSessionBinding,
   upsertSessionMessages,
   type BackgroundRunRecord,
 } from "../db/repository";
 import { env } from "../env";
+import { buildStreamdownRenderSnapshot } from "../render/streamdownSnapshots";
 import {
   buildDesiredRuntimeMcpConfigMap,
   normalizeMcpIds,
@@ -211,6 +214,7 @@ const QUEUE_DRAIN_METADATA_KEY = "__queueDrain";
 const DEFAULT_RUNTIME_TIMEOUT_MS = 120_000;
 const DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS = 300_000;
 const STREAMED_METADATA_CACHE_LIMIT = 10_000;
+const STREAMDOWN_RENDER_DEBOUNCE_MS = 100;
 const AGENT_NAME_CACHE_TTL_MS = 5_000;
 const BUILTIN_SUBAGENT_IDS = new Set(["general", "explore"]);
 const BUILTIN_PRIMARY_AGENT_IDS = new Set(["build", "plan", "title", "summary", "compaction"]);
@@ -302,6 +306,8 @@ export class OpencodeRuntime implements RuntimeEngine {
   private imageCapabilityFetchedAtMs = 0;
   private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
   private partTypeByScopedPartId = new Map<string, Part["type"]>();
+  private renderSnapshotTimerByScopedMessageId = new Map<string, ReturnType<typeof setTimeout>>();
+  private streamedAssistantContentByScopedMessageId = new Map<string, string>();
   private memoryInjectionStateBySessionId = new Map<string, MemoryInjectionState>();
   private availableAgentNamesCache:
     | {
@@ -582,6 +588,7 @@ export class OpencodeRuntime implements RuntimeEngine {
         this.extractText(assistantMessage.parts) ||
         this.mapOpencodeMessageContent(assistantMessage.info, assistantMessage.parts) ||
         "[assistant response pending; check streamed parts or wait for session sync]";
+      this.rememberStreamedAssistantContent(session.id, assistantMessage.info.id, assistantText);
 
       const createdAt =
         assistantMessage.info.time?.completed ?? assistantMessage.info.time?.created ?? Date.now();
@@ -626,6 +633,22 @@ export class OpencodeRuntime implements RuntimeEngine {
         for (const message of result.messages) {
           if (message.id === assistantMessage.info.id && message.role === "assistant") {
             message.parts = assistantParts;
+          }
+        }
+      }
+
+      const renderSnapshot = await buildStreamdownRenderSnapshot(assistantText);
+      if (renderSnapshot) {
+        setMessageRenderSnapshot({
+          sessionId: session.id,
+          messageId: assistantMessage.info.id,
+          renderSnapshot,
+          createdAt,
+          updatedAt: createdAt,
+        });
+        for (const message of result.messages) {
+          if (message.id === assistantMessage.info.id && message.role === "assistant") {
+            message.renderSnapshot = renderSnapshot;
           }
         }
       }
@@ -1541,6 +1564,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (event.properties.part.type !== "text" && event.properties.part.type !== "reasoning") return;
 
     if (deltaFromPartUpdate.length > 0) {
+      this.updateStreamedAssistantContent(localSessionId, event.properties.part.messageID, deltaFromPartUpdate, "append");
       this.emit(
         createSessionMessageDeltaEvent(
           {
@@ -1557,6 +1581,7 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
 
     if (event.properties.part.text.length > 0) {
+      this.updateStreamedAssistantContent(localSessionId, event.properties.part.messageID, event.properties.part.text, "replace");
       this.emit(
         createSessionMessageDeltaEvent(
           {
@@ -1596,6 +1621,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       messageRole === "assistant" || (messageRole !== "user" && partType === "reasoning");
     if (!canTreatAsAssistant) return;
 
+    this.updateStreamedAssistantContent(localSessionId, messageId, delta, "append");
     this.emit(
       createSessionMessageDeltaEvent(
         {
@@ -1905,6 +1931,74 @@ export class OpencodeRuntime implements RuntimeEngine {
     );
   }
 
+  private rememberStreamedAssistantContent(sessionId: string, messageId: string, content: string) {
+    const normalizedSessionId = sessionId.trim();
+    const normalizedMessageId = messageId.trim();
+    if (!normalizedSessionId || !normalizedMessageId) return;
+    this.setBoundedMapEntry(
+      this.streamedAssistantContentByScopedMessageId,
+      this.scopedMessageId(normalizedSessionId, normalizedMessageId),
+      content,
+    );
+  }
+
+  private updateStreamedAssistantContent(
+    sessionId: string,
+    messageId: string,
+    text: string,
+    mode: "append" | "replace",
+  ) {
+    const normalizedSessionId = sessionId.trim();
+    const normalizedMessageId = messageId.trim();
+    if (!normalizedSessionId || !normalizedMessageId || !text) return;
+
+    const scopedMessageId = this.scopedMessageId(normalizedSessionId, normalizedMessageId);
+    const current = this.streamedAssistantContentByScopedMessageId.get(scopedMessageId) ?? "";
+    const next = mode === "replace" ? text : `${current}${text}`;
+    this.rememberStreamedAssistantContent(normalizedSessionId, normalizedMessageId, next);
+    this.scheduleRenderSnapshotEmit(normalizedSessionId, normalizedMessageId, next);
+  }
+
+  private scheduleRenderSnapshotEmit(sessionId: string, messageId: string, content: string) {
+    if (!content.trim()) return;
+    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
+    const existingTimer = this.renderSnapshotTimerByScopedMessageId.get(scopedMessageId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      this.renderSnapshotTimerByScopedMessageId.delete(scopedMessageId);
+      void this.emitRenderSnapshot(sessionId, messageId, content);
+    }, STREAMDOWN_RENDER_DEBOUNCE_MS);
+    this.renderSnapshotTimerByScopedMessageId.set(scopedMessageId, timer);
+  }
+
+  private async emitRenderSnapshot(sessionId: string, messageId: string, content: string) {
+    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
+    const latestContent = this.streamedAssistantContentByScopedMessageId.get(scopedMessageId);
+    if (latestContent !== content) {
+      return;
+    }
+
+    const renderSnapshot = await buildStreamdownRenderSnapshot(content);
+    if (!renderSnapshot) {
+      return;
+    }
+
+    this.emit(
+      createSessionMessageRenderSnapshotEvent(
+        {
+          sessionId,
+          messageId,
+          renderSnapshot,
+          observedAt: new Date().toISOString(),
+        },
+        "runtime",
+      ),
+    );
+  }
+
   private rememberPartMetadata(part: Part) {
     const maybePart = part as {
       sessionID?: unknown;
@@ -2098,6 +2192,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     const imported = messages.flatMap(entry => {
       const content = this.mapOpencodeMessageContent(entry.info, entry.parts).trim();
       if (!content) return [];
+      if (entry.info.role === "assistant") {
+        this.rememberStreamedAssistantContent(localSessionId, entry.info.id, content);
+      }
       const parts = entry.info.role === "assistant" ? this.buildChatMessageParts(entry.parts) : [];
       return [
         {
@@ -2118,6 +2215,32 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (!synced) return;
 
     const entriesById = new Map(messages.map(entry => [entry.info.id, entry] as const));
+    const importedAssistants = imported.filter(
+      (message): message is typeof message & { role: "assistant" } =>
+        message.role === "assistant",
+    );
+    for (const assistantMessage of importedAssistants) {
+      const entry = entriesById.get(assistantMessage.id);
+      const renderSnapshot = await buildStreamdownRenderSnapshot(assistantMessage.content);
+      if (!renderSnapshot) continue;
+      const entryTime = entry?.info.time;
+      const entryUpdatedAt =
+        entryTime && "completed" in entryTime ? entryTime.completed : undefined;
+      setMessageRenderSnapshot({
+        sessionId: localSessionId,
+        messageId: assistantMessage.id,
+        renderSnapshot,
+        createdAt: entry?.info.time?.created ?? now,
+        updatedAt: entryUpdatedAt ?? entry?.info.time?.created ?? now,
+      });
+      const insertedMessage = synced.inserted.find(
+        (message) => message.id === assistantMessage.id && message.role === "assistant",
+      );
+      if (insertedMessage) {
+        insertedMessage.renderSnapshot = renderSnapshot;
+      }
+    }
+
     for (const message of synced.inserted) {
       if (message.role !== "assistant") continue;
       const entry = entriesById.get(message.id);

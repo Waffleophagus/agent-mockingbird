@@ -3,7 +3,6 @@ import type {
   SessionMessageCheckpoint,
   SessionSummary,
 } from "@agent-mockingbird/contracts/dashboard";
-import type { StreamdownFrozenSnapshot } from "@streamdown/react-native";
 import { MMKV } from "react-native-mmkv";
 
 import type { LocalChatMessage } from "@/features/chat/chat-helpers";
@@ -30,10 +29,6 @@ function sessionMessagesKey(sessionId: string) {
 
 function sessionCheckpointKey(sessionId: string) {
   return `session:${sessionId}:checkpoint`;
-}
-
-function sessionMarkdownSnapshotsKey(sessionId: string) {
-  return `session:${sessionId}:markdown-snapshots`;
 }
 
 function stripUiState(messages: LocalChatMessage[]): ChatMessage[] {
@@ -71,39 +66,6 @@ export function writeCachedSessionCheckpoint(sessionId: string, checkpoint: Sess
   }
 
   storage.set(sessionCheckpointKey(sessionId), JSON.stringify(checkpoint));
-}
-
-export function readCachedMarkdownSnapshots(
-  sessionId: string
-): Record<string, StreamdownFrozenSnapshot> {
-  return (
-    safeParseJson<Record<string, StreamdownFrozenSnapshot>>(
-      storage.getString(sessionMarkdownSnapshotsKey(sessionId))
-    ) ?? {}
-  );
-}
-
-export function readCachedMarkdownSnapshot(
-  sessionId: string,
-  entryId: string
-): StreamdownFrozenSnapshot | undefined {
-  return readCachedMarkdownSnapshots(sessionId)[entryId];
-}
-
-export function writeCachedMarkdownSnapshot(
-  sessionId: string,
-  entryId: string,
-  snapshot: StreamdownFrozenSnapshot | null
-) {
-  const next = {
-    ...readCachedMarkdownSnapshots(sessionId),
-  };
-  if (!snapshot) {
-    delete next[entryId];
-  } else {
-    next[entryId] = snapshot;
-  }
-  storage.set(sessionMarkdownSnapshotsKey(sessionId), JSON.stringify(next));
 }
 
 export function readCachedLastAppliedSeq(): number {

@@ -24,6 +24,8 @@
     "@trpc/server": "^11.7.1",
     "@agent-mockingbird/api": "workspace:*",
     "@agent-mockingbird/contracts": "workspace:*",
+    "@streamdown/code": "file:/var/home/matt/Documents/random-vibecoded-stuff/streamdown/packages/streamdown-code",
+    "@streamdown/core": "file:/var/home/matt/Documents/random-vibecoded-stuff/streamdown/packages/streamdown-core",
     "cron": "^4.4.0",
     "drizzle-orm": "^0.45.1",
     "jsonc-parser": "^3.3.1",

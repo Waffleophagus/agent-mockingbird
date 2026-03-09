@@ -9,7 +9,6 @@ import {
   formatCompactTimestamp,
   relativeFromIso,
   sanitizeMessageContentForDisplay,
-  shouldHideMirroredAssistantContent,
   type LocalChatMessage,
 } from "@/features/chat/chat-helpers";
 import { PanelCard } from "@/components/panel-card";
@@ -47,10 +46,8 @@ function toolSummary(part: Extract<ChatMessagePart, { type: "tool_call" }>) {
 
 function ToolCallCard({
   part,
-  sessionId,
 }: {
   part: Extract<ChatMessagePart, { type: "tool_call" }>;
-  sessionId: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const detailsInput = useMemo(() => stringifyToolInput(part.input), [part.input]);
@@ -73,16 +70,10 @@ function ToolCallCard({
         <View className="mt-4 gap-3">
           {detailsInput ? <Text selectable className="font-mono text-[12px] leading-5 text-brass">{detailsInput}</Text> : null}
           {part.output ? (
-            <MarkdownMessage
-              content={part.output}
-              snapshotCacheKey={{ entryId: `${part.id}:output`, sessionId }}
-            />
+            <MarkdownMessage content={part.output} />
           ) : null}
           {part.error ? (
-            <MarkdownMessage
-              content={part.error}
-              snapshotCacheKey={{ entryId: `${part.id}:error`, sessionId }}
-            />
+            <MarkdownMessage content={part.error} />
           ) : null}
         </View>
       ) : null}
@@ -94,14 +85,12 @@ export function SessionTimeline({
   loading,
   messages,
   onRetryRequest,
-  sessionId,
   showThinkingDetails,
   showToolCallDetails,
 }: {
   loading: boolean;
   messages: LocalChatMessage[];
   onRetryRequest: (requestId: string, content: string) => void;
-  sessionId: string;
   showThinkingDetails: boolean;
   showToolCallDetails: boolean;
 }) {
@@ -132,7 +121,7 @@ export function SessionTimeline({
               <View className="mt-2">
                 <MarkdownMessage
                   content={sanitizeMessageContentForDisplay(turn.user.role, turn.user.content)}
-                  snapshotCacheKey={{ entryId: turn.user.id, sessionId }}
+                  renderSnapshot={turn.user.renderSnapshot}
                 />
               </View>
             </View>
@@ -147,7 +136,6 @@ export function SessionTimeline({
               }),
               message.at,
             );
-            const hideMirroredAssistantContent = shouldHideMirroredAssistantContent(message, showThinkingDetails);
             const pendingMeta = message.uiMeta?.type === "assistant-pending" ? message.uiMeta : null;
 
             return (
@@ -156,12 +144,12 @@ export function SessionTimeline({
                   OpenCode · {formatCompactTimestamp(message.at) || relativeFromIso(message.at)}
                 </Text>
 
-                {!hideMirroredAssistantContent && message.content.trim() ? (
+                {message.content.trim() ? (
                   <View className="mt-3">
                     <MarkdownMessage
                       content={sanitizeMessageContentForDisplay(message.role, message.content)}
                       isStreaming={pendingMeta?.status === "pending"}
-                      snapshotCacheKey={{ entryId: message.id, sessionId }}
+                      renderSnapshot={message.renderSnapshot}
                     />
                   </View>
                 ) : null}
@@ -174,14 +162,11 @@ export function SessionTimeline({
                         <Text className="text-xs font-bold uppercase tracking-[1.4px] text-moss">Thinking</Text>
                       </View>
                       <View className="mt-3">
-                        <MarkdownMessage
-                          content={part.text}
-                          snapshotCacheKey={{ entryId: part.id, sessionId }}
-                        />
+                        <MarkdownMessage content={part.text} />
                       </View>
                     </PanelCard>
                   ) : (
-                    <ToolCallCard key={part.id} part={part} sessionId={sessionId} />
+                    <ToolCallCard key={part.id} part={part} />
                   ),
                 )}
 
