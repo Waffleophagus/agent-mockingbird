@@ -2,7 +2,8 @@ import { Redirect, useLocalSearchParams } from "expo-router";
 import type { ModelOption } from "@agent-mockingbird/contracts/dashboard";
 import { ArrowLeft, Brain, ChevronDown, SendHorizontal, Wrench } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView, KeyboardStickyView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ModelPickerOverlay } from "@/features/chat/model-picker-overlay";
@@ -24,6 +25,7 @@ export default function SessionDetailScreen() {
   const hasInitialBottomScrollRef = useRef(false);
   const shouldFollowLatestRef = useRef(true);
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardState(state => state.isVisible);
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : "";
   const session = chat.sessions.find(entry => entry.id === sessionId);
   const messages = chat.messagesBySession[sessionId] ?? [];
@@ -141,13 +143,16 @@ export default function SessionDetailScreen() {
     setModelQuery("");
   }, [sessionId]);
 
+  useEffect(() => {
+    if (!shouldFollowLatestRef.current) return;
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: keyboardVisible });
+    });
+  }, [keyboardVisible]);
+
   return (
     <>
-      <KeyboardAvoidingView
-        className="flex-1 bg-ink"
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
-      >
+      <View className="flex-1 bg-ink">
         <View className="border-b border-bone/10 px-5 pb-5 pt-16">
           <View className="mb-4 flex-row items-center justify-between gap-3">
             <Pressable
@@ -212,11 +217,12 @@ export default function SessionDetailScreen() {
           {runError ? <Text className="mt-4 text-sm leading-6 text-emberSoft">{runError}</Text> : null}
         </View>
 
-        <ScrollView
+        <KeyboardAwareScrollView
           ref={scrollRef}
           className="flex-1 px-5 pt-5"
           contentContainerStyle={{ paddingBottom: 20 }}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}
           scrollEventThrottle={16}
           onScroll={handleTimelineScroll}
@@ -232,36 +238,45 @@ export default function SessionDetailScreen() {
             onRetryRequest={(requestId, content) => {
               void chat.retryMessage(sessionId, requestId, content);
             }}
+            sessionId={sessionId}
             showThinkingDetails={chat.showThinkingDetails}
             showToolCallDetails={chat.showToolCallDetails}
           />
-        </ScrollView>
+        </KeyboardAwareScrollView>
 
-        <View className="border-t border-bone/10 bg-ash/95 px-5 pt-4" style={{ paddingBottom: insets.bottom + 8 }}>
-          <View className="flex-row items-end gap-3 rounded-[28px] border border-bone/10 bg-bone/5 px-4 py-3">
-            <TextInput
-              value={draftMessage}
-              onChangeText={setDraftMessage}
-              editable={!sending && !promptBusy && !activeQuestionRequest && !activePermissionRequest}
-              multiline
-              placeholder="Send a message to this session…"
-              placeholderTextColor="#8D8A84"
-              className="max-h-32 min-h-[48px] flex-1 py-2 text-sm leading-6 text-bone"
-            />
-            <Pressable
-              onPress={() => {
-                const content = draftMessage.trim();
-                if (!content) return;
-                setDraftMessage("");
-                void chat.sendMessage(sessionId, content);
-              }}
-              disabled={!draftMessage.trim() || sending || promptBusy || Boolean(activeQuestionRequest) || Boolean(activePermissionRequest)}
-              className={`mb-1 size-11 items-center justify-center rounded-full ${!draftMessage.trim() || sending || promptBusy || activeQuestionRequest || activePermissionRequest ? "bg-bone/10" : "bg-ember"}`}
-            >
-              <SendHorizontal color={!draftMessage.trim() || sending || promptBusy || activeQuestionRequest || activePermissionRequest ? "#8D8A84" : "#13100F"} size={18} />
-            </Pressable>
+        <KeyboardStickyView>
+          <View className="border-t border-bone/10 bg-ash/95 px-5 pt-4" style={{ paddingBottom: insets.bottom + 8 }}>
+            <View className="flex-row items-end gap-3 rounded-[28px] border border-bone/10 bg-bone/5 px-4 py-3">
+              <TextInput
+                value={draftMessage}
+                onChangeText={setDraftMessage}
+                editable={!sending && !promptBusy && !activeQuestionRequest && !activePermissionRequest}
+                multiline
+                placeholder="Send a message to this session…"
+                placeholderTextColor="#8D8A84"
+                className="max-h-32 min-h-[48px] flex-1 py-2 text-sm leading-6 text-bone"
+                onFocus={() => {
+                  if (!shouldFollowLatestRef.current) return;
+                  requestAnimationFrame(() => {
+                    scrollRef.current?.scrollToEnd({ animated: true });
+                  });
+                }}
+              />
+              <Pressable
+                onPress={() => {
+                  const content = draftMessage.trim();
+                  if (!content) return;
+                  setDraftMessage("");
+                  void chat.sendMessage(sessionId, content);
+                }}
+                disabled={!draftMessage.trim() || sending || promptBusy || Boolean(activeQuestionRequest) || Boolean(activePermissionRequest)}
+                className={`mb-1 size-11 items-center justify-center rounded-full ${!draftMessage.trim() || sending || promptBusy || activeQuestionRequest || activePermissionRequest ? "bg-bone/10" : "bg-ember"}`}
+              >
+                <SendHorizontal color={!draftMessage.trim() || sending || promptBusy || activeQuestionRequest || activePermissionRequest ? "#8D8A84" : "#13100F"} size={18} />
+              </Pressable>
+            </View>
           </View>
-        </View>
+        </KeyboardStickyView>
 
         {activePermissionRequest ? (
           <PermissionPromptOverlay
@@ -302,7 +317,7 @@ export default function SessionDetailScreen() {
             selectedModelId={session?.model ?? ""}
           />
         ) : null}
-      </KeyboardAvoidingView>
+      </View>
     </>
   );
 }

@@ -32,6 +32,9 @@
     "db:wipe": "turbo run db:wipe --filter=@agent-mockingbird/server",
     "config:migrate-opencode-env": "bun run ./scripts/migrate-opencode-env.ts"
   },
+  "overrides": {
+    "@streamdown/core": "file:/var/home/matt/Documents/random-vibecoded-stuff/streamdown/packages/streamdown-core"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.3",
     "@types/bun": "latest",

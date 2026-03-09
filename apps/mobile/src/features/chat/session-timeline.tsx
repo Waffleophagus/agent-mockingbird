@@ -45,7 +45,13 @@ function toolSummary(part: Extract<ChatMessagePart, { type: "tool_call" }>) {
   return "No details";
 }
 
-function ToolCallCard({ part }: { part: Extract<ChatMessagePart, { type: "tool_call" }> }) {
+function ToolCallCard({
+  part,
+  sessionId,
+}: {
+  part: Extract<ChatMessagePart, { type: "tool_call" }>;
+  sessionId: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const detailsInput = useMemo(() => stringifyToolInput(part.input), [part.input]);
   const hasDetails = Boolean(detailsInput || part.output || part.error);
@@ -66,8 +72,18 @@ function ToolCallCard({ part }: { part: Extract<ChatMessagePart, { type: "tool_c
       {expanded && hasDetails ? (
         <View className="mt-4 gap-3">
           {detailsInput ? <Text selectable className="font-mono text-[12px] leading-5 text-brass">{detailsInput}</Text> : null}
-          {part.output ? <MarkdownMessage content={part.output} /> : null}
-          {part.error ? <MarkdownMessage content={part.error} /> : null}
+          {part.output ? (
+            <MarkdownMessage
+              content={part.output}
+              snapshotCacheKey={{ entryId: `${part.id}:output`, sessionId }}
+            />
+          ) : null}
+          {part.error ? (
+            <MarkdownMessage
+              content={part.error}
+              snapshotCacheKey={{ entryId: `${part.id}:error`, sessionId }}
+            />
+          ) : null}
         </View>
       ) : null}
     </PanelCard>
@@ -78,12 +94,14 @@ export function SessionTimeline({
   loading,
   messages,
   onRetryRequest,
+  sessionId,
   showThinkingDetails,
   showToolCallDetails,
 }: {
   loading: boolean;
   messages: LocalChatMessage[];
   onRetryRequest: (requestId: string, content: string) => void;
+  sessionId: string;
   showThinkingDetails: boolean;
   showToolCallDetails: boolean;
 }) {
@@ -112,7 +130,10 @@ export function SessionTimeline({
                 You · {formatCompactTimestamp(turn.user.at) || relativeFromIso(turn.user.at)}
               </Text>
               <View className="mt-2">
-                <MarkdownMessage content={sanitizeMessageContentForDisplay(turn.user.role, turn.user.content)} />
+                <MarkdownMessage
+                  content={sanitizeMessageContentForDisplay(turn.user.role, turn.user.content)}
+                  snapshotCacheKey={{ entryId: turn.user.id, sessionId }}
+                />
               </View>
             </View>
           ) : null}
@@ -137,7 +158,11 @@ export function SessionTimeline({
 
                 {!hideMirroredAssistantContent && message.content.trim() ? (
                   <View className="mt-3">
-                    <MarkdownMessage content={sanitizeMessageContentForDisplay(message.role, message.content)} />
+                    <MarkdownMessage
+                      content={sanitizeMessageContentForDisplay(message.role, message.content)}
+                      isStreaming={pendingMeta?.status === "pending"}
+                      snapshotCacheKey={{ entryId: message.id, sessionId }}
+                    />
                   </View>
                 ) : null}
 
@@ -149,11 +174,14 @@ export function SessionTimeline({
                         <Text className="text-xs font-bold uppercase tracking-[1.4px] text-moss">Thinking</Text>
                       </View>
                       <View className="mt-3">
-                        <MarkdownMessage content={part.text} />
+                        <MarkdownMessage
+                          content={part.text}
+                          snapshotCacheKey={{ entryId: part.id, sessionId }}
+                        />
                       </View>
                     </PanelCard>
                   ) : (
-                    <ToolCallCard key={part.id} part={part} />
+                    <ToolCallCard key={part.id} part={part} sessionId={sessionId} />
                   ),
                 )}
 

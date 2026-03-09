@@ -106,3 +106,11 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Temporary Streamdown Integration Rule
+
+For the mobile Streamdown integration effort:
+- Treat `/var/home/matt/Documents/random-vibecoded-stuff/streamdown` as the source of truth for Streamdown library changes.
+- Do not patch Streamdown library internals in this repo when the same change can be made in the Streamdown fork.
+- Keep changes in this repo limited to integration wiring (dependencies, config, app usage), while implementing library fixes/features in the Streamdown fork for upstream publishing.
+- If a Streamdown-side change is required, make it in the fork first, then consume it here via local dependency links.
