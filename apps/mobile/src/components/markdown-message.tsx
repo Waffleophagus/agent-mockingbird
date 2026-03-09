@@ -2,6 +2,7 @@ import type { StreamdownRenderSnapshot } from "@streamdown/react-native";
 import { Streamdown } from "@streamdown/react-native";
 import { Linking, StyleSheet, View } from "react-native";
 
+import { getStreamdownCodePlugin } from "@/lib/streamdown-code-plugin";
 import { chromePalette } from "@/theme/palette";
 
 const styles = StyleSheet.create({
@@ -9,6 +10,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+
+const STREAMDOWN_CODE_PLUGIN = getStreamdownCodePlugin();
+const STREAMDOWN_PLUGINS = STREAMDOWN_CODE_PLUGIN
+  ? { code: STREAMDOWN_CODE_PLUGIN }
+  : undefined;
+const STREAMING_ANIMATION = {
+  animation: "fadeIn" as const,
+  duration: 90,
+  maxAnimatedTokens: 12,
+  sep: "word" as const,
+};
 
 function normalizeMarkdownContent(content: string): string {
   const normalizedLineEndings = content.replace(/\r\n?/g, "\n");
@@ -49,10 +61,11 @@ export function MarkdownMessage({
         mode={isStreaming ? "streaming" : "static"}
         parseIncompleteMarkdown={isStreaming}
         isAnimating={isStreaming}
-        animated={isStreaming ? { animation: "fadeIn", sep: "word" } : false}
+        animated={isStreaming ? STREAMING_ANIMATION : false}
         onLinkPress={onLinkPress}
+        plugins={STREAMDOWN_PLUGINS}
         renderSnapshot={renderSnapshot}
-        staticCodeStrategy="plain"
+        staticCodeStrategy={STREAMDOWN_CODE_PLUGIN ? "highlight" : "plain"}
         theme={{
           blockquoteBorderColor: chromePalette.haze,
           codeBlockBackgroundColor: chromePalette.ink,
