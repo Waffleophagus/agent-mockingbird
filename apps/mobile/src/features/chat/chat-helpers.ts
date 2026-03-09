@@ -5,6 +5,7 @@ import type {
   PermissionPromptRequest,
   QuestionPromptRequest,
   SessionSummary,
+  StreamdownCodeLineHighlight,
   StreamdownRenderSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
 
@@ -25,6 +26,7 @@ export interface PendingAssistantMeta {
 export type LocalMessageMeta = OptimisticUserMeta | PendingAssistantMeta;
 
 export interface LocalChatMessage extends ChatMessage {
+  liveCodeHighlights?: StreamdownCodeLineHighlight[];
   uiMeta?: LocalMessageMeta;
 }
 
@@ -99,6 +101,7 @@ export function mergeMessages(current: LocalChatMessage[], incoming: ChatMessage
     merged[index] = {
       ...existing,
       ...message,
+      liveCodeHighlights: existing.liveCodeHighlights,
       uiMeta: existing.uiMeta,
     };
   }
@@ -321,6 +324,8 @@ export function applyMessageDelta(
   next[resolvedIndex] = {
     ...target,
     content: nextContent,
+    liveCodeHighlights:
+      mode === "replace" ? undefined : target.liveCodeHighlights,
     uiMeta: nextMeta,
   };
   return next;
@@ -383,6 +388,55 @@ export function applyMessageRenderSnapshot(
   next[resolvedIndex] = {
     ...target,
     renderSnapshot,
+    uiMeta: nextMeta,
+  };
+  return next;
+}
+
+export function applyMessageCodeHighlight(
+  messages: LocalChatMessage[],
+  messageId: string,
+  highlight: StreamdownCodeLineHighlight,
+): LocalChatMessage[] {
+  const next = [...messages];
+  const targetIndex = next.findIndex(message => message.id === messageId);
+  const pendingIndex = targetIndex >= 0 ? -1 : findPendingAssistant(next, messageId);
+  const fallbackPendingIndex = targetIndex >= 0 || pendingIndex >= 0 ? -1 : findPendingAssistant(next);
+  const resolvedIndex = targetIndex >= 0 ? targetIndex : pendingIndex >= 0 ? pendingIndex : fallbackPendingIndex;
+  if (resolvedIndex < 0) return messages;
+
+  const target = next[resolvedIndex];
+  if (!target) return messages;
+
+  const nextMeta =
+    target.uiMeta?.type === "assistant-pending"
+      ? {
+          ...target.uiMeta,
+          runtimeMessageId: messageId,
+        }
+      : target.uiMeta;
+
+  const currentHighlights = target.liveCodeHighlights ?? [];
+  const existingIndex = currentHighlights.findIndex(
+    item =>
+      item.blockIndex === highlight.blockIndex &&
+      item.lineIndex === highlight.lineIndex,
+  );
+  const nextHighlights =
+    existingIndex === -1
+      ? [...currentHighlights, highlight]
+      : currentHighlights.map((item, index) =>
+          index === existingIndex ? highlight : item,
+        );
+
+  next[resolvedIndex] = {
+    ...target,
+    liveCodeHighlights: nextHighlights.sort((left, right) => {
+      if (left.blockIndex !== right.blockIndex) {
+        return left.blockIndex - right.blockIndex;
+      }
+      return left.lineIndex - right.lineIndex;
+    }),
     uiMeta: nextMeta,
   };
   return next;

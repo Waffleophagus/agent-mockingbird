@@ -29,9 +29,9 @@
         "@agent-mockingbird/app-core": "workspace:*",
         "@agent-mockingbird/contracts": "workspace:*",
         "@expo/vector-icons": "^15.0.3",
-        "@streamdown/code-native": "0.1.3",
-        "@streamdown/core": "0.1.3",
-        "@streamdown/react-native": "0.1.3",
+        "@streamdown/code-native": "0.1.4",
+        "@streamdown/core": "0.1.4",
+        "@streamdown/react-native": "0.1.4",
         "expo": "~54.0.0",
         "expo-constants": "~18.0.13",
         "expo-dev-client": "~6.0.20",
@@ -74,7 +74,7 @@
         "@opencode-ai/plugin": "^1.2.15",
         "@opencode-ai/sdk": "^1.2.15",
         "@streamdown/code": "1.1.1",
-        "@streamdown/core": "0.1.1",
+        "@streamdown/core": "0.1.4",
         "@t3-oss/env-core": "^0.13.10",
         "@trpc/server": "^11.7.1",
         "cron": "^4.4.0",
@@ -143,11 +143,11 @@
   "overrides": {
     "@streamdown/cjk": "1.0.3",
     "@streamdown/code": "1.1.1",
-    "@streamdown/code-native": "0.1.3",
-    "@streamdown/core": "0.1.3",
+    "@streamdown/code-native": "0.1.4",
+    "@streamdown/core": "0.1.4",
     "@streamdown/math": "1.0.3",
     "@streamdown/mermaid": "1.0.3",
-    "@streamdown/react-native": "0.1.3",
+    "@streamdown/react-native": "0.1.4",
     "remend": "1.2.2",
   },
   "packages": {
@@ -681,11 +681,11 @@
 
     "@streamdown/code": ["@streamdown/code@1.1.1", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcode/-/1.1.1/code-1.1.1.tgz", { "dependencies": { "shiki": "^3.19.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-vwf1WJB5UbKEsJ2UssC+SwDgQR0GwCol1c6iylv26O4+Z8X2iAGhxnN8EqrnPRT9R6heQYa2q+sJEGUaqU0TTQ=="],
 
-    "@streamdown/code-native": ["@streamdown/code-native@0.1.3", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcode-native/-/0.1.3/code-native-0.1.3.tgz", { "dependencies": { "@shikijs/core": "^3.21.0", "react-native-shiki-engine": "^0.3.9", "shiki": "^3.23.0" } }, "sha512-tCqXv/UwYipVDNrg4FmqBOpmlNpCh6xpBz7YEBahqneoCGw4NCpxM0/RMILVx0wFvSmNManf5SP2LSBWWLY77A=="],
+    "@streamdown/code-native": ["@streamdown/code-native@0.1.4", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcode-native/-/0.1.4/code-native-0.1.4.tgz", { "dependencies": { "@shikijs/core": "^3.21.0", "react-native-shiki-engine": "^0.3.9", "shiki": "^3.23.0" } }, "sha512-dQj+DCU3hD9cekhkjOmmx09ZAbMnbYwsuRg9BzTE9WLCRqHmkUfouQ7QKiZa+Xp3yxccK7jeRSWH5877B6/h5g=="],
 
-    "@streamdown/core": ["@streamdown/core@0.1.3", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcore/-/0.1.3/core-0.1.3.tgz", { "dependencies": { "marked": "^17.0.1", "remend": "1.2.5" } }, "sha512-eF3a4EheNH1Q2FVrD5ho15seFH5qo20Vim8EGkIWOC8L0rSI+Bh5Eb1AcZdLA1qv5T6mIJpoB8P/GYhxcsi/SA=="],
+    "@streamdown/core": ["@streamdown/core@0.1.4", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Fcore/-/0.1.4/core-0.1.4.tgz", { "dependencies": { "marked": "^17.0.1", "remend": "1.2.6" } }, "sha512-y8AOedVbxAbgb21oMB87kJ+Vea34OIdqt/gibhS2atkdiZSzt+CkBDkdEKxCzblDnnh2ixFIyfwKYxJ6CxXE+Q=="],
 
-    "@streamdown/react-native": ["@streamdown/react-native@0.1.3", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Freact-native/-/0.1.3/react-native-0.1.3.tgz", { "dependencies": { "@streamdown/core": "0.1.3", "react-native-url-polyfill": "^2.0.0", "remark-gfm": "^4.0.1", "remark-parse": "^11.0.0", "remark-rehype": "^11.1.2", "unified": "^11.0.5" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-native": ">=0.74.0", "react-native-reanimated": "~4.0.1", "react-native-worklets": "0.5.1" } }, "sha512-19fb5bK2hMcgQBxn6swg9wRBdJklSCa5fSut3Cr4cEJs/49F8k/aJVVaxPKZ2eZO36QP2x2dEoV+MGp2sS5gyg=="],
+    "@streamdown/react-native": ["@streamdown/react-native@0.1.4", "https://git.waffleophagus.com/api/packages/waffleophagus/npm/%40streamdown%2Freact-native/-/0.1.4/react-native-0.1.4.tgz", { "dependencies": { "@streamdown/core": "0.1.4", "react-native-url-polyfill": "^2.0.0", "remark-gfm": "^4.0.1", "remark-parse": "^11.0.0", "remark-rehype": "^11.1.2", "unified": "^11.0.5" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-native": ">=0.74.0", "react-native-reanimated": "~4.0.1", "react-native-worklets": "0.5.1" } }, "sha512-CWVN5jU3rCnsOWzdn7fP/Lz4xpeKtF6333gJWvZjXjKgsIuoQwkiBwdpvLD4riV6sMY0ICr3VCi0IB5aBRd5Ww=="],
 
     "@t3-oss/env-core": ["@t3-oss/env-core@0.13.10", "", { "peerDependencies": { "arktype": "^2.1.0", "typescript": ">=5.0.0", "valibot": "^1.0.0-beta.7 || ^1.0.0", "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["arktype", "typescript", "valibot", "zod"] }, "sha512-NNFfdlJ+HmPHkLi2HKy7nwuat9SIYOxei9K10lO2YlcSObDILY7mHZNSHsieIM3A0/5OOzw/P/b+yLvPdaG52g=="],
 

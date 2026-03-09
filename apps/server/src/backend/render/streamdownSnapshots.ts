@@ -1,11 +1,16 @@
+import type { StreamdownCodeLineHighlight } from "@agent-mockingbird/contracts/dashboard";
 import { createServerCodeHighlighter } from "@streamdown/code";
 import {
   extractStreamdownCodeBlocks,
+  hashStreamdownCodeBlock,
   type StreamdownCodeBlockSnapshot,
   type StreamdownRenderSnapshot,
 } from "@streamdown/core";
 
 const STREAMDOWN_SERVER_THEME_ID = "app-dark";
+const openingFenceRegex =
+  /^(?<fence>`{3,}|~{3,})(?<language>[^\n`]*)\n(?<rest>[\s\S]*)$/;
+
 const highlighter = createServerCodeHighlighter({
   themes: ["github-dark", "github-dark"],
 });
@@ -23,6 +28,102 @@ function normalizeMarkdownContent(content: string): string {
     .replace(/\\n/g, "\n")
     .replace(/\\t/g, "\t")
     .replace(/\\`/g, "`");
+}
+
+const mapCodeToken = (token: {
+  bgColor?: string;
+  color?: string;
+  content: string;
+}) => ({
+  bgColor: token.bgColor,
+  color: token.color,
+  content: token.content,
+});
+
+const mapCodeTokenRows = (
+  rows: Array<
+    Array<{
+      bgColor?: string;
+      color?: string;
+      content: string;
+    }>
+  >,
+) => rows.map((row) => row.map(mapCodeToken));
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractLiveCodeLines(blocks: string[]): StreamdownCodeLineHighlight[] {
+  return blocks.flatMap((block, blockIndex) => {
+    const opening = block.match(openingFenceRegex);
+    if (!opening?.groups) {
+      return [];
+    }
+
+    const fence = opening.groups.fence ?? "";
+    const language = (opening.groups.language ?? "").trim().toLowerCase();
+    const rest = opening.groups.rest ?? "";
+    if (!fence) {
+      return [];
+    }
+    const closingFenceRegex = new RegExp(`\\n${escapeRegex(fence)}\\s*$`);
+    const isClosed = closingFenceRegex.test(rest);
+    const code = isClosed ? rest.replace(closingFenceRegex, "") : rest;
+    const lines = code.split("\n");
+    const completedLines = isClosed ? lines : lines.slice(0, -1);
+    const codeHash = hashStreamdownCodeBlock(language, code);
+
+    return completedLines.map((lineText, lineIndex) => ({
+      blockIndex,
+      codeHash,
+      isClosed,
+      lineIndex,
+      language,
+      lineText,
+      tokens: [],
+    }));
+  });
+}
+
+export async function buildStreamdownCodeLineHighlights(
+  markdown: string,
+): Promise<StreamdownCodeLineHighlight[]> {
+  const normalizedMarkdown = normalizeMarkdownContent(markdown);
+  const extracted = extractStreamdownCodeBlocks({
+    markdown: normalizedMarkdown,
+    parseIncompleteMarkdown: true,
+  });
+  const liveCodeLines = extractLiveCodeLines(extracted.blocks);
+
+  if (liveCodeLines.length === 0) {
+    return [];
+  }
+
+  return (
+    await Promise.all(
+      liveCodeLines.map(
+        async (line): Promise<StreamdownCodeLineHighlight | null> => {
+          try {
+            const result = await highlighter.highlightCode({
+              code: line.lineText,
+              language: line.language,
+            });
+            return {
+              ...line,
+              tokens: result.tokens[0]?.map(mapCodeToken) ?? [],
+            };
+          } catch (error) {
+            console.warn(
+              `[server] Streamdown line highlight failed for language "${line.language}":`,
+              error,
+            );
+            return null;
+          }
+        },
+      ),
+    )
+  ).filter((line): line is StreamdownCodeLineHighlight => Boolean(line));
 }
 
 export async function buildStreamdownRenderSnapshot(
@@ -51,26 +152,7 @@ export async function buildStreamdownRenderSnapshot(
               blockIndex: block.blockIndex,
               codeHash: block.codeHash,
               language: block.language,
-              tokens: result.tokens.map(
-                (
-                  row: Array<{
-                    bgColor?: string;
-                    color?: string;
-                    content: string;
-                  }>,
-                ) =>
-                  row.map(
-                    (token: {
-                      bgColor?: string;
-                      color?: string;
-                      content: string;
-                    }) => ({
-                      bgColor: token.bgColor,
-                      color: token.color,
-                      content: token.content,
-                    }),
-                  ),
-              ),
+              tokens: mapCodeTokenRows(result.tokens),
             };
           } catch (error) {
             console.warn(

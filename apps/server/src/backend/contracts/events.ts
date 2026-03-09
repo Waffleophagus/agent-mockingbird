@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   ChatMessagePart,
   HeartbeatSnapshot,
+  StreamdownCodeLineHighlight,
   StreamdownRenderSnapshot,
   SessionMessagePartPhase,
   SessionSummary,
@@ -55,6 +56,17 @@ export interface SessionMessageRenderSnapshotPayload {
 export type SessionMessageRenderSnapshotEvent = RuntimeEventBase<
   "session.message.render_snapshot",
   SessionMessageRenderSnapshotPayload
+>;
+
+export interface SessionMessageCodeHighlightPayload {
+  sessionId: string;
+  messageId: string;
+  highlight: StreamdownCodeLineHighlight;
+  observedAt: string;
+}
+export type SessionMessageCodeHighlightEvent = RuntimeEventBase<
+  "session.message.code_highlight",
+  SessionMessageCodeHighlightPayload
 >;
 
 export interface SessionRunStatusPayload {
@@ -231,6 +243,7 @@ export type RuntimeEvent =
   | SessionMessageCreatedEvent
   | SessionMessagePartUpdatedEvent
   | SessionMessageDeltaEvent
+  | SessionMessageCodeHighlightEvent
   | SessionMessageRenderSnapshotEvent
   | SessionRunStatusUpdatedEvent
   | SessionCompactedEvent
@@ -302,6 +315,13 @@ export function createSessionMessageRenderSnapshotEvent(
   source: RuntimeEventSource,
 ): SessionMessageRenderSnapshotEvent {
   return baseRuntimeEvent("session.message.render_snapshot", payload, source);
+}
+
+export function createSessionMessageCodeHighlightEvent(
+  payload: SessionMessageCodeHighlightPayload,
+  source: RuntimeEventSource,
+): SessionMessageCodeHighlightEvent {
+  return baseRuntimeEvent("session.message.code_highlight", payload, source);
 }
 
 export function createSessionRunStatusUpdatedEvent(

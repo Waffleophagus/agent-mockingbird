@@ -1,5 +1,7 @@
+import type { StreamdownCodeLineHighlight } from "@agent-mockingbird/contracts/dashboard";
 import type { StreamdownRenderSnapshot } from "@streamdown/react-native";
 import { Streamdown } from "@streamdown/react-native";
+import type { ComponentProps } from "react";
 import { Linking, StyleSheet, View } from "react-native";
 
 import { getStreamdownCodePlugin } from "@/lib/streamdown-code-plugin";
@@ -46,42 +48,49 @@ function onLinkPress(url: string) {
 export function MarkdownMessage({
   content,
   isStreaming = false,
+  liveCodeHighlights,
   renderSnapshot,
 }: {
   content: string;
   isStreaming?: boolean;
+  liveCodeHighlights?: StreamdownCodeLineHighlight[];
   renderSnapshot?: StreamdownRenderSnapshot;
 }) {
   const displayContent = normalizeMarkdownContent(content);
   if (!displayContent.trim()) return null;
 
+  const streamdownProps = {
+    mode: isStreaming ? "streaming" : "static",
+    parseIncompleteMarkdown: isStreaming,
+    isAnimating: isStreaming,
+    animated: isStreaming ? STREAMING_ANIMATION : false,
+    onLinkPress,
+    plugins: STREAMDOWN_PLUGINS,
+    renderSnapshot,
+    staticCodeStrategy: STREAMDOWN_CODE_PLUGIN ? "highlight" : "plain",
+    theme: {
+      blockquoteBorderColor: chromePalette.haze,
+      codeBlockBackgroundColor: chromePalette.ink,
+      codeBlockBorderColor: "rgba(246, 239, 228, 0.10)",
+      codeTextColor: chromePalette.bone,
+      imageBackgroundColor: chromePalette.ash,
+      inlineCodeBackgroundColor: "rgba(246, 239, 228, 0.10)",
+      inlineCodeTextColor: chromePalette.bone,
+      linkColor: chromePalette.ocean,
+      mutedTextColor: chromePalette.brass,
+      ruleColor: "rgba(141, 138, 132, 0.35)",
+      tableBorderColor: "rgba(141, 138, 132, 0.35)",
+      tableHeaderBackgroundColor: chromePalette.ash,
+      textColor: chromePalette.bone,
+    },
+    liveCodeHighlights,
+  } as ComponentProps<typeof Streamdown> & {
+    liveCodeHighlights?: StreamdownCodeLineHighlight[];
+  };
+
   return (
     <View style={styles.container}>
-      <Streamdown
-        mode={isStreaming ? "streaming" : "static"}
-        parseIncompleteMarkdown={isStreaming}
-        isAnimating={isStreaming}
-        animated={isStreaming ? STREAMING_ANIMATION : false}
-        onLinkPress={onLinkPress}
-        plugins={STREAMDOWN_PLUGINS}
-        renderSnapshot={renderSnapshot}
-        staticCodeStrategy={STREAMDOWN_CODE_PLUGIN ? "highlight" : "plain"}
-        theme={{
-          blockquoteBorderColor: chromePalette.haze,
-          codeBlockBackgroundColor: chromePalette.ink,
-          codeBlockBorderColor: "rgba(246, 239, 228, 0.10)",
-          codeTextColor: chromePalette.bone,
-          imageBackgroundColor: chromePalette.ash,
-          inlineCodeBackgroundColor: "rgba(246, 239, 228, 0.10)",
-          inlineCodeTextColor: chromePalette.bone,
-          linkColor: chromePalette.ocean,
-          mutedTextColor: chromePalette.brass,
-          ruleColor: "rgba(141, 138, 132, 0.35)",
-          tableBorderColor: "rgba(141, 138, 132, 0.35)",
-          tableHeaderBackgroundColor: chromePalette.ash,
-          textColor: chromePalette.bone,
-        }}
-      >
+      <Streamdown {...streamdownProps}>
         {displayContent}
       </Streamdown>
     </View>

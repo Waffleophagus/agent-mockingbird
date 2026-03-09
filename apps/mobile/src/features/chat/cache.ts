@@ -34,7 +34,7 @@ function sessionCheckpointKey(sessionId: string) {
 function stripUiState(messages: LocalChatMessage[]): ChatMessage[] {
   return messages.flatMap(message => {
     if (message.uiMeta) return [];
-    const { uiMeta, ...persisted } = message;
+    const { liveCodeHighlights, uiMeta, ...persisted } = message;
     return [persisted];
   });
 }

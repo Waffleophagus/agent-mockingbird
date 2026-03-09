@@ -149,6 +149,7 @@ export function SessionTimeline({
                     <MarkdownMessage
                       content={sanitizeMessageContentForDisplay(message.role, message.content)}
                       isStreaming={pendingMeta?.status === "pending"}
+                      liveCodeHighlights={message.liveCodeHighlights}
                       renderSnapshot={message.renderSnapshot}
                     />
                   </View>

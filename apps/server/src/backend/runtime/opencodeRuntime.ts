@@ -39,6 +39,7 @@ import {
   createBackgroundRunUpdatedEvent,
   createHeartbeatUpdatedEvent,
   createSessionCompactedEvent,
+  createSessionMessageCodeHighlightEvent,
   createSessionMessageCreatedEvent,
   createSessionMessageDeltaEvent,
   createSessionMessageRenderSnapshotEvent,
@@ -107,7 +108,10 @@ import {
   unwrapSdkData,
 } from "../opencode/client";
 import { getLaneQueue } from "../queue/service";
-import { buildStreamdownRenderSnapshot } from "../render/streamdownSnapshots";
+import {
+  buildStreamdownCodeLineHighlights,
+  buildStreamdownRenderSnapshot,
+} from "../render/streamdownSnapshots";
 import {
   buildManagedSkillPaths,
   getManagedSkillsRootPath,
@@ -346,6 +350,10 @@ export class OpencodeRuntime implements RuntimeEngine {
     ReturnType<typeof setTimeout>
   >();
   private streamedAssistantContentByScopedMessageId = new Map<string, string>();
+  private emittedCodeHighlightLinesByScopedMessageId = new Map<
+    string,
+    Map<string, string>
+  >();
   private memoryInjectionStateBySessionId = new Map<
     string,
     MemoryInjectionState
@@ -2317,6 +2325,9 @@ export class OpencodeRuntime implements RuntimeEngine {
     const current =
       this.streamedAssistantContentByScopedMessageId.get(scopedMessageId) ?? "";
     const next = mode === "replace" ? text : `${current}${text}`;
+    if (mode === "replace") {
+      this.emittedCodeHighlightLinesByScopedMessageId.delete(scopedMessageId);
+    }
     this.rememberStreamedAssistantContent(
       normalizedSessionId,
       normalizedMessageId,
@@ -2327,6 +2338,65 @@ export class OpencodeRuntime implements RuntimeEngine {
       normalizedMessageId,
       next,
     );
+  }
+
+  private rememberEmittedCodeHighlightLine(
+    sessionId: string,
+    messageId: string,
+    lineKey: string,
+    lineText: string,
+  ) {
+    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
+    const current =
+      this.emittedCodeHighlightLinesByScopedMessageId.get(scopedMessageId) ??
+      new Map<string, string>();
+    current.set(lineKey, lineText);
+    this.setBoundedMapEntry(
+      this.emittedCodeHighlightLinesByScopedMessageId,
+      scopedMessageId,
+      current,
+    );
+  }
+
+  private async emitCodeHighlightLines(
+    sessionId: string,
+    messageId: string,
+    content: string,
+  ) {
+    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
+    const liveHighlights = await buildStreamdownCodeLineHighlights(content);
+    if (liveHighlights.length === 0) {
+      return;
+    }
+
+    const emittedLineMap =
+      this.emittedCodeHighlightLinesByScopedMessageId.get(scopedMessageId) ??
+      new Map<string, string>();
+
+    for (const highlight of liveHighlights) {
+      const lineKey = `${highlight.blockIndex}:${highlight.lineIndex}`;
+      if (emittedLineMap.get(lineKey) === highlight.lineText) {
+        continue;
+      }
+
+      this.emit(
+        createSessionMessageCodeHighlightEvent(
+          {
+            sessionId,
+            messageId,
+            highlight,
+            observedAt: new Date().toISOString(),
+          },
+          "runtime",
+        ),
+      );
+      this.rememberEmittedCodeHighlightLine(
+        sessionId,
+        messageId,
+        lineKey,
+        highlight.lineText,
+      );
+    }
   }
 
   private scheduleRenderSnapshotEmit(
@@ -2360,6 +2430,8 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (latestContent !== content) {
       return;
     }
+
+    await this.emitCodeHighlightLines(sessionId, messageId, content);
 
     const renderSnapshot = await buildStreamdownRenderSnapshot(content);
     if (!renderSnapshot) {

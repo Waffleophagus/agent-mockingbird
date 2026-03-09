@@ -25,7 +25,7 @@
     "@agent-mockingbird/api": "workspace:*",
     "@agent-mockingbird/contracts": "workspace:*",
     "@streamdown/code": "1.1.1",
-    "@streamdown/core": "0.1.1",
+    "@streamdown/core": "0.1.4",
     "cron": "^4.4.0",
     "drizzle-orm": "^0.45.1",
     "jsonc-parser": "^3.3.1",

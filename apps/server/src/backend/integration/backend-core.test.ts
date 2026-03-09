@@ -1674,6 +1674,31 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
+  test("toSseFrame maps session.message.code_highlight to session-message-code-highlight event", () => {
+    const frame = toSseFrame({
+      id: "evt-code-highlight-1",
+      type: "session.message.code_highlight",
+      source: "runtime",
+      at: new Date().toISOString(),
+      payload: {
+        sessionId: "main",
+        messageId: "msg-1",
+        observedAt: new Date().toISOString(),
+        highlight: {
+          blockIndex: 0,
+          codeHash: "hash-1",
+          isClosed: false,
+          lineIndex: 1,
+          lineText: "const answer = 42;",
+          language: "ts",
+          tokens: [{ content: "const", color: "#ffffff" }],
+        },
+      },
+    });
+    expect(frame).toContain("event: session-message-code-highlight");
+    expect(frame).toContain("data:");
+  });
+
   test("toSseFrame maps background.run.updated to background-run event", () => {
     const frame = toSseFrame({
       id: "evt-bg-1",

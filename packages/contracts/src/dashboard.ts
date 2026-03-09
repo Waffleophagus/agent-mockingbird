@@ -57,6 +57,16 @@ export interface StreamdownCodeBlockSnapshot {
   tokens: StreamdownCodeTokenSnapshot[][];
 }
 
+export interface StreamdownCodeLineHighlight {
+  blockIndex: number;
+  codeHash: string;
+  isClosed: boolean;
+  lineIndex: number;
+  language: string;
+  lineText: string;
+  tokens: StreamdownCodeTokenSnapshot[];
+}
+
 export interface StreamdownRenderSnapshot {
   codeBlocks: StreamdownCodeBlockSnapshot[];
   contentHash: string;
@@ -267,6 +277,13 @@ export interface SessionMessageRenderSnapshotEvent {
   observedAt: string;
 }
 
+export interface SessionMessageCodeHighlightEvent {
+  sessionId: string;
+  messageId: string;
+  highlight: StreamdownCodeLineHighlight;
+  observedAt: string;
+}
+
 export interface BackgroundRunSnapshot {
   runId: string;
   parentSessionId: string;
@@ -391,6 +408,10 @@ export type DashboardEvent =
       };
     }
   | { event: "session-message-delta"; payload: SessionMessageDeltaSnapshot }
+  | {
+      event: "session-message-code-highlight";
+      payload: SessionMessageCodeHighlightEvent;
+    }
   | {
       event: "session-message-render-snapshot";
       payload: SessionMessageRenderSnapshotEvent;
