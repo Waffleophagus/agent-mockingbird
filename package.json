@@ -33,11 +33,11 @@
     "config:migrate-opencode-env": "bun run ./scripts/migrate-opencode-env.ts"
   },
   "overrides": {
-    "@streamdown/cjk": "file:/var/home/matt/Documents/random-vibecoded-stuff/streamdown/packages/streamdown-cjk",
-    "@streamdown/core": "file:/var/home/matt/Documents/random-vibecoded-stuff/streamdown/packages/streamdown-core",
-    "@streamdown/math": "file:/var/home/matt/Documents/random-vibecoded-stuff/streamdown/packages/streamdown-math",
-    "@streamdown/mermaid": "file:/var/home/matt/Documents/random-vibecoded-stuff/streamdown/packages/streamdown-mermaid",
-    "remend": "file:/var/home/matt/Documents/random-vibecoded-stuff/streamdown/packages/remend"
+    "@streamdown/cjk": "file:./vendor/streamdown/packages/streamdown-cjk",
+    "@streamdown/core": "file:./vendor/streamdown/packages/streamdown-core",
+    "@streamdown/math": "file:./vendor/streamdown/packages/streamdown-math",
+    "@streamdown/mermaid": "file:./vendor/streamdown/packages/streamdown-mermaid",
+    "remend": "file:./vendor/streamdown/packages/remend"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",

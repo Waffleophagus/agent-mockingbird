@@ -1,0 +1,263 @@
+---
+title: Usage
+description: Learn how to use Streamdown in your project.
+type: guide
+summary: Integrate Streamdown with the Vercel AI SDK and other streaming providers.
+prerequisites:
+  - /docs/getting-started
+related:
+  - /docs/components
+  - /docs/configuration
+---
+
+Streamdown is a drop-in replacement for `react-markdown`, so you can use it just like you would use `react-markdown`.
+
+## Basic Usage
+
+Import and use the `Streamdown` component in your React application:
+
+```tsx title="app/page.tsx"
+import { Streamdown } from 'streamdown';
+
+export default function Page() {
+  const markdown = "# Hello World\n\nThis is **streaming** markdown!";
+
+  return <Streamdown>{markdown}</Streamdown>;
+}
+```
+
+That's it! Streamdown will render your Markdown with all the built-in features enabled.
+
+## With Plugins
+
+For syntax highlighting, diagrams, math rendering, and CJK support, install the plugin packages:
+
+```package-install
+npm install @streamdown/code @streamdown/mermaid @streamdown/math @streamdown/cjk
+```
+
+Then import the plugins:
+
+```tsx title="app/page.tsx"
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
+import { mermaid } from '@streamdown/mermaid';
+import { math } from '@streamdown/math';
+import { cjk } from '@streamdown/cjk';
+
+// Import KaTeX styles for math rendering
+import 'katex/dist/katex.min.css';
+
+export default function Page() {
+  const markdown = `
+# Hello World
+
+Here's some code:
+
+\`\`\`typescript
+const greeting = "Hello, World!";
+console.log(greeting);
+\`\`\`
+
+And a diagram:
+
+\`\`\`mermaid
+graph LR
+    A[Start] --> B[End]
+\`\`\`
+
+And some math: $$E = mc^2$$
+  `;
+
+  return (
+    <Streamdown
+      plugins={{
+        code: code,
+        mermaid: mermaid,
+        math: math,
+        cjk: cjk,
+      }}
+    >
+      {markdown}
+    </Streamdown>
+  );
+}
+```
+
+### Plugin Options
+
+Each plugin is optional - install and import only what you need:
+
+```bash
+# Just syntax highlighting
+npm install @streamdown/code
+```
+
+```tsx title="app/page.tsx"
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
+
+<Streamdown plugins={{ code: code }}>
+  {markdown}
+</Streamdown>
+```
+
+```bash
+# Just diagrams
+npm install @streamdown/mermaid
+```
+
+```tsx title="app/page.tsx"
+import { Streamdown } from 'streamdown';
+import { mermaid } from '@streamdown/mermaid';
+
+<Streamdown plugins={{ mermaid: mermaid }}>
+  {markdown}
+</Streamdown>
+```
+
+```bash
+# Just math
+npm install @streamdown/math
+```
+
+```tsx title="app/page.tsx"
+import { Streamdown } from 'streamdown';
+import { math } from '@streamdown/math';
+import 'katex/dist/katex.min.css';
+
+<Streamdown plugins={{ math: math }}>
+  {markdown}
+</Streamdown>
+```
+
+```bash
+# Just CJK support
+npm install @streamdown/cjk
+```
+
+```tsx title="app/page.tsx"
+import { Streamdown } from 'streamdown';
+import { cjk } from '@streamdown/cjk';
+
+<Streamdown plugins={{ cjk: cjk }}>
+  {markdown}
+</Streamdown>
+```
+
+## With AI Streaming
+
+Streamdown really shines when used with AI streaming. Here's an example using the Vercel AI SDK:
+
+```tsx title="app/page.tsx"
+'use client';
+
+import { useChat } from '@ai-sdk/react';
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
+import { mermaid } from '@streamdown/mermaid';
+
+export default function ChatPage() {
+  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat();
+
+  return (
+    <div className="flex flex-col h-screen">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={message.role === 'user' ? 'text-right' : 'text-left'}
+          >
+            <div className="inline-block max-w-2xl">
+              <Streamdown
+                plugins={{
+                  code: code,
+                  mermaid: mermaid,
+                }}
+                isAnimating={isLoading && message.role === 'assistant'}
+              >
+                {message.content}
+              </Streamdown>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-4 border-t">
+        <input
+          value={input}
+          onChange={handleInputChange}
+          placeholder="Ask me anything..."
+          className="w-full px-4 py-2 border rounded-lg"
+          disabled={isLoading}
+        />
+      </form>
+    </div>
+  );
+}
+```
+
+## Static Mode
+
+Static mode is designed for rendering pre-generated markdown content, such as blog posts, documentation, or other static pages where content is already complete.
+
+### When to Use Static Mode
+
+Use static mode when:
+
+- Rendering static markdown content (e.g., blog posts, docs)
+- Content is pre-generated and not streaming
+- You need improved fallback rendering for code blocks
+- Streaming optimizations are unnecessary
+
+### Basic Static Mode Usage
+
+Enable static mode by setting the `mode` prop to `"static"`:
+
+```tsx title="app/blog/[slug]/page.tsx"
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
+
+export default function BlogPost({ content }: { content: string }) {
+  return (
+    <Streamdown
+      mode="static"
+      plugins={{ code: code }}
+    >
+      {content}
+    </Streamdown>
+  );
+}
+```
+
+### How Static Mode Works
+
+Static mode skips streaming-related optimizations:
+
+- **No block parsing**: Content is rendered as a single unit instead of being split into blocks
+- **No incomplete markdown handling**: Assumes markdown is complete and well-formed
+- **Improved code blocks**: Uses optimized rendering for static code blocks
+- **Simpler rendering**: Direct ReactMarkdown rendering without streaming overhead
+
+### Configuration
+
+All standard Streamdown props work in static mode, including:
+
+- Custom components
+- Syntax highlighting themes
+- Mermaid diagrams
+- Plugin configuration
+
+```tsx title="app/blog/[slug]/page.tsx"
+<Streamdown
+  mode="static"
+  plugins={{
+    code: code,
+    mermaid: mermaid,
+  }}
+  shikiTheme={['github-light', 'github-dark']}
+  mermaid={{ config: { theme: 'neutral' } }}
+>
+  {content}
+</Streamdown>
+```

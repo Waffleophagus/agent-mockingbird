@@ -1,0 +1,54 @@
+{
+  "name": "@streamdown/react-native",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "react-native": "./index.tsx",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:coverage": "vitest --coverage run"
+  },
+  "license": "Apache-2.0",
+  "description": "React Native renderer package for Streamdown.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel/streamdown.git",
+    "directory": "packages/streamdown-react-native"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-native": ">=0.74.0",
+    "react-native-reanimated": "~4.0.1",
+    "react-native-worklets": "0.5.1"
+  },
+  "dependencies": {
+    "@streamdown/core": "workspace:*",
+    "react-native-url-polyfill": "^2.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5"
+  },
+  "devDependencies": {
+    "@types/hast": "^3.0.4",
+    "@types/react": "^19.2.7",
+    "@vitest/coverage-v8": "^4.0.15",
+    "tsup": "^8.5.1",
+    "vitest": "^4.0.15"
+  }
+}

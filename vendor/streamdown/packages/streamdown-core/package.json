@@ -1,0 +1,42 @@
+{
+  "name": "@streamdown/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "react-native": "./dist/index.js",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:coverage": "vitest --coverage run"
+  },
+  "license": "Apache-2.0",
+  "description": "Shared, platform-agnostic Streamdown core utilities.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel/streamdown.git",
+    "directory": "packages/streamdown-core"
+  },
+  "dependencies": {
+    "marked": "^17.0.1",
+    "remend": "^1.2.2"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.15",
+    "tsup": "^8.5.1",
+    "vitest": "^4.0.15"
+  }
+}

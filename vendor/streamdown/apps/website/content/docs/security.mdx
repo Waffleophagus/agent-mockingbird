@@ -1,0 +1,332 @@
+---
+title: Security
+description: Built-in content hardening and security features to protect against malicious Markdown.
+type: conceptual
+summary: Streamdown sanitizes HTML, prevents XSS attacks, and strips dangerous content by default.
+related:
+  - /docs/link-safety
+---
+
+Streamdown is built with security as a top priority. When rendering user-generated or AI-generated Markdown content, it's crucial to protect against malicious content, especially when dealing with content that might have been subject to prompt injection attacks.
+
+## Why Security Matters
+
+Markdown can contain:
+- **Links to malicious sites** - Phishing or malware distribution
+- **External images** - Privacy tracking or CSRF attacks
+- **HTML content** - XSS vulnerabilities
+- **JavaScript execution** - Code injection
+- **Prompt injection** - AI models manipulated to include harmful content
+
+Streamdown uses two layers of protection:
+
+1. **[rehype-sanitize](https://github.com/rehypejs/rehype-sanitize)** — strips dangerous HTML elements and attributes using GitHub's sanitization schema, extended with `tel:` protocol support
+2. **[rehype-harden](https://github.com/vercel-labs/markdown-sanitizers)** — restricts URL protocols, link domains, and image sources
+
+## Default Security
+
+By default, Streamdown is configured with **permissive security** to allow maximum functionality:
+
+```tsx
+// Default rehype-harden configuration
+{
+  allowedImagePrefixes: ["*"],  // All images allowed
+  allowedLinkPrefixes: ["*"],   // All links allowed
+  allowedProtocols: ["*"],      // All protocols allowed
+  defaultOrigin: undefined,     // No origin restriction
+  allowDataImages: true,        // Base64 images allowed
+}
+```
+
+The default `rehype-sanitize` schema allows `http`, `https`, `irc`, `ircs`, `mailto`, `xmpp`, and `tel` protocols for links.
+
+This works well for trusted content but should be tightened for untrusted sources.
+
+## Restricting Protocols
+
+By default, all protocols are allowed. You can restrict which URL protocols are permitted:
+
+```tsx
+import { Streamdown, defaultRehypePlugins } from 'streamdown';
+import { harden } from 'rehype-harden';
+
+export default function Page() {
+  return (
+    <Streamdown
+      rehypePlugins={[
+        defaultRehypePlugins.raw,
+        defaultRehypePlugins.sanitize,
+        [
+          harden,
+          {
+            allowedProtocols: [
+              'http',
+              'https',
+              'mailto',
+            ],
+          },
+        ],
+      ]}
+    >
+      {markdown}
+    </Streamdown>
+  );
+}
+```
+
+<Callout type="warning">
+  When overriding `rehypePlugins`, always include `defaultRehypePlugins.sanitize` to preserve XSS protection. The `rehypePlugins` prop **replaces** the entire default array — it does not merge.
+</Callout>
+
+This is useful for security-sensitive applications where you want to prevent custom protocol schemes like `javascript:`, `data:`, or desktop app protocols.
+
+### Custom Protocol Schemes
+
+To enable custom protocol schemes like `postman://`, `vscode://`, or `slack://`, include them in the `allowedProtocols` array:
+
+```tsx
+{
+  allowedProtocols: [
+    'http',
+    'https',
+    'postman',
+    'vscode',
+    'slack',
+  ],
+}
+```
+
+## Restricting Links
+
+Limit which domains users can link to:
+
+```tsx
+import { Streamdown, defaultRehypePlugins } from 'streamdown';
+import { harden } from 'rehype-harden';
+
+export default function Page() {
+  return (
+    <Streamdown
+      rehypePlugins={[
+        defaultRehypePlugins.raw,
+        defaultRehypePlugins.sanitize,
+        [
+          harden,
+          {
+            defaultOrigin: 'https://streamdown.ai',
+            allowedLinkPrefixes: [
+              'https://streamdown.ai',
+              'https://github.com',
+              'https://vercel.com',
+            ],
+          },
+        ],
+      ]}
+    >
+      {markdown}
+    </Streamdown>
+  );
+}
+```
+
+Any links not matching the allowed prefixes will be rewritten to point to the `defaultOrigin`.
+
+### Example
+
+With the above configuration:
+
+```markdown
+[Safe link](https://github.com/vercel/streamdown)
+[Unsafe link](https://malicious-site.com)
+```
+
+Results in:
+- Safe link: Works normally
+- Unsafe link: Renders as [blocked]
+
+## Restricting Images
+
+Similarly, restrict which domains can serve images:
+
+```tsx
+<Streamdown
+  rehypePlugins={[
+    defaultRehypePlugins.raw,
+    defaultRehypePlugins.sanitize,
+    [
+      harden,
+      {
+        allowedImagePrefixes: [
+          'https://your-cdn.com',
+          'https://trusted-images.com',
+        ],
+        allowDataImages: false,  // Disable base64 images
+      },
+    ],
+  ]}
+>
+  {markdown}
+</Streamdown>
+```
+
+### Data Images
+
+Base64-encoded images (`data:image/...`) can be disabled:
+
+```tsx
+allowDataImages: false
+```
+
+This prevents embedding arbitrary image data in Markdown, which could be used for:
+- Tracking pixels
+- Large embedded files
+- Malicious payloads
+
+## Protecting Against Prompt Injection
+
+When using AI-generated content, models can be manipulated to include malicious links or content. Here's a production-ready configuration:
+
+```tsx
+import { Streamdown, defaultRehypePlugins } from 'streamdown';
+import { harden } from 'rehype-harden';
+
+export default function ChatMessage({ content, isAIGenerated }) {
+  const securityConfig = isAIGenerated ? {
+    defaultOrigin: 'https://your-app.com',
+    allowedLinkPrefixes: [
+      'https://your-app.com',
+      'https://docs.your-app.com',
+      'https://github.com',
+    ],
+    allowedImagePrefixes: [
+      'https://your-cdn.com',
+    ],
+    allowedProtocols: [
+      'http',
+      'https',
+      'mailto',
+    ],
+    allowDataImages: false,
+  } : {
+    // More permissive for user content
+    allowedLinkPrefixes: ['*'],
+    allowedImagePrefixes: ['*'],
+    allowedProtocols: ['*'],
+  };
+
+  return (
+    <Streamdown
+      rehypePlugins={[
+        defaultRehypePlugins.raw,
+        defaultRehypePlugins.sanitize,
+        [harden, securityConfig],
+      ]}
+    >
+      {content}
+    </Streamdown>
+  );
+}
+```
+
+## Custom HTML Tags
+
+By default, Streamdown's sanitizer strips unknown HTML tags (while preserving their content). If you need to render custom tags like `<ref>` or `<mention>`, use the `allowedTags` prop:
+
+```tsx
+<Streamdown
+  allowedTags={{
+    ref: ["note_id"],      // Allow <ref> with note_id attribute
+    mention: ["user_id"],  // Allow <mention> with user_id attribute
+  }}
+  components={{
+    ref: (props) => <NoteBadge noteId={props.note_id} />,
+    mention: (props) => <UserMention userId={props.user_id} />,
+  }}
+>
+  {markdown}
+</Streamdown>
+```
+
+Only attributes explicitly listed in `allowedTags` are preserved—all other attributes are stripped for security. See the [Styling documentation](/docs/styling#custom-tags) for more details.
+
+<Callout type="warning">
+  The `allowedTags` prop only works with the default rehype plugins. If you provide custom `rehypePlugins`, you must configure sanitization yourself.
+</Callout>
+
+## HTML Content
+
+Streamdown supports raw HTML through `rehype-raw`. To disable HTML entirely:
+
+```tsx
+import { Streamdown, defaultRehypePlugins } from 'streamdown';
+
+export default function Page() {
+  return (
+    <Streamdown
+      rehypePlugins={[
+        // Omit defaultRehypePlugins.raw to disable HTML
+        defaultRehypePlugins.sanitize,
+        defaultRehypePlugins.harden,
+      ]}
+    >
+      {markdown}
+    </Streamdown>
+  );
+}
+```
+
+Without `rehype-raw`, HTML tags will be escaped and displayed as text.
+
+## Relative URLs
+
+Control how relative URLs are handled:
+
+```tsx
+{
+  defaultOrigin: 'https://your-app.com'
+}
+```
+
+Relative URLs will be resolved against this origin:
+
+```markdown
+[Relative link](/docs/guide)
+```
+
+Becomes: `https://your-app.com/docs/guide`
+
+## URL Transform
+
+For URL-level control without writing a rehype plugin, use the `urlTransform` prop. This runs on every URL in the rendered Markdown (links, images, etc.) and matches the react-markdown API.
+
+By default, `defaultUrlTransform` is a passthrough — URL security is already handled by `rehype-sanitize` and `rehype-harden`. Use `urlTransform` when you need custom URL rewriting beyond what those plugins provide.
+
+```tsx title="app/page.tsx"
+import { Streamdown, defaultUrlTransform } from 'streamdown';
+
+// Proxy images through your CDN
+<Streamdown
+  urlTransform={(url, key, node) => {
+    if (key === 'src') {
+      return `https://your-cdn.com/proxy?url=${encodeURIComponent(url)}`;
+    }
+    return defaultUrlTransform(url, key, node);
+  }}
+>
+  {markdown}
+</Streamdown>
+```
+
+## Skipping HTML
+
+To completely ignore raw HTML in Markdown (rather than escaping it), use the `skipHtml` prop:
+
+```tsx title="app/page.tsx"
+<Streamdown skipHtml>
+  {markdown}
+</Streamdown>
+```
+
+## Advanced URL Handling
+
+For advanced URL handling beyond what `urlTransform` and `rehype-harden` provide, you can create a custom rehype plugin. This gives you full control over URL transformation and validation in your markdown content.
