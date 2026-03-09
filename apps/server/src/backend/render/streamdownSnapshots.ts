@@ -34,9 +34,14 @@ const mapCodeToken = (token: {
   bgColor?: string;
   color?: string;
   content: string;
+  htmlStyle?: Record<string, string>;
 }) => ({
   bgColor: token.bgColor,
-  color: token.color,
+  color:
+    token.color ??
+    token.htmlStyle?.color ??
+    token.htmlStyle?.["--shiki-dark"] ??
+    token.htmlStyle?.["--shiki-light"],
   content: token.content,
 });
 
