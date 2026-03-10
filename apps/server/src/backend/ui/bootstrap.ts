@@ -2,7 +2,14 @@ import type { SessionScreenBootstrapResponse } from "@agent-mockingbird/contract
 
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import type { RuntimeEngine } from "../contracts/runtime";
-import { getHeartbeatSnapshot, getSessionById, getUsageSnapshot, listMessagesForSession, listSessions } from "../db/repository";
+import {
+  getHeartbeatSnapshot,
+  getSessionById,
+  getUsageSnapshot,
+  listMessageWindowForSession,
+  listMessagesForSession,
+  listSessions,
+} from "../db/repository";
 import { listOpencodeModelOptions } from "../opencode/models";
 import { listPendingPrompts } from "../prompts/service";
 
@@ -10,6 +17,7 @@ export async function createRuntimeSessionBootstrap(
   runtime: RuntimeEngine,
   latestSeq: number,
   requestedSessionId?: string,
+  messageWindowLimit?: number,
 ): Promise<SessionScreenBootstrapResponse> {
   const sessions = listSessions();
   const activeSessionId = requestedSessionId?.trim() || sessions[0]?.id || "";
@@ -19,7 +27,11 @@ export async function createRuntimeSessionBootstrap(
   }
 
   const activeSession = activeSessionId ? getSessionById(activeSessionId) : null;
-  const messages = activeSessionId ? listMessagesForSession(activeSessionId) : [];
+  const messageWindow =
+    activeSessionId && messageWindowLimit
+      ? listMessageWindowForSession(activeSessionId, { limit: messageWindowLimit })
+      : null;
+  const messages = activeSessionId ? messageWindow?.messages ?? listMessagesForSession(activeSessionId) : [];
   const usage = getUsageSnapshot();
   const heartbeat = getHeartbeatSnapshot();
   const [models, pendingPrompts, backgroundRuns] = await Promise.all([
@@ -36,6 +48,7 @@ export async function createRuntimeSessionBootstrap(
     activeSessionId,
     activeSession,
     messages,
+    messagesMeta: messageWindow?.meta,
     usage,
     heartbeat,
     models,

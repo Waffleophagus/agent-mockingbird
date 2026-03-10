@@ -5,6 +5,7 @@ import type {
   ModelOption,
   PermissionPromptRequest,
   QuestionPromptRequest,
+  SessionMessageWindowMeta,
   SessionSummary,
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
@@ -46,6 +47,7 @@ export interface SessionScreenBootstrapResponse {
   activeSessionId: string;
   activeSession: SessionSummary | null;
   messages: ChatMessage[];
+  messagesMeta?: SessionMessageWindowMeta;
   usage: UsageSnapshot;
   heartbeat: HeartbeatSnapshot;
   models: ModelOption[];

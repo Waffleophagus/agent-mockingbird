@@ -7,8 +7,10 @@ import { MMKV } from "react-native-mmkv";
 
 import type { LocalChatMessage } from "@/features/chat/chat-helpers";
 
+const CACHED_TAIL_MESSAGE_LIMIT = 240;
+
 const storage = new MMKV({
-  id: "agent-mockingbird.mobile.chat-cache",
+  id: "agent-mockingbird.mobile.chat-cache-v2",
 });
 
 const SESSIONS_KEY = "sessions";
@@ -52,7 +54,9 @@ export function readCachedSessionMessages(sessionId: string): ChatMessage[] {
 }
 
 export function writeCachedSessionMessages(sessionId: string, messages: LocalChatMessage[]) {
-  storage.set(sessionMessagesKey(sessionId), JSON.stringify(stripUiState(messages)));
+  const confirmedMessages = stripUiState(messages);
+  const tailMessages = confirmedMessages.slice(-CACHED_TAIL_MESSAGE_LIMIT);
+  storage.set(sessionMessagesKey(sessionId), JSON.stringify(tailMessages));
 }
 
 export function readCachedSessionCheckpoint(sessionId: string): SessionMessageCheckpoint | null {

@@ -5,8 +5,10 @@ import type {
   NotificationDeviceRecord,
   PermissionPromptRequest,
   QuestionPromptRequest,
+  SessionMessageCursor,
   SessionMessageCheckpoint,
   SessionMessagesDeltaResponse,
+  SessionMessagesWindowResponse,
   SessionScreenBootstrapResponse,
   SessionSummary,
 } from "@agent-mockingbird/contracts/dashboard";
@@ -15,13 +17,18 @@ import { z } from "zod";
 
 
 export interface AppApiServices {
-  getSessionBootstrap: (input?: { sessionId?: string }) => Promise<SessionScreenBootstrapResponse>;
+  getSessionBootstrap: (input?: { sessionId?: string; messageWindowLimit?: number }) => Promise<SessionScreenBootstrapResponse>;
   listSessions: () => Promise<SessionSummary[]>;
   createSession: (input?: { title?: string; model?: string }) => Promise<SessionSummary>;
   getSessionMessages: (input: {
     sessionId: string;
     checkpoint?: SessionMessageCheckpoint;
   }) => Promise<SessionMessagesDeltaResponse>;
+  getSessionHistory: (input: {
+    sessionId: string;
+    limit: number;
+    before?: SessionMessageCursor;
+  }) => Promise<SessionMessagesWindowResponse>;
   sendChat: (input: { sessionId: string; content: string }) => Promise<{ session: SessionSummary; messages: ChatMessage[] }>;
   abortChat: (sessionId: string) => Promise<{ aborted: boolean }>;
   listBackgroundRuns: (input?: {
@@ -70,6 +77,11 @@ const checkpointSchema = z.object({
   lastMessageAt: z.string().trim().min(1),
   lastMessageId: z.string().trim().min(1),
 });
+const cursorSchema = z.object({
+  at: z.string().trim().min(1),
+  role: z.enum(["user", "assistant"]),
+  id: z.string().trim().min(1),
+});
 
 export const createAppRouter = () =>
   t.router({
@@ -79,6 +91,7 @@ export const createAppRouter = () =>
           z
             .object({
               sessionId: z.string().trim().min(1).optional(),
+              messageWindowLimit: z.number().int().min(1).max(500).optional(),
             })
             .optional(),
         )
@@ -102,6 +115,15 @@ export const createAppRouter = () =>
           }),
         )
         .query(({ ctx, input }) => ctx.services.getSessionMessages(input)),
+      history: t.procedure
+        .input(
+          z.object({
+            sessionId: sessionIdSchema,
+            limit: z.number().int().min(1).max(500),
+            before: cursorSchema.optional(),
+          }),
+        )
+        .query(({ ctx, input }) => ctx.services.getSessionHistory(input)),
     }),
     chat: t.router({
       send: t.procedure

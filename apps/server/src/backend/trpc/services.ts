@@ -1,14 +1,17 @@
 import type { AppApiServices } from "@agent-mockingbird/api";
 import type {
   ChatMessage,
+  SessionMessageCursor,
   SessionMessageCheckpoint,
   SessionMessagesDeltaResponse,
+  SessionMessagesWindowResponse,
 } from "@agent-mockingbird/contracts/dashboard";
 
 import type { RuntimeEngine } from "../contracts/runtime";
 import {
   createSession,
   getSessionById,
+  listMessageWindowForSession,
   listMessagesForSession,
   listSessions,
 } from "../db/repository";
@@ -37,6 +40,26 @@ function compareMessageToCheckpoint(message: ChatMessage, checkpoint: SessionMes
 
   if (normalizedMessageAt !== normalizedCheckpointAt) {
     return normalizedMessageAt - normalizedCheckpointAt;
+  }
+
+  return message.id.localeCompare(checkpoint.lastMessageId);
+}
+
+function compareMessageWithRole(
+  message: ChatMessage,
+  checkpoint: SessionMessageCheckpoint & { role?: ChatMessage["role"] },
+) {
+  const messageAt = Date.parse(message.at);
+  const checkpointAt = Date.parse(checkpoint.lastMessageAt);
+  const normalizedMessageAt = Number.isFinite(messageAt) ? messageAt : 0;
+  const normalizedCheckpointAt = Number.isFinite(checkpointAt) ? checkpointAt : 0;
+
+  if (normalizedMessageAt !== normalizedCheckpointAt) {
+    return normalizedMessageAt - normalizedCheckpointAt;
+  }
+
+  if (checkpoint.role && message.role !== checkpoint.role) {
+    return message.role === "user" ? -1 : 1;
   }
 
   return message.id.localeCompare(checkpoint.lastMessageId);
@@ -72,7 +95,10 @@ function buildSessionMessagesDeltaResponse(
     };
   }
 
-  if (latestMessage && compareMessageToCheckpoint(latestMessage, checkpoint) < 0) {
+  const checkpointMessage = messages.find(message => message.id === checkpoint.lastMessageId);
+  const resolvedCheckpoint = checkpointMessage ? { ...checkpoint, role: checkpointMessage.role } : checkpoint;
+
+  if (latestMessage && compareMessageWithRole(latestMessage, resolvedCheckpoint) < 0) {
     return {
       messages,
       checkpoint: latestCheckpoint,
@@ -81,14 +107,15 @@ function buildSessionMessagesDeltaResponse(
   }
 
   return {
-    messages: messages.filter(message => compareMessageToCheckpoint(message, checkpoint) > 0),
+    messages: messages.filter(message => compareMessageWithRole(message, resolvedCheckpoint) > 0),
     checkpoint: latestCheckpoint,
   };
 }
 
 export function createAppApiServices(runtime: RuntimeEngine, getLatestSeq: () => number): AppApiServices {
   return {
-    getSessionBootstrap: input => createRuntimeSessionBootstrap(runtime, getLatestSeq(), input?.sessionId),
+    getSessionBootstrap: input =>
+      createRuntimeSessionBootstrap(runtime, getLatestSeq(), input?.sessionId, input?.messageWindowLimit),
     listSessions: async () => listSessions(),
     createSession: async input => createSession(input),
     getSessionMessages: async input => {
@@ -97,6 +124,17 @@ export function createAppApiServices(runtime: RuntimeEngine, getLatestSeq: () =>
         await runtime.syncSessionMessages(input.sessionId).catch(() => undefined);
       }
       return buildSessionMessagesDeltaResponse(listMessagesForSession(input.sessionId), input.checkpoint);
+    },
+    getSessionHistory: async (input: {
+      sessionId: string;
+      limit: number;
+      before?: SessionMessageCursor;
+    }): Promise<SessionMessagesWindowResponse> => {
+      ensureSession(input.sessionId);
+      if (runtime.syncSessionMessages) {
+        await runtime.syncSessionMessages(input.sessionId).catch(() => undefined);
+      }
+      return listMessageWindowForSession(input.sessionId, input);
     },
     sendChat: async input => {
       ensureSession(input.sessionId);

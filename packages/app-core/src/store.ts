@@ -1,10 +1,12 @@
 import type {
   BackgroundRunSnapshot,
   ChatMessage,
+  SessionMessageCursor,
   PermissionPromptRequest,
   QuestionPromptRequest,
   SessionMessageCheckpoint,
   SessionMessagesDeltaResponse,
+  SessionMessagesWindowResponse,
   SessionScreenBootstrapResponse,
   SessionSummary,
 } from "@agent-mockingbird/contracts/dashboard";
@@ -14,9 +16,10 @@ import type { Instance } from "mobx-state-tree";
 export interface AppCoreEnvironment {
   api: {
     sessions: {
-      bootstrap: (input?: { sessionId?: string }) => Promise<SessionScreenBootstrapResponse>;
+      bootstrap: (input?: { sessionId?: string; messageWindowLimit?: number }) => Promise<SessionScreenBootstrapResponse>;
       create: (input?: { title?: string; model?: string }) => Promise<SessionSummary>;
       messages: (input: { sessionId: string; checkpoint?: SessionMessageCheckpoint }) => Promise<SessionMessagesDeltaResponse>;
+      history: (input: { sessionId: string; limit: number; before?: SessionMessageCursor }) => Promise<SessionMessagesWindowResponse>;
     };
     chat: {
       send: (input: { sessionId: string; content: string }) => Promise<{

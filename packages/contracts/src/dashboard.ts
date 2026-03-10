@@ -89,10 +89,29 @@ export interface SessionMessageCheckpoint {
   lastMessageId: string;
 }
 
+export interface SessionMessageCursor {
+  at: string;
+  role: ChatRole;
+  id: string;
+}
+
+export interface SessionMessageWindowMeta {
+  oldestLoaded: SessionMessageCursor | null;
+  newestLoaded: SessionMessageCursor | null;
+  hasOlder: boolean;
+  totalMessages: number;
+  isWindowed: boolean;
+}
+
 export interface SessionMessagesDeltaResponse {
   messages: ChatMessage[];
   checkpoint: SessionMessageCheckpoint | null;
   requiresReset?: boolean;
+}
+
+export interface SessionMessagesWindowResponse {
+  messages: ChatMessage[];
+  meta: SessionMessageWindowMeta;
 }
 
 export interface SessionSummary {
@@ -353,6 +372,7 @@ export interface SessionScreenBootstrapResponse {
   activeSessionId: string;
   activeSession: SessionSummary | null;
   messages: ChatMessage[];
+  messagesMeta?: SessionMessageWindowMeta;
   usage: UsageSnapshot;
   heartbeat: HeartbeatSnapshot;
   models: ModelOption[];

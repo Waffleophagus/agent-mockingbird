@@ -48,40 +48,39 @@ function buildRuntimeStub() {
 describe("createAppApiServices", () => {
   test("getSessionMessages returns only messages after the client checkpoint", async () => {
     const session = repository.createSession({ title: "Delta Session" });
-    const firstExchange = repository.appendChatExchange({
+    repository.upsertSessionMessages({
       sessionId: session.id,
-      userContent: "hello",
-      assistantContent: "world",
-      source: "api",
-      usage: {
-        requestCountDelta: 1,
-        inputTokensDelta: 1,
-        outputTokensDelta: 1,
-        estimatedCostUsdDelta: 0,
-      },
-      createdAt: Date.parse("2026-03-07T12:00:00.000Z"),
-      userMessageId: "user-1",
-      assistantMessageId: "assistant-1",
-    });
-    repository.appendChatExchange({
-      sessionId: session.id,
-      userContent: "next",
-      assistantContent: "reply",
-      source: "api",
-      usage: {
-        requestCountDelta: 1,
-        inputTokensDelta: 1,
-        outputTokensDelta: 1,
-        estimatedCostUsdDelta: 0,
-      },
-      createdAt: Date.parse("2026-03-07T12:01:00.000Z"),
-      userMessageId: "user-2",
-      assistantMessageId: "assistant-2",
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          content: "hello",
+          createdAt: Date.parse("2026-03-07T12:00:00.000Z"),
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          content: "world",
+          createdAt: Date.parse("2026-03-07T12:00:01.000Z"),
+        },
+        {
+          id: "user-2",
+          role: "user",
+          content: "next",
+          createdAt: Date.parse("2026-03-07T12:01:00.000Z"),
+        },
+        {
+          id: "assistant-2",
+          role: "assistant",
+          content: "reply",
+          createdAt: Date.parse("2026-03-07T12:01:01.000Z"),
+        },
+      ],
     });
 
     const services = createAppApiServices(buildRuntimeStub() as never, () => 0);
     const checkpoint = {
-      lastMessageAt: firstExchange?.messages[firstExchange.messages.length - 1]?.at ?? "",
+      lastMessageAt: "2026-03-07T12:00:01.000Z",
       lastMessageId: "assistant-1",
     };
     const response = await services.getSessionMessages({
@@ -123,5 +122,135 @@ describe("createAppApiServices", () => {
 
     expect(response.requiresReset).toBe(true);
     expect(response.messages.map(message => message.id)).toEqual(["user-1", "assistant-1"]);
+  });
+
+  test("getSessionHistory returns the latest page in ascending order with hasOlder metadata", async () => {
+    const session = repository.createSession({ title: "History Session" });
+    for (let index = 1; index <= 3; index += 1) {
+      repository.appendChatExchange({
+        sessionId: session.id,
+        userContent: `user-${index}`,
+        assistantContent: `assistant-${index}`,
+        source: "api",
+        usage: {
+          requestCountDelta: 1,
+          inputTokensDelta: 1,
+          outputTokensDelta: 1,
+          estimatedCostUsdDelta: 0,
+        },
+        createdAt: Date.parse(`2026-03-07T12:0${index}:00.000Z`),
+        userMessageId: `user-${index}`,
+        assistantMessageId: `assistant-${index}`,
+      });
+    }
+
+    const services = createAppApiServices(buildRuntimeStub() as never, () => 0);
+    const response = await services.getSessionHistory({
+      sessionId: session.id,
+      limit: 4,
+    });
+
+    expect(response.messages.map(message => message.id)).toEqual(["user-2", "assistant-2", "user-3", "assistant-3"]);
+    expect(response.meta.hasOlder).toBe(true);
+    expect(response.meta.oldestLoaded?.id).toBe("user-2");
+    expect(response.meta.newestLoaded?.id).toBe("assistant-3");
+    expect(response.meta.totalMessages).toBe(6);
+  });
+
+  test("getSessionHistory returns the next older page before a cursor", async () => {
+    const session = repository.createSession({ title: "History Cursor Session" });
+    for (let index = 1; index <= 4; index += 1) {
+      repository.appendChatExchange({
+        sessionId: session.id,
+        userContent: `user-${index}`,
+        assistantContent: `assistant-${index}`,
+        source: "api",
+        usage: {
+          requestCountDelta: 1,
+          inputTokensDelta: 1,
+          outputTokensDelta: 1,
+          estimatedCostUsdDelta: 0,
+        },
+        createdAt: Date.parse(`2026-03-07T12:0${index}:00.000Z`),
+        userMessageId: `user-${index}`,
+        assistantMessageId: `assistant-${index}`,
+      });
+    }
+
+    const services = createAppApiServices(buildRuntimeStub() as never, () => 0);
+    const latest = await services.getSessionHistory({
+      sessionId: session.id,
+      limit: 4,
+    });
+    const older = await services.getSessionHistory({
+      sessionId: session.id,
+      limit: 4,
+      before: latest.meta.oldestLoaded ?? undefined,
+    });
+
+    expect(older.messages.map(message => message.id)).toEqual(["user-1", "assistant-1", "user-2", "assistant-2"]);
+    expect(older.meta.hasOlder).toBe(false);
+    expect(older.meta.oldestLoaded?.id).toBe("user-1");
+    expect(older.meta.newestLoaded?.id).toBe("assistant-2");
+  });
+
+  test("getSessionHistory keeps user before assistant when timestamps match", async () => {
+    const session = repository.createSession({ title: "Equal Timestamp Session" });
+    repository.appendChatExchange({
+      sessionId: session.id,
+      userContent: "hello",
+      assistantContent: "world",
+      source: "api",
+      usage: {
+        requestCountDelta: 1,
+        inputTokensDelta: 1,
+        outputTokensDelta: 1,
+        estimatedCostUsdDelta: 0,
+      },
+      createdAt: Date.parse("2026-03-07T12:00:00.000Z"),
+      userMessageId: "zzz-user",
+      assistantMessageId: "aaa-assistant",
+    });
+
+    const services = createAppApiServices(buildRuntimeStub() as never, () => 0);
+    const response = await services.getSessionHistory({
+      sessionId: session.id,
+      limit: 10,
+    });
+
+    expect(response.messages.map(message => message.id)).toEqual(["zzz-user", "aaa-assistant"]);
+  });
+
+  test("bootstrap honors messageWindowLimit and returns window metadata", async () => {
+    const session = repository.createSession({ title: "Bootstrap Window Session" });
+    for (let index = 1; index <= 3; index += 1) {
+      repository.appendChatExchange({
+        sessionId: session.id,
+        userContent: `user-${index}`,
+        assistantContent: `assistant-${index}`,
+        source: "api",
+        usage: {
+          requestCountDelta: 1,
+          inputTokensDelta: 1,
+          outputTokensDelta: 1,
+          estimatedCostUsdDelta: 0,
+        },
+        createdAt: Date.parse(`2026-03-07T12:0${index}:00.000Z`),
+        userMessageId: `user-${index}`,
+        assistantMessageId: `assistant-${index}`,
+      });
+    }
+
+    const services = createAppApiServices(buildRuntimeStub() as never, () => 42);
+    const response = await services.getSessionBootstrap({
+      sessionId: session.id,
+      messageWindowLimit: 2,
+    });
+
+    expect(response.messages.map(message => message.id)).toEqual(["user-3", "assistant-3"]);
+    expect(response.messagesMeta?.hasOlder).toBe(true);
+    expect(response.messagesMeta?.oldestLoaded?.id).toBe("user-3");
+    expect(response.messagesMeta?.newestLoaded?.id).toBe("assistant-3");
+    expect(response.realtime.latestSeq).toBe(42);
   });
 });

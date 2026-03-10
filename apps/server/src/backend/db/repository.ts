@@ -4,6 +4,8 @@ import type {
   DashboardBootstrap,
   HeartbeatSnapshot,
   MessageMemoryTrace,
+  SessionMessageCursor,
+  SessionMessagesWindowResponse,
   SessionSummary,
   StreamdownRenderSnapshot,
   UsageSnapshot,
@@ -99,6 +101,10 @@ interface ChannelAllowlistEntryRow {
 interface ExistingMessageIdRow {
   id: string;
   content: string;
+}
+
+interface MessageCountRow {
+  count: number;
 }
 
 export interface RuntimeSessionBindingRecord {
@@ -220,6 +226,96 @@ function messageRowToMessage(row: MessageRow): ChatMessage {
     content: row.content,
     at: toIso(row.created_at),
   };
+}
+
+function messageToCursor(message: ChatMessage): SessionMessageCursor {
+  return {
+    at: message.at,
+    role: message.role,
+    id: message.id,
+  };
+}
+
+function roleSortValue(role: "user" | "assistant") {
+  return role === "user" ? 0 : 1;
+}
+
+function hydrateMessagesForSession(sessionId: string, messages: ChatMessage[]): ChatMessage[] {
+  if (!messages.length) return messages;
+
+  const messageIds = messages.map(message => message.id);
+  const placeholders = messageIds.map(() => "?").join(", ");
+  const traceRows = sqlite
+    .query(
+      `
+      SELECT message_id, trace_json
+      FROM message_memory_traces
+      WHERE session_id = ?1
+        AND message_id IN (${placeholders})
+    `,
+    )
+    .all(sessionId, ...messageIds) as MessageMemoryTraceRow[];
+  const traceMap = new Map<string, MessageMemoryTrace>();
+  for (const row of traceRows) {
+    try {
+      traceMap.set(row.message_id, JSON.parse(row.trace_json) as MessageMemoryTrace);
+    } catch {
+      // ignore malformed trace rows
+    }
+  }
+
+  const partRows = sqlite
+    .query(
+      `
+      SELECT message_id, parts_json
+      FROM message_parts
+      WHERE session_id = ?1
+        AND message_id IN (${placeholders})
+    `,
+    )
+    .all(sessionId, ...messageIds) as MessagePartsRow[];
+  const partMap = new Map<string, ChatMessagePart[]>();
+  for (const row of partRows) {
+    try {
+      const parsed = JSON.parse(row.parts_json) as unknown;
+      const parts = normalizeChatMessageParts(parsed);
+      if (parts.length > 0) {
+        partMap.set(row.message_id, parts);
+      }
+    } catch {
+      // ignore malformed part rows
+    }
+  }
+
+  const renderSnapshotRows = sqlite
+    .query(
+      `
+      SELECT message_id, snapshot_json
+      FROM message_render_snapshots
+      WHERE session_id = ?1
+        AND message_id IN (${placeholders})
+    `,
+    )
+    .all(sessionId, ...messageIds) as MessageRenderSnapshotRow[];
+  const renderSnapshotMap = new Map<string, StreamdownRenderSnapshot>();
+  for (const row of renderSnapshotRows) {
+    try {
+      const parsed = JSON.parse(row.snapshot_json) as unknown;
+      const renderSnapshot = normalizeStreamdownRenderSnapshot(parsed);
+      if (renderSnapshot) {
+        renderSnapshotMap.set(row.message_id, renderSnapshot);
+      }
+    } catch {
+      // ignore malformed snapshot rows
+    }
+  }
+
+  return messages.map(message => ({
+    ...message,
+    memoryTrace: traceMap.get(message.id),
+    parts: partMap.get(message.id),
+    renderSnapshot: renderSnapshotMap.get(message.id),
+  }));
 }
 
 function backgroundRunRowToRecord(row: BackgroundRunRow): BackgroundRunRecord {
@@ -660,87 +756,90 @@ export function listMessagesForSession(sessionId: string): ChatMessage[] {
           WHEN 'user' THEN 0
           ELSE 1
         END ASC,
-        rowid ASC
+        id ASC
     `,
     sessionId,
   );
 
-  const messages = rows.map(messageRowToMessage);
-  if (!messages.length) return messages;
+  return hydrateMessagesForSession(sessionId, rows.map(messageRowToMessage));
+}
 
-  const messageIds = messages.map(message => message.id);
-  const placeholders = messageIds.map(() => "?").join(", ");
-  const traceRows = sqlite
-    .query(
-      `
-      SELECT message_id, trace_json
-      FROM message_memory_traces
-      WHERE session_id = ?1
-        AND message_id IN (${placeholders})
+export function listMessageWindowForSession(
+  sessionId: string,
+  input: {
+    limit: number;
+    before?: SessionMessageCursor;
+  },
+): SessionMessagesWindowResponse {
+  const limit = Math.max(1, input.limit);
+  const beforeMillis = toMillisOrNull(input.before?.at ?? null) ?? Number.MAX_SAFE_INTEGER;
+  const beforeRole = input.before ? roleSortValue(input.before.role) : Number.MAX_SAFE_INTEGER;
+  const beforeId = input.before?.id ?? "\uffff";
+
+  const rows = allRows<MessageRow>(
+    `
+      SELECT id, session_id, role, content, created_at
+      FROM (
+        SELECT id, session_id, role, content, created_at
+        FROM messages
+        WHERE session_id = ?1
+          AND (
+            ?2 IS NULL
+            OR created_at < ?2
+            OR (created_at = ?2 AND CASE role WHEN 'user' THEN 0 ELSE 1 END < ?3)
+            OR (
+              created_at = ?2
+              AND CASE role WHEN 'user' THEN 0 ELSE 1 END = ?3
+              AND id < ?4
+            )
+          )
+        ORDER BY
+          created_at DESC,
+          CASE role
+            WHEN 'user' THEN 0
+            ELSE 1
+          END DESC,
+          id DESC
+        LIMIT ?5
+      )
+      ORDER BY
+        created_at ASC,
+        CASE role
+          WHEN 'user' THEN 0
+          ELSE 1
+        END ASC,
+        id ASC
     `,
-    )
-    .all(sessionId, ...messageIds) as MessageMemoryTraceRow[];
-  const traceMap = new Map<string, MessageMemoryTrace>();
-  for (const row of traceRows) {
-    try {
-      traceMap.set(row.message_id, JSON.parse(row.trace_json) as MessageMemoryTrace);
-    } catch {
-      // ignore malformed trace rows
-    }
-  }
+    sessionId,
+    input.before ? beforeMillis : null,
+    beforeRole,
+    beforeId,
+    limit + 1,
+  );
 
-  const partRows = sqlite
-    .query(
+  const hasOlder = rows.length > limit;
+  const windowRows = hasOlder ? rows.slice(1) : rows;
+  const messages = hydrateMessagesForSession(sessionId, windowRows.map(messageRowToMessage));
+  const totalMessages =
+    scalar<MessageCountRow>(
       `
-      SELECT message_id, parts_json
-      FROM message_parts
-      WHERE session_id = ?1
-        AND message_id IN (${placeholders})
-    `,
-    )
-    .all(sessionId, ...messageIds) as MessagePartsRow[];
-  const partMap = new Map<string, ChatMessagePart[]>();
-  for (const row of partRows) {
-    try {
-      const parsed = JSON.parse(row.parts_json) as unknown;
-      const parts = normalizeChatMessageParts(parsed);
-      if (parts.length > 0) {
-        partMap.set(row.message_id, parts);
-      }
-    } catch {
-      // ignore malformed part rows
-    }
-  }
+        SELECT COUNT(*) as count
+        FROM messages
+        WHERE session_id = ?1
+      `,
+      sessionId,
+    )?.count ?? 0;
 
-  const renderSnapshotRows = sqlite
-    .query(
-      `
-      SELECT message_id, snapshot_json
-      FROM message_render_snapshots
-      WHERE session_id = ?1
-        AND message_id IN (${placeholders})
-    `,
-    )
-    .all(sessionId, ...messageIds) as MessageRenderSnapshotRow[];
-  const renderSnapshotMap = new Map<string, StreamdownRenderSnapshot>();
-  for (const row of renderSnapshotRows) {
-    try {
-      const parsed = JSON.parse(row.snapshot_json) as unknown;
-      const renderSnapshot = normalizeStreamdownRenderSnapshot(parsed);
-      if (renderSnapshot) {
-        renderSnapshotMap.set(row.message_id, renderSnapshot);
-      }
-    } catch {
-      // ignore malformed snapshot rows
-    }
-  }
-
-  return messages.map(message => ({
-    ...message,
-    memoryTrace: traceMap.get(message.id),
-    parts: partMap.get(message.id),
-    renderSnapshot: renderSnapshotMap.get(message.id),
-  }));
+  return {
+    messages,
+    meta: {
+      oldestLoaded: messages[0] ? messageToCursor(messages[0]) : null,
+      newestLoaded: messages[messages.length - 1] ? messageToCursor(messages[messages.length - 1]!) : null,
+      hasOlder,
+      totalMessages,
+      isWindowed: true,
+    },
+  };
 }
 
 export function setMessageMemoryTrace(input: {

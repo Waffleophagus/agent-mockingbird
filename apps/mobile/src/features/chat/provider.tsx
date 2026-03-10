@@ -5,8 +5,11 @@ import type {
   ModelOption,
   PermissionPromptRequest,
   QuestionPromptRequest,
+  SessionMessageCursor,
   SessionMessageCheckpoint,
   SessionMessagesDeltaResponse,
+  SessionMessagesWindowResponse,
+  SessionMessageWindowMeta,
   SessionRunErrorSnapshot,
   SessionRunStatusSnapshot,
   SessionScreenBootstrapResponse,
@@ -52,9 +55,11 @@ interface MobileChatContextValue {
   sessions: SessionSummary[];
   activeSessionId: string;
   messagesBySession: Record<string, LocalChatMessage[]>;
+  historyMetaBySession: Record<string, SessionMessageWindowMeta>;
   modelOptions: ModelOption[];
   loadingBootstrap: boolean;
   loadingMessagesBySession: Record<string, boolean>;
+  loadingOlderBySession: Record<string, boolean>;
   loadingModels: boolean;
   savingModel: boolean;
   modelError: string;
@@ -71,6 +76,7 @@ interface MobileChatContextValue {
   showToolCallDetails: boolean;
   setActiveSessionId: (sessionId: string) => void;
   ensureSessionLoaded: (sessionId: string) => Promise<void>;
+  loadOlderMessages: (sessionId: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   createSession: () => Promise<SessionSummary | null>;
   updateSessionModel: (sessionId: string, model: string) => Promise<void>;
@@ -91,6 +97,7 @@ const SHOW_THINKING_KEY = "agent-mockingbird.mobile.showThinking";
 const SHOW_TOOL_CALLS_KEY = "agent-mockingbird.mobile.showToolCalls";
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
+const MOBILE_MESSAGE_WINDOW_LIMIT = 120;
 
 const MobileChatContext = createContext<MobileChatContextValue | null>(null);
 
@@ -135,6 +142,33 @@ function checkpointFromMessages(messages: LocalChatMessage[]): SessionMessageChe
   };
 }
 
+function confirmedMessages(messages: LocalChatMessage[]) {
+  return messages.filter(message => !message.uiMeta);
+}
+
+function cursorFromMessage(message: ChatMessage): SessionMessageCursor {
+  return {
+    at: message.at,
+    role: message.role,
+    id: message.id,
+  };
+}
+
+function buildHistoryMeta(
+  messages: LocalChatMessage[],
+  options?: Partial<SessionMessageWindowMeta>,
+): SessionMessageWindowMeta {
+  const confirmed = confirmedMessages(messages);
+  return {
+    oldestLoaded: options?.oldestLoaded ?? (confirmed[0] ? cursorFromMessage(confirmed[0]) : null),
+    newestLoaded:
+      options?.newestLoaded ?? (confirmed[confirmed.length - 1] ? cursorFromMessage(confirmed[confirmed.length - 1]!) : null),
+    hasOlder: options?.hasOlder ?? false,
+    totalMessages: options?.totalMessages ?? confirmed.length,
+    isWindowed: options?.isWindowed ?? false,
+  };
+}
+
 export function MobileChatProvider({ children }: PropsWithChildren) {
   const bootstrapStore = useBootstrapStore();
   const apiBaseUrl = bootstrapStore.apiBaseUrl.trim();
@@ -146,9 +180,11 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
   const [sessions, setSessions] = useState<SessionSummary[]>(() => readCachedSessions());
   const [activeSessionId, setActiveSessionIdState] = useState("");
   const [messagesBySession, setMessagesBySession] = useState<Record<string, LocalChatMessage[]>>({});
+  const [historyMetaBySession, setHistoryMetaBySession] = useState<Record<string, SessionMessageWindowMeta>>({});
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [loadingBootstrap, setLoadingBootstrap] = useState(false);
   const [loadingMessagesBySession, setLoadingMessagesBySession] = useState<Record<string, boolean>>({});
+  const [loadingOlderBySession, setLoadingOlderBySession] = useState<Record<string, boolean>>({});
   const [loadingModels, setLoadingModels] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
   const [modelError, setModelError] = useState("");
@@ -171,6 +207,8 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
   const [socketGeneration, setSocketGeneration] = useState(0);
   const loadedSessionIdsRef = useRef(new Set<string>());
   const activeSessionIdRef = useRef("");
+  const messagesBySessionRef = useRef<Record<string, LocalChatMessage[]>>({});
+  const historyMetaBySessionRef = useRef<Record<string, SessionMessageWindowMeta>>({});
   const lastAppliedSeqRef = useRef(readCachedLastAppliedSeq());
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -180,6 +218,14 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    messagesBySessionRef.current = messagesBySession;
+  }, [messagesBySession]);
+
+  useEffect(() => {
+    historyMetaBySessionRef.current = historyMetaBySession;
+  }, [historyMetaBySession]);
 
   useEffect(() => {
     writeCachedSessions(sessions);
@@ -221,12 +267,57 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
     socketRef.current = null;
   }
 
+  function commitSessionMessages(
+    sessionId: string,
+    nextMessages: LocalChatMessage[],
+    nextMeta?: SessionMessageWindowMeta,
+  ) {
+    const nextMessagesBySession = {
+      ...messagesBySessionRef.current,
+      [sessionId]: nextMessages,
+    };
+    messagesBySessionRef.current = nextMessagesBySession;
+    setMessagesBySession(nextMessagesBySession);
+    writeCachedSessionMessages(sessionId, nextMessages);
+    writeCachedSessionCheckpoint(sessionId, checkpointFromMessages(nextMessages));
+
+    if (nextMeta) {
+      const nextHistoryMetaBySession = {
+        ...historyMetaBySessionRef.current,
+        [sessionId]: nextMeta,
+      };
+      historyMetaBySessionRef.current = nextHistoryMetaBySession;
+      setHistoryMetaBySession(nextHistoryMetaBySession);
+    }
+  }
+
+  function deriveHistoryMetaForSession(
+    sessionId: string,
+    nextMessages: LocalChatMessage[],
+    overrides?: Partial<SessionMessageWindowMeta>,
+  ) {
+    const currentMeta = historyMetaBySessionRef.current[sessionId];
+    const sessionCount = sessions.find(session => session.id === sessionId)?.messageCount ?? currentMeta?.totalMessages;
+    const confirmedCount = confirmedMessages(nextMessages).length;
+    return buildHistoryMeta(nextMessages, {
+      totalMessages: overrides?.totalMessages ?? sessionCount ?? confirmedCount,
+      hasOlder: overrides?.hasOlder ?? currentMeta?.hasOlder ?? (sessionCount != null ? sessionCount > confirmedCount : false),
+      isWindowed: overrides?.isWindowed ?? currentMeta?.isWindowed ?? false,
+      oldestLoaded: overrides?.oldestLoaded,
+      newestLoaded: overrides?.newestLoaded,
+    });
+  }
+
   function applyBootstrapPayload(payload: SessionScreenBootstrapResponse, options?: { resetLoadedSessions?: boolean }) {
     const nextSessions = sortSessionsByActivity(payload.sessions ?? []);
     const resolvedActiveSessionId = payload.activeSessionId || activeSessionIdRef.current || nextSessions[0]?.id || "";
     const nextMessages = (payload.messages ?? []) as LocalChatMessage[];
     const cachedMessages = resolvedActiveSessionId ? (readCachedSessionMessages(resolvedActiveSessionId) as LocalChatMessage[]) : [];
     const hydratedMessages = mergeMessages(cachedMessages, nextMessages);
+    const nextHistoryMeta =
+      resolvedActiveSessionId && hydratedMessages
+        ? buildHistoryMeta(hydratedMessages, payload.messagesMeta ?? { totalMessages: hydratedMessages.length })
+        : undefined;
 
     setSessions(nextSessions);
     setModelOptions(Array.isArray(payload.models) ? payload.models : []);
@@ -240,25 +331,40 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
     if (options?.resetLoadedSessions) {
       const loaded = new Set<string>();
       const nextMessagesBySession: Record<string, LocalChatMessage[]> = {};
+      const nextHistoryMetaBySession: Record<string, SessionMessageWindowMeta> = {};
       if (resolvedActiveSessionId) {
         loaded.add(resolvedActiveSessionId);
         nextMessagesBySession[resolvedActiveSessionId] = hydratedMessages;
+        if (nextHistoryMeta) {
+          nextHistoryMetaBySession[resolvedActiveSessionId] = nextHistoryMeta;
+        }
+      }
+      loadedSessionIdsRef.current = loaded;
+      messagesBySessionRef.current = nextMessagesBySession;
+      setMessagesBySession(nextMessagesBySession);
+      historyMetaBySessionRef.current = nextHistoryMetaBySession;
+      setHistoryMetaBySession(nextHistoryMetaBySession);
+      if (resolvedActiveSessionId) {
         writeCachedSessionMessages(resolvedActiveSessionId, hydratedMessages);
         writeCachedSessionCheckpoint(resolvedActiveSessionId, checkpointFromMessages(hydratedMessages));
       }
-      loadedSessionIdsRef.current = loaded;
-      setMessagesBySession(nextMessagesBySession);
     } else if (resolvedActiveSessionId) {
       loadedSessionIdsRef.current.add(resolvedActiveSessionId);
-      setMessagesBySession(current => ({
-        ...current,
-        [resolvedActiveSessionId]: (() => {
-          const mergedMessages = mergeMessages(current[resolvedActiveSessionId] ?? cachedMessages, nextMessages);
-          writeCachedSessionMessages(resolvedActiveSessionId, mergedMessages);
-          writeCachedSessionCheckpoint(resolvedActiveSessionId, checkpointFromMessages(mergedMessages));
-          return mergedMessages;
-        })(),
-      }));
+      const mergedMessages = mergeMessages(messagesBySessionRef.current[resolvedActiveSessionId] ?? cachedMessages, nextMessages);
+      commitSessionMessages(
+        resolvedActiveSessionId,
+        mergedMessages,
+        nextHistoryMeta ??
+          historyMetaBySessionRef.current[resolvedActiveSessionId] ??
+          buildHistoryMeta(mergedMessages, {
+            totalMessages:
+              nextSessions.find(session => session.id === resolvedActiveSessionId)?.messageCount ?? mergedMessages.length,
+            hasOlder:
+              (nextSessions.find(session => session.id === resolvedActiveSessionId)?.messageCount ?? mergedMessages.length) >
+              confirmedMessages(mergedMessages).length,
+            isWindowed: Boolean(payload.messagesMeta),
+          }),
+      );
     }
 
     const latestSeq = payload.realtime?.latestSeq ?? 0;
@@ -274,7 +380,9 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
 
     try {
       const payload = (await client.sessions.bootstrap.query(
-        requestedSessionId?.trim() ? { sessionId: requestedSessionId.trim() } : undefined,
+        requestedSessionId?.trim()
+          ? { sessionId: requestedSessionId.trim(), messageWindowLimit: MOBILE_MESSAGE_WINDOW_LIMIT }
+          : { messageWindowLimit: MOBILE_MESSAGE_WINDOW_LIMIT },
       )) as SessionScreenBootstrapResponse;
       applyBootstrapPayload(payload, options);
       return true;
@@ -326,6 +434,19 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
         setLastServerActivityAt(markActivity());
         const payload = frame.payload as SessionSummary;
         setSessions(current => upsertSessionList(current, payload));
+        const existingMeta = historyMetaBySessionRef.current[payload.id];
+        if (existingMeta) {
+          const nextHistoryMetaBySession = {
+            ...historyMetaBySessionRef.current,
+            [payload.id]: {
+              ...existingMeta,
+              totalMessages: payload.messageCount,
+              hasOlder: existingMeta.isWindowed ? payload.messageCount > confirmedMessages(messagesBySessionRef.current[payload.id] ?? []).length : existingMeta.hasOlder,
+            },
+          };
+          historyMetaBySessionRef.current = nextHistoryMetaBySession;
+          setHistoryMetaBySession(nextHistoryMetaBySession);
+        }
         return;
       }
       case "session-message": {
@@ -335,15 +456,8 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
           { event: "session-message" }
         >["payload"];
         loadedSessionIdsRef.current.add(payload.sessionId);
-        setMessagesBySession(current => ({
-          ...current,
-          [payload.sessionId]: (() => {
-            const nextMessages = reconcileIncomingMessage(current[payload.sessionId] ?? [], payload.message);
-            writeCachedSessionMessages(payload.sessionId, nextMessages);
-            writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
-            return nextMessages;
-          })(),
-        }));
+        const nextMessages = reconcileIncomingMessage(messagesBySessionRef.current[payload.sessionId] ?? [], payload.message);
+        commitSessionMessages(payload.sessionId, nextMessages, deriveHistoryMetaForSession(payload.sessionId, nextMessages));
         if (payload.message.role === "assistant") {
           setSendingBySession(current => ({
             ...current,
@@ -365,15 +479,13 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
           { event: "session-message-delta" }
         >["payload"];
         loadedSessionIdsRef.current.add(payload.sessionId);
-        setMessagesBySession(current => ({
-          ...current,
-          [payload.sessionId]: (() => {
-            const nextMessages = applyMessageDelta(current[payload.sessionId] ?? [], payload.messageId, payload.text, payload.mode);
-            writeCachedSessionMessages(payload.sessionId, nextMessages);
-            writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
-            return nextMessages;
-          })(),
-        }));
+        const nextMessages = applyMessageDelta(
+          messagesBySessionRef.current[payload.sessionId] ?? [],
+          payload.messageId,
+          payload.text,
+          payload.mode,
+        );
+        commitSessionMessages(payload.sessionId, nextMessages, deriveHistoryMetaForSession(payload.sessionId, nextMessages));
         return;
       }
       case "session-message-part": {
@@ -383,15 +495,8 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
           { event: "session-message-part" }
         >["payload"];
         loadedSessionIdsRef.current.add(payload.sessionId);
-        setMessagesBySession(current => ({
-          ...current,
-          [payload.sessionId]: (() => {
-            const nextMessages = applyMessagePart(current[payload.sessionId] ?? [], payload.messageId, payload.part);
-            writeCachedSessionMessages(payload.sessionId, nextMessages);
-            writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
-            return nextMessages;
-          })(),
-        }));
+        const nextMessages = applyMessagePart(messagesBySessionRef.current[payload.sessionId] ?? [], payload.messageId, payload.part);
+        commitSessionMessages(payload.sessionId, nextMessages, deriveHistoryMetaForSession(payload.sessionId, nextMessages));
         return;
       }
       case "session-message-code-highlight": {
@@ -401,19 +506,12 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
           { event: "session-message-code-highlight" }
         >["payload"];
         loadedSessionIdsRef.current.add(payload.sessionId);
-        setMessagesBySession(current => ({
-          ...current,
-          [payload.sessionId]: (() => {
-            const nextMessages = applyMessageCodeHighlight(
-              current[payload.sessionId] ?? [],
-              payload.messageId,
-              payload.highlight,
-            );
-            writeCachedSessionMessages(payload.sessionId, nextMessages);
-            writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
-            return nextMessages;
-          })(),
-        }));
+        const nextMessages = applyMessageCodeHighlight(
+          messagesBySessionRef.current[payload.sessionId] ?? [],
+          payload.messageId,
+          payload.highlight,
+        );
+        commitSessionMessages(payload.sessionId, nextMessages, deriveHistoryMetaForSession(payload.sessionId, nextMessages));
         return;
       }
       case "session-message-render-snapshot": {
@@ -423,19 +521,12 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
           { event: "session-message-render-snapshot" }
         >["payload"];
         loadedSessionIdsRef.current.add(payload.sessionId);
-        setMessagesBySession(current => ({
-          ...current,
-          [payload.sessionId]: (() => {
-            const nextMessages = applyMessageRenderSnapshot(
-              current[payload.sessionId] ?? [],
-              payload.messageId,
-              payload.renderSnapshot,
-            );
-            writeCachedSessionMessages(payload.sessionId, nextMessages);
-            writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
-            return nextMessages;
-          })(),
-        }));
+        const nextMessages = applyMessageRenderSnapshot(
+          messagesBySessionRef.current[payload.sessionId] ?? [],
+          payload.messageId,
+          payload.renderSnapshot,
+        );
+        commitSessionMessages(payload.sessionId, nextMessages, deriveHistoryMetaForSession(payload.sessionId, nextMessages));
         return;
       }
       case "session-status": {
@@ -445,15 +536,8 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
           { event: "session-status" }
         >["payload"];
         if (payload.status === "idle") {
-          setMessagesBySession(current => ({
-            ...current,
-            [payload.sessionId]: (() => {
-              const nextMessages = clearPendingAssistantUiMeta(current[payload.sessionId] ?? []);
-              writeCachedSessionMessages(payload.sessionId, nextMessages);
-              writeCachedSessionCheckpoint(payload.sessionId, checkpointFromMessages(nextMessages));
-              return nextMessages;
-            })(),
-          }));
+          const nextMessages = clearPendingAssistantUiMeta(messagesBySessionRef.current[payload.sessionId] ?? []);
+          commitSessionMessages(payload.sessionId, nextMessages, deriveHistoryMetaForSession(payload.sessionId, nextMessages));
         }
         setRunStatusBySession(current => ({
           ...current,
@@ -579,8 +663,12 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
       setActiveSessionIdState("");
       activeSessionIdRef.current = "";
       setMessagesBySession({});
+      messagesBySessionRef.current = {};
+      setHistoryMetaBySession({});
+      historyMetaBySessionRef.current = {};
       setPendingPermissionsBySession({});
       setPendingQuestionsBySession({});
+      setLoadingOlderBySession({});
       setConnectionState("idle");
       setBaselineSeq(null);
       lastAppliedSeqRef.current = 0;
@@ -642,16 +730,52 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
     closeSocket();
   }, []);
 
+  async function loadLatestWindow(sessionId: string) {
+    if (!client) return;
+    const response = (await client.sessions.history.query({
+      sessionId,
+      limit: MOBILE_MESSAGE_WINDOW_LIMIT,
+    })) as SessionMessagesWindowResponse;
+    const incomingMessages = response.messages as LocalChatMessage[];
+    loadedSessionIdsRef.current.add(sessionId);
+    setLastServerActivityAt(markActivity());
+    commitSessionMessages(
+      sessionId,
+      incomingMessages,
+      buildHistoryMeta(incomingMessages, response.meta),
+    );
+  }
+
   async function ensureSessionLoaded(sessionId: string) {
     if (!client || !sessionId) return;
     const cachedMessages = readCachedSessionMessages(sessionId) as LocalChatMessage[];
     if (cachedMessages.length > 0) {
       loadedSessionIdsRef.current.add(sessionId);
-      setMessagesBySession(current => ({
-        ...current,
-        [sessionId]: mergeMessages(current[sessionId] ?? [], cachedMessages),
-      }));
+      commitSessionMessages(
+        sessionId,
+        mergeMessages(messagesBySessionRef.current[sessionId] ?? [], cachedMessages),
+        deriveHistoryMetaForSession(sessionId, cachedMessages, {
+          hasOlder:
+            (sessions.find(session => session.id === sessionId)?.messageCount ?? cachedMessages.length) >
+            confirmedMessages(cachedMessages).length,
+          isWindowed: true,
+        }),
+      );
     } else if (loadedSessionIdsRef.current.has(sessionId)) {
+      const currentMessages = messagesBySessionRef.current[sessionId] ?? [];
+      const checkpoint = checkpointFromMessages(currentMessages);
+      if (!checkpoint) return;
+      const response = (await client.sessions.messages.query({
+        sessionId,
+        checkpoint,
+      })) as SessionMessagesDeltaResponse;
+      if (response.requiresReset) {
+        await loadLatestWindow(sessionId);
+        return;
+      }
+      const nextMessages = mergeMessages(currentMessages, response.messages as LocalChatMessage[]);
+      setLastServerActivityAt(markActivity());
+      commitSessionMessages(sessionId, nextMessages, deriveHistoryMetaForSession(sessionId, nextMessages));
       return;
     }
     setLoadingMessagesBySession(current => ({
@@ -661,25 +785,75 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
 
     try {
       const checkpoint = readCachedSessionCheckpoint(sessionId) ?? checkpointFromMessages(cachedMessages);
+      if (!checkpoint) {
+        await loadLatestWindow(sessionId);
+        return;
+      }
+
       const response = (await client.sessions.messages.query({
         sessionId,
-        checkpoint: checkpoint ?? undefined,
+        checkpoint,
       })) as SessionMessagesDeltaResponse;
-      const incomingMessages = response.messages as LocalChatMessage[];
+
+      if (response.requiresReset) {
+        await loadLatestWindow(sessionId);
+        return;
+      }
+
+      const currentMessages = messagesBySessionRef.current[sessionId] ?? cachedMessages;
+      const nextMessages = mergeMessages(currentMessages, response.messages as LocalChatMessage[]);
       setLastServerActivityAt(markActivity());
       loadedSessionIdsRef.current.add(sessionId);
-      setMessagesBySession(current => ({
-        ...current,
-        [sessionId]: (() => {
-          const currentMessages = current[sessionId] ?? cachedMessages;
-          const nextMessages = response.requiresReset ? incomingMessages : mergeMessages(currentMessages, incomingMessages);
-          writeCachedSessionMessages(sessionId, nextMessages);
-          writeCachedSessionCheckpoint(sessionId, response.checkpoint ?? checkpointFromMessages(nextMessages));
-          return nextMessages;
-        })(),
-      }));
+      commitSessionMessages(
+        sessionId,
+        nextMessages,
+        deriveHistoryMetaForSession(sessionId, nextMessages, {
+          hasOlder:
+            (sessions.find(session => session.id === sessionId)?.messageCount ?? nextMessages.length) >
+            confirmedMessages(nextMessages).length,
+          isWindowed: true,
+        }),
+      );
     } finally {
       setLoadingMessagesBySession(current => ({
+        ...current,
+        [sessionId]: false,
+      }));
+    }
+  }
+
+  async function loadOlderMessages(sessionId: string) {
+    if (!client || !sessionId) return;
+    const meta = historyMetaBySessionRef.current[sessionId];
+    if (!meta?.hasOlder || !meta.oldestLoaded || loadingOlderBySession[sessionId]) return;
+
+    setLoadingOlderBySession(current => ({
+      ...current,
+      [sessionId]: true,
+    }));
+
+    try {
+      const response = (await client.sessions.history.query({
+        sessionId,
+        limit: MOBILE_MESSAGE_WINDOW_LIMIT,
+        before: meta.oldestLoaded,
+      })) as SessionMessagesWindowResponse;
+      const currentMessages = messagesBySessionRef.current[sessionId] ?? [];
+      const nextMessages = mergeMessages(response.messages as LocalChatMessage[], currentMessages);
+      setLastServerActivityAt(markActivity());
+      commitSessionMessages(
+        sessionId,
+        nextMessages,
+        buildHistoryMeta(nextMessages, {
+          oldestLoaded: response.meta.oldestLoaded,
+          newestLoaded: meta.newestLoaded,
+          hasOlder: response.meta.hasOlder,
+          totalMessages: response.meta.totalMessages,
+          isWindowed: true,
+        }),
+      );
+    } finally {
+      setLoadingOlderBySession(current => ({
         ...current,
         [sessionId]: false,
       }));
@@ -698,12 +872,15 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
     const session = await client.sessions.create.mutate();
     setLastServerActivityAt(markActivity());
     setSessions(current => upsertSessionList(current, session));
-    setMessagesBySession(current => ({
-      ...current,
-      [session.id]: current[session.id] ?? [],
-    }));
-    writeCachedSessionMessages(session.id, []);
-    writeCachedSessionCheckpoint(session.id, null);
+    commitSessionMessages(
+      session.id,
+      messagesBySessionRef.current[session.id] ?? [],
+      buildHistoryMeta([], {
+        totalMessages: 0,
+        hasOlder: false,
+        isWindowed: true,
+      }),
+    );
     loadedSessionIdsRef.current.add(session.id);
     setActiveSessionIdState(session.id);
     activeSessionIdRef.current = session.id;
@@ -768,27 +945,18 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
       delete next[sessionId];
       return next;
     });
-    setMessagesBySession(current => ({
-      ...current,
-      [sessionId]: appendOptimisticRequest(current[sessionId] ?? [], requestId, content),
-    }));
+    const optimisticMessages = appendOptimisticRequest(messagesBySessionRef.current[sessionId] ?? [], requestId, content);
+    commitSessionMessages(sessionId, optimisticMessages, deriveHistoryMetaForSession(sessionId, optimisticMessages));
 
     try {
       const result = await client.chat.send.mutate({ sessionId, content });
       setLastServerActivityAt(markActivity());
       setSessions(current => upsertSessionList(current, result.session));
-      setMessagesBySession(current => ({
-        ...current,
-        [sessionId]: (() => {
-          const nextMessages = result.messages.reduce(
-            (messages, message) => reconcileIncomingMessage(messages, message),
-            current[sessionId] ?? [],
-          );
-          writeCachedSessionMessages(sessionId, nextMessages);
-          writeCachedSessionCheckpoint(sessionId, checkpointFromMessages(nextMessages));
-          return nextMessages;
-        })(),
-      }));
+      const nextMessages = result.messages.reduce(
+        (messages, message) => reconcileIncomingMessage(messages, message),
+        messagesBySessionRef.current[sessionId] ?? [],
+      );
+      commitSessionMessages(sessionId, nextMessages, deriveHistoryMetaForSession(sessionId, nextMessages));
     } catch (error) {
       const message = normalizeRequestError(error);
       setSendingBySession(current => ({
@@ -799,18 +967,14 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
         ...current,
         [sessionId]: message,
       }));
-      setMessagesBySession(current => ({
-        ...current,
-        [sessionId]: markPendingAssistantFailed(current[sessionId] ?? [], requestId, message),
-      }));
+      const nextMessages = markPendingAssistantFailed(messagesBySessionRef.current[sessionId] ?? [], requestId, message);
+      commitSessionMessages(sessionId, nextMessages, deriveHistoryMetaForSession(sessionId, nextMessages));
     }
   }
 
   async function retryMessage(sessionId: string, requestId: string, content: string) {
-    setMessagesBySession(current => ({
-      ...current,
-      [sessionId]: removeRequestMessages(current[sessionId] ?? [], requestId),
-    }));
+    const nextMessages = removeRequestMessages(messagesBySessionRef.current[sessionId] ?? [], requestId);
+    commitSessionMessages(sessionId, nextMessages, deriveHistoryMetaForSession(sessionId, nextMessages));
     await sendMessage(sessionId, content);
   }
 
@@ -891,9 +1055,11 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
       sessions,
       activeSessionId,
       messagesBySession,
+      historyMetaBySession,
       modelOptions,
       loadingBootstrap,
       loadingMessagesBySession,
+      loadingOlderBySession,
       loadingModels,
       savingModel,
       modelError,
@@ -910,6 +1076,7 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
       showToolCallDetails,
       setActiveSessionId,
       ensureSessionLoaded,
+      loadOlderMessages,
       refreshSessions,
       createSession,
       updateSessionModel,
@@ -925,9 +1092,11 @@ export function MobileChatProvider({ children }: PropsWithChildren) {
       sessions,
       activeSessionId,
       messagesBySession,
+      historyMetaBySession,
       modelOptions,
       loadingBootstrap,
       loadingMessagesBySession,
+      loadingOlderBySession,
       loadingModels,
       savingModel,
       modelError,
