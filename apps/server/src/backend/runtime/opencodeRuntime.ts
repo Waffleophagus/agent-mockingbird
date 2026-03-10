@@ -240,6 +240,7 @@ const DEFAULT_RUNTIME_TIMEOUT_MS = 120_000;
 const DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS = 300_000;
 const STREAMED_METADATA_CACHE_LIMIT = 10_000;
 const STREAMDOWN_RENDER_DEBOUNCE_MS = 100;
+const STREAMDOWN_LIVE_HIGHLIGHT_DEBOUNCE_MS = 16;
 const AGENT_NAME_CACHE_TTL_MS = 5_000;
 const BUILTIN_SUBAGENT_IDS = new Set(["general", "explore"]);
 const BUILTIN_PRIMARY_AGENT_IDS = new Set([
@@ -346,6 +347,10 @@ export class OpencodeRuntime implements RuntimeEngine {
   private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
   private partTypeByScopedPartId = new Map<string, Part["type"]>();
   private renderSnapshotTimerByScopedMessageId = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private liveCodeHighlightTimerByScopedMessageId = new Map<
     string,
     ReturnType<typeof setTimeout>
   >();
@@ -2333,6 +2338,11 @@ export class OpencodeRuntime implements RuntimeEngine {
       normalizedMessageId,
       next,
     );
+    this.scheduleLiveCodeHighlightEmit(
+      normalizedSessionId,
+      normalizedMessageId,
+      next,
+    );
     this.scheduleRenderSnapshotEmit(
       normalizedSessionId,
       normalizedMessageId,
@@ -2364,6 +2374,12 @@ export class OpencodeRuntime implements RuntimeEngine {
     content: string,
   ) {
     const scopedMessageId = this.scopedMessageId(sessionId, messageId);
+    const latestContent =
+      this.streamedAssistantContentByScopedMessageId.get(scopedMessageId);
+    if (latestContent !== content) {
+      return;
+    }
+
     const liveHighlights = await buildStreamdownCodeLineHighlights(content);
     if (liveHighlights.length === 0) {
       return;
@@ -2399,6 +2415,26 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
   }
 
+  private scheduleLiveCodeHighlightEmit(
+    sessionId: string,
+    messageId: string,
+    content: string,
+  ) {
+    if (!content.trim()) return;
+    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
+    const existingTimer =
+      this.liveCodeHighlightTimerByScopedMessageId.get(scopedMessageId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      this.liveCodeHighlightTimerByScopedMessageId.delete(scopedMessageId);
+      void this.emitCodeHighlightLines(sessionId, messageId, content);
+    }, STREAMDOWN_LIVE_HIGHLIGHT_DEBOUNCE_MS);
+    this.liveCodeHighlightTimerByScopedMessageId.set(scopedMessageId, timer);
+  }
+
   private scheduleRenderSnapshotEmit(
     sessionId: string,
     messageId: string,
@@ -2430,8 +2466,6 @@ export class OpencodeRuntime implements RuntimeEngine {
     if (latestContent !== content) {
       return;
     }
-
-    await this.emitCodeHighlightLines(sessionId, messageId, content);
 
     const renderSnapshot = await buildStreamdownRenderSnapshot(content);
     if (!renderSnapshot) {
