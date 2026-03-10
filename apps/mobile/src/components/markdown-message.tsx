@@ -4,7 +4,6 @@ import { Streamdown } from "@streamdown/react-native";
 import type { ComponentProps } from "react";
 import { Linking, StyleSheet, View } from "react-native";
 
-import { getStreamdownCodePlugin } from "@/lib/streamdown-code-plugin";
 import { chromePalette } from "@/theme/palette";
 
 const styles = StyleSheet.create({
@@ -13,10 +12,6 @@ const styles = StyleSheet.create({
   },
 });
 
-const STREAMDOWN_CODE_PLUGIN = getStreamdownCodePlugin();
-const STREAMDOWN_PLUGINS = STREAMDOWN_CODE_PLUGIN
-  ? { code: STREAMDOWN_CODE_PLUGIN }
-  : undefined;
 const STREAMING_ANIMATION = {
   animation: "fadeIn" as const,
   duration: 90,
@@ -65,9 +60,8 @@ export function MarkdownMessage({
     isAnimating: isStreaming,
     animated: isStreaming ? STREAMING_ANIMATION : false,
     onLinkPress,
-    plugins: STREAMDOWN_PLUGINS,
     renderSnapshot,
-    staticCodeStrategy: STREAMDOWN_CODE_PLUGIN ? "highlight" : "plain",
+    staticCodeStrategy: renderSnapshot ? "freeze" : "plain",
     theme: {
       blockquoteBorderColor: chromePalette.haze,
       codeBlockBackgroundColor: chromePalette.ink,
