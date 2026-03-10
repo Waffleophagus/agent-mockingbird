@@ -2389,29 +2389,44 @@ export class OpencodeRuntime implements RuntimeEngine {
       this.emittedCodeHighlightLinesByScopedMessageId.get(scopedMessageId) ??
       new Map<string, string>();
 
-    for (const highlight of liveHighlights) {
+    const nextHighlight = liveHighlights.find((highlight) => {
       const lineKey = `${highlight.blockIndex}:${highlight.lineIndex}`;
-      if (emittedLineMap.get(lineKey) === highlight.lineText) {
-        continue;
-      }
+      return emittedLineMap.get(lineKey) !== highlight.lineText;
+    });
 
-      this.emit(
-        createSessionMessageCodeHighlightEvent(
-          {
-            sessionId,
-            messageId,
-            highlight,
-            observedAt: new Date().toISOString(),
-          },
-          "runtime",
-        ),
-      );
-      this.rememberEmittedCodeHighlightLine(
-        sessionId,
-        messageId,
-        lineKey,
-        highlight.lineText,
-      );
+    if (!nextHighlight) {
+      return;
+    }
+
+    const lineKey = `${nextHighlight.blockIndex}:${nextHighlight.lineIndex}`;
+    this.emit(
+      createSessionMessageCodeHighlightEvent(
+        {
+          sessionId,
+          messageId,
+          highlight: nextHighlight,
+          observedAt: new Date().toISOString(),
+        },
+        "runtime",
+      ),
+    );
+    this.rememberEmittedCodeHighlightLine(
+      sessionId,
+      messageId,
+      lineKey,
+      nextHighlight.lineText,
+    );
+
+    const hasMorePendingHighlights = liveHighlights.some((highlight) => {
+      const pendingLineKey = `${highlight.blockIndex}:${highlight.lineIndex}`;
+      if (pendingLineKey === lineKey) {
+        return false;
+      }
+      return emittedLineMap.get(pendingLineKey) !== highlight.lineText;
+    });
+
+    if (hasMorePendingHighlights) {
+      this.scheduleLiveCodeHighlightEmit(sessionId, messageId, content);
     }
   }
 
