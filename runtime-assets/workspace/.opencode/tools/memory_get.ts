@@ -29,7 +29,7 @@ export default tool({
     lines: tool.schema.number().int().min(1).max(400).optional().describe("Number of lines to return"),
   },
   async execute(args: { path: string; from?: number; lines?: number }) {
-    const payload = await postJson("/api/memory/read", {
+    const payload = await postJson("/api/waffle/memory/read", {
       path: args.path,
       from: args.from,
       lines: args.lines,

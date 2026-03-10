@@ -2,7 +2,7 @@ import type { SignalChannelService } from "../../channels/signal/service";
 
 export function createSignalRoutes(signalService: SignalChannelService) {
   return {
-    "/api/channels/signal/status": {
+    "/api/waffle/signal/status": {
       GET: async () => {
         return Response.json({
           status: signalService.getStatus(),
@@ -11,14 +11,14 @@ export function createSignalRoutes(signalService: SignalChannelService) {
         });
       },
     },
-    "/api/channels/signal/pairing": {
+    "/api/waffle/signal/pairing": {
       GET: async () => {
         return Response.json({
           requests: signalService.listPairingRequests(),
         });
       },
     },
-    "/api/channels/signal/pairing/approve": {
+    "/api/waffle/signal/pairing/approve": {
       POST: async (req: Request) => {
         const body = (await req.json()) as { code?: string; senderId?: string };
         const entry = signalService.approvePairing({
@@ -31,7 +31,7 @@ export function createSignalRoutes(signalService: SignalChannelService) {
         return Response.json({ approved: true, entry });
       },
     },
-    "/api/channels/signal/pairing/reject": {
+    "/api/waffle/signal/pairing/reject": {
       POST: async (req: Request) => {
         const body = (await req.json()) as { code?: string; senderId?: string };
         const rejected = signalService.rejectPairing({
@@ -46,4 +46,3 @@ export function createSignalRoutes(signalService: SignalChannelService) {
     },
   };
 }
-

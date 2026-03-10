@@ -136,7 +136,7 @@ export default tool({
     patch?: unknown;
   }) {
     const args = argsSchema.parse(rawArgs);
-    const payload = await postJson("/api/cron/manage", args);
+    const payload = await postJson("/api/waffle/cron/manage", args);
     return JSON.stringify({
       ok: true,
       ...payload,

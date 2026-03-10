@@ -1,2 +1,0 @@
-export { createAppApiClient } from "./client";
-export type { AppApiServices, AppRouter, AppRouterContext } from "./router";

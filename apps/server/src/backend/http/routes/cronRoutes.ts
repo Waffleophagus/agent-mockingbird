@@ -4,11 +4,11 @@ import { cronJobCreateSchema, cronJobPatchSchema, cronManageSchema } from "../sc
 
 export function createCronRoutes(cronService: CronService) {
   return {
-    "/api/cron/handlers": {
+    "/api/waffle/cron/handlers": {
       GET: () => Response.json({ handlers: listCronHandlerKeys() }),
     },
 
-    "/api/cron/health": {
+    "/api/waffle/cron/health": {
       GET: async () => {
         try {
           return Response.json({ health: await cronService.getHealth() });
@@ -19,7 +19,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/cron/jobs": {
+    "/api/waffle/cron/jobs": {
       GET: async () => {
         try {
           return Response.json({ jobs: await cronService.listJobs() });
@@ -46,7 +46,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/cron/jobs/:id": {
+    "/api/waffle/cron/jobs/:id": {
       GET: async (req: Request & { params: { id: string } }) => {
         const job = await cronService.getJob(req.params.id);
         if (!job) {
@@ -80,7 +80,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/cron/jobs/:id/run": {
+    "/api/waffle/cron/jobs/:id/run": {
       POST: async (req: Request & { params: { id: string } }) => {
         try {
           const run = await cronService.runJobNow(req.params.id);
@@ -93,7 +93,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/cron/instances": {
+    "/api/waffle/cron/instances": {
       GET: async (req: Request) => {
         try {
           const url = new URL(req.url);
@@ -112,7 +112,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/cron/instances/:id/steps": {
+    "/api/waffle/cron/instances/:id/steps": {
       GET: async (req: Request & { params: { id: string } }) => {
         try {
           const steps = await cronService.listSteps(req.params.id);
@@ -124,7 +124,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/cron/manage": {
+    "/api/waffle/cron/manage": {
       POST: async (req: Request) => {
         const parsed = cronManageSchema.safeParse(await req.json());
         if (!parsed.success) {

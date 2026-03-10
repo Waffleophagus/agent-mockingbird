@@ -372,7 +372,12 @@ export const runtimeConfigPolicySchema = z
 
 export const agentMockingbirdConfigSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
+    workspace: z
+      .object({
+        pinnedDirectory: z.string().min(1).default("./data/workspace"),
+      })
+      .strict(),
     runtime: z
       .object({
         opencode: runtimeOpencodeSchema,

@@ -12,7 +12,7 @@ import { parseMemoryRememberBody } from "../parsers";
 
 export function createMemoryRoutes() {
   return {
-    "/api/memory/status": {
+    "/api/waffle/memory/status": {
       GET: async () => {
         try {
           return Response.json({ status: await getMemoryStatus() });
@@ -23,7 +23,7 @@ export function createMemoryRoutes() {
       },
     },
 
-    "/api/memory/activity": {
+    "/api/waffle/memory/activity": {
       GET: async (req: Request) => {
         try {
           const url = new URL(req.url);
@@ -37,7 +37,7 @@ export function createMemoryRoutes() {
       },
     },
 
-    "/api/memory/sync": {
+    "/api/waffle/memory/sync": {
       POST: async () => {
         try {
           await syncMemoryIndex();
@@ -49,7 +49,7 @@ export function createMemoryRoutes() {
       },
     },
 
-    "/api/memory/reindex": {
+    "/api/waffle/memory/reindex": {
       POST: async () => {
         try {
           await syncMemoryIndex({ force: true });
@@ -61,7 +61,7 @@ export function createMemoryRoutes() {
       },
     },
 
-    "/api/memory/retrieve": {
+    "/api/waffle/memory/retrieve": {
       POST: async (req: Request) => {
         const body = (await req.json()) as { query?: string; maxResults?: number; minScore?: number; debug?: boolean };
         const query = body.query?.trim();
@@ -86,7 +86,7 @@ export function createMemoryRoutes() {
       },
     },
 
-    "/api/memory/read": {
+    "/api/waffle/memory/read": {
       POST: async (req: Request) => {
         const body = (await req.json()) as { path?: string; from?: number; lines?: number };
         const relPath = body.path?.trim();
@@ -107,7 +107,7 @@ export function createMemoryRoutes() {
       },
     },
 
-    "/api/memory/remember": {
+    "/api/waffle/memory/remember": {
       POST: async (req: Request) => {
         const body = parseMemoryRememberBody(await req.json());
         if (!body) {
@@ -129,7 +129,7 @@ export function createMemoryRoutes() {
       },
     },
 
-    "/api/memory/remember/validate": {
+    "/api/waffle/memory/remember/validate": {
       POST: async (req: Request) => {
         const body = parseMemoryRememberBody(await req.json());
         if (!body) {

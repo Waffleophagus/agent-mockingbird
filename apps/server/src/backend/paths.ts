@@ -17,13 +17,13 @@ export function resolveDataPath(...segments: string[]): string {
   return path.resolve(getProjectRoot(), "data", ...segments);
 }
 
-export function resolveWebDistDir(): string | null {
+export function resolveAppDistDir(): string | null {
   const candidates = [
-    path.resolve(process.cwd(), "dist", "web"),
-    path.resolve(process.cwd(), "apps", "web", "dist"),
-    path.resolve(sourceRoot(), "dist", "web"),
-    path.resolve(sourceRoot(), "apps", "web", "dist"),
-    path.resolve(path.dirname(process.execPath), "web"),
+    path.resolve(process.cwd(), "dist", "app"),
+    path.resolve(process.cwd(), "vendor", "opencode", "packages", "app", "dist"),
+    path.resolve(sourceRoot(), "dist", "app"),
+    path.resolve(sourceRoot(), "vendor", "opencode", "packages", "app", "dist"),
+    path.resolve(path.dirname(process.execPath), "app"),
   ];
   for (const candidate of candidates) {
     if (existsSync(path.join(candidate, "index.html"))) {

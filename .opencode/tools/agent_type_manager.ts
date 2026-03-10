@@ -70,12 +70,12 @@ export default tool({
     const args = argsSchema.parse(rawArgs);
 
     if (args.action === "list") {
-      const payload = await requestJson("/api/opencode/agents");
+      const payload = await requestJson("/api/waffle/agents");
       return JSON.stringify({ ok: true, ...payload });
     }
 
     if (args.action === "validate_patch") {
-      const payload = await requestJson("/api/opencode/agents/validate", {
+      const payload = await requestJson("/api/waffle/agents/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -86,7 +86,7 @@ export default tool({
       return JSON.stringify({ ok: true, ...payload });
     }
 
-    const payload = await requestJson("/api/opencode/agents", {
+    const payload = await requestJson("/api/waffle/agents", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

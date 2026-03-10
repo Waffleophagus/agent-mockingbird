@@ -9,25 +9,19 @@ function resolvePathFromBinaryRoot(dirPath: string) {
 }
 
 export function resolveMemoryWorkspaceDir(config: AgentMockingbirdConfig) {
-  return resolvePathFromBinaryRoot(config.runtime.memory.workspaceDir.trim());
+  return resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
 }
 
 export function resolveOpencodeWorkspaceDir(config: AgentMockingbirdConfig) {
-  const configured = config.runtime.opencode.directory?.trim();
-  if (configured) return resolvePathFromBinaryRoot(configured);
-  return resolveMemoryWorkspaceDir(config);
+  return resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
 }
 
 export function resolveWorkspaceAlignment(config: AgentMockingbirdConfig) {
-  const memoryWorkspaceDir = resolveMemoryWorkspaceDir(config);
-  const opencodeConfigured = config.runtime.opencode.directory?.trim();
-  const opencodeWorkspaceDir = opencodeConfigured
-    ? resolvePathFromBinaryRoot(opencodeConfigured)
-    : memoryWorkspaceDir;
+  const pinnedWorkspaceDir = resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
   return {
-    memoryWorkspaceDir,
-    opencodeWorkspaceDir,
-    opencodeDirectoryExplicit: Boolean(opencodeConfigured),
-    aligned: memoryWorkspaceDir === opencodeWorkspaceDir,
+    memoryWorkspaceDir: pinnedWorkspaceDir,
+    opencodeWorkspaceDir: pinnedWorkspaceDir,
+    opencodeDirectoryExplicit: true,
+    aligned: true,
   };
 }

@@ -29,7 +29,7 @@ ARCHIVE_PATH="${DIST_DIR}/agent-mockingbird-${VERSION}.tar.gz"
 CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
 PREFIX="agent-mockingbird-${VERSION}"
 
-echo "Building web + standalone runtime..."
+echo "Building vendored OpenCode app + standalone runtime..."
 (
   cd "${ROOT_DIR}"
   bun run build
@@ -48,7 +48,7 @@ rm -rf "${STAGE_DIR:?}/${PREFIX}/dist/release-stage"
 
 test -f "${STAGE_DIR}/${PREFIX}/dist/agent-mockingbird"
 test -f "${STAGE_DIR}/${PREFIX}/dist/drizzle/meta/_journal.json"
-test -f "${STAGE_DIR}/${PREFIX}/dist/web/index.html"
+test -f "${STAGE_DIR}/${PREFIX}/dist/app/index.html"
 test -f "${STAGE_DIR}/${PREFIX}/drizzle/meta/_journal.json"
 
 echo "Packing release bundle..."

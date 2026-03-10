@@ -58,30 +58,28 @@ export default tool({
     const args = argsSchema.parse(rawArgs);
 
     if (args.action === "get_config") {
-      const payload = await requestJson("/api/config");
+      const payload = await requestJson("/api/waffle/runtime/config");
       return JSON.stringify({ ok: true, ...payload });
     }
 
     if (args.action === "patch_config") {
-      const payload = await requestJson("/api/config/patch-safe", {
-        method: "POST",
+      const payload = await requestJson("/api/waffle/runtime/config", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patch: args.patch,
           expectedHash: args.expectedHash,
-          runSmokeTest: args.runSmokeTest,
         }),
       });
       return JSON.stringify({ ok: true, ...payload });
     }
 
-    const payload = await requestJson("/api/config/replace-safe", {
+    const payload = await requestJson("/api/waffle/runtime/config/replace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         config: args.config,
         expectedHash: args.expectedHash,
-        runSmokeTest: args.runSmokeTest,
       }),
     });
     return JSON.stringify({ ok: true, ...payload });

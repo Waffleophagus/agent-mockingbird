@@ -22,12 +22,13 @@ interface ConfigRow {
   value_json: string;
 }
 
-const CONFIG_VERSION = 1 as const;
-const DEFAULT_CONFIG_FILENAME = "agent-mockingbird.config.json";
+const CONFIG_VERSION = 2 as const;
+const DEFAULT_CONFIG_FILENAME = "wafflebot.config.json";
+const LEGACY_CONFIG_FILENAME = "agent-mockingbird.config.json";
 const BACKUP_SUFFIX = ".bak";
 const DEFAULT_SMOKE_TEST_PROMPT = 'Just respond "OK" to this to confirm the gateway is working.';
 const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
-const DEFAULT_OPENCODE_BASE_URL = "http://127.0.0.1:4096";
+const DEFAULT_OPENCODE_BASE_URL = `http://127.0.0.1:${process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001"}`;
 const DEFAULT_OPENCODE_PROVIDER_ID = "opencode";
 const DEFAULT_OPENCODE_MODEL_ID = "big-pickle";
 const DEFAULT_OPENCODE_SMALL_MODEL = "opencode/big-pickle";
@@ -45,6 +46,10 @@ function resolvedConfigPath() {
     return path.resolve(configuredPath);
   }
   return resolveDataPath(DEFAULT_CONFIG_FILENAME);
+}
+
+function legacyDefaultConfigPath() {
+  return resolveDataPath(LEGACY_CONFIG_FILENAME);
 }
 
 function backupPathFor(configPath: string) {
@@ -193,9 +198,21 @@ function mergeAgentTypesWithLegacyAgents(
   return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+function normalizeOpencodeBaseUrl(baseUrl: string) {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return DEFAULT_OPENCODE_BASE_URL;
+  if (trimmed === "http://127.0.0.1:4096" || trimmed === "http://localhost:4096") {
+    return DEFAULT_OPENCODE_BASE_URL;
+  }
+  return trimmed;
+}
+
 function buildLegacyBootstrappedConfig() {
   const candidate: AgentMockingbirdConfig = {
     version: CONFIG_VERSION,
+    workspace: {
+      pinnedDirectory: env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+    },
     runtime: {
       opencode: {
         baseUrl: DEFAULT_OPENCODE_BASE_URL,
@@ -330,6 +347,36 @@ function buildLegacyBootstrappedConfig() {
   return agentMockingbirdConfigSchema.parse(candidate);
 }
 
+function migrateConfigShape(raw: unknown): unknown {
+  if (!isPlainObject(raw)) return raw;
+  if (raw.version === CONFIG_VERSION && isPlainObject(raw.workspace)) {
+    return raw;
+  }
+
+  const root = { ...raw };
+  const runtime = isPlainObject(root.runtime) ? root.runtime : {};
+  const opencode = isPlainObject(runtime.opencode) ? runtime.opencode : {};
+  const memory = isPlainObject(runtime.memory) ? runtime.memory : {};
+  const pinnedDirectory =
+    (typeof root.workspace === "object" &&
+    root.workspace &&
+    !Array.isArray(root.workspace) &&
+    typeof (root.workspace as { pinnedDirectory?: unknown }).pinnedDirectory === "string"
+      ? (root.workspace as { pinnedDirectory: string }).pinnedDirectory
+      : undefined) ??
+    (typeof opencode.directory === "string" ? opencode.directory : undefined) ??
+    (typeof memory.workspaceDir === "string" ? memory.workspaceDir : undefined) ??
+    env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
+
+  return {
+    ...root,
+    version: CONFIG_VERSION,
+    workspace: {
+      pinnedDirectory,
+    },
+  };
+}
+
 function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
   if (!isPlainObject(raw)) return raw;
   const root = { ...raw };
@@ -347,11 +394,11 @@ function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
 }
 
 export function parseConfig(raw: unknown) {
-  const normalized = stripLegacyMemoryWriteConfig(raw);
+  const normalized = migrateConfigShape(stripLegacyMemoryWriteConfig(raw));
   if (appearsToBeOpencodeConfig(normalized)) {
     throw new ConfigApplyError(
       "schema",
-      "Config file appears to be OpenCode config.json, not agent-mockingbird config. Set AGENT_MOCKINGBIRD_CONFIG_PATH to a agent-mockingbird config file (default: ./data/agent-mockingbird.config.json).",
+      "Config file appears to be OpenCode config.json, not Agent Mockingbird config. Set AGENT_MOCKINGBIRD_CONFIG_PATH to an Agent Mockingbird config file (default: ./data/agent-mockingbird.config.json).",
     );
   }
   const withExplicitEnvDefaults = deepMerge(buildExplicitEnvConfigDefaultsPatch(), normalized);
@@ -360,11 +407,10 @@ export function parseConfig(raw: unknown) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }
   const config = parsed.data;
+  config.runtime.opencode.baseUrl = normalizeOpencodeBaseUrl(config.runtime.opencode.baseUrl);
   const workspaceAlignment = resolveWorkspaceAlignment(config);
-  let normalizedMemoryWorkspaceDir = workspaceAlignment.memoryWorkspaceDir;
-  if (workspaceAlignment.opencodeDirectoryExplicit && !workspaceAlignment.aligned) {
-    normalizedMemoryWorkspaceDir = workspaceAlignment.opencodeWorkspaceDir;
-  }
+  const normalizedMemoryWorkspaceDir = workspaceAlignment.memoryWorkspaceDir;
+  config.workspace.pinnedDirectory = workspaceAlignment.opencodeWorkspaceDir;
   config.runtime.opencode.directory = workspaceAlignment.opencodeWorkspaceDir;
   config.runtime.memory.workspaceDir = normalizedMemoryWorkspaceDir;
   config.ui.agentTypes = mergeAgentTypesWithLegacyAgents(config.ui.agentTypes, config.ui.agents);
@@ -414,6 +460,12 @@ function writeConfigAtomic(configPath: string, config: AgentMockingbirdConfig) {
 export function ensureConfigSnapshot() {
   const configPath = resolvedConfigPath();
   if (existsSync(configPath)) {
+    return readSnapshotFromDisk(configPath);
+  }
+  const legacyPath = legacyDefaultConfigPath();
+  if (!env.AGENT_MOCKINGBIRD_CONFIG_PATH && existsSync(legacyPath)) {
+    const snapshot = readSnapshotFromDisk(legacyPath);
+    writeConfigAtomic(configPath, snapshot.config);
     return readSnapshotFromDisk(configPath);
   }
   const config = buildLegacyBootstrappedConfig();

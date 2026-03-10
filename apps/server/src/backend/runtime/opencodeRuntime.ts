@@ -94,10 +94,8 @@ import {
 } from "../db/repository";
 import { env } from "../env";
 import {
-  buildDesiredRuntimeMcpConfigMap,
   normalizeMcpIds,
   normalizeMcpServerDefinitions,
-  normalizeRuntimeMcpConfigMap,
 } from "../mcp/service";
 import { searchMemory } from "../memory/service";
 import type { MemorySearchResult } from "../memory/types";
@@ -4275,10 +4273,7 @@ export class OpencodeRuntime implements RuntimeEngine {
 
   private runtimeConfigTargetKey() {
     return JSON.stringify({
-      smallModel: this.currentSmallModel().trim(),
       enabledSkills: this.currentEnabledSkills(),
-      enabledMcps: this.currentEnabledMcps(),
-      configuredMcpServers: this.currentConfiguredMcpServers(),
       managedSkillsRoot: getManagedSkillsRootPath(
         this.currentRuntimeConfig()?.directory ?? null,
       ),
@@ -4321,12 +4316,6 @@ export class OpencodeRuntime implements RuntimeEngine {
       const currentRecord = current as Record<string, unknown>;
       let changed = false;
 
-      const desiredSmallModel = this.currentSmallModel().trim();
-      if (desiredSmallModel && current.small_model !== desiredSmallModel) {
-        nextConfig.small_model = desiredSmallModel;
-        changed = true;
-      }
-
       const desiredSkillPaths = normalizeStringArray(
         buildManagedSkillPaths(
           current,
@@ -4347,19 +4336,6 @@ export class OpencodeRuntime implements RuntimeEngine {
           ...currentSkills,
           paths: desiredSkillPaths,
         };
-        changed = true;
-      }
-
-      const currentMcpConfig = normalizeRuntimeMcpConfigMap(currentRecord.mcp);
-      const desiredMcpConfig = buildDesiredRuntimeMcpConfigMap({
-        currentMcpConfig: currentRecord.mcp,
-        configuredServers: this.currentConfiguredMcpServers(),
-        legacyEnabledIds: this.currentEnabledMcps(),
-      });
-      if (
-        stableSerialize(currentMcpConfig) !== stableSerialize(desiredMcpConfig)
-      ) {
-        (nextConfig as Record<string, unknown>).mcp = desiredMcpConfig;
         changed = true;
       }
 

@@ -6,7 +6,7 @@ import {
 
 import { env } from "../env";
 
-const DEFAULT_OPENCODE_BASE_URL = "http://127.0.0.1:4096";
+const DEFAULT_OPENCODE_BASE_URL = `http://127.0.0.1:${process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001"}`;
 const DEFAULT_OPENCODE_TIMEOUT_MS = 120_000;
 
 export interface OpencodeConnectionConfig {

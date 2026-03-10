@@ -1,5 +1,6 @@
 import type { CronHandler, CronHandlerResult } from "./types";
 import { getConfigSnapshot } from "../config/service";
+import { listOpencodeAgentTypes } from "../agents/opencodeConfig";
 import { executeHeartbeat } from "../heartbeat/service";
 import { syncMemoryIndex } from "../memory/service";
 
@@ -28,9 +29,8 @@ const heartbeatCheckHandler: CronHandler = async ctx => {
     };
   }
 
-  const config = getConfigSnapshot();
-  const agentType = config.config.ui.agentTypes.find(a => a.id === agentId);
-  const heartbeatConfig = agentType?.heartbeat;
+  const agentTypes = await listOpencodeAgentTypes().catch(() => ({ agentTypes: [] }));
+  const heartbeatConfig = agentTypes.agentTypes.find(agent => agent.id === agentId)?.heartbeat;
 
   if (!heartbeatConfig || !heartbeatConfig.enabled) {
     return {

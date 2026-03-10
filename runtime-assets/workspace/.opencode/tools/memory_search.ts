@@ -39,7 +39,7 @@ export default tool({
     debug: tool.schema.boolean().optional().describe("Include retrieval debug details."),
   },
   async execute(args: { query: string; maxResults?: number; minScore?: number; debug?: boolean }) {
-    const payload = await postJson("/api/memory/retrieve", {
+    const payload = await postJson("/api/waffle/memory/retrieve", {
       query: args.query,
       maxResults: args.maxResults,
       minScore: args.minScore,

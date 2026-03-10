@@ -8,7 +8,7 @@
     },
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".expo/**", "web-build/**"]
+      "outputs": ["dist/**", "vendor/opencode/packages/app/dist/**"]
     },
     "lint": {
       "dependsOn": ["^lint"]

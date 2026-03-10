@@ -1,42 +1,93 @@
-import { createBackgroundRoutes } from "./backgroundRoutes";
-import { createChatRoutes } from "./chatRoutes";
-import { createConfigRoutes } from "./configRoutes";
-import { createCronRoutes } from "./cronRoutes";
-import { createDashboardRoutes } from "./dashboardRoutes";
-import { createEventRoutes } from "./eventRoutes";
-import { createMemoryRoutes } from "./memoryRoutes";
-import { createPromptRoutes } from "./promptRoutes";
-import { createQueueRoutes } from "./queueRoutes";
-import { createRunRoutes } from "./runRoutes";
-import { createSignalRoutes } from "./signalRoutes";
-import { createUiRoutes } from "./uiRoutes";
+import { z } from "zod";
+
+import { migrateOpenclawWorkspace } from "../../agents/openclawImport";
 import type { SignalChannelService } from "../../channels/signal/service";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import type { CronService } from "../../cron/service";
-import type { RunService } from "../../run/service";
-import { createTrpcRoutes } from "../../trpc/routes";
-import type { RuntimeEventStream } from "../sse";
+import { syncMemoryIndex } from "../../memory/service";
+import type { RouteTable } from "../router";
+import { createAgentRoutes } from "./agentRoutes";
+import { createCronRoutes } from "./cronRoutes";
+import { createMcpRoutes } from "./mcpRoutes";
+import { createMemoryRoutes } from "./memoryRoutes";
+import { createRuntimeRoutes } from "./runtimeRoutes";
+import { createSignalRoutes } from "./signalRoutes";
+import { createSkillRoutes } from "./skillRoutes";
+
+function prefixRoutes(prefix: string, routes: RouteTable): RouteTable {
+  return Object.fromEntries(
+    Object.entries(routes).map(([pathname, handlers]) => {
+      const suffix = pathname.startsWith("/api/") ? pathname.slice("/api".length) : pathname;
+      return [`${prefix}${suffix}`, handlers];
+    }),
+  );
+}
+
+async function importOpenclaw(req: Request) {
+  const schema = z.object({
+    source: z.discriminatedUnion("mode", [
+      z.object({
+        mode: z.literal("local"),
+        path: z.string().min(1),
+      }),
+      z.object({
+        mode: z.literal("git"),
+        url: z.string().min(1),
+        ref: z.string().optional(),
+      }),
+    ]),
+    targetDirectory: z.string().optional(),
+  });
+
+  const parsed = schema.safeParse(await req.json());
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid import request", issues: parsed.error.issues }, { status: 400 });
+  }
+
+  try {
+    const migration = await migrateOpenclawWorkspace(parsed.data);
+    let memorySync: { attempted: boolean; completed: boolean; error?: string | null } = {
+      attempted: false,
+      completed: false,
+      error: null,
+    };
+    try {
+      await syncMemoryIndex();
+      memorySync = { attempted: true, completed: true, error: null };
+    } catch (error) {
+      memorySync = {
+        attempted: true,
+        completed: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    return Response.json({ migration, memorySync });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "Failed to import OpenClaw workspace files" },
+      { status: 422 },
+    );
+  }
+}
 
 export function createApiRoutes(input: {
   runtime: RuntimeEngine;
   cronService: CronService;
-  eventStream: RuntimeEventStream;
-  runService: RunService;
   signalService: SignalChannelService;
-}) {
+}): RouteTable {
   return {
-    ...createDashboardRoutes(input.runtime),
-    ...createBackgroundRoutes(input.runtime),
-    ...createChatRoutes(input.runtime),
-    ...createRunRoutes(input.runService),
-    ...createConfigRoutes(input.eventStream),
-    ...createCronRoutes(input.cronService),
-    ...createMemoryRoutes(),
-    ...createQueueRoutes(),
-    ...createEventRoutes(input.eventStream),
-    ...createSignalRoutes(input.signalService),
-    ...createPromptRoutes(),
-    ...createUiRoutes(input.runtime, input.eventStream),
-    ...createTrpcRoutes(input.runtime, input.eventStream.getLatestSeq),
+    "/api/health": {
+      GET: () => Response.json({ ok: true, service: "agent-mockingbird" }),
+    },
+    "/api/waffle/runtime/import-openclaw": {
+      POST: (req: Request) => importOpenclaw(req),
+    },
+    ...createRuntimeRoutes(),
+    ...createAgentRoutes(),
+    ...createMcpRoutes(),
+    ...createSkillRoutes(),
+    ...prefixRoutes("/api/waffle", createCronRoutes(input.cronService) as RouteTable),
+    ...prefixRoutes("/api/waffle", createMemoryRoutes() as RouteTable),
+    ...prefixRoutes("/api/waffle", createSignalRoutes(input.signalService) as RouteTable),
   };
 }

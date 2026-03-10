@@ -39,7 +39,7 @@ export default tool({
     supersedes?: string[];
     topic?: string;
   }) {
-    const response = await postJson("/api/memory/remember", {
+    const response = await postJson("/api/waffle/memory/remember", {
       ...args,
       source: args.source ?? "assistant",
     });
