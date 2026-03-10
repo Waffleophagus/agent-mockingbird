@@ -32,19 +32,6 @@ function ensureSession(sessionId: string) {
   return session;
 }
 
-function compareMessageToCheckpoint(message: ChatMessage, checkpoint: SessionMessageCheckpoint) {
-  const messageAt = Date.parse(message.at);
-  const checkpointAt = Date.parse(checkpoint.lastMessageAt);
-  const normalizedMessageAt = Number.isFinite(messageAt) ? messageAt : 0;
-  const normalizedCheckpointAt = Number.isFinite(checkpointAt) ? checkpointAt : 0;
-
-  if (normalizedMessageAt !== normalizedCheckpointAt) {
-    return normalizedMessageAt - normalizedCheckpointAt;
-  }
-
-  return message.id.localeCompare(checkpoint.lastMessageId);
-}
-
 function compareMessageWithRole(
   message: ChatMessage,
   checkpoint: SessionMessageCheckpoint & { role?: ChatMessage["role"] },

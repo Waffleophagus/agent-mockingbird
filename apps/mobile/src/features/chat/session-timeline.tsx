@@ -1,7 +1,8 @@
+import type { LegendListRef } from "@legendapp/list";
 import { KeyboardAvoidingLegendList } from "@legendapp/list/keyboard";
 import type { ChatMessagePart } from "@agent-mockingbird/contracts/dashboard";
 import { AlertTriangle, Brain, ChevronDown, LoaderCircle, RefreshCcw, Wrench } from "lucide-react-native";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
 import { MarkdownMessage } from "@/components/markdown-message";
@@ -212,60 +213,41 @@ function SessionTimelineEmptyState({ loading }: { loading: boolean }) {
   );
 }
 
-function SessionTimelineHeader({
-  hasMessages,
-  hasOlder,
-  loadingOlder,
-}: {
-  hasMessages: boolean;
-  hasOlder: boolean;
-  loadingOlder: boolean;
-}) {
-  if (!hasMessages) return null;
-
-  return (
-    <View className="pb-5">
-      {loadingOlder ? (
-        <View className="items-center">
-          <Text className="text-[11px] font-bold uppercase tracking-[1.6px] text-haze">Loading older messages…</Text>
-        </View>
-      ) : null}
-      {!loadingOlder && !hasOlder ? (
-        <View className="items-center">
-          <Text className="text-[11px] font-bold uppercase tracking-[1.6px] text-haze">Start of conversation</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
 export function SessionTimeline({
-  hasOlder,
   loading,
-  loadingOlder,
   messages,
-  onLoadOlder,
   onRetryRequest,
   sessionId,
   showThinkingDetails,
   showToolCallDetails,
 }: {
-  hasOlder: boolean;
   loading: boolean;
-  loadingOlder: boolean;
   messages: LocalChatMessage[];
-  onLoadOlder: () => void;
   onRetryRequest: (requestId: string, content: string) => void;
   sessionId: string;
   showThinkingDetails: boolean;
   showToolCallDetails: boolean;
 }) {
   const turns = useMemo(() => buildTurns(messages), [messages]);
+  const listRef = useRef<LegendListRef>(null);
+  const hasRestoredInitialScrollRef = useRef(false);
   const [expandedToolCallIds, setExpandedToolCallIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setExpandedToolCallIds({});
+    hasRestoredInitialScrollRef.current = false;
   }, [sessionId]);
+
+  useEffect(() => {
+    if (loading || turns.length === 0 || hasRestoredInitialScrollRef.current) return;
+
+    hasRestoredInitialScrollRef.current = true;
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: false });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [loading, turns.length]);
 
   function handleToggleToolCall(partId: string) {
     setExpandedToolCallIds(current => ({
@@ -281,21 +263,15 @@ export function SessionTimeline({
       data={turns}
       drawDistance={DRAW_DISTANCE}
       estimatedItemSize={ESTIMATED_ITEM_SIZE}
-      initialScrollIndex={turns.length > 0 ? turns.length - 1 : undefined}
       keyExtractor={turn => turn.id}
       keyboardDismissMode="interactive"
       keyboardShouldPersistTaps="handled"
       ListEmptyComponent={<SessionTimelineEmptyState loading={loading} />}
-      ListHeaderComponent={<SessionTimelineHeader hasMessages={messages.length > 0} hasOlder={hasOlder} loadingOlder={loadingOlder} />}
       maintainScrollAtEnd
       maintainScrollAtEndThreshold={0.1}
       maintainVisibleContentPosition
-      onStartReached={() => {
-        if (!hasOlder || loadingOlder) return;
-        onLoadOlder();
-      }}
-      onStartReachedThreshold={0.2}
       recycleItems={false}
+      ref={listRef}
       renderItem={({ item }) => (
         <SessionTimelineTurnRow
           expandedToolCallIds={expandedToolCallIds}

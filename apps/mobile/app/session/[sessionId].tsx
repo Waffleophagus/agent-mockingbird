@@ -24,9 +24,7 @@ export default function SessionDetailScreen() {
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : "";
   const session = chat.sessions.find(entry => entry.id === sessionId);
   const messages = chat.messagesBySession[sessionId] ?? [];
-  const historyMeta = chat.historyMetaBySession[sessionId];
   const loadingMessages = chat.loadingMessagesBySession[sessionId] ?? false;
-  const loadingOlder = chat.loadingOlderBySession[sessionId] ?? false;
   const sending = chat.sendingBySession[sessionId] ?? false;
   const activeQuestionRequest = chat.pendingQuestionsBySession[sessionId]?.[0];
   const activePermissionRequest = chat.pendingPermissionsBySession[sessionId]?.[0];
@@ -183,13 +181,8 @@ export default function SessionDetailScreen() {
       <View className="flex-1 px-5 pt-5">
         <SessionTimeline
           sessionId={sessionId}
-          hasOlder={historyMeta?.hasOlder ?? false}
           loading={loadingMessages}
-          loadingOlder={loadingOlder}
           messages={messages}
-          onLoadOlder={() => {
-            void chat.loadOlderMessages(sessionId);
-          }}
           onRetryRequest={(requestId, content) => {
             void chat.retryMessage(sessionId, requestId, content);
           }}
