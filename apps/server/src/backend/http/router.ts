@@ -3,13 +3,17 @@ export interface RouteRequest<TParams extends Record<string, string> = Record<st
   params: TParams;
 }
 
+type RouteMethod<TParams extends Record<string, string> = Record<string, string>> = {
+  bivarianceHack(req: RouteRequest<TParams>): Response | Promise<Response>;
+}["bivarianceHack"];
+
 export interface RouteHandler {
-  GET?: (req: RouteRequest) => Response | Promise<Response>;
-  POST?: (req: RouteRequest) => Response | Promise<Response>;
-  PUT?: (req: RouteRequest) => Response | Promise<Response>;
-  PATCH?: (req: RouteRequest) => Response | Promise<Response>;
-  DELETE?: (req: RouteRequest) => Response | Promise<Response>;
-  OPTIONS?: (req: RouteRequest) => Response | Promise<Response>;
+  GET?: RouteMethod;
+  POST?: RouteMethod;
+  PUT?: RouteMethod;
+  PATCH?: RouteMethod;
+  DELETE?: RouteMethod;
+  OPTIONS?: RouteMethod;
 }
 
 export type RouteTable = Record<string, RouteHandler>;

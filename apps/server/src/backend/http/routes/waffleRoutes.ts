@@ -40,6 +40,15 @@ import { getRuntimeStartupInfo } from "../../runtime";
 import { parseStringListBody } from "../parsers";
 import type { RouteTable } from "../router";
 
+function prefixRoutes(prefix: string, routes: RouteTable): RouteTable {
+  return Object.fromEntries(
+    Object.entries(routes).map(([pathname, handlers]) => {
+      const suffix = pathname.startsWith("/api/") ? pathname.slice("/api".length) : pathname;
+      return [`${prefix}${suffix}`, handlers];
+    }),
+  );
+}
+
 function configError(error: unknown) {
   if (error instanceof ConfigApplyError) {
     const status = error.stage === "conflict" ? 409 : error.stage === "schema" || error.stage === "request" ? 400 : 422;
