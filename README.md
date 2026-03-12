@@ -334,8 +334,7 @@ This repo uses one CI/CD workflow:
 - `.github/workflows/ci.yml` runs lint/typecheck/build, then publishes the same packed artifact to your npm-compatible package registry.
 - `.github/workflows/ci.yml` verifies the committed `dist/app` bundle, rebuilds the standalone binary locally in CI, then publishes the packed artifact to your npm-compatible package registry.
 - Pull requests run checks only (no publish).
-- `main` pushes publish preview builds with npm tag `latest`.
-- Non-`main` branch pushes publish preview builds with npm tag `branch-<sanitized-branch-name>`.
+- Any publishable push updates npm tag `latest`. For now, `latest` simply means "most recent successful publish," regardless of branch.
 - Pushes to matching `v*` tags publish the exact `package.json` version with npm tag `latest`.
 - Manual dispatch publishes `package.json` version with npm tag `latest`.
 - Tag pushes must match `v<package.json version>` or CI fails.
@@ -364,9 +363,10 @@ Install from a feature branch preview:
 
 ```bash
 BRANCH="<branch-name>"
-TAG="branch-<sanitized-branch-name>"
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${BRANCH}/scripts/onboard/bootstrap.sh" | AGENT_MOCKINGBIRD_TAG="${TAG}" bash
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${BRANCH}/scripts/onboard/bootstrap.sh" | bash
 ```
+
+Current solo-dev policy: `latest` is always the newest successful publish, even if it came from a feature branch. The branch-specific bootstrap script above is only to fetch the script contents from that branch; package install still resolves `@latest`.
 
 Direct package execution from private registry:
 

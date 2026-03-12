@@ -40,8 +40,7 @@ Feature branch preview install:
 
 ```bash
 BRANCH="<branch-name>"
-TAG="branch-<sanitized-branch-name>"
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${BRANCH}/scripts/onboard/bootstrap.sh" | AGENT_MOCKINGBIRD_TAG="${TAG}" bash
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${BRANCH}/scripts/onboard/bootstrap.sh" | bash
 ```
 
 ## Maintainer flow (build + publish)
@@ -50,8 +49,10 @@ curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/br
 2. CI builds the compiled distributable (`dist/agent-mockingbird` + `dist/app`) and publishes:
    - `@<scope>/agent-mockingbird`
    - `@<scope>/agent-mockingbird-installer`
-   - branch preview pushes update dist-tags in the form `branch-<sanitized-branch-name>`
+   - all publishable builds update dist-tag `latest`
 3. The published package is the source of truth for the end-user install flow above.
+
+Current solo-dev policy: `latest` is intentionally the newest successful publish regardless of branch.
 
 Repository build policy:
 

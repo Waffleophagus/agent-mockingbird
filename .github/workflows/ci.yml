@@ -114,9 +114,8 @@ jobs:
           elif [[ "${event}" == "workflow_dispatch" ]]; then
             should_publish="true"
             if [[ "${ref}" == refs/heads/* && "${ref}" != "refs/heads/main" ]]; then
-              npm_tag="branch-${branch_slug}"
               bootstrap_ref="${ref_name}"
-              bootstrap_tag="${npm_tag}"
+              bootstrap_tag="latest"
               if [[ -z "${build_number}" ]]; then
                 build_number="$(date +%s)"
               fi
@@ -130,9 +129,8 @@ jobs:
             package_version="${base_version}-build.${build_number}"
           elif [[ "${event}" == "push" && "${ref}" == refs/heads/* ]]; then
             should_publish="true"
-            npm_tag="branch-${branch_slug}"
             bootstrap_ref="${ref_name}"
-            bootstrap_tag="${npm_tag}"
+            bootstrap_tag="latest"
             if [[ -z "${build_number}" ]]; then
               build_number="$(date +%s)"
             fi
@@ -388,10 +386,6 @@ jobs:
             echo "## Install command"
             echo
             echo '```bash'
-            if [[ "${bootstrap_ref}" == "main" && "${bootstrap_tag}" == "latest" ]]; then
-              echo 'curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash'
-            else
-              echo "curl -fsSL \"https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${bootstrap_ref}/scripts/onboard/bootstrap.sh\" | AGENT_MOCKINGBIRD_TAG=\"${bootstrap_tag}\" bash"
-            fi
+            echo "curl -fsSL \"https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${bootstrap_ref}/scripts/onboard/bootstrap.sh\" | bash"
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
