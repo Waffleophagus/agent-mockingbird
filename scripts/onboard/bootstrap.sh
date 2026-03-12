@@ -30,6 +30,6 @@ printf "registry=%s\n@%s:registry=%s\n" \
 exec npm exec \
   --yes \
   --userconfig "${tmp_npmrc}" \
-  --package "@${AGENT_MOCKINGBIRD_SCOPE}/agent-mockingbird@${AGENT_MOCKINGBIRD_TAG}" \
-  agent-mockingbird \
+  --package "@${AGENT_MOCKINGBIRD_SCOPE}/agent-mockingbird-installer@${AGENT_MOCKINGBIRD_TAG}" \
+  agent-mockingbird-installer \
   -- "$@"

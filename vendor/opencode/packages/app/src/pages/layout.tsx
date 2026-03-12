@@ -565,7 +565,24 @@ export default function Layout(props: ParentProps) {
     const pinned = pinnedDirectory()
     const projects = layout.projects.list()
     if (!pinned) return projects
-    return projects.filter((project) => project.worktree === pinned)
+    const pinnedKey = workspaceKey(pinned)
+    const matches = projects.filter((project) => {
+      if (workspaceKey(project.worktree) === pinnedKey) return true
+      return project.sandboxes?.some((directory) => workspaceKey(directory) === pinnedKey) ?? false
+    })
+    if (matches.length > 0) return matches
+
+    const current = currentProject()
+    if (!current) return []
+    if (workspaceKey(current.worktree) === pinnedKey) return [current]
+    if (current.sandboxes?.some((directory) => workspaceKey(directory) === pinnedKey)) return [current]
+    return []
+  })
+
+  createEffect(() => {
+    const directory = currentDir()
+    if (!directory) return
+    layout.projects.open(directory)
   })
 
   createEffect(

@@ -137,26 +137,17 @@ jobs:
             pkg.name = `@${scope}/agent-mockingbird`;
             pkg.private = false;
             pkg.version = version;
-            pkg.module = "apps/server/src/index.ts";
-            pkg.main = "apps/server/src/index.ts";
+            delete pkg.module;
+            delete pkg.main;
             pkg.publishConfig = { registry: process.env.REGISTRY_URL };
             pkg.files = [
               "bin",
               "runtime-assets",
-              ".agents",
-              "apps/server",
-              "apps/web",
-              "packages/api",
-              "packages/contracts",
               "dist",
               "deploy",
               "scripts",
-              "drizzle",
-              "drizzle.config.ts",
               "README.md",
               "bun.lock",
-              "bunfig.toml",
-              "tsconfig.json",
               "agent-mockingbird.config.example.json"
             ];
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
@@ -190,20 +181,17 @@ jobs:
           tar_contents="$(tar -tzf "${tarball}")"
           grep -Fqx -- "package/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/agent-mockingbird" <<<"${tar_contents}"
+          grep -Fqx -- "package/bin/runtime-assets.mjs" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/agent-mockingbird" <<<"${tar_contents}"
+          grep -Fqx -- "package/dist/app/index.html" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/drizzle/meta/_journal.json" <<<"${tar_contents}"
-          grep -Fqx -- "package/apps/server/package.json" <<<"${tar_contents}"
-          grep -Fqx -- "package/apps/server/src/index.ts" <<<"${tar_contents}"
-          grep -Fqx -- "package/packages/api/package.json" <<<"${tar_contents}"
-          grep -Fqx -- "package/packages/contracts/package.json" <<<"${tar_contents}"
-          grep -Fqx -- "package/apps/web/index.html" <<<"${tar_contents}"
-          grep -Fqx -- "package/dist/web/index.html" <<<"${tar_contents}"
-          grep -Fqx -- "package/dist/web/vendor/opencode-ui/fonts/geist.woff2" <<<"${tar_contents}"
-          grep -Fqx -- "package/drizzle/meta/_journal.json" <<<"${tar_contents}"
+          grep -Fqx -- "package/runtime-assets/workspace/AGENTS.md" <<<"${tar_contents}"
+          grep -Fqx -- "package/deploy/systemd/agent-mockingbird.service" <<<"${tar_contents}"
+          grep -Fqx -- "package/scripts/onboard/bootstrap.sh" <<<"${tar_contents}"
           echo "AGENT_MOCKINGBIRD_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
-      - name: Verify packaged frontend markdown assets
+      - name: Verify packaged compiled app bundle
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
@@ -212,25 +200,22 @@ jobs:
           tar -xzf "${AGENT_MOCKINGBIRD_TARBALL}" -C "${tmpdir}"
           PACKAGE_ROOT="${tmpdir}/package" bun -e '
             const path = require("path");
+            const fs = require("fs");
             const pkgRoot = process.env.PACKAGE_ROOT;
-            const cssPath = path.join(pkgRoot, "dist", "web", "index.css");
-            const fontPath = path.join(pkgRoot, "dist", "web", "vendor", "opencode-ui", "fonts", "geist.woff2");
-            const css = require("fs").readFileSync(cssPath, "utf8");
-            const markers = [".chat-markdown", "[data-streamdown=code-block]", "counter(line)", "sdm-c"];
-            for (const marker of markers) {
-              if (!css.includes(marker)) {
-                throw new Error(`Packaged CSS missing marker: ${marker}`);
-              }
+            const indexPath = path.join(pkgRoot, "dist", "app", "index.html");
+            const indexHtml = fs.readFileSync(indexPath, "utf8");
+            if (!indexHtml.includes("/assets/")) {
+              throw new Error("Packaged app index does not reference compiled assets.");
             }
-            const font = require("fs").readFileSync(fontPath);
-            const sig = font.subarray(0, 4).toString("ascii");
-            if (sig !== "wOF2") {
-              throw new Error(`Packaged font signature invalid: ${sig || "<empty>"}`);
+            const assetDir = path.join(pkgRoot, "dist", "app", "assets");
+            const assetEntries = fs.readdirSync(assetDir);
+            if (assetEntries.length === 0) {
+              throw new Error("Packaged app assets directory is empty.");
             }
-            console.log("Packaged frontend markdown assets validated.");
+            console.log("Packaged compiled app bundle validated.");
           '
 
-      - name: Verify packaged runtime prefers source mode
+      - name: Verify packaged runtime prefers compiled bundle
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
@@ -250,15 +235,16 @@ jobs:
               throw new Error("Could not locate packaged runtime resolver.");
             }
             const snippet = text.slice(start, end);
-            const sourceIndex = snippet.indexOf("const entrypoint = resolveAgentMockingbirdServiceEntrypoint");
             const compiledIndex = snippet.indexOf("const compiledBinary = path.join");
-            if (sourceIndex < 0 || compiledIndex < 0) {
-              throw new Error("Packaged runtime resolver is missing source/compiled branches.");
+            const compiledModeIndex = snippet.indexOf('mode: "compiled"');
+            const sourceIndex = snippet.indexOf("const entrypoint = resolveAgentMockingbirdServiceEntrypoint");
+            if (compiledIndex < 0 || compiledModeIndex < 0) {
+              throw new Error("Packaged runtime resolver is missing compiled bundle support.");
             }
-            if (sourceIndex > compiledIndex) {
-              throw new Error("Packaged runtime still prefers compiled mode.");
+            if (sourceIndex >= 0 && sourceIndex < compiledIndex) {
+              throw new Error("Packaged runtime still prefers source mode.");
             }
-            console.log("Packaged runtime prefers source mode.");
+            console.log("Packaged runtime prefers compiled bundle.");
           '
 
       - name: Pack agent-mockingbird-installer artifact

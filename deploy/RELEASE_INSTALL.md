@@ -1,13 +1,15 @@
 # Release + Install
 
-This project ships as a tarball from GitHub Releases.
+Primary install channel is the private Gitea npm registry, using the compatibility wrapper package.
 
-## Private onboarding flow (Gitea npm + systemd user services)
+## Canonical first-run flow (Gitea npm + systemd user services)
 
 Recommended first-run flow on Linux:
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
+  --package "@waffleophagus/agent-mockingbird-installer@latest" \
+  agent-mockingbird-installer install
 ```
 
 This installs:
@@ -15,6 +17,8 @@ This installs:
 - `@waffleophagus/agent-mockingbird` from `https://git.waffleophagus.com/api/packages/waffleophagus/npm/`
 - `opencode-ai` from npmjs
 - user services (`opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
+- automatic service start and health verification
+- interactive onboarding on TTY installs (`provider auth`, default model, memory/Ollama, optional OpenClaw import)
 
 Install root defaults to `~/.agent-mockingbird`.
 
@@ -26,14 +30,21 @@ agent-mockingbird restart
 agent-mockingbird update
 ```
 
+Fallback bootstrap wrapper:
+
+```bash
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+```
+
 ## Maintainer flow (build + publish)
 
-1. Push a tag (for example `v0.1.0`) or run the `Release Bundle` workflow manually.
-2. GitHub Actions will produce and publish:
-   - `agent-mockingbird-<version>.tar.gz`
-   - `agent-mockingbird-<version>.tar.gz.sha256`
+1. Push a tag (for example `v0.1.0`) or push to `main`.
+2. CI builds the compiled distributable (`dist/agent-mockingbird` + `dist/app`) and publishes:
+   - `@<scope>/agent-mockingbird`
+   - `@<scope>/agent-mockingbird-installer`
+3. The published package is the source of truth for the end-user install flow above.
 
-## Host install flow
+## Manual host install flow
 
 Run as root on your target Linux host:
 

@@ -18,6 +18,16 @@ bun run dev
 bun run build:cli
 ```
 
+Canonical install flow for end users on Linux:
+
+```bash
+npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
+  --package "@waffleophagus/agent-mockingbird-installer@latest" \
+  agent-mockingbird-installer install
+```
+
+That command installs the packaged CLI from the private Gitea registry, installs and starts the `opencode` and `agent-mockingbird` user services, and then launches the interactive onboarding wizard on TTY installs.
+
 Run agent-mockingbird + OpenCode together for smoke testing:
 
 ```bash
@@ -30,7 +40,7 @@ Production build and run:
 
 ```bash
 bun run build
-bun run start
+./dist/agent-mockingbird
 ```
 
 Code quality:

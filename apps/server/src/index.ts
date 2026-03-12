@@ -16,14 +16,20 @@ import { resolveAppDistDir } from "./backend/paths";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
 
 const OPENCODE_SERVER_PREFIXES = [
+  "/agent",
   "/auth",
+  "/command",
   "/config",
   "/doc",
+  "/event",
   "/experimental",
   "/file",
   "/find",
+  "/formatter",
   "/global",
   "/instance",
+  "/log",
+  "/lsp",
   "/mcp",
   "/path",
   "/permission",
@@ -32,6 +38,7 @@ const OPENCODE_SERVER_PREFIXES = [
   "/pty",
   "/question",
   "/session",
+  "/skill",
   "/tui",
   "/vcs",
 ];

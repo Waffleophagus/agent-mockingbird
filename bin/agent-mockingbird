@@ -645,28 +645,8 @@ function shellEscapeSystemdArg(value) {
   return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
-function canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint) {
-  if (!entrypoint) {
-    return false;
-  }
-  const webHtml = path.join(agentMockingbirdAppDir, "apps", "web", "index.html");
-  if (!fs.existsSync(webHtml)) {
-    return false;
-  }
-  const nodeModulesDir = path.join(agentMockingbirdAppDir, "node_modules");
-  if (!fs.existsSync(nodeModulesDir)) {
-    return false;
-  }
-  const requiredModuleEntries = [
-    path.join(nodeModulesDir, "drizzle-orm"),
-    path.join(nodeModulesDir, "@t3-oss", "env-core"),
-    path.join(nodeModulesDir, "sqlite-vec"),
-  ];
-  return requiredModuleEntries.every(entry => fs.existsSync(entry));
-}
-
 function hasCompiledDashboardAssets(agentMockingbirdAppDir) {
-  return fs.existsSync(path.join(agentMockingbirdAppDir, "dist", "web", "index.html"));
+  return fs.existsSync(path.join(agentMockingbirdAppDir, "dist", "app", "index.html"));
 }
 
 function hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) {
@@ -675,14 +655,6 @@ function hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) {
 
 function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
-  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
-  if (canRunAgentMockingbirdFromSource(agentMockingbirdAppDir, entrypoint)) {
-    return {
-      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
-      mode: "source",
-    };
-  }
-
   if (hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) && hasCompiledDashboardAssets(agentMockingbirdAppDir)) {
     return {
       execStart: compiledBinary,
@@ -690,10 +662,11 @@ function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
     };
   }
 
-  if (hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir)) {
+  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
+  if (entrypoint && bunBin) {
     return {
-      execStart: compiledBinary,
-      mode: "compiled",
+      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
+      mode: "source",
     };
   }
 
@@ -1958,7 +1931,7 @@ async function installOrUpdate(args, mode) {
   const agentMockingbirdRuntime = resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin);
   if (!agentMockingbirdRuntime) {
     throw new Error(
-      `agent-mockingbird runtime missing in ${agentMockingbirdAppDir} (checked dist binary plus package module/main and common entry files).`,
+      `agent-mockingbird runtime missing in ${agentMockingbirdAppDir} (checked compiled dist bundle, then package module/main entry files).`,
     );
   }
   const opencodeBin = resolveOpencodeBin(paths);

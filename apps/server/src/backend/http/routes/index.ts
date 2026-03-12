@@ -86,8 +86,8 @@ export function createApiRoutes(input: {
     ...createAgentRoutes(),
     ...createMcpRoutes(),
     ...createSkillRoutes(),
-    ...prefixRoutes("/api/waffle", createCronRoutes(input.cronService) as RouteTable),
-    ...prefixRoutes("/api/waffle", createMemoryRoutes() as RouteTable),
-    ...prefixRoutes("/api/waffle", createSignalRoutes(input.signalService) as RouteTable),
+    ...createCronRoutes(input.cronService),
+    ...createMemoryRoutes(),
+    ...createSignalRoutes(input.signalService),
   };
 }
