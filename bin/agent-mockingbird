@@ -744,28 +744,23 @@ async function healthCheckWithRetry(url, input = {}) {
 }
 
 async function verifyFrontendAssets(baseUrl) {
-  const requiredCssMarkers = [
-    ".chat-markdown",
-    "[data-streamdown=code-block]",
-    "counter(line)",
-    "sdm-c",
-  ];
   try {
     const htmlResponse = await fetch(baseUrl, { method: "GET" });
     const html = await htmlResponse.text();
     const stylesheetMatch = html.match(/<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/i);
+    const scriptMatch = html.match(/<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i);
     if (!htmlResponse.ok) {
       return {
         ok: false,
         pageOk: false,
         cssOk: false,
+        scriptOk: false,
         pageStatus: htmlResponse.status,
         cssStatus: 0,
-        fontStatus: 0,
+        scriptStatus: 0,
         cssUrl: "",
-        fontUrl: "",
-        fontSignature: "",
-        missingCssMarkers: requiredCssMarkers,
+        scriptUrl: "",
+        referencedFontCount: 0,
         error: `dashboard page returned ${htmlResponse.status}`,
       };
     }
@@ -774,68 +769,82 @@ async function verifyFrontendAssets(baseUrl) {
         ok: false,
         pageOk: true,
         cssOk: false,
+        scriptOk: false,
         pageStatus: htmlResponse.status,
         cssStatus: 0,
-        fontStatus: 0,
+        scriptStatus: 0,
         cssUrl: "",
-        fontUrl: "",
-        fontSignature: "",
-        missingCssMarkers: requiredCssMarkers,
+        scriptUrl: "",
+        referencedFontCount: 0,
         error: "dashboard HTML did not include a stylesheet link",
+      };
+    }
+    if (!scriptMatch) {
+      return {
+        ok: false,
+        pageOk: true,
+        cssOk: false,
+        scriptOk: false,
+        pageStatus: htmlResponse.status,
+        cssStatus: 0,
+        scriptStatus: 0,
+        cssUrl: "",
+        scriptUrl: "",
+        referencedFontCount: 0,
+        error: "dashboard HTML did not include a module script",
       };
     }
 
     const cssUrl = new globalThis.URL(stylesheetMatch[1], baseUrl).toString();
+    const scriptUrl = new globalThis.URL(scriptMatch[1], baseUrl).toString();
     const cssResponse = await fetch(cssUrl, { method: "GET" });
     const cssText = await cssResponse.text();
-    const missingCssMarkers = requiredCssMarkers.filter(selector => !cssText.includes(selector));
-    const fontMatch = cssText.match(/url\((['"]?)([^'")]*geist\.woff2)\1\)/i);
-    const fontUrl = fontMatch?.[2] ? new globalThis.URL(fontMatch[2], cssUrl).toString() : "";
-    let fontStatus = 0;
-    let fontSignature = "";
-    if (fontUrl) {
-      const fontResponse = await fetch(fontUrl, { method: "GET" });
-      fontStatus = fontResponse.status;
-      const bytes = new Uint8Array(await fontResponse.arrayBuffer());
-      fontSignature = String.fromCharCode(...bytes.slice(0, 4));
-    }
-    const fontOk = fontStatus === 200 && fontSignature === "wOF2";
+    const scriptResponse = await fetch(scriptUrl, { method: "GET" });
+    const referencedFontUrls = [
+      ...cssText.matchAll(/url\((['"]?)([^'")]*\.woff2)\1\)/gi),
+    ].map(match => new globalThis.URL(match[2], cssUrl).toString());
     return {
-      ok: htmlResponse.ok && cssResponse.ok && missingCssMarkers.length === 0 && fontOk,
+      ok:
+        htmlResponse.ok &&
+        cssResponse.ok &&
+        scriptResponse.ok &&
+        cssUrl.includes("/assets/") &&
+        scriptUrl.includes("/assets/") &&
+        referencedFontUrls.length > 0,
       pageOk: htmlResponse.ok,
-      cssOk: cssResponse.ok && missingCssMarkers.length === 0,
-      fontOk,
+      cssOk: cssResponse.ok && cssUrl.includes("/assets/"),
+      scriptOk: scriptResponse.ok && scriptUrl.includes("/assets/"),
       pageStatus: htmlResponse.status,
       cssStatus: cssResponse.status,
-      fontStatus,
+      scriptStatus: scriptResponse.status,
       cssUrl,
-      fontUrl,
-      fontSignature,
-      missingCssMarkers,
+      scriptUrl,
+      referencedFontCount: referencedFontUrls.length,
       error:
         !cssResponse.ok
           ? `stylesheet returned ${cssResponse.status}`
-          : missingCssMarkers.length > 0
-            ? `stylesheet missing markers: ${missingCssMarkers.join(", ")}`
-            : !fontUrl
-              ? "could not resolve geist.woff2 url from stylesheet"
-              : !fontOk
-                ? `font validation failed (status=${fontStatus}, signature=${fontSignature || "none"})`
-                : "",
+          : !scriptResponse.ok
+            ? `module script returned ${scriptResponse.status}`
+            : !cssUrl.includes("/assets/")
+              ? "stylesheet is not served from /assets/"
+              : !scriptUrl.includes("/assets/")
+                ? "module script is not served from /assets/"
+                : referencedFontUrls.length === 0
+                  ? "stylesheet did not reference any .woff2 assets"
+                  : "",
     };
   } catch (error) {
     return {
       ok: false,
       pageOk: false,
       cssOk: false,
-      fontOk: false,
+      scriptOk: false,
       pageStatus: 0,
       cssStatus: 0,
-      fontStatus: 0,
+      scriptStatus: 0,
       cssUrl: "",
-      fontUrl: "",
-      fontSignature: "",
-      missingCssMarkers: requiredCssMarkers,
+      scriptUrl: "",
+      referencedFontCount: 0,
       error: error instanceof Error ? error.message : String(error),
     };
   }
