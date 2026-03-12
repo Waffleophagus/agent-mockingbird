@@ -48,30 +48,6 @@ function isOpenCodeServerPath(pathname: string) {
   return OPENCODE_SERVER_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-interface OpenCodeApp {
-  fetch(request: Request, env?: unknown, executionCtx?: unknown): Response | Promise<Response>;
-}
-
-type AgentMockingbirdServer = Bun.Server<unknown>;
-
-let openCodeAppPromise: Promise<OpenCodeApp> | undefined;
-
-async function getOpenCodeApp(): Promise<OpenCodeApp> {
-  if (!openCodeAppPromise) {
-    openCodeAppPromise = import(
-      new URL("../../../vendor/opencode/packages/opencode/src/server/server.ts", import.meta.url).href
-    ).then(module => {
-      const server = module as {
-        Server: {
-          createApp: (opts: { cors?: string[]; localApp?: boolean }) => OpenCodeApp;
-        };
-      };
-      return server.Server.createApp({ localApp: true });
-    });
-  }
-  return openCodeAppPromise;
-}
-
 ensureSeedData();
 ensureConfigFile();
 const configSnapshot = getConfigSnapshot();
@@ -106,7 +82,21 @@ async function syncHeartbeatJobs(reason: string) {
   }
 }
 
-async function serveOpenCodeApp(req: Request, server?: AgentMockingbirdServer) {
+async function proxyOpenCodeSidecar(req: Request) {
+  const sidecarBaseUrl = getConfigSnapshot().config.runtime.opencode.baseUrl;
+  const incoming = new URL(req.url);
+  const target = new URL(`${incoming.pathname}${incoming.search}`, sidecarBaseUrl);
+  const headers = new Headers(req.headers);
+  headers.delete("host");
+  return fetch(target, {
+    method: req.method,
+    headers,
+    body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+    redirect: "manual",
+  });
+}
+
+async function serveOpenCodeApp(req: Request) {
   if (!appDistDir) {
     return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
   }
@@ -114,8 +104,7 @@ async function serveOpenCodeApp(req: Request, server?: AgentMockingbirdServer) {
   const url = new URL(req.url);
   const pathname = decodeURIComponent(url.pathname);
   if (isOpenCodeServerPath(pathname)) {
-    const opencodeApp = await getOpenCodeApp();
-    return opencodeApp.fetch(req, server as object);
+    return proxyOpenCodeSidecar(req);
   }
 
   const relativePath = pathname.replace(/^\/+/, "") || "index.html";
@@ -144,12 +133,12 @@ const heartbeatJobSyncTimer = setInterval(() => {
 
 const server = serve({
   idleTimeout: 120,
-  fetch: async (req, server) => {
+  fetch: async (req) => {
     const apiResponse = await dispatchRoute(apiRoutes, req);
     if (apiResponse) {
       return apiResponse;
     }
-    return serveOpenCodeApp(req, server);
+    return serveOpenCodeApp(req);
   },
   development: env.NODE_ENV !== "production" && {
     hmr: true,

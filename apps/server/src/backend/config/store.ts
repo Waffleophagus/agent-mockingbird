@@ -111,6 +111,24 @@ function readExplicitEnvBoolean(key: string) {
 }
 
 function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
+  const opencodePatch: Record<string, unknown> = {};
+  const opencodeBaseUrl = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_BASE_URL");
+  if (opencodeBaseUrl) opencodePatch.baseUrl = opencodeBaseUrl;
+  const opencodeDirectory = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY");
+  if (opencodeDirectory) opencodePatch.directory = opencodeDirectory;
+  const opencodeProviderId = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_PROVIDER_ID");
+  if (opencodeProviderId) opencodePatch.providerId = opencodeProviderId;
+  const opencodeModelId = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID");
+  if (opencodeModelId) opencodePatch.modelId = opencodeModelId;
+  const opencodeSmallModel = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_SMALL_MODEL");
+  if (opencodeSmallModel) opencodePatch.smallModel = opencodeSmallModel;
+  const opencodeTimeoutMs = readExplicitEnvNumber("AGENT_MOCKINGBIRD_OPENCODE_TIMEOUT_MS");
+  if (typeof opencodeTimeoutMs === "number") opencodePatch.timeoutMs = opencodeTimeoutMs;
+  const opencodePromptTimeoutMs = readExplicitEnvNumber("AGENT_MOCKINGBIRD_OPENCODE_PROMPT_TIMEOUT_MS");
+  if (typeof opencodePromptTimeoutMs === "number") opencodePatch.promptTimeoutMs = opencodePromptTimeoutMs;
+  const opencodeRunWaitTimeoutMs = readExplicitEnvNumber("AGENT_MOCKINGBIRD_OPENCODE_RUN_WAIT_TIMEOUT_MS");
+  if (typeof opencodeRunWaitTimeoutMs === "number") opencodePatch.runWaitTimeoutMs = opencodeRunWaitTimeoutMs;
+
   const memoryPatch: Record<string, unknown> = {};
 
   const memoryEnabled = readExplicitEnvBoolean("AGENT_MOCKINGBIRD_MEMORY_ENABLED");
@@ -148,10 +166,15 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
     memoryPatch.injectionDedupeMaxTracked = memoryInjectionDedupeMaxTracked;
   }
 
-  if (!Object.keys(memoryPatch).length) {
+  if (!Object.keys(opencodePatch).length && !Object.keys(memoryPatch).length) {
     return {};
   }
-  return { runtime: { memory: memoryPatch } };
+  return {
+    runtime: {
+      ...(Object.keys(opencodePatch).length ? { opencode: opencodePatch } : {}),
+      ...(Object.keys(memoryPatch).length ? { memory: memoryPatch } : {}),
+    },
+  };
 }
 
 function readLegacyConfigRow(key: LegacyConfigKey) {
@@ -201,9 +224,6 @@ function mergeAgentTypesWithLegacyAgents(
 function normalizeOpencodeBaseUrl(baseUrl: string) {
   const trimmed = baseUrl.trim();
   if (!trimmed) return DEFAULT_OPENCODE_BASE_URL;
-  if (trimmed === "http://127.0.0.1:4096" || trimmed === "http://localhost:4096") {
-    return DEFAULT_OPENCODE_BASE_URL;
-  }
   return trimmed;
 }
 
