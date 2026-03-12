@@ -6,6 +6,7 @@ export const env = createEnv({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     AGENT_MOCKINGBIRD_DB_PATH: z.string().optional(),
     AGENT_MOCKINGBIRD_CONFIG_PATH: z.string().optional(),
+    AGENT_MOCKINGBIRD_OPENCODE_BASE_URL: z.string().url().optional(),
     AGENT_MOCKINGBIRD_OPENCODE_AUTH_HEADER: z.string().optional(),
     AGENT_MOCKINGBIRD_OPENCODE_USERNAME: z.string().optional(),
     AGENT_MOCKINGBIRD_OPENCODE_PASSWORD: z.string().optional(),

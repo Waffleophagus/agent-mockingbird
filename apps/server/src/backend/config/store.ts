@@ -28,7 +28,9 @@ const LEGACY_CONFIG_FILENAME = "agent-mockingbird.config.json";
 const BACKUP_SUFFIX = ".bak";
 const DEFAULT_SMOKE_TEST_PROMPT = 'Just respond "OK" to this to confirm the gateway is working.';
 const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
-const DEFAULT_OPENCODE_BASE_URL = `http://127.0.0.1:${process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001"}`;
+const DEFAULT_OPENCODE_BASE_URL =
+  process.env.AGENT_MOCKINGBIRD_OPENCODE_BASE_URL?.trim() ||
+  `http://127.0.0.1:${process.env.OPENCODE_PORT?.trim() || "4096"}`;
 const DEFAULT_OPENCODE_PROVIDER_ID = "opencode";
 const DEFAULT_OPENCODE_MODEL_ID = "big-pickle";
 const DEFAULT_OPENCODE_SMALL_MODEL = "opencode/big-pickle";
