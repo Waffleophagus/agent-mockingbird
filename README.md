@@ -28,6 +28,18 @@ npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/n
 
 That command installs the packaged CLI from the private Gitea registry, installs and starts the `opencode` and `agent-mockingbird` user services, and then launches the interactive onboarding wizard on TTY installs.
 
+Local development installs a git `pre-commit` hook automatically via `core.hooksPath=.githooks`. The hook runs:
+
+```bash
+bun run build:cli
+bun run lint
+bun run typecheck
+bun run build
+bun run build:bin
+```
+
+and stages the committed web bundle in `dist/app` plus the tracked CLI shim.
+
 Run agent-mockingbird + OpenCode together for smoke testing:
 
 ```bash
@@ -320,6 +332,7 @@ Deployment artifacts:
 This repo uses one CI/CD workflow:
 
 - `.github/workflows/ci.yml` runs lint/typecheck/build, then publishes the same packed artifact to your npm-compatible package registry.
+- `.github/workflows/ci.yml` verifies the committed `dist/app` bundle, rebuilds the standalone binary locally in CI, then publishes the packed artifact to your npm-compatible package registry.
 - Pull requests run checks only (no publish).
 - `main` pushes publish preview builds with npm tag `latest`.
 - Non-`main` branch pushes publish preview builds with npm tag `branch-<sanitized-branch-name>`.

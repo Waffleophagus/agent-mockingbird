@@ -12,6 +12,8 @@
     "packages/*"
   ],
   "scripts": {
+    "prepare": "bun run ./scripts/setup-git-hooks.ts",
+    "setup:hooks": "bun run ./scripts/setup-git-hooks.ts",
     "dev": "turbo run dev --filter=@agent-mockingbird/server",
     "dev:server": "turbo run dev --filter=@agent-mockingbird/server",
     "dev:stack": "bun run build:app && bun run dev:server",

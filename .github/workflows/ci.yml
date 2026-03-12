@@ -55,11 +55,25 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Build
-        run: bun run build
+      - name: Verify committed OpenCode app bundle
+        run: |
+          set -euo pipefail
+          git ls-files --error-unmatch dist/app/index.html >/dev/null
+          test -f dist/app/index.html
+          test -d dist/app/assets
+          find dist/app/assets -type f | grep -q .
 
       - name: Build standalone runtime
         run: bun run build:bin
+
+      - name: Verify standalone runtime is synced
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- bin/agent-mockingbird; then
+            echo "bin/agent-mockingbird is out of sync with src/cli/agent-mockingbird.mjs."
+            git --no-pager diff -- bin/agent-mockingbird
+            exit 1
+          fi
 
       - name: Resolve publish metadata
         id: meta

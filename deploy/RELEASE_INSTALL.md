@@ -53,6 +53,12 @@ curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/br
    - branch preview pushes update dist-tags in the form `branch-<sanitized-branch-name>`
 3. The published package is the source of truth for the end-user install flow above.
 
+Repository build policy:
+
+- `dist/app` is treated as a committed artifact generated locally before commit.
+- The repo `pre-commit` hook runs lint, typecheck, `build`, and `build:bin`, then stages `dist/app`.
+- CI no longer rebuilds the OpenCode web bundle from vendored dependencies; it verifies the committed `dist/app` bundle and rebuilds only the standalone runtime binary.
+
 ## Manual host install flow
 
 Run as root on your target Linux host:

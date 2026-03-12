@@ -3,7 +3,9 @@ node_modules
 
 # output
 out
-dist
+dist/*
+!dist/app/
+!dist/app/**
 *.tgz
 data/*
 data/*
