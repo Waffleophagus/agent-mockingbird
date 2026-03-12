@@ -14,15 +14,6 @@ import { createRuntimeRoutes } from "./runtimeRoutes";
 import { createSignalRoutes } from "./signalRoutes";
 import { createSkillRoutes } from "./skillRoutes";
 
-function prefixRoutes(prefix: string, routes: RouteTable): RouteTable {
-  return Object.fromEntries(
-    Object.entries(routes).map(([pathname, handlers]) => {
-      const suffix = pathname.startsWith("/api/") ? pathname.slice("/api".length) : pathname;
-      return [`${prefix}${suffix}`, handlers];
-    }),
-  );
-}
-
 async function importOpenclaw(req: Request) {
   const schema = z.object({
     source: z.discriminatedUnion("mode", [

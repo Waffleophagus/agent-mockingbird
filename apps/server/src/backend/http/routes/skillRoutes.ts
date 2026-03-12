@@ -1,3 +1,8 @@
+import {
+  importManagedSkillWithConfigUpdate,
+  loadRuntimeSkillCatalog,
+  setEnabledSkillsFromCatalog,
+} from "../../config/orchestration";
 import { getConfigSnapshot } from "../../config/service";
 import {
   disposeOpencodeSkillInstance,
@@ -7,11 +12,6 @@ import {
   removeManagedSkill,
   setManagedSkillEnabled,
 } from "../../skills/service";
-import {
-  importManagedSkillWithConfigUpdate,
-  loadRuntimeSkillCatalog,
-  setEnabledSkillsFromCatalog,
-} from "../../config/orchestration";
 
 export function createSkillRoutes() {
   return {

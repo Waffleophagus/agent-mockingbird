@@ -9,5 +9,5 @@
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["src/**/*.test.ts", "src/test-embedded.ts", "src/test-embedded2.ts"]
+  "exclude": ["src/test-embedded.ts", "src/test-embedded2.ts"]
 }

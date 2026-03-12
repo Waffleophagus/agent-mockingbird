@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { createCronRoutes } from "./cronRoutes";
+import { createMemoryRoutes } from "./memoryRoutes";
+import { createSignalRoutes } from "./signalRoutes";
 import { migrateOpenclawWorkspace } from "../../agents/openclawImport";
 import {
   getOpencodeAgentStorageInfo,
@@ -7,12 +10,7 @@ import {
   patchOpencodeAgentTypes,
   validateOpencodeAgentPatch,
 } from "../../agents/opencodeConfig";
-import {
-  getConfigSnapshot,
-  applyConfigPatch,
-  ConfigApplyError,
-  replaceConfig,
-} from "../../config/service";
+import type { SignalChannelService } from "../../channels/signal/service";
 import {
   getEnabledSkillsFromCatalog,
   importManagedSkillWithConfigUpdate,
@@ -20,11 +18,14 @@ import {
   setEnabledSkillsFromCatalog,
 } from "../../config/orchestration";
 import { configuredMcpServerSchema } from "../../config/schema";
+import {
+  applyConfigPatch,
+  ConfigApplyError,
+  getConfigSnapshot,
+  replaceConfig,
+} from "../../config/service";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import type { CronService } from "../../cron/service";
-import { getRuntimeStartupInfo } from "../../runtime";
-import type { SignalChannelService } from "../../channels/signal/service";
-import { syncMemoryIndex } from "../../memory/service";
 import {
   connectRuntimeMcp,
   disconnectRuntimeMcp,
@@ -34,20 +35,10 @@ import {
   startRuntimeMcpAuth,
   updateWorkspaceMcpConfig,
 } from "../../mcp/service";
-import { createCronRoutes } from "./cronRoutes";
-import { createMemoryRoutes } from "./memoryRoutes";
+import { syncMemoryIndex } from "../../memory/service";
+import { getRuntimeStartupInfo } from "../../runtime";
 import { parseStringListBody } from "../parsers";
 import type { RouteTable } from "../router";
-import { createSignalRoutes } from "./signalRoutes";
-
-function prefixRoutes(prefix: string, routes: RouteTable): RouteTable {
-  return Object.fromEntries(
-    Object.entries(routes).map(([pathname, handlers]) => {
-      const suffix = pathname.startsWith("/api/") ? pathname.slice("/api".length) : pathname;
-      return [`${prefix}${suffix}`, handlers];
-    }),
-  );
-}
 
 function configError(error: unknown) {
   if (error instanceof ConfigApplyError) {

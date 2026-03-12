@@ -1,10 +1,15 @@
+export interface RouteRequest<TParams extends Record<string, string> = Record<string, string>>
+  extends Request {
+  params: TParams;
+}
+
 export interface RouteHandler {
-  GET?: (req: Request & { params: any }) => Response | Promise<Response>;
-  POST?: (req: Request & { params: any }) => Response | Promise<Response>;
-  PUT?: (req: Request & { params: any }) => Response | Promise<Response>;
-  PATCH?: (req: Request & { params: any }) => Response | Promise<Response>;
-  DELETE?: (req: Request & { params: any }) => Response | Promise<Response>;
-  OPTIONS?: (req: Request & { params: any }) => Response | Promise<Response>;
+  GET?: (req: RouteRequest) => Response | Promise<Response>;
+  POST?: (req: RouteRequest) => Response | Promise<Response>;
+  PUT?: (req: RouteRequest) => Response | Promise<Response>;
+  PATCH?: (req: RouteRequest) => Response | Promise<Response>;
+  DELETE?: (req: RouteRequest) => Response | Promise<Response>;
+  OPTIONS?: (req: RouteRequest) => Response | Promise<Response>;
 }
 
 export type RouteTable = Record<string, RouteHandler>;
@@ -39,7 +44,7 @@ export async function dispatchRoute(table: RouteTable, req: Request) {
     if (!handler) {
       return new Response("Method not allowed", { status: 405 });
     }
-    return handler(Object.assign(req, { params }));
+    return handler(Object.assign(req, { params }) as RouteRequest);
   }
 
   return null;

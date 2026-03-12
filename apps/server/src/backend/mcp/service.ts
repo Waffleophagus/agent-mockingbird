@@ -1,7 +1,7 @@
 import type { Config } from "@opencode-ai/sdk/client";
+import { parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parse as parseJsonc } from "jsonc-parser";
 
 import type { AgentMockingbirdConfig, ConfiguredMcpServer } from "../config/schema";
 import { createOpencodeClientFromConnection, createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";

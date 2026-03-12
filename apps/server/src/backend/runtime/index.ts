@@ -1,8 +1,8 @@
 import { OpencodeRuntime } from "./opencodeRuntime";
 import { getConfigSnapshot } from "../config/service";
 import type { RuntimeEngine } from "../contracts/runtime";
-import { getOpencodeConnectionInfo } from "../opencode/client";
 import { readConfiguredMcpServersFromWorkspaceConfig } from "../mcp/service";
+import { getOpencodeConnectionInfo } from "../opencode/client";
 import { listManagedSkillCatalog } from "../skills/service";
 
 let runtimeInstance: RuntimeEngine | null = null;

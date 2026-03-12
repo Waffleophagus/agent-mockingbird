@@ -51,6 +51,8 @@ interface OpenCodeApp {
   fetch(request: Request, env?: unknown, executionCtx?: unknown): Response | Promise<Response>;
 }
 
+type AgentMockingbirdServer = Bun.Server<unknown>;
+
 let openCodeAppPromise: Promise<OpenCodeApp> | undefined;
 
 async function getOpenCodeApp(): Promise<OpenCodeApp> {
@@ -96,7 +98,7 @@ async function syncHeartbeatJobs(reason: string) {
   }
 }
 
-async function serveOpenCodeApp(req: Request, server?: Bun.Server<any>) {
+async function serveOpenCodeApp(req: Request, server?: AgentMockingbirdServer) {
   if (!appDistDir) {
     return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
   }

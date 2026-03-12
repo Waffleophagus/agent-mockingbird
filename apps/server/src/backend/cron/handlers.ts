@@ -1,5 +1,4 @@
 import type { CronHandler, CronHandlerResult } from "./types";
-import { getConfigSnapshot } from "../config/service";
 import { listOpencodeAgentTypes } from "../agents/opencodeConfig";
 import { executeHeartbeat } from "../heartbeat/service";
 import { syncMemoryIndex } from "../memory/service";
