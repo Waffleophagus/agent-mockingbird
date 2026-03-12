@@ -278,7 +278,7 @@ jobs:
             }
             const snippet = text.slice(start, end);
             const compiledIndex = snippet.indexOf("const compiledBinary = path.join");
-            const compiledModeIndex = snippet.indexOf('mode: "compiled"');
+            const compiledModeIndex = snippet.indexOf("mode: \"compiled\"");
             const sourceIndex = snippet.indexOf("const entrypoint = resolveAgentMockingbirdServiceEntrypoint");
             if (compiledIndex < 0 || compiledModeIndex < 0) {
               throw new Error("Packaged runtime resolver is missing compiled bundle support.");
