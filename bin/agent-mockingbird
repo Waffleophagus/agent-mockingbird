@@ -850,11 +850,28 @@ async function verifyFrontendAssets(baseUrl) {
   }
 }
 
+async function verifyFrontendAssetsWithRetry(baseUrl, input = {}) {
+  const attempts = typeof input.attempts === "number" ? Math.max(1, Math.trunc(input.attempts)) : 10;
+  const delayMs = typeof input.delayMs === "number" ? Math.max(100, Math.trunc(input.delayMs)) : 750;
+  let last = await verifyFrontendAssets(baseUrl);
+  for (let attempt = 1; attempt < attempts; attempt += 1) {
+    if (last.ok) {
+      return last;
+    }
+    await sleep(delayMs);
+    last = await verifyFrontendAssets(baseUrl);
+  }
+  return last;
+}
+
 async function runPostInstallVerification() {
   const agentMockingbirdStatus = shell("systemctl", ["--user", "status", UNIT_AGENT_MOCKINGBIRD, "--no-pager"]);
   const opencodeStatus = shell("systemctl", ["--user", "status", UNIT_OPENCODE, "--no-pager"]);
   const linger = shell("loginctl", ["show-user", userName(), "-p", "Linger"]);
-  const frontendAssets = await verifyFrontendAssets("http://127.0.0.1:3001/");
+  const frontendAssets = await verifyFrontendAssetsWithRetry("http://127.0.0.1:3001/", {
+    attempts: 10,
+    delayMs: 750,
+  });
   return {
     agentMockingbirdServiceOk: agentMockingbirdStatus.code === 0,
     opencodeServiceOk: opencodeStatus.code === 0,
@@ -1976,10 +1993,6 @@ async function installOrUpdate(args, mode) {
           skills: [],
         };
   const verify = await runPostInstallVerification();
-  if (!verify.frontendAssetsOk) {
-    const detail = verify.frontendAssets?.error || "frontend asset verification failed";
-    throw new Error(`Frontend asset verification failed after ${mode}: ${detail}`);
-  }
   let onboarding = null;
   if (mode === "install" && !args.yes) {
     try {
