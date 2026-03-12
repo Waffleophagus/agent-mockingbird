@@ -321,7 +321,8 @@ This repo uses one CI/CD workflow:
 
 - `.github/workflows/ci.yml` runs lint/typecheck/build, then publishes the same packed artifact to your npm-compatible package registry.
 - Pull requests run checks only (no publish).
-- `main` pushes auto-increment patch version from the currently published stable version (`0.0.1` -> `0.0.2` -> `0.0.3`) and publish with npm tag `latest`.
+- `main` pushes publish preview builds with npm tag `latest`.
+- Non-`main` branch pushes publish preview builds with npm tag `branch-<sanitized-branch-name>`.
 - Pushes to matching `v*` tags publish the exact `package.json` version with npm tag `latest`.
 - Manual dispatch publishes `package.json` version with npm tag `latest`.
 - Tag pushes must match `v<package.json version>` or CI fails.
@@ -344,6 +345,14 @@ Run a different lifecycle command:
 
 ```bash
 curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash -s -- status
+```
+
+Install from a feature branch preview:
+
+```bash
+BRANCH="<branch-name>"
+TAG="branch-<sanitized-branch-name>"
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${BRANCH}/scripts/onboard/bootstrap.sh" | AGENT_MOCKINGBIRD_TAG="${TAG}" bash
 ```
 
 Direct package execution from private registry:

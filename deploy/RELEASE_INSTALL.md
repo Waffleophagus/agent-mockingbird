@@ -36,12 +36,21 @@ Fallback bootstrap wrapper:
 curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
+Feature branch preview install:
+
+```bash
+BRANCH="<branch-name>"
+TAG="branch-<sanitized-branch-name>"
+curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${BRANCH}/scripts/onboard/bootstrap.sh" | AGENT_MOCKINGBIRD_TAG="${TAG}" bash
+```
+
 ## Maintainer flow (build + publish)
 
-1. Push a tag (for example `v0.1.0`) or push to `main`.
+1. Push a branch, push to `main`, or push a tag (for example `v0.1.0`).
 2. CI builds the compiled distributable (`dist/agent-mockingbird` + `dist/app`) and publishes:
    - `@<scope>/agent-mockingbird`
    - `@<scope>/agent-mockingbird-installer`
+   - branch preview pushes update dist-tags in the form `branch-<sanitized-branch-name>`
 3. The published package is the source of truth for the end-user install flow above.
 
 ## Manual host install flow

@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - "**"
     tags:
       - "v*"
   workflow_dispatch:
@@ -73,6 +73,11 @@ jobs:
           build_number="${GITHUB_RUN_NUMBER:-${GITEA_RUN_NUMBER:-}}"
           registry_url="${PACKAGE_REGISTRY_URL:-}"
           scope="${PACKAGE_REGISTRY_SCOPE:-}"
+          branch_slug="$(printf '%s' "${ref_name}" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9-]#-#g; s#--*#-#g; s#^-##; s#-$##')"
+          branch_slug="${branch_slug:0:48}"
+          if [[ -z "${branch_slug}" ]]; then
+            branch_slug="preview"
+          fi
           scope="$(printf '%s' "${scope}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           scope="${scope,,}"
           registry_url="$(printf '%s' "${registry_url}" | tr -d '\r' | sed 's/[[:space:]]*$//')"
@@ -80,6 +85,8 @@ jobs:
 
           should_publish="false"
           npm_tag="latest"
+          bootstrap_ref="main"
+          bootstrap_tag="latest"
 
           if [[ "${event}" == "pull_request" ]]; then
             should_publish="false"
@@ -92,18 +99,39 @@ jobs:
             fi
           elif [[ "${event}" == "workflow_dispatch" ]]; then
             should_publish="true"
+            if [[ "${ref}" == refs/heads/* && "${ref}" != "refs/heads/main" ]]; then
+              npm_tag="branch-${branch_slug}"
+              bootstrap_ref="${ref_name}"
+              bootstrap_tag="${npm_tag}"
+              if [[ -z "${build_number}" ]]; then
+                build_number="$(date +%s)"
+              fi
+              package_version="${base_version}-branch.${branch_slug}.${build_number}"
+            fi
           elif [[ "${event}" == "push" && "${ref}" == "refs/heads/main" ]]; then
             should_publish="true"
             if [[ -z "${build_number}" ]]; then
               build_number="$(date +%s)"
             fi
             package_version="${base_version}-build.${build_number}"
+          elif [[ "${event}" == "push" && "${ref}" == refs/heads/* ]]; then
+            should_publish="true"
+            npm_tag="branch-${branch_slug}"
+            bootstrap_ref="${ref_name}"
+            bootstrap_tag="${npm_tag}"
+            if [[ -z "${build_number}" ]]; then
+              build_number="$(date +%s)"
+            fi
+            package_version="${base_version}-branch.${branch_slug}.${build_number}"
           fi
 
           echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
           echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
           echo "build_number=${build_number}" >> "${GITHUB_OUTPUT}"
           echo "npm_tag=${npm_tag}" >> "${GITHUB_OUTPUT}"
+          echo "branch_slug=${branch_slug}" >> "${GITHUB_OUTPUT}"
+          echo "bootstrap_ref=${bootstrap_ref}" >> "${GITHUB_OUTPUT}"
+          echo "bootstrap_tag=${bootstrap_tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Validate publish secrets
         if: steps.meta.outputs.should_publish == 'true'
@@ -335,3 +363,21 @@ jobs:
           actual_installer_tag="$(bunx npm view "${installer_name}" "dist-tags.${npm_tag}" --registry "${REGISTRY_URL%/}/")"
           test "${actual_pkg_tag}" = "${expected_version}"
           test "${actual_installer_tag}" = "${expected_version}"
+
+      - name: Publish install command summary
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          bootstrap_ref="${{ steps.meta.outputs.bootstrap_ref }}"
+          bootstrap_tag="${{ steps.meta.outputs.bootstrap_tag }}"
+          {
+            echo "## Install command"
+            echo
+            echo '```bash'
+            if [[ "${bootstrap_ref}" == "main" && "${bootstrap_tag}" == "latest" ]]; then
+              echo 'curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash'
+            else
+              echo "curl -fsSL \"https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${bootstrap_ref}/scripts/onboard/bootstrap.sh\" | AGENT_MOCKINGBIRD_TAG=\"${bootstrap_tag}\" bash"
+            fi
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
