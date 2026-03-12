@@ -73,13 +73,17 @@ function toConfigErrorResponse(error: unknown) {
 
 export function createDashboardRoutes(runtime: RuntimeEngine) {
   return {
-    "/api/health": () =>
-      Response.json({
-        status: "ok",
-        now: new Date().toISOString(),
-      }),
+    "/api/health": {
+      GET: () =>
+        Response.json({
+          status: "ok",
+          now: new Date().toISOString(),
+        }),
+    },
 
-    "/api/dashboard/bootstrap": () => Response.json(getDashboardBootstrap()),
+    "/api/dashboard/bootstrap": {
+      GET: () => Response.json(getDashboardBootstrap()),
+    },
 
     "/api/runtime/health": {
       GET: async (req: Request) => {

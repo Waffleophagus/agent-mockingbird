@@ -6,11 +6,12 @@ import { SignalChannelService } from "./backend/channels/signal/service";
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { CronService } from "./backend/cron/service";
 import "./backend/db/migrate";
-import { ensureSeedData } from "./backend/db/repository";
+import { ensureSeedData, getHeartbeatSnapshot, getUsageSnapshot } from "./backend/db/repository";
 import { env } from "./backend/env";
 import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
 import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
+import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
 import { resolveAppDistDir } from "./backend/paths";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
@@ -77,13 +78,20 @@ const configSnapshot = getConfigSnapshot();
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
 const signalService = new SignalChannelService(runtime);
+const eventStream = createRuntimeEventStream({
+  getHeartbeatSnapshot,
+  getUsageSnapshot,
+});
 const runtimeInfo = getRuntimeStartupInfo();
 const appDistDir = resolveAppDistDir();
 const apiRoutes = createApiRoutes({
   runtime,
   cronService,
   signalService,
+  eventStream,
 });
+
+runtime.subscribe(eventStream.publish);
 
 let heartbeatAgentHash = "";
 

@@ -6,13 +6,17 @@ import type { RuntimeEngine } from "../../contracts/runtime";
 import type { CronService } from "../../cron/service";
 import { syncMemoryIndex } from "../../memory/service";
 import type { RouteTable } from "../router";
+import type { RuntimeEventStream } from "../sse";
 import { createAgentRoutes } from "./agentRoutes";
+import { createConfigRoutes } from "./configRoutes";
 import { createCronRoutes } from "./cronRoutes";
+import { createDashboardRoutes } from "./dashboardRoutes";
 import { createMcpRoutes } from "./mcpRoutes";
 import { createMemoryRoutes } from "./memoryRoutes";
 import { createRuntimeRoutes } from "./runtimeRoutes";
 import { createSignalRoutes } from "./signalRoutes";
 import { createSkillRoutes } from "./skillRoutes";
+import { createUiRoutes } from "./uiRoutes";
 
 async function importOpenclaw(req: Request) {
   const schema = z.object({
@@ -65,15 +69,16 @@ export function createApiRoutes(input: {
   runtime: RuntimeEngine;
   cronService: CronService;
   signalService: SignalChannelService;
+  eventStream: RuntimeEventStream;
 }): RouteTable {
   return {
-    "/api/health": {
-      GET: () => Response.json({ ok: true, service: "agent-mockingbird" }),
-    },
     "/api/waffle/runtime/import-openclaw": {
       POST: (req: Request) => importOpenclaw(req),
     },
     ...createRuntimeRoutes(),
+    ...createDashboardRoutes(input.runtime),
+    ...createConfigRoutes(input.eventStream),
+    ...createUiRoutes(input.runtime, input.eventStream),
     ...createAgentRoutes(),
     ...createMcpRoutes(),
     ...createSkillRoutes(),

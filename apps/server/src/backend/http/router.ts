@@ -16,7 +16,9 @@ export interface RouteHandler {
   OPTIONS?: RouteMethod;
 }
 
-export type RouteTable = Record<string, RouteHandler>;
+export type RouteEntry = RouteHandler | RouteMethod;
+
+export type RouteTable = Record<string, RouteEntry>;
 
 function matchPattern(pattern: string, pathname: string) {
   const patternParts = pattern.split("/").filter(Boolean);
@@ -44,11 +46,15 @@ export async function dispatchRoute(table: RouteTable, req: Request) {
   for (const [pattern, handlers] of Object.entries(table)) {
     const params = matchPattern(pattern, pathname);
     if (!params) continue;
+    const request = Object.assign(req, { params }) as RouteRequest;
+    if (typeof handlers === "function") {
+      return handlers(request);
+    }
     const handler = handlers[method];
     if (!handler) {
       return new Response("Method not allowed", { status: 405 });
     }
-    return handler(Object.assign(req, { params }) as RouteRequest);
+    return handler(request);
   }
 
   return null;
