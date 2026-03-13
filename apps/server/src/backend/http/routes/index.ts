@@ -5,14 +5,18 @@ import type { SignalChannelService } from "../../channels/signal/service";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import type { CronService } from "../../cron/service";
 import { syncMemoryIndex } from "../../memory/service";
+import type { RunService } from "../../run/service";
 import type { RouteTable } from "../router";
 import type { RuntimeEventStream } from "../sse";
 import { createAgentRoutes } from "./agentRoutes";
+import { createChatRoutes } from "./chatRoutes";
 import { createConfigRoutes } from "./configRoutes";
 import { createCronRoutes } from "./cronRoutes";
 import { createDashboardRoutes } from "./dashboardRoutes";
+import { createEventRoutes } from "./eventRoutes";
 import { createMcpRoutes } from "./mcpRoutes";
 import { createMemoryRoutes } from "./memoryRoutes";
+import { createRunRoutes } from "./runRoutes";
 import { createRuntimeRoutes } from "./runtimeRoutes";
 import { createSignalRoutes } from "./signalRoutes";
 import { createSkillRoutes } from "./skillRoutes";
@@ -70,15 +74,19 @@ export function createApiRoutes(input: {
   cronService: CronService;
   signalService: SignalChannelService;
   eventStream: RuntimeEventStream;
+  runService: RunService;
 }): RouteTable {
   return {
     "/api/waffle/runtime/import-openclaw": {
       POST: (req: Request) => importOpenclaw(req),
     },
     ...createRuntimeRoutes(),
+    ...createChatRoutes(input.runtime),
+    ...createRunRoutes(input.runService),
     ...createDashboardRoutes(input.runtime),
     ...createConfigRoutes(input.eventStream),
     ...createUiRoutes(input.runtime, input.eventStream),
+    ...createEventRoutes(input.eventStream),
     ...createAgentRoutes(),
     ...createMcpRoutes(),
     ...createSkillRoutes(),

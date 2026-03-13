@@ -11,9 +11,10 @@ import { env } from "./backend/env";
 import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
 import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
-import { createRuntimeEventStream } from "./backend/http/sse";
+import { createRuntimeEventStream, type MobileRealtimeSocketData } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
 import { resolveAppDistDir } from "./backend/paths";
+import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
 
 const OPENCODE_SERVER_PREFIXES = [
@@ -54,6 +55,7 @@ const configSnapshot = getConfigSnapshot();
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
 const signalService = new SignalChannelService(runtime);
+const runService = new RunService(runtime);
 const eventStream = createRuntimeEventStream({
   getHeartbeatSnapshot,
   getUsageSnapshot,
@@ -65,6 +67,7 @@ const apiRoutes = createApiRoutes({
   cronService,
   signalService,
   eventStream,
+  runService,
 });
 
 runtime.subscribe(eventStream.publish);
@@ -124,6 +127,7 @@ void initializeMemory().catch(() => {
   // Memory startup should not block server boot.
 });
 
+runService.start();
 cronService.start();
 signalService.start();
 void syncHeartbeatJobs("startup");
@@ -133,7 +137,10 @@ const heartbeatJobSyncTimer = setInterval(() => {
 
 const server = serve({
   idleTimeout: 120,
-  fetch: async (req) => {
+  fetch: async (req, server) => {
+    if (new URL(req.url).pathname === "/api/mobile/events/ws") {
+      return eventStream.websocketRoute(req, server as unknown as Bun.Server<MobileRealtimeSocketData>);
+    }
     const apiResponse = await dispatchRoute(apiRoutes, req);
     if (apiResponse) {
       return apiResponse;
@@ -149,6 +156,7 @@ const server = serve({
 
 const shutdown = () => {
   clearInterval(heartbeatJobSyncTimer);
+  runService.stop();
   cronService.stop();
   signalService.stop();
 };
