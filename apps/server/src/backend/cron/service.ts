@@ -1,7 +1,6 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { CronTime, validateCronExpression } from "cron";
 import { relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { getConfigSnapshot } from "../config/service";
 import { env } from "../env";
@@ -1201,7 +1200,7 @@ export class CronService {
     ctx: CronConditionalModuleContext,
   ): Promise<CronHandlerResult> {
     const timeoutMs = getConfigSnapshot().config.runtime.cron.conditionalModuleTimeoutMs;
-    const workerModuleUrl = pathToFileURL(resolve(import.meta.dir, "conditionWorker.ts")).href;
+    const workerModuleUrl = new URL("./conditionWorker.ts", import.meta.url).href;
 
     return await new Promise<CronHandlerResult>((resolveResult, rejectResult) => {
       const worker = new Worker(workerModuleUrl, { type: "module" });

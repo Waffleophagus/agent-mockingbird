@@ -2,6 +2,8 @@
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
+import { createStandaloneBuildOptions } from "./apps/server/src/cli/standaloneBuild";
+
 const repoRoot = import.meta.dir;
 const outdir = path.join(repoRoot, "dist");
 const outfile = path.join(outdir, "agent-mockingbird");
@@ -16,14 +18,7 @@ if (existsSync(drizzleOutdir)) {
 }
 
 console.log("Building standalone binary...");
-const result = await Bun.build({
-  entrypoints: [path.join(repoRoot, "apps/server/src/index.ts")],
-  compile: {
-    outfile,
-  },
-  minify: true,
-  sourcemap: "linked",
-});
+const result = await Bun.build(createStandaloneBuildOptions(repoRoot, outfile));
 
 if (!result.success) {
   for (const message of result.logs) {
