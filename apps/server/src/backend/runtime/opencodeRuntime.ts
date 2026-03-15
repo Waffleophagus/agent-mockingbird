@@ -349,9 +349,6 @@ export class OpencodeRuntime implements RuntimeEngine {
     } else if (!options.getRuntimeConfig) {
       this.client = createOpencodeClient();
     }
-    if (options.enableSmallModelSync !== false) {
-      void this.syncOpencodeSmallModel();
-    }
     if (options.enableEventSync !== false) {
       this.startEventSync();
     }
@@ -4266,7 +4263,4 @@ export class OpencodeRuntime implements RuntimeEngine {
     }
   }
 
-  private async syncOpencodeSmallModel() {
-    await this.ensureRuntimeConfigSynced(true);
-  }
 }

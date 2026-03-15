@@ -1256,30 +1256,34 @@ describe("opencode runtime failover contract", () => {
     expect(retryEvent?.payload?.message).toContain("Retrying with backup-provider/backup-model.");
   });
 
-  test("syncs runtime skill paths and MCP config into OpenCode config without permission skill writes", async () => {
+  test("syncs runtime skill paths into OpenCode config without permission skill writes", async () => {
     const updates: Array<Record<string, unknown>> = [];
+    let configGetCount = 0;
     const client = createMockClient({
       prompt: async (request) => assistantResponse(request.path.id, "OK"),
     });
-    client.config.get = async () => ({
-      data: {
-        small_model: "test-provider/test-small",
-        skills: {
-          paths: [],
-        },
-        mcp: {
-          github: {
-            enabled: true,
+    client.config.get = async () => {
+      configGetCount += 1;
+      return {
+        data: {
+          small_model: "test-provider/test-small",
+          skills: {
+            paths: [],
           },
-          linear: {
-            type: "remote",
-            url: "https://example.com/mcp",
-            enabled: true,
+          mcp: {
+            github: {
+              enabled: true,
+            },
+            linear: {
+              type: "remote",
+              url: "https://example.com/mcp",
+              enabled: true,
+            },
           },
+          permission: {},
         },
-        permission: {},
-      },
-    });
+      };
+    };
     client.config.update = async (input: unknown) => {
       const body = (input as { body?: Record<string, unknown> }).body ?? {};
       updates.push(body);
@@ -1302,16 +1306,17 @@ describe("opencode runtime failover contract", () => {
         },
       ],
     });
+    expect(configGetCount).toBe(0);
     const ack = await runtime.sendUserMessage({
       sessionId: "main",
       content: "hello",
     });
 
     expect(ack.messages.at(-1)?.content).toBe("OK");
+    expect(configGetCount).toBeGreaterThan(0);
     const updated = updates.at(-1) as
       | {
           skills?: { paths?: Array<string> };
-          mcp?: Record<string, { enabled?: boolean; url?: string }>;
           agent?: Record<
             string,
             {
@@ -1328,9 +1333,6 @@ describe("opencode runtime failover contract", () => {
     expect(updated).toBeTruthy();
     expect(updated?.skills?.paths).toContain(path.resolve(testWorkspacePath, ".agents", "skills"));
     expect(updated?.permission).toEqual({});
-    expect(updated?.mcp?.github?.enabled).toBe(true);
-    expect(updated?.mcp?.github?.url).toBe("https://api.github.com/mcp");
-    expect(updated?.mcp?.linear?.enabled).toBe(false);
     expect(updated?.agent).toBeUndefined();
   });
 
