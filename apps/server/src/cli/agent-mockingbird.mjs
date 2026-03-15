@@ -1050,7 +1050,10 @@ async function runOnboardingCommand(args) {
   if (!opencodeBin) {
     throw new Error("opencode binary not found. Run `agent-mockingbird install` first.");
   }
-  const onboarding = await runInteractiveProviderOnboarding({ opencodeBin });
+  const onboarding = await runInteractiveProviderOnboarding({
+    opencodeBin,
+    workspaceDir: paths.workspaceDir,
+  });
   return {
     mode: "onboard",
     rootDir: paths.rootDir,
@@ -1569,7 +1572,7 @@ async function runOpenclawMigrationWizard() {
 }
 
 async function runInteractiveProviderOnboarding(input) {
-  const { opencodeBin } = input;
+  const { opencodeBin, workspaceDir } = input;
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return { status: "skipped", reason: "non-interactive" };
   }
@@ -1620,7 +1623,7 @@ async function runInteractiveProviderOnboarding(input) {
     console.log("");
     console.log(heading("Provider auth"));
     console.log(info("Current OpenCode credentials:"));
-    shell(opencodeBin, ["auth", "list"], { stdio: "inherit" });
+    shell(opencodeBin, ["auth", "list"], { stdio: "inherit", cwd: workspaceDir });
 
     while (true) {
       const selection = await promptSelect(
@@ -1649,7 +1652,7 @@ async function runInteractiveProviderOnboarding(input) {
       let result;
       if (selection.value === "__picker__") {
         authAttempts += 1;
-        result = shell(opencodeBin, ["auth", "login"], { stdio: "inherit" });
+        result = shell(opencodeBin, ["auth", "login"], { stdio: "inherit", cwd: workspaceDir });
       } else if (selection.value === "__manual_url__") {
         const providerUrl = (await promptText("Provider auth URL", "")).trim();
         if (!providerUrl) {
@@ -1664,14 +1667,14 @@ async function runInteractiveProviderOnboarding(input) {
           continue;
         }
         authAttempts += 1;
-        result = shell(opencodeBin, ["auth", "login", providerUrl], { stdio: "inherit" });
+        result = shell(opencodeBin, ["auth", "login", providerUrl], { stdio: "inherit", cwd: workspaceDir });
       } else {
         continue;
       }
 
       if (result.code === 0) {
         authSuccess = true;
-        shell(opencodeBin, ["auth", "list"], { stdio: "inherit" });
+        shell(opencodeBin, ["auth", "list"], { stdio: "inherit", cwd: workspaceDir });
       } else {
         console.log(warn("OpenCode login attempt did not complete successfully."));
       }
@@ -1996,7 +1999,10 @@ async function installOrUpdate(args, mode) {
   let onboarding = null;
   if (mode === "install" && !args.yes) {
     try {
-      onboarding = await runInteractiveProviderOnboarding({ opencodeBin });
+      onboarding = await runInteractiveProviderOnboarding({
+        opencodeBin,
+        workspaceDir: paths.workspaceDir,
+      });
     } catch (error) {
       onboarding = {
         status: "error",
