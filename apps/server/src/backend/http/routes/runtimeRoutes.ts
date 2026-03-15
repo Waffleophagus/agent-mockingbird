@@ -132,9 +132,11 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
     },
 
     "/api/waffle/runtime/compaction-context": {
-      GET: () =>
+      GET: (req: Request) =>
         Response.json({
-          context: buildAgentMockingbirdCompactionContext(),
+          context: buildAgentMockingbirdCompactionContext(
+            new URL(req.url).searchParams.get("sessionId")?.trim() || undefined,
+          ),
         }),
     },
 

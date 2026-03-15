@@ -159,18 +159,22 @@ async function fetchSystemPrompt() {
   return system
 }
 
-async function fetchCompactionContext() {
+async function fetchCompactionContext(sessionID?: string) {
   const now = Date.now()
-  if (compactionContextCache.expiresAtMs > now) {
+  const cacheKey = sessionID?.trim() || "__default__"
+  if (compactionContextCache.expiresAtMs > now && cacheKey === "__default__") {
     return compactionContextCache.value
   }
 
-  const payload = await requestJson("/api/waffle/runtime/compaction-context")
+  const search = sessionID?.trim() ? `?sessionId=${encodeURIComponent(sessionID.trim())}` : ""
+  const payload = await requestJson(`/api/waffle/runtime/compaction-context${search}`)
   const context = Array.isArray(payload.context)
     ? payload.context.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     : []
-  compactionContextCache.value = context
-  compactionContextCache.expiresAtMs = now + 5_000
+  if (cacheKey === "__default__") {
+    compactionContextCache.value = context
+    compactionContextCache.expiresAtMs = now + 5_000
+  }
   return context
 }
 
@@ -629,7 +633,7 @@ const AgentMockingbirdPlugin: Plugin = async () => {
       }
     },
     "experimental.session.compacting": async (_input, output) => {
-      const context = await fetchCompactionContext()
+      const context = await fetchCompactionContext(_input.sessionID)
       if (context.length === 0) return
       output.context.push(...context)
     },

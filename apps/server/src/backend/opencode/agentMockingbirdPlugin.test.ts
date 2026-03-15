@@ -178,7 +178,7 @@ describe("AgentMockingbirdPlugin", () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input) => {
-      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/runtime/compaction-context");
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/runtime/compaction-context?sessionId=sess-1");
       return new Response(JSON.stringify({ context: ["Agent Mockingbird continuation notes:\n- Mention config changes."] }), {
         headers: {
           "Content-Type": "application/json",

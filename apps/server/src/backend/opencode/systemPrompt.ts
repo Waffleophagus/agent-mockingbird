@@ -1,6 +1,125 @@
 import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import { getConfigSnapshot } from "../config/service";
+import {
+  getLocalSessionIdByRuntimeBinding,
+  listMessagesForSession,
+} from "../db/repository";
 import { env } from "../env";
+
+const OPENCODE_RUNTIME_ID = "opencode";
+const MAX_COMPACTION_RECENT_MESSAGES = 6;
+const MAX_COMPACTION_RECENT_MESSAGE_CHARS = 220;
+const MAX_COMPACTION_IDENTIFIERS = 10;
+const MAX_COMPACTION_PATHS = 8;
+
+function trimCompactionLine(value: string) {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= MAX_COMPACTION_RECENT_MESSAGE_CHARS) return compact;
+  return `${compact.slice(0, MAX_COMPACTION_RECENT_MESSAGE_CHARS - 3).trimEnd()}...`;
+}
+
+function collectRecentTranscriptLines(externalSessionId?: string) {
+  const sessionId = externalSessionId?.trim()
+    ? getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, externalSessionId)
+    : null;
+  if (!sessionId) return [];
+  const messages = listMessagesForSession(sessionId);
+  return messages
+    .slice(-MAX_COMPACTION_RECENT_MESSAGES)
+    .map(message => {
+      const content = trimCompactionLine(message.content);
+      if (!content) return null;
+      const role = message.role === "user" ? "User" : "Assistant";
+      return `- ${role}: ${content}`;
+    })
+    .filter((line): line is string => Boolean(line));
+}
+
+function collectLatestUserAsk(externalSessionId?: string) {
+  const sessionId = externalSessionId?.trim()
+    ? getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, externalSessionId)
+    : null;
+  if (!sessionId) return null;
+  const messages = listMessagesForSession(sessionId);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+    const content = trimCompactionLine(message.content);
+    if (content) return content;
+  }
+  return null;
+}
+
+function collectOpaqueIdentifiers(externalSessionId?: string) {
+  const sessionId = externalSessionId?.trim()
+    ? getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, externalSessionId)
+    : null;
+  if (!sessionId) return [];
+  const messages = listMessagesForSession(sessionId);
+  const haystack = messages.slice(-10).map(message => message.content).join("\n");
+  const matches =
+    haystack.match(
+      /([A-Fa-f0-9]{8,}|https?:\/\/\S+|\/[\w./-]{2,}|[A-Za-z]:\\[\w\\./-]+|\b\d{4}-\d{2}-\d{2}\b|\b\d{6,}\b|localhost:\d{2,5}|\b\d{2,5}\b)/g,
+    ) ?? [];
+  return [...new Set(matches.map(match => match.replace(/[),.;]+$/g, "").trim()).filter(Boolean))].slice(
+    0,
+    MAX_COMPACTION_IDENTIFIERS,
+  );
+}
+
+function collectMentionedPaths(externalSessionId?: string) {
+  const sessionId = externalSessionId?.trim()
+    ? getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, externalSessionId)
+    : null;
+  if (!sessionId) return [];
+  const messages = listMessagesForSession(sessionId);
+  const haystack = messages.slice(-12).map(message => message.content).join("\n");
+  const matches =
+    haystack.match(
+      /\b(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\b|\b[A-Za-z0-9_.-]+\.(?:ts|tsx|js|jsx|json|md|sql|mjs|cjs|css|html)\b/g,
+    ) ?? [];
+  return [...new Set(matches.map(match => match.replace(/[),.;]+$/g, "").trim()).filter(Boolean))].slice(
+    0,
+    MAX_COMPACTION_PATHS,
+  );
+}
+
+function buildSessionAwareCompactionContext(externalSessionId?: string) {
+  const latestAsk = collectLatestUserAsk(externalSessionId);
+  const identifiers = collectOpaqueIdentifiers(externalSessionId);
+  const paths = collectMentionedPaths(externalSessionId);
+  const recentTranscript = collectRecentTranscriptLines(externalSessionId);
+  const sections: string[] = [];
+
+  if (latestAsk || identifiers.length > 0 || paths.length > 0) {
+    const lines = [
+      "Transcript continuity requirements:",
+      "- Preserve the latest unresolved user ask and any unfinished work, approvals, or blockers.",
+      "- Preserve exact literal identifiers when they matter for continuation: file paths, URLs, ports, dates, hashes, IDs.",
+    ];
+    if (latestAsk) {
+      lines.push(`- Latest user ask to carry forward: ${latestAsk}`);
+    }
+    if (identifiers.length > 0) {
+      lines.push(`- Exact identifiers seen recently: ${identifiers.join(", ")}`);
+    }
+    if (paths.length > 0) {
+      lines.push(`- Files and paths explicitly mentioned: ${paths.join(", ")}`);
+    }
+    sections.push(lines.join("\n"));
+  }
+
+  if (recentTranscript.length > 0) {
+    sections.push(
+      [
+        "Recent turns to preserve verbatim when useful:",
+        ...recentTranscript,
+      ].join("\n"),
+    );
+  }
+
+  return sections;
+}
 
 function currentMemoryConfig() {
   return getConfigSnapshot().config.runtime.memory;
@@ -76,7 +195,7 @@ export function buildAgentMockingbirdSystemPrompt() {
   return lines.length ? lines.join("\n") : undefined;
 }
 
-export function buildAgentMockingbirdCompactionContext() {
+export function buildAgentMockingbirdCompactionContext(externalSessionId?: string) {
   const memoryConfig = currentMemoryConfig();
   const workspaceContext = buildWorkspaceBootstrapPromptContext({
     config: getConfigSnapshot().config,
@@ -101,6 +220,8 @@ export function buildAgentMockingbirdCompactionContext() {
       ].join("\n"),
     );
   }
+
+  sections.push(...buildSessionAwareCompactionContext(externalSessionId));
 
   if (workspaceContext.section) {
     sections.push(
