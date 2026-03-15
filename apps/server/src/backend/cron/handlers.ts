@@ -24,12 +24,12 @@ const memoryMaintenanceHandler: CronHandler = async () => {
 const heartbeatCheckHandler: CronHandler = async ctx => {
   const payload = (ctx.payload ?? {}) as unknown as Partial<HeartbeatJobPayload>;
   const agentId = asString(payload.agentId);
-  const sessionId = asString(payload.sessionId);
+  const sessionId = ctx.job.threadSessionId ?? asString(payload.sessionId);
 
   if (!agentId || !sessionId) {
     return {
       status: "error",
-      summary: "heartbeat.check requires agentId and sessionId in payload",
+      summary: "heartbeat.check requires agentId and a target session",
     };
   }
 

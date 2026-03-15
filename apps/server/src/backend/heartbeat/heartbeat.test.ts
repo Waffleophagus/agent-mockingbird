@@ -139,7 +139,6 @@ describe("default heartbeat cron", () => {
     expect(row?.handler_key).toBe("heartbeat.check");
     expect(JSON.parse(row?.payload_json ?? "{}")).toEqual({
       agentId: "build",
-      sessionId: "main",
       prompt: DEFAULT_HEARTBEAT_PROMPT,
       ackMaxChars: DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
     });

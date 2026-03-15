@@ -28,7 +28,7 @@ export interface HeartbeatResult {
 
 export interface HeartbeatJobPayload {
   agentId: string;
-  sessionId: string;
+  sessionId?: string;
   prompt?: string;
   ackMaxChars?: number;
   activeHours?: {

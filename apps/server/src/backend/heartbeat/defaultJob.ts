@@ -9,7 +9,6 @@ import { DEFAULT_AGENT_TYPES } from "../defaults";
 
 export const HEARTBEAT_SYSTEM_JOB_ID = "heartbeat-system";
 const HEARTBEAT_SYSTEM_JOB_NAME = "Heartbeat";
-const MAIN_SESSION_ID = "main";
 const DEFAULT_HEARTBEAT_INTERVAL = "30m";
 
 function resolveDefaultHeartbeatAgentId() {
@@ -23,7 +22,6 @@ function resolveDefaultHeartbeatAgentId() {
 function buildDefaultHeartbeatPayload() {
   return {
     agentId: resolveDefaultHeartbeatAgentId(),
-    sessionId: MAIN_SESSION_ID,
     prompt: DEFAULT_HEARTBEAT_PROMPT,
     ackMaxChars: DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
   };

@@ -23,7 +23,7 @@ import type {
 } from "./types";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
-import { getSessionById } from "../db/repository";
+import { getSessionById, setSessionModel, setSessionTitle } from "../db/repository";
 
 interface CronDefinitionRow {
   id: string;
@@ -1050,8 +1050,19 @@ export class CronService {
   }
 
   private async ensureCronThread(definition: CronJobDefinition): Promise<CronJobDefinition> {
-    if (definition.threadSessionId && getSessionById(definition.threadSessionId)) {
-      return definition;
+    if (definition.threadSessionId) {
+      const existingThread = getSessionById(definition.threadSessionId);
+      if (existingThread) {
+        const mainSession = getSessionById("main");
+        const desiredTitle = `Cron: ${definition.name}`;
+        if (existingThread.title !== desiredTitle) {
+          setSessionTitle(existingThread.id, desiredTitle);
+        }
+        if (mainSession && existingThread.model !== mainSession.model) {
+          setSessionModel(existingThread.id, mainSession.model);
+        }
+        return (await this.getJob(definition.id)) ?? definition;
+      }
     }
 
     if (!this.runtime.spawnBackgroundSession) {
@@ -1078,6 +1089,12 @@ export class CronService {
       `,
       )
       .run(definition.id, threadSessionId, nowMs());
+
+    const mainSession = getSessionById("main");
+    if (mainSession) {
+      setSessionModel(threadSessionId, mainSession.model);
+    }
+    setSessionTitle(threadSessionId, `Cron: ${definition.name}`);
 
     const refreshed = await this.getJob(definition.id);
     if (!refreshed) {
@@ -1253,7 +1270,7 @@ export class CronService {
       });
       return;
     }
-    const definition = definitionRowToModel(definitionRow);
+    let definition = definitionRowToModel(definitionRow);
     const instance = instanceRowToModel(claimed);
     const attempt = claimed.attempt + 1;
     const startedAt = nowMs();
@@ -1315,6 +1332,9 @@ export class CronService {
           finishedAt: nowMs(),
         });
       } else {
+        if (definition.handlerKey === "heartbeat.check") {
+          definition = await this.ensureCronThread(definition);
+        }
         const stepKind: CronStepKind =
           definition.runMode === "background" ? "background" : "conditional_agent";
         insertStep({

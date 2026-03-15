@@ -37,6 +37,7 @@ interface RepositoryApi {
   resetDatabaseToDefaults: () => unknown;
   createSession: (input?: { title?: string; model?: string }) => SessionSummaryLite;
   getSessionById: (sessionId: string) => { id: string; model: string } | null;
+  setSessionModel: (sessionId: string, model: string) => { id: string; model: string } | null;
   getUsageSnapshot: () => UsageSnapshotLite;
   getHeartbeatSnapshot: () => HeartbeatSnapshotLite;
 }
@@ -291,6 +292,7 @@ let RuntimeSessionNotFoundError: RuntimeSessionNotFoundErrorCtor;
 let RuntimeSessionQueuedError: RuntimeSessionQueuedErrorCtor;
 let RuntimeContinuationDetachedError: RuntimeContinuationDetachedErrorCtor;
 let sqlite: SqliteDb;
+let setRuntimeForTests: (runtime: RuntimeStub | null) => void;
 
 beforeAll(async () => {
   await import("../db/migrate");
@@ -321,6 +323,9 @@ beforeAll(async () => {
   ({ sqlite } = (await import("../db/client")) as unknown as {
     sqlite: SqliteDb;
   });
+  ({ setRuntimeForTests } = (await import("../runtime")) as unknown as {
+    setRuntimeForTests: (runtime: RuntimeStub | null) => void;
+  });
 
   repository.ensureSeedData();
   await memoryService.initializeMemory();
@@ -328,6 +333,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   repository.resetDatabaseToDefaults();
+  setRuntimeForTests(null);
   rmSync(testWorkspacePath, { recursive: true, force: true });
   await memoryService.initializeMemory();
 });
@@ -1229,7 +1235,12 @@ describe("background routes", () => {
     >();
     const runtime: RuntimeStub = {
       ...createRuntimeStub(async () => ({ sessionId: session.id, messages: [] })),
-      spawnBackgroundSession: async (input) => {
+      spawnBackgroundSession: async (input: {
+        parentSessionId: string;
+        title?: string;
+        requestedBy?: string;
+        prompt?: string;
+      }) => {
         const runId = "bg-route-1";
         const run = {
           runId,
@@ -1717,6 +1728,91 @@ describe("cron validation and retries", () => {
     expect(captured).toEqual([cronThread.id, cronThread.id]);
     const updatedJob = await cronService.getJob(job.id);
     expect(updatedJob?.threadSessionId).toBe(cronThread.id);
+  });
+
+  test("heartbeat jobs use a cron-owned thread and sync that thread model from main", async () => {
+    const captured: Array<{
+      sessionId: string;
+      content: string;
+      agent?: string;
+      metadata?: Record<string, unknown>;
+    }> = [];
+    let spawnCount = 0;
+    const runtime = {
+      ...createRuntimeStub(async input => {
+        captured.push(input);
+        return {
+          sessionId: input.sessionId,
+          messages: [{ id: "assistant-1", role: "assistant", content: "HEARTBEAT_OK", at: new Date().toISOString() }],
+        };
+      }),
+      spawnBackgroundSession: async (input: {
+        parentSessionId: string;
+        title?: string;
+        requestedBy?: string;
+        prompt?: string;
+      }) => {
+        spawnCount += 1;
+        const child = repository.createSession({
+          title: "Stale Heartbeat Thread",
+          model: "opencode/stale-model",
+        });
+        sqlite
+          .query(
+            `
+            INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(runtime, session_id) DO UPDATE SET
+              external_session_id = excluded.external_session_id,
+              updated_at = excluded.updated_at
+          `,
+          )
+          .run("opencode", child.id, `ext-heartbeat-${spawnCount}`, Date.now());
+        return {
+          runId: `bg-heartbeat-${spawnCount}`,
+          parentSessionId: input.parentSessionId,
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: `ext-heartbeat-${spawnCount}`,
+          childSessionId: child.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
+    setRuntimeForTests(runtime);
+    repository.setSessionModel("main", "opencode/follow-main");
+
+    const cronService = new CronService(runtime);
+    const job = await cronService.createJob({
+      name: "heartbeat-threaded",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "background",
+      handlerKey: "heartbeat.check",
+      payload: {
+        agentId: "build",
+        sessionId: "main",
+      },
+    });
+
+    await cronService.runJobNow(job.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    expect(spawnCount).toBe(1);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.sessionId).not.toBe("main");
+    expect(captured[0]?.agent).toBe("build");
+    expect(captured[0]?.metadata).toMatchObject({ heartbeat: true });
+
+    const updatedJob = await cronService.getJob(job.id);
+    expect(updatedJob?.threadSessionId).toBeTruthy();
+    const threadSessionId = updatedJob?.threadSessionId;
+    if (!threadSessionId) return;
+
+    expect(captured[0]?.sessionId).toBe(threadSessionId);
+    expect(repository.getSessionById(threadSessionId)?.model).toBe("opencode/follow-main");
   });
 
   test("cron threads can explicitly notify the main thread", async () => {
