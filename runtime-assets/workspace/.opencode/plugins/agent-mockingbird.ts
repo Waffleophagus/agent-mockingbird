@@ -1,4 +1,4 @@
-import { tool, type Plugin } from "@opencode-ai/plugin"
+import { tool, type Plugin, type ToolContext } from "@opencode-ai/plugin"
 
 const z = tool.schema
 
@@ -45,7 +45,15 @@ const compactionContextCache = {
   expiresAtMs: 0,
 }
 
-const sessionScopeCache = new Map<string, { value: { localSessionId: string | null; isMain: boolean }; expiresAtMs: number }>()
+type SessionScope = {
+  localSessionId: string | null
+  isMain: boolean
+  kind: "main" | "cron" | "other"
+  cronJobId: string | null
+  cronJobName: string | null
+}
+
+const sessionScopeCache = new Map<string, { value: SessionScope; expiresAtMs: number }>()
 
 async function postJson(pathname: string, body: unknown, envKeys: string[] = []) {
   const response = await fetch(`${resolveApiBaseUrl(...envKeys)}${pathname}`, {
@@ -168,7 +176,7 @@ async function fetchCompactionContext() {
 
 async function fetchSessionScope(sessionID?: string) {
   if (!sessionID?.trim()) {
-    return { localSessionId: null, isMain: false }
+    return { localSessionId: null, isMain: false, kind: "other" as const, cronJobId: null, cronJobName: null }
   }
 
   const cacheKey = sessionID.trim()
@@ -179,11 +187,16 @@ async function fetchSessionScope(sessionID?: string) {
   }
 
   const payload = await requestJson(`/api/waffle/runtime/session-scope?sessionId=${encodeURIComponent(cacheKey)}`)
+  const kind: SessionScope["kind"] =
+    payload.kind === "main" || payload.kind === "cron" || payload.kind === "other" ? payload.kind : "other"
   const value = {
     localSessionId: typeof payload.localSessionId === "string" && payload.localSessionId.trim()
       ? payload.localSessionId
       : null,
     isMain: payload.isMain === true,
+    kind,
+    cronJobId: typeof payload.cronJobId === "string" && payload.cronJobId.trim() ? payload.cronJobId : null,
+    cronJobName: typeof payload.cronJobName === "string" && payload.cronJobName.trim() ? payload.cronJobName : null,
   }
   sessionScopeCache.set(cacheKey, {
     value,
@@ -198,6 +211,19 @@ function buildMainThreadNote() {
     "- This is the main/root conversation thread.",
     "- Prefer doing work directly in this thread unless delegation materially improves speed or focus.",
     "- Treat this thread as the primary durable context for the user.",
+  ].join("\n")
+}
+
+function buildCronThreadNote(sessionScope: SessionScope) {
+  const jobLabel = sessionScope.cronJobName
+    ? `${sessionScope.cronJobName} (${sessionScope.cronJobId ?? "cron"})`
+    : sessionScope.cronJobId ?? "this cron job"
+  return [
+    "Thread policy:",
+    `- This thread belongs to cron job ${jobLabel}.`,
+    "- Keep work focused on this cron job's ongoing context and prior runs.",
+    "- Do not act like this is the main user-facing conversation thread.",
+    "- If user attention or a decision is needed, call notify_main_thread with a concise prompt for main.",
   ].join("\n")
 }
 
@@ -471,6 +497,29 @@ const cronManagerTool = tool({
   },
 })
 
+const notifyMainThreadTool = tool({
+  description: "Escalate a concise prompt from a cron worker thread into the main/root conversation.",
+  args: {
+    prompt: z.string().min(1),
+    severity: z.enum(["info", "warn", "critical"]).optional(),
+  },
+  async execute(args: { prompt: string; severity?: "info" | "warn" | "critical" }, context: ToolContext) {
+    const response = await postJson("/api/waffle/runtime/notify-main-thread", {
+      sessionId: context.sessionID,
+      prompt: args.prompt,
+      severity: args.severity,
+    })
+    if (!response.ok) {
+      const error = typeof response.payload.error === "string" ? response.payload.error : `Request failed (${response.status})`
+      throw new Error(error)
+    }
+    return JSON.stringify({
+      ok: true,
+      ...response.payload,
+    })
+  },
+})
+
 const agentTypeManagerTool = tool({
   description:
     "Manage OpenCode agent definitions through Agent Mockingbird's OpenCode-backed APIs with validation and hash conflict detection.",
@@ -575,6 +624,8 @@ const AgentMockingbirdPlugin: Plugin = async () => {
       const sessionScope = await fetchSessionScope(_input.sessionID)
       if (sessionScope.isMain) {
         output.system.push(buildMainThreadNote())
+      } else if (sessionScope.kind === "cron") {
+        output.system.push(buildCronThreadNote(sessionScope))
       }
     },
     "experimental.session.compacting": async (_input, output) => {
@@ -608,6 +659,7 @@ const AgentMockingbirdPlugin: Plugin = async () => {
       memory_get: memoryGetTool,
       memory_remember: memoryRememberTool,
       cron_manager: cronManagerTool,
+      notify_main_thread: notifyMainThreadTool,
       agent_type_manager: agentTypeManagerTool,
       config_manager: configManagerTool,
     },
