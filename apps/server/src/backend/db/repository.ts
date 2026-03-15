@@ -17,6 +17,7 @@ import { toLegacySpecialistAgent } from "../agents/service";
 import { getConfig as getManagedConfig } from "../config/service";
 import { clearCronTables } from "../cron/storage";
 import { DEFAULT_SESSIONS } from "../defaults";
+import { seedDefaultHeartbeatJob } from "../heartbeat/defaultJob";
 import { clearRunTables } from "../run/storage";
 import { listManagedSkillCatalog } from "../skills/service";
 
@@ -614,6 +615,8 @@ function seedDefaultState(createdAt: number) {
     `,
     )
     .run(crypto.randomUUID(), createdAt);
+
+  seedDefaultHeartbeatJob(createdAt);
 }
 
 export function ensureSeedData() {

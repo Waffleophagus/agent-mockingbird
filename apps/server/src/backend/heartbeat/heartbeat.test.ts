@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
 import { isActiveHours } from "./activeHours";
-import { getHeartbeatJobId, syncHeartbeatJob } from "./jobSync";
-import { isHeartbeatAck, parseInterval } from "./service";
+import { HEARTBEAT_SYSTEM_JOB_ID, migrateLegacyHeartbeatJobs, seedDefaultHeartbeatJob } from "./defaultJob";
+import {
+  DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+  DEFAULT_HEARTBEAT_PROMPT,
+  isHeartbeatAck,
+  parseInterval,
+} from "./service";
 import type { HeartbeatConfig } from "./types";
+import { clearCronTables } from "../cron/storage";
+import { sqlite } from "../db/client";
 
 describe("parseInterval", () => {
   test("parses minutes", () => {
@@ -96,70 +103,79 @@ describe("isActiveHours", () => {
   });
 });
 
-describe("getHeartbeatJobId", () => {
-  test("generates consistent job ID for agent", () => {
-    expect(getHeartbeatJobId("my-agent")).toBe("heartbeat-my-agent");
+describe("default heartbeat cron", () => {
+  test("seeds the reserved heartbeat-system cron with OpenClaw defaults", () => {
+    clearCronTables();
+    const createdAt = Date.now();
+    seedDefaultHeartbeatJob(createdAt);
+
+    const row = sqlite
+      .query(
+        `
+        SELECT id, name, enabled, schedule_kind, every_ms, run_mode, handler_key, payload_json
+        FROM cron_job_definitions
+        WHERE id = ?1
+      `,
+      )
+      .get(HEARTBEAT_SYSTEM_JOB_ID) as
+      | {
+          id: string;
+          name: string;
+          enabled: number;
+          schedule_kind: string;
+          every_ms: number;
+          run_mode: string;
+          handler_key: string;
+          payload_json: string;
+        }
+      | null;
+
+    expect(row).not.toBeNull();
+    expect(row?.name).toBe("Heartbeat");
+    expect(row?.enabled).toBe(1);
+    expect(row?.schedule_kind).toBe("every");
+    expect(row?.every_ms).toBe(parseInterval("30m"));
+    expect(row?.run_mode).toBe("background");
+    expect(row?.handler_key).toBe("heartbeat.check");
+    expect(JSON.parse(row?.payload_json ?? "{}")).toEqual({
+      agentId: "build",
+      sessionId: "main",
+      prompt: DEFAULT_HEARTBEAT_PROMPT,
+      ackMaxChars: DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+    });
   });
 
-  test("handles agent IDs with special characters", () => {
-    expect(getHeartbeatJobId("my_agent-123")).toBe("heartbeat-my_agent-123");
-  });
-});
+  test("migrates legacy heartbeat-* jobs to the reserved heartbeat-system job once", () => {
+    clearCronTables();
+    sqlite
+      .query(
+        `
+        INSERT INTO cron_job_definitions (
+          id, name, thread_session_id, enabled, schedule_kind, schedule_expr, every_ms, at_iso, timezone,
+          run_mode, handler_key, condition_module_path, condition_description, agent_prompt_template, agent_model_override,
+          max_attempts, retry_backoff_ms, payload_json, last_enqueued_for, created_at, updated_at
+        )
+        VALUES (?1, ?2, NULL, 1, 'every', NULL, ?3, NULL, NULL, 'background', 'heartbeat.check', NULL, NULL, NULL, NULL, 3, 30000, '{}', NULL, ?4, ?4)
+      `,
+      )
+      .run("heartbeat-build", "Heartbeat: build", parseInterval("30m"), Date.now());
 
-describe("syncHeartbeatJob", () => {
-  test("deletes existing heartbeat job for zero-length hour interval", async () => {
-    const calls: string[] = [];
-    const cronService = {
-      getJob: async () => ({ id: "heartbeat-agent-1" }),
-      deleteJob: async () => {
-        calls.push("delete");
-      },
-      updateJob: async () => {
-        calls.push("update");
-      },
-      createJob: async () => {
-        calls.push("create");
-      },
-    };
+    const result = migrateLegacyHeartbeatJobs();
+    expect(result).toEqual({
+      migrated: true,
+      removedLegacy: 1,
+      createdDefault: true,
+    });
 
-    await syncHeartbeatJob(
-      cronService as unknown as Parameters<typeof syncHeartbeatJob>[0],
-      "agent-1",
-      {
-        enabled: true,
-        interval: "0h",
-        ackMaxChars: 300,
-      },
-    );
-
-    expect(calls).toEqual(["delete"]);
-  });
-
-  test("deletes existing heartbeat job for zero-length day interval", async () => {
-    const calls: string[] = [];
-    const cronService = {
-      getJob: async () => ({ id: "heartbeat-agent-1" }),
-      deleteJob: async () => {
-        calls.push("delete");
-      },
-      updateJob: async () => {
-        calls.push("update");
-      },
-      createJob: async () => {
-        calls.push("create");
-      },
-    };
-
-    await syncHeartbeatJob(
-      cronService as unknown as Parameters<typeof syncHeartbeatJob>[0],
-      "agent-1",
-      {
-        enabled: true,
-        interval: "0d",
-        ackMaxChars: 300,
-      },
-    );
-
-    expect(calls).toEqual(["delete"]);
+    const rows = sqlite
+      .query(
+        `
+        SELECT id
+        FROM cron_job_definitions
+        ORDER BY id
+      `,
+      )
+      .all() as Array<{ id: string }>;
+    expect(rows.map(row => row.id)).toEqual([HEARTBEAT_SYSTEM_JOB_ID]);
   });
 });

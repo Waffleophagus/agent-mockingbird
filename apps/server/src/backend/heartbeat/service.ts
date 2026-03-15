@@ -6,8 +6,9 @@ import type { HeartbeatConfig, HeartbeatContext, HeartbeatResult } from "./types
 import { getConfigSnapshot } from "../config/service";
 import { getRuntime } from "../runtime";
 
-const DEFAULT_HEARTBEAT_PROMPT =
+export const DEFAULT_HEARTBEAT_PROMPT =
   "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.";
+export const DEFAULT_HEARTBEAT_ACK_MAX_CHARS = 300;
 
 export function parseInterval(interval: string): number {
   const match = interval.match(/^(\d+)([mhd])$/);

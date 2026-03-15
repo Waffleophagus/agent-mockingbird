@@ -1,14 +1,13 @@
 import { serve } from "bun";
 import { websocket } from "hono/bun";
 
-import { listOpencodeAgentTypes } from "./backend/agents/opencodeConfig";
 import { SignalChannelService } from "./backend/channels/signal/service";
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { CronService } from "./backend/cron/service";
 import "./backend/db/migrate";
 import { ensureSeedData, getHeartbeatSnapshot, getUsageSnapshot } from "./backend/db/repository";
 import { env } from "./backend/env";
-import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
+import { migrateLegacyHeartbeatJobs } from "./backend/heartbeat/defaultJob";
 import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream, type MobileRealtimeSocketData } from "./backend/http/sse";
@@ -51,6 +50,7 @@ function isOpenCodeServerPath(pathname: string) {
 
 ensureSeedData();
 ensureConfigFile();
+migrateLegacyHeartbeatJobs();
 const configSnapshot = getConfigSnapshot();
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
@@ -71,19 +71,6 @@ const apiRoutes = createApiRoutes({
 });
 
 runtime.subscribe(eventStream.publish);
-
-let heartbeatAgentHash = "";
-
-async function syncHeartbeatJobs(reason: string) {
-  try {
-    const payload = await listOpencodeAgentTypes();
-    if (payload.hash === heartbeatAgentHash) return;
-    heartbeatAgentHash = payload.hash;
-    await syncHeartbeatJobsForAgents(cronService, payload.agentTypes);
-  } catch (error) {
-    console.error(`[heartbeat] Failed to sync heartbeat jobs during ${reason}:`, error);
-  }
-}
 
 async function proxyOpenCodeSidecar(req: Request) {
   const sidecarBaseUrl = getConfigSnapshot().config.runtime.opencode.baseUrl;
@@ -130,10 +117,6 @@ void initializeMemory().catch(() => {
 runService.start();
 cronService.start();
 signalService.start();
-void syncHeartbeatJobs("startup");
-const heartbeatJobSyncTimer = setInterval(() => {
-  void syncHeartbeatJobs("poll");
-}, 5_000);
 
 const server = serve({
   idleTimeout: 120,
@@ -155,7 +138,6 @@ const server = serve({
 });
 
 const shutdown = () => {
-  clearInterval(heartbeatJobSyncTimer);
   runService.stop();
   cronService.stop();
   signalService.stop();

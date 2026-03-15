@@ -1,6 +1,10 @@
 import type { CronHandler, CronHandlerResult } from "./types";
-import { listOpencodeAgentTypes } from "../agents/opencodeConfig";
-import { executeHeartbeat } from "../heartbeat/service";
+import {
+  executeHeartbeat,
+  DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+  DEFAULT_HEARTBEAT_PROMPT,
+} from "../heartbeat/service";
+import type { HeartbeatConfig, HeartbeatJobPayload } from "../heartbeat/types";
 import { syncMemoryIndex } from "../memory/service";
 
 function asString(value: unknown): string | null {
@@ -18,8 +22,9 @@ const memoryMaintenanceHandler: CronHandler = async () => {
 };
 
 const heartbeatCheckHandler: CronHandler = async ctx => {
-  const agentId = asString(ctx.payload.agentId);
-  const sessionId = asString(ctx.payload.sessionId);
+  const payload = (ctx.payload ?? {}) as unknown as Partial<HeartbeatJobPayload>;
+  const agentId = asString(payload.agentId);
+  const sessionId = asString(payload.sessionId);
 
   if (!agentId || !sessionId) {
     return {
@@ -28,16 +33,23 @@ const heartbeatCheckHandler: CronHandler = async ctx => {
     };
   }
 
-  const agentTypes = await listOpencodeAgentTypes().catch(() => ({ agentTypes: [] }));
-  const heartbeatConfig = agentTypes.agentTypes.find(agent => agent.id === agentId)?.heartbeat;
-
-  if (!heartbeatConfig || !heartbeatConfig.enabled) {
-    return {
-      status: "ok",
-      summary: `Heartbeat disabled for agent ${agentId}`,
-      data: { agentId, sessionId, disabled: true },
-    };
-  }
+  const heartbeatConfig: HeartbeatConfig = {
+    enabled: true,
+    interval: "30m",
+    prompt: asString(payload.prompt) ?? DEFAULT_HEARTBEAT_PROMPT,
+    ackMaxChars:
+      typeof payload.ackMaxChars === "number" && Number.isFinite(payload.ackMaxChars)
+        ? Math.max(0, payload.ackMaxChars)
+        : DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+    activeHours:
+      payload.activeHours &&
+      typeof payload.activeHours === "object" &&
+      typeof payload.activeHours.start === "string" &&
+      typeof payload.activeHours.end === "string" &&
+      typeof payload.activeHours.timezone === "string"
+        ? payload.activeHours
+        : undefined,
+  };
 
   const result = await executeHeartbeat(agentId, sessionId, heartbeatConfig);
 

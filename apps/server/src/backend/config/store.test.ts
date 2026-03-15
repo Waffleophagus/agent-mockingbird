@@ -14,12 +14,12 @@ test("parseConfig reports a clear error when AGENT_MOCKINGBIRD_CONFIG_PATH point
   ).toThrowError(
     new ConfigApplyError(
       "schema",
-      "Config file appears to be OpenCode config.json, not agent-mockingbird config. Set AGENT_MOCKINGBIRD_CONFIG_PATH to a agent-mockingbird config file (default: ./data/agent-mockingbird.config.json).",
+      "Config file appears to be OpenCode config.json, not Agent Mockingbird config. Set AGENT_MOCKINGBIRD_CONFIG_PATH to an Agent Mockingbird config file (default: ./data/agent-mockingbird.config.json).",
     ),
   );
 });
 
-test("parseConfig does not use AGENT_MOCKINGBIRD_OPENCODE_* env vars as runtime fallbacks", () => {
+test("parseConfig uses AGENT_MOCKINGBIRD_OPENCODE_* env vars as runtime fallbacks when fields are unset", () => {
   const previousModelId = process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID;
   process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID = "env-only-model";
   try {
@@ -31,7 +31,7 @@ test("parseConfig does not use AGENT_MOCKINGBIRD_OPENCODE_* env vars as runtime 
       throw new Error("Test fixture missing runtime.opencode");
     }
     delete raw.runtime.opencode.modelId;
-    expect(() => parseConfig(raw)).toThrowError(ConfigApplyError);
+    expect(parseConfig(raw).runtime.opencode.modelId).toBe("env-only-model");
   } finally {
     if (previousModelId === undefined) {
       delete process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID;
@@ -74,15 +74,13 @@ test("parseConfig auto-aligns mismatched memory workspace to explicit opencode d
   expect(parsed.runtime.memory.workspaceDir).toBe("/tmp/opencode-workspace");
 });
 
-test("example config ships a default build heartbeat", () => {
+test("example config no longer ships heartbeat config on the default build agent", () => {
   const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
-    ui?: { agentTypes?: Array<{ id?: string; heartbeat?: { enabled?: boolean; interval?: string; ackMaxChars?: number } }> };
+    ui?: { agentTypes?: Array<{ id?: string; heartbeat?: unknown }> };
   };
 
   const buildAgent = raw.ui?.agentTypes?.find(agent => agent.id === "build");
   expect(buildAgent).toBeDefined();
-  expect(buildAgent?.heartbeat?.enabled).toBe(true);
-  expect(buildAgent?.heartbeat?.interval).toBe("30m");
-  expect(buildAgent?.heartbeat?.ackMaxChars).toBe(300);
+  expect(buildAgent?.heartbeat).toBeUndefined();
 });
