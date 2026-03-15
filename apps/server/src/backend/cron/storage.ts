@@ -10,6 +10,7 @@ export function ensureCronTables() {
     CREATE TABLE IF NOT EXISTS cron_job_definitions (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      thread_session_id TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       schedule_kind TEXT NOT NULL CHECK (schedule_kind IN ('at', 'every', 'cron')),
       schedule_expr TEXT,
@@ -77,6 +78,9 @@ export function ensureCronTables() {
   }
   if (!tableHasColumn("cron_job_definitions", "condition_description")) {
     sqlite.exec("ALTER TABLE cron_job_definitions ADD COLUMN condition_description TEXT");
+  }
+  if (!tableHasColumn("cron_job_definitions", "thread_session_id")) {
+    sqlite.exec("ALTER TABLE cron_job_definitions ADD COLUMN thread_session_id TEXT");
   }
 }
 

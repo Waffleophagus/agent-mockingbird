@@ -146,6 +146,7 @@ interface CronJobDefinitionLite {
   id: string;
   name?: string;
   everyMs?: number | null;
+  threadSessionId?: string | null;
 }
 
 interface CronJobInstanceLite {
@@ -190,12 +191,17 @@ interface CronServiceInstance {
     retryBackoffMs?: number;
     payload?: Record<string, unknown>;
   }) => Promise<{ created: boolean; job: CronJobDefinitionLite }>;
-  updateJob: (jobId: string, patch: { enabled?: boolean }) => Promise<{ enabled: boolean }>;
-  getJob: (jobId: string) => Promise<{ enabled: boolean } | null>;
+  updateJob: (jobId: string, patch: { enabled?: boolean }) => Promise<CronJobDefinitionLite & { enabled: boolean }>;
+  getJob: (jobId: string) => Promise<(CronJobDefinitionLite & { enabled: boolean }) | null>;
   runJobNow: (jobId: string) => Promise<{ queued: boolean; instanceId: string | null }>;
   listJobs: () => Promise<CronJobDefinitionLite[]>;
   listInstances: (input?: { jobId?: string; limit?: number }) => Promise<CronJobInstanceLite[]>;
   listSteps: (instanceId: string) => Promise<Array<{ stepKind: string; status: string }>>;
+  notifyMainThread: (input: {
+    runtimeSessionId: string;
+    prompt: string;
+    severity?: "info" | "warn" | "critical";
+  }) => Promise<{ delivered: true; cronJobId: string; threadSessionId: string }>;
 }
 
 type CronServiceCtor = new (runtime: RuntimeStub) => CronServiceInstance;
@@ -347,6 +353,36 @@ function createRuntimeStub(
     checkHealth: options?.checkHealth,
     abortSession: async () => true,
     compactSession: async () => true,
+    spawnBackgroundSession: async (input: {
+      parentSessionId: string;
+      title?: string;
+      requestedBy?: string;
+      prompt?: string;
+    }) => {
+      const child = repository.createSession({ title: input.title ?? "Background Session" });
+      sqlite
+        .query(
+          `
+          INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+          VALUES (?1, ?2, ?3, ?4)
+          ON CONFLICT(runtime, session_id) DO UPDATE SET
+            external_session_id = excluded.external_session_id,
+            updated_at = excluded.updated_at
+        `,
+        )
+        .run("opencode", child.id, `ext-${child.id}`, Date.now());
+      return {
+        runId: `bg-${child.id}`,
+        parentSessionId: input.parentSessionId,
+        parentExternalSessionId: "ext-main",
+        childExternalSessionId: `ext-${child.id}`,
+        childSessionId: child.id,
+        status: "created",
+        startedAt: null,
+        completedAt: null,
+        error: null,
+      };
+    },
   };
 }
 
@@ -1453,13 +1489,42 @@ describe("cron validation and retries", () => {
 
   test("conditional_agent module can decide to invoke the agent with per-run context", async () => {
     const captured: Array<{ content: string; sessionId: string }> = [];
-    const runtime = createRuntimeStub(async input => {
-      captured.push({ content: input.content, sessionId: input.sessionId });
-      return {
-        sessionId: input.sessionId,
-        messages: [{ id: "assistant-1", role: "assistant", content: "noted", at: new Date().toISOString() }],
-      };
-    });
+    let spawnCount = 0;
+    const cronThread = repository.createSession({ title: "Cron Stock Thread" });
+    const runtime = {
+      ...createRuntimeStub(async input => {
+        captured.push({ content: input.content, sessionId: input.sessionId });
+        return {
+          sessionId: input.sessionId,
+          messages: [{ id: "assistant-1", role: "assistant", content: "noted", at: new Date().toISOString() }],
+        };
+      }),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        sqlite
+          .query(
+            `
+            INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(runtime, session_id) DO UPDATE SET
+              external_session_id = excluded.external_session_id,
+              updated_at = excluded.updated_at
+          `,
+          )
+          .run("opencode", cronThread.id, `ext-cron-${spawnCount}`, Date.now());
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: `ext-cron-${spawnCount}`,
+          childSessionId: cronThread.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
     const cronService = new CronService(runtime);
 
     mkdirSync(path.join(testWorkspacePath, "cron"), { recursive: true });
@@ -1487,7 +1552,6 @@ describe("cron validation and retries", () => {
       runMode: "conditional_agent",
       conditionModulePath: "cron/stock-alert.ts",
       payload: {
-        sessionId: "main",
         symbol: "AAPL",
         movePct: 3.4,
       },
@@ -1502,7 +1566,10 @@ describe("cron validation and retries", () => {
     expect(instances[0]?.agentInvoked).toBe(true);
     expect(captured.length).toBe(1);
     expect(captured[0]?.content).toContain("Stock AAPL moved 3.4% in 10m");
-    expect(captured[0]?.sessionId).toBe("main");
+    expect(captured[0]?.sessionId).toBe(cronThread.id);
+    expect(spawnCount).toBe(1);
+    const updatedJob = await cronService.getJob(job.id);
+    expect(updatedJob?.threadSessionId).toBe(cronThread.id);
 
     const instanceId = instances[0]?.id;
     if (!instanceId) return;
@@ -1543,7 +1610,25 @@ describe("cron validation and retries", () => {
   });
 
   test("conditional_agent instance reports agentInvoked=false when no escalation occurs", async () => {
-    const runtime = createRuntimeStub(async () => ({ sessionId: "main", messages: [] }));
+    let spawnCount = 0;
+    const runtime = {
+      ...createRuntimeStub(async () => ({ sessionId: "main", messages: [] })),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        const child = repository.createSession({ title: "Unused Cron Thread" });
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: `ext-cron-${spawnCount}`,
+          childSessionId: child.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
     const cronService = new CronService(runtime);
 
     mkdirSync(path.join(testWorkspacePath, "cron"), { recursive: true });
@@ -1562,7 +1647,7 @@ describe("cron validation and retries", () => {
       everyMs: 10_000,
       runMode: "conditional_agent",
       conditionModulePath: "cron/no-invoke.ts",
-      payload: { sessionId: "main" },
+      payload: {},
     });
 
     const queued = await cronService.runJobNow(job.id);
@@ -1572,6 +1657,138 @@ describe("cron validation and retries", () => {
     const instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
     expect(instances[0]?.state).toBe("completed");
     expect(instances[0]?.agentInvoked).toBe(false);
+    expect(spawnCount).toBe(0);
+  });
+
+  test("agent jobs reuse one durable thread per cron definition", async () => {
+    const captured: string[] = [];
+    let spawnCount = 0;
+    const cronThread = repository.createSession({ title: "Stable Cron Thread" });
+    const runtime = {
+      ...createRuntimeStub(async input => {
+        captured.push(input.sessionId);
+        return {
+          sessionId: input.sessionId,
+          messages: [{ id: "assistant-1", role: "assistant", content: "done", at: new Date().toISOString() }],
+        };
+      }),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        sqlite
+          .query(
+            `
+            INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(runtime, session_id) DO UPDATE SET
+              external_session_id = excluded.external_session_id,
+              updated_at = excluded.updated_at
+          `,
+          )
+          .run("opencode", cronThread.id, "ext-cron-thread", Date.now());
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: `ext-cron-${spawnCount}`,
+          childSessionId: cronThread.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
+    const cronService = new CronService(runtime);
+
+    const job = await cronService.createJob({
+      name: "stable-thread",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "agent",
+      agentPromptTemplate: "Check status",
+    });
+
+    await cronService.runJobNow(job.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+    await cronService.runJobNow(job.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    expect(spawnCount).toBe(1);
+    expect(captured).toEqual([cronThread.id, cronThread.id]);
+    const updatedJob = await cronService.getJob(job.id);
+    expect(updatedJob?.threadSessionId).toBe(cronThread.id);
+  });
+
+  test("cron threads can explicitly notify the main thread", async () => {
+    const captured: Array<{ sessionId: string; content: string; metadata?: Record<string, unknown> }> = [];
+    let spawnCount = 0;
+    const cronThread = repository.createSession({ title: "Notify Cron Thread" });
+    const runtime = {
+      ...createRuntimeStub(async input => {
+        captured.push(input);
+        return {
+          sessionId: input.sessionId,
+          messages: [{ id: "assistant-1", role: "assistant", content: "done", at: new Date().toISOString() }],
+        };
+      }),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: "ext-cron-thread",
+          childSessionId: cronThread.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
+    const cronService = new CronService(runtime);
+
+    const job = await cronService.createJob({
+      name: "needs-attention",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "agent",
+      agentPromptTemplate: "Review state",
+    });
+    await cronService.runJobNow(job.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+    sqlite
+      .query(
+        `
+        INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+        VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(runtime, session_id) DO UPDATE SET
+          external_session_id = excluded.external_session_id,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run("opencode", cronThread.id, "ext-cron-thread", Date.now());
+
+    const result = await cronService.notifyMainThread({
+      runtimeSessionId: "ext-cron-thread",
+      prompt: "Please ask the user whether to continue.",
+      severity: "warn",
+    });
+
+    expect(result).toEqual({
+      delivered: true,
+      cronJobId: job.id,
+      threadSessionId: cronThread.id,
+    });
+    expect(captured.at(-1)?.sessionId).toBe("main");
+    expect(captured.at(-1)?.content).toContain("Cron escalation from needs-attention");
+    expect(captured.at(-1)?.content).toContain("Please ask the user whether to continue.");
+    expect(captured.at(-1)?.metadata).toMatchObject({
+      source: "cron",
+      cronJobId: job.id,
+      cronThreadSessionId: cronThread.id,
+      severity: "warn",
+    });
   });
 
   test("jobs can be disabled and re-enabled without deletion", async () => {

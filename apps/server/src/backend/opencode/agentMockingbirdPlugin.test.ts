@@ -22,6 +22,7 @@ describe("AgentMockingbirdPlugin", () => {
       "memory_get",
       "memory_remember",
       "memory_search",
+      "notify_main_thread",
     ]);
   });
 
@@ -85,7 +86,7 @@ describe("AgentMockingbirdPlugin", () => {
         });
       }
       if (url === "http://127.0.0.1:3001/api/waffle/runtime/session-scope?sessionId=sess-1") {
-        return new Response(JSON.stringify({ localSessionId: "session-123", isMain: false }), {
+        return new Response(JSON.stringify({ localSessionId: "session-123", isMain: false, kind: "other" }), {
           headers: {
             "Content-Type": "application/json",
           },
@@ -113,7 +114,7 @@ describe("AgentMockingbirdPlugin", () => {
         });
       }
       if (url === "http://127.0.0.1:3001/api/waffle/runtime/session-scope?sessionId=sess-main") {
-        return new Response(JSON.stringify({ localSessionId: "main", isMain: true }), {
+        return new Response(JSON.stringify({ localSessionId: "main", isMain: true, kind: "main" }), {
           headers: {
             "Content-Type": "application/json",
           },
@@ -129,6 +130,47 @@ describe("AgentMockingbirdPlugin", () => {
       "existing",
       "Config policy:\n- Use config_manager.",
       "Thread policy:\n- This is the main/root conversation thread.\n- Prefer doing work directly in this thread unless delegation materially improves speed or focus.\n- Treat this thread as the primary durable context for the user.",
+    ]);
+  });
+
+  test("system transform appends cron-thread guidance for cron worker sessions", async () => {
+    process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url === "http://127.0.0.1:3001/api/waffle/runtime/system-prompt") {
+        return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+      }
+      if (url === "http://127.0.0.1:3001/api/waffle/runtime/session-scope?sessionId=sess-cron") {
+        return new Response(
+          JSON.stringify({
+            localSessionId: "session-cron-1",
+            isMain: false,
+            kind: "cron",
+            cronJobId: "cron-stock",
+            cronJobName: "stock-watch",
+          }),
+          {
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const hooks = await AgentMockingbirdPlugin({} as never);
+    const output = { system: ["existing"] };
+    await hooks["experimental.chat.system.transform"]?.({ sessionID: "sess-cron", model: {} as never }, output);
+    expect(output.system).toEqual([
+      "existing",
+      "Config policy:\n- Use config_manager.",
+      "Thread policy:\n- This thread belongs to cron job stock-watch (cron-stock).\n- Keep work focused on this cron job's ongoing context and prior runs.\n- Do not act like this is the main user-facing conversation thread.\n- If user attention or a decision is needed, call notify_main_thread with a concise prompt for main.",
     ]);
   });
 
@@ -207,5 +249,45 @@ describe("AgentMockingbirdPlugin", () => {
     expect(output.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL).toBe("http://127.0.0.1:3001");
     expect(output.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL).toBe("http://127.0.0.1:3001");
     expect(output.env.AGENT_MOCKINGBIRD_PORT).toBe("3001");
+  });
+
+  test("notify_main_thread sends an escalation request using the calling session", async () => {
+    process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async (input, init) => {
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/runtime/notify-main-thread");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+      expect(init?.body).toBe(
+        JSON.stringify({
+          sessionId: "sess-cron",
+          prompt: "Please ask the user whether to place the trade.",
+          severity: "warn",
+        }),
+      );
+      return new Response(JSON.stringify({ delivered: true, cronJobId: "cron-stock", threadSessionId: "session-cron-1" }), {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    }) as typeof fetch;
+
+    const hooks = await AgentMockingbirdPlugin({} as never);
+    const raw = await hooks.tool?.notify_main_thread?.execute(
+      {
+        prompt: "Please ask the user whether to place the trade.",
+        severity: "warn",
+      },
+      {
+        sessionID: "sess-cron",
+      } as never,
+    );
+
+    expect(JSON.parse(raw ?? "{}")).toEqual({
+      ok: true,
+      delivered: true,
+      cronJobId: "cron-stock",
+      threadSessionId: "session-cron-1",
+    });
   });
 });

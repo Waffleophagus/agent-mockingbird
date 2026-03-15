@@ -24,10 +24,12 @@ import type {
 } from "./types";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
+import { getSessionById } from "../db/repository";
 
 interface CronDefinitionRow {
   id: string;
   name: string;
+  thread_session_id: string | null;
   enabled: number;
   schedule_kind: CronScheduleKind;
   schedule_expr: string | null;
@@ -119,6 +121,7 @@ function definitionRowToModel(row: CronDefinitionRow): CronJobDefinition {
   return {
     id: row.id,
     name: row.name,
+    threadSessionId: row.thread_session_id,
     enabled: row.enabled === 1,
     scheduleKind: row.schedule_kind,
     scheduleExpr: row.schedule_expr,
@@ -472,16 +475,17 @@ export class CronService {
       .query(
         `
         INSERT INTO cron_job_definitions (
-          id, name, enabled, schedule_kind, schedule_expr, every_ms, at_iso, timezone,
+          id, name, thread_session_id, enabled, schedule_kind, schedule_expr, every_ms, at_iso, timezone,
           run_mode, handler_key, condition_module_path, condition_description, agent_prompt_template, agent_model_override,
           max_attempts, retry_backoff_ms, payload_json, created_at, updated_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?19)
       `,
       )
       .run(
         normalized.id,
         normalized.name,
+        null,
         normalized.enabled ? 1 : 0,
         normalized.scheduleKind,
         normalized.scheduleExpr,
@@ -587,28 +591,30 @@ export class CronService {
         UPDATE cron_job_definitions
         SET
           name = ?2,
-          enabled = ?3,
-          schedule_kind = ?4,
-          schedule_expr = ?5,
-          every_ms = ?6,
-          at_iso = ?7,
-          timezone = ?8,
-          run_mode = ?9,
-          handler_key = ?10,
-          condition_module_path = ?11,
-          condition_description = ?12,
-          agent_prompt_template = ?13,
-          agent_model_override = ?14,
-          max_attempts = ?15,
-          retry_backoff_ms = ?16,
-          payload_json = ?17,
-          updated_at = ?18
+          thread_session_id = ?3,
+          enabled = ?4,
+          schedule_kind = ?5,
+          schedule_expr = ?6,
+          every_ms = ?7,
+          at_iso = ?8,
+          timezone = ?9,
+          run_mode = ?10,
+          handler_key = ?11,
+          condition_module_path = ?12,
+          condition_description = ?13,
+          agent_prompt_template = ?14,
+          agent_model_override = ?15,
+          max_attempts = ?16,
+          retry_backoff_ms = ?17,
+          payload_json = ?18,
+          updated_at = ?19
         WHERE id = ?1
       `,
       )
       .run(
         jobId,
         merged.name,
+        existing.threadSessionId,
         merged.enabled ? 1 : 0,
         merged.scheduleKind,
         merged.scheduleExpr,
@@ -796,6 +802,70 @@ export class CronService {
     };
   }
 
+  getJobByThreadSessionId(sessionId: string): CronJobDefinition | null {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) return null;
+    const row = selectOne<CronDefinitionRow>(
+      `
+      SELECT *
+      FROM cron_job_definitions
+      WHERE thread_session_id = ?1
+      LIMIT 1
+    `,
+      normalizedSessionId,
+    );
+    return row ? definitionRowToModel(row) : null;
+  }
+
+  async notifyMainThread(input: {
+    runtimeSessionId: string;
+    prompt: string;
+    severity?: "info" | "warn" | "critical";
+  }): Promise<{ delivered: true; cronJobId: string; threadSessionId: string }> {
+    const runtimeSessionId = input.runtimeSessionId.trim();
+    const prompt = input.prompt.trim();
+    if (!runtimeSessionId) throw new Error("runtimeSessionId is required");
+    if (!prompt) throw new Error("prompt is required");
+
+    const threadSessionId =
+      selectOne<{ session_id: string } | null>(
+        `
+        SELECT session_id
+        FROM runtime_session_bindings
+        WHERE runtime = 'opencode'
+          AND external_session_id = ?1
+        LIMIT 1
+      `,
+        runtimeSessionId,
+      )?.session_id ?? null;
+    if (!threadSessionId) {
+      throw new Error("Unknown runtime session");
+    }
+
+    const job = this.getJobByThreadSessionId(threadSessionId);
+    if (!job) {
+      throw new Error("notify_main_thread is only available from cron threads");
+    }
+
+    const severity = input.severity ?? "info";
+    await this.runtime.sendUserMessage({
+      sessionId: "main",
+      content: [`Cron escalation from ${job.name} (${job.id})`, `Severity: ${severity}`, "", prompt].join("\n"),
+      metadata: {
+        source: "cron",
+        cronJobId: job.id,
+        cronThreadSessionId: threadSessionId,
+        severity,
+      },
+    });
+
+    return {
+      delivered: true,
+      cronJobId: job.id,
+      threadSessionId,
+    };
+  }
+
   private async schedulerTick() {
     if (!env.AGENT_MOCKINGBIRD_CRON_ENABLED || this.schedulerBusy) return;
     this.schedulerBusy = true;
@@ -980,6 +1050,43 @@ export class CronService {
       );
   }
 
+  private async ensureCronThread(definition: CronJobDefinition): Promise<CronJobDefinition> {
+    if (definition.threadSessionId && getSessionById(definition.threadSessionId)) {
+      return definition;
+    }
+
+    if (!this.runtime.spawnBackgroundSession) {
+      throw new Error("runtime does not support cron thread sessions");
+    }
+
+    const spawned = await this.runtime.spawnBackgroundSession({
+      parentSessionId: "main",
+      title: `Cron: ${definition.name}`,
+      requestedBy: `cron:${definition.id}`,
+      prompt: "",
+    });
+    const threadSessionId = spawned.childSessionId?.trim();
+    if (!threadSessionId) {
+      throw new Error("Failed to create cron thread session");
+    }
+
+    sqlite
+      .query(
+        `
+        UPDATE cron_job_definitions
+        SET thread_session_id = ?2, updated_at = ?3
+        WHERE id = ?1
+      `,
+      )
+      .run(definition.id, threadSessionId, nowMs());
+
+    const refreshed = await this.getJob(definition.id);
+    if (!refreshed) {
+      throw new Error(`Unknown cron job: ${definition.id}`);
+    }
+    return refreshed;
+  }
+
   private async invokeAgent(input: {
     definition: CronJobDefinition;
     instance: CronJobInstance;
@@ -988,10 +1095,9 @@ export class CronService {
   }): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
     const promptText = input.prompt.trim();
     if (!promptText) return { ok: false, error: "agent prompt was empty" };
-
-    const targetSession =
-      (typeof input.definition.payload.sessionId === "string" && input.definition.payload.sessionId.trim()) ||
-      "main";
+    const definition = await this.ensureCronThread(input.definition);
+    const targetSession = definition.threadSessionId;
+    if (!targetSession) return { ok: false, error: "cron thread session was not created" };
 
     const context = input.context ?? {};
     const agentFromPayload =
@@ -1001,7 +1107,8 @@ export class CronService {
           ? input.definition.payload.agent.trim()
           : "";
     const expanded = renderTemplate(promptText, {
-      ...definitionPayloadContext(input.definition),
+      ...definitionPayloadContext(definition),
+      threadSessionId: targetSession,
       ...context,
       instanceId: input.instance.id,
       scheduledFor: input.instance.scheduledFor,

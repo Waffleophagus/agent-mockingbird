@@ -8,6 +8,7 @@ export type CronStepKind = "background" | "conditional_agent" | "agent";
 export interface CronJobDefinition {
   id: string;
   name: string;
+  threadSessionId: string | null;
   enabled: boolean;
   scheduleKind: CronScheduleKind;
   scheduleExpr: string | null;

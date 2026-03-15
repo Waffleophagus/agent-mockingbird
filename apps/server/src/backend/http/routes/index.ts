@@ -9,6 +9,7 @@ import type { RunService } from "../../run/service";
 import type { RouteTable } from "../router";
 import type { RuntimeEventStream } from "../sse";
 import { createAgentRoutes } from "./agentRoutes";
+import { createBackgroundRoutes } from "./backgroundRoutes";
 import { createChatRoutes } from "./chatRoutes";
 import { createConfigRoutes } from "./configRoutes";
 import { createCronRoutes } from "./cronRoutes";
@@ -80,9 +81,10 @@ export function createApiRoutes(input: {
     "/api/waffle/runtime/import-openclaw": {
       POST: (req: Request) => importOpenclaw(req),
     },
-    ...createRuntimeRoutes(),
+    ...createRuntimeRoutes({ cronService: input.cronService }),
     ...createChatRoutes(input.runtime),
     ...createRunRoutes(input.runService),
+    ...createBackgroundRoutes(input.runtime),
     ...createDashboardRoutes(input.runtime),
     ...createConfigRoutes(input.eventStream),
     ...createUiRoutes(input.runtime, input.eventStream),

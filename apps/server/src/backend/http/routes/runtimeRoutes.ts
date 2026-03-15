@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { applyConfigPatch, getConfigSnapshot, replaceConfig } from "../../config/service";
+import type { CronService } from "../../cron/service";
 import { getLocalSessionIdByRuntimeBinding } from "../../db/repository";
 import {
   buildAgentMockingbirdCompactionContext,
@@ -44,7 +45,7 @@ function buildRuntimePayload() {
   };
 }
 
-export function createRuntimeRoutes() {
+export function createRuntimeRoutes(input: { cronService: CronService }) {
   return {
     "/api/waffle/runtime/pinned-workspace": {
       GET: () => {
@@ -145,11 +146,54 @@ export function createRuntimeRoutes() {
         }
 
         const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, sessionId);
+        const cronJob = localSessionId ? input.cronService.getJobByThreadSessionId(localSessionId) : null;
+        const kind = localSessionId === "main" ? "main" : cronJob ? "cron" : "other";
         return Response.json({
           sessionId,
           localSessionId,
           isMain: localSessionId === "main",
+          kind,
+          cronJobId: cronJob?.id ?? null,
+          cronJobName: cronJob?.name ?? null,
         });
+      },
+    },
+
+    "/api/waffle/runtime/notify-main-thread": {
+      POST: async (req: Request) => {
+        const body = (await req.json()) as {
+          sessionId?: unknown;
+          prompt?: unknown;
+          severity?: unknown;
+        };
+        const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+        const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+        const severity =
+          body.severity === "info" || body.severity === "warn" || body.severity === "critical"
+            ? body.severity
+            : undefined;
+        if (!sessionId) {
+          return Response.json({ error: "sessionId is required" }, { status: 400 });
+        }
+        if (!prompt) {
+          return Response.json({ error: "prompt is required" }, { status: 400 });
+        }
+
+        try {
+          const result = await input.cronService.notifyMainThread({
+            runtimeSessionId: sessionId,
+            prompt,
+            severity,
+          });
+          return Response.json({ ok: true, ...result });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to notify main thread";
+          const status =
+            message === "Unknown runtime session" || message === "notify_main_thread is only available from cron threads"
+              ? 403
+              : 400;
+          return Response.json({ error: message }, { status });
+        }
       },
     },
   };
