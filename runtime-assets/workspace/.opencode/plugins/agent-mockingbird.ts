@@ -45,6 +45,8 @@ const compactionContextCache = {
   expiresAtMs: 0,
 }
 
+const sessionScopeCache = new Map<string, { value: { localSessionId: string | null; isMain: boolean }; expiresAtMs: number }>()
+
 async function postJson(pathname: string, body: unknown, envKeys: string[] = []) {
   const response = await fetch(`${resolveApiBaseUrl(...envKeys)}${pathname}`, {
     method: "POST",
@@ -162,6 +164,41 @@ async function fetchCompactionContext() {
   compactionContextCache.value = context
   compactionContextCache.expiresAtMs = now + 5_000
   return context
+}
+
+async function fetchSessionScope(sessionID?: string) {
+  if (!sessionID?.trim()) {
+    return { localSessionId: null, isMain: false }
+  }
+
+  const cacheKey = sessionID.trim()
+  const now = Date.now()
+  const cached = sessionScopeCache.get(cacheKey)
+  if (cached && cached.expiresAtMs > now) {
+    return cached.value
+  }
+
+  const payload = await requestJson(`/api/waffle/runtime/session-scope?sessionId=${encodeURIComponent(cacheKey)}`)
+  const value = {
+    localSessionId: typeof payload.localSessionId === "string" && payload.localSessionId.trim()
+      ? payload.localSessionId
+      : null,
+    isMain: payload.isMain === true,
+  }
+  sessionScopeCache.set(cacheKey, {
+    value,
+    expiresAtMs: now + 5_000,
+  })
+  return value
+}
+
+function buildMainThreadNote() {
+  return [
+    "Thread policy:",
+    "- This is the main/root conversation thread.",
+    "- Prefer doing work directly in this thread unless delegation materially improves speed or focus.",
+    "- Treat this thread as the primary durable context for the user.",
+  ].join("\n")
 }
 
 const scheduleKindSchema = z.enum(["at", "every", "cron"])
@@ -535,6 +572,10 @@ const AgentMockingbirdPlugin: Plugin = async () => {
       const system = await fetchSystemPrompt()
       if (!system.trim()) return
       output.system.push(system)
+      const sessionScope = await fetchSessionScope(_input.sessionID)
+      if (sessionScope.isMain) {
+        output.system.push(buildMainThreadNote())
+      }
     },
     "experimental.session.compacting": async (_input, output) => {
       const context = await fetchCompactionContext()
@@ -571,6 +612,14 @@ const AgentMockingbirdPlugin: Plugin = async () => {
       config_manager: configManagerTool,
     },
   }
+}
+
+export function resetAgentMockingbirdPluginCaches() {
+  systemPromptCache.value = ""
+  systemPromptCache.expiresAtMs = 0
+  compactionContextCache.value = []
+  compactionContextCache.expiresAtMs = 0
+  sessionScopeCache.clear()
 }
 
 export { AgentMockingbirdPlugin }

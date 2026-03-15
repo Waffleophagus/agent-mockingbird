@@ -1,10 +1,13 @@
 import { z } from "zod";
 
 import { applyConfigPatch, getConfigSnapshot, replaceConfig } from "../../config/service";
+import { getLocalSessionIdByRuntimeBinding } from "../../db/repository";
 import {
   buildAgentMockingbirdCompactionContext,
   buildAgentMockingbirdSystemPrompt,
 } from "../../opencode/systemPrompt";
+
+const OPENCODE_RUNTIME_ID = "opencode";
 
 const runtimePatchSchema = z
   .object({
@@ -132,6 +135,22 @@ export function createRuntimeRoutes() {
         Response.json({
           context: buildAgentMockingbirdCompactionContext(),
         }),
+    },
+
+    "/api/waffle/runtime/session-scope": {
+      GET: (req: Request) => {
+        const sessionId = new URL(req.url).searchParams.get("sessionId")?.trim() ?? "";
+        if (!sessionId) {
+          return Response.json({ error: "sessionId is required" }, { status: 400 });
+        }
+
+        const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, sessionId);
+        return Response.json({
+          sessionId,
+          localSessionId,
+          isMain: localSessionId === "main",
+        });
+      },
     },
   };
 }

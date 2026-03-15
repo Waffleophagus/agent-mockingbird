@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { AgentMockingbirdPlugin } from "../../../../../runtime-assets/workspace/.opencode/plugins/agent-mockingbird";
+import {
+  AgentMockingbirdPlugin,
+  resetAgentMockingbirdPluginCaches,
+} from "../../../../../runtime-assets/workspace/.opencode/plugins/agent-mockingbird";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  resetAgentMockingbirdPluginCaches();
   delete process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL;
   delete process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL;
   delete process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL;
@@ -76,18 +80,60 @@ describe("AgentMockingbirdPlugin", () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input) => {
-      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/runtime/system-prompt");
-      return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+      const url = String(input);
+      if (url === "http://127.0.0.1:3001/api/waffle/runtime/system-prompt") {
+        return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+      }
+      if (url === "http://127.0.0.1:3001/api/waffle/runtime/session-scope?sessionId=sess-1") {
+        return new Response(JSON.stringify({ localSessionId: "session-123", isMain: false }), {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
     }) as typeof fetch;
 
     const hooks = await AgentMockingbirdPlugin({} as never);
     const output = { system: ["existing"] };
     await hooks["experimental.chat.system.transform"]?.({ sessionID: "sess-1", model: {} as never }, output);
     expect(output.system).toEqual(["existing", "Config policy:\n- Use config_manager."]);
+  });
+
+  test("system transform appends main-thread guidance for the rooted conversation", async () => {
+    process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url === "http://127.0.0.1:3001/api/waffle/runtime/system-prompt") {
+        return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+      }
+      if (url === "http://127.0.0.1:3001/api/waffle/runtime/session-scope?sessionId=sess-main") {
+        return new Response(JSON.stringify({ localSessionId: "main", isMain: true }), {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const hooks = await AgentMockingbirdPlugin({} as never);
+    const output = { system: ["existing"] };
+    await hooks["experimental.chat.system.transform"]?.({ sessionID: "sess-main", model: {} as never }, output);
+    expect(output.system).toEqual([
+      "existing",
+      "Config policy:\n- Use config_manager.",
+      "Thread policy:\n- This is the main/root conversation thread.\n- Prefer doing work directly in this thread unless delegation materially improves speed or focus.\n- Treat this thread as the primary durable context for the user.",
+    ]);
   });
 
   test("compaction hook appends Agent Mockingbird compaction context from the runtime API", async () => {
