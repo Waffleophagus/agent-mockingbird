@@ -21,6 +21,30 @@ export namespace Plugin {
   // Built-in plugins that are directly imported (not installed from npm)
   const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin]
 
+  function isHooks(value: unknown): value is Hooks {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+  }
+
+  async function collectHooksFromModuleExports(mod: Record<string, unknown>, input: PluginInput) {
+    const hooks: Hooks[] = []
+    const seen = new Set<PluginInstance>()
+
+    for (const [name, exported] of Object.entries(mod)) {
+      if (typeof exported !== "function") continue
+      const fn = exported as PluginInstance
+      if (seen.has(fn)) continue
+      seen.add(fn)
+      const init = await fn(input)
+      if (!isHooks(init)) {
+        log.info("ignoring non-hook plugin export", { name })
+        continue
+      }
+      hooks.push(init)
+    }
+
+    return hooks
+  }
+
   const state = Instance.state(async () => {
     const client = createOpencodeClient({
       baseUrl: "http://localhost:4096",
@@ -80,12 +104,7 @@ export namespace Plugin {
       // Object.entries(mod) would return both entries pointing to the same function reference.
       await import(plugin)
         .then(async (mod) => {
-          const seen = new Set<PluginInstance>()
-          for (const [_name, fn] of Object.entries<PluginInstance>(mod)) {
-            if (seen.has(fn)) continue
-            seen.add(fn)
-            hooks.push(await fn(input))
-          }
+          hooks.push(...(await collectHooksFromModuleExports(mod as Record<string, unknown>, input)))
         })
         .catch((err) => {
           const message = err instanceof Error ? err.message : String(err)
@@ -111,6 +130,7 @@ export namespace Plugin {
   >(name: Name, input: Input, output: Output): Promise<Output> {
     if (!name) return output
     for (const hook of await state().then((x) => x.hooks)) {
+      if (!hook) continue
       const fn = hook[name]
       if (!fn) continue
       // @ts-expect-error if you feel adventurous, please fix the typing, make sure to bump the try-counter if you
@@ -129,16 +149,23 @@ export namespace Plugin {
     const hooks = await state().then((x) => x.hooks)
     const config = await Config.get()
     for (const hook of hooks) {
+      if (!hook) continue
       // @ts-expect-error this is because we haven't moved plugin to sdk v2
       await hook.config?.(config)
     }
     Bus.subscribeAll(async (input) => {
       const hooks = await state().then((x) => x.hooks)
       for (const hook of hooks) {
+        if (!hook) continue
         hook["event"]?.({
           event: input,
         })
       }
     })
+  }
+
+  export const testing = {
+    collectHooksFromModuleExports,
+    isHooks,
   }
 }

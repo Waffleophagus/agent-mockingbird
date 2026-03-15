@@ -117,4 +117,14 @@ describe("resolvePluginProviders", () => {
     })
     expect(result).toEqual([])
   })
+
+  test("tolerates undefined hooks from malformed plugin exports", () => {
+    const result = resolvePluginProviders({
+      hooks: [undefined, hookWithAuth("portkey"), undefined],
+      existingProviders: {},
+      disabled: new Set(),
+      providerNames: {},
+    })
+    expect(result).toEqual([{ id: "portkey", name: "portkey" }])
+  })
 })

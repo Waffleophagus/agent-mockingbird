@@ -614,13 +614,5 @@ const AgentMockingbirdPlugin: Plugin = async () => {
   }
 }
 
-export function resetAgentMockingbirdPluginCaches() {
-  systemPromptCache.value = ""
-  systemPromptCache.expiresAtMs = 0
-  compactionContextCache.value = []
-  compactionContextCache.expiresAtMs = 0
-  sessionScopeCache.clear()
-}
-
 export { AgentMockingbirdPlugin }
 export default AgentMockingbirdPlugin

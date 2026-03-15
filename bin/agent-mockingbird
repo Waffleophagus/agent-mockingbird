@@ -1227,6 +1227,30 @@ async function fetchRuntimeModelOptionsWithRetry(input = {}) {
   return last;
 }
 
+function buildEmptyModelDiscoveryDiagnostics(input) {
+  const lines = [
+    "No runtime models were discovered after provider setup.",
+    `Workspace: ${input.workspaceDir}`,
+  ];
+  if (input.currentModel) {
+    lines.push(`Current runtime default: ${input.currentModel}`);
+  }
+  if (input.authAttempts > 0) {
+    lines.push(
+      `Provider auth attempts: ${input.authAttempts} (${input.authSuccess ? "at least one succeeded" : "none succeeded"})`,
+    );
+  }
+  if (input.authRefresh) {
+    lines.push(`OpenCode auth refresh: ${input.authRefresh.message}`);
+  }
+  lines.push("This usually means the runtime workspace config and the saved provider credentials are still out of sync.");
+  lines.push("Recommended checks:");
+  lines.push(`- cd ${input.workspaceDir} && opencode auth list`);
+  lines.push("- curl -sS http://127.0.0.1:3001/api/opencode/models");
+  lines.push("- verify the provider you authenticated actually exposes models in this workspace configuration");
+  return lines;
+}
+
 async function restartOpencodeServiceForAuthRefresh() {
   if (!checkSystemdUserStatus()) {
     return {
@@ -1710,11 +1734,28 @@ async function runInteractiveProviderOnboarding(input) {
       console.log(info(`Current runtime default: ${currentModel}`));
     }
     if (modelOptions.length === 0) {
-      const manual = (await promptText("No discovered model list; enter provider/model manually", currentModel || "")).trim();
-      if (manual) {
-        await setRuntimeDefaultModel(manual);
-        selectedModel = manual;
+      const diagnostics = buildEmptyModelDiscoveryDiagnostics({
+        workspaceDir,
+        currentModel,
+        authAttempts,
+        authSuccess,
+        authRefresh,
+      });
+      console.log("");
+      console.log(warn(diagnostics[0]));
+      for (const line of diagnostics.slice(1)) {
+        console.log(info(line));
       }
+      return {
+        status: "error",
+        message: diagnostics[0],
+        flow: pathChoice.value,
+        authAttempts,
+        authSuccess,
+        authRefresh,
+        selectedModel: null,
+        diagnostics,
+      };
     } else {
       const selection = await promptSearchableModelChoice({
         modelOptions,
@@ -1876,6 +1917,10 @@ async function runInteractiveProviderOnboarding(input) {
     memoryEmbedding,
     openclawMigration,
   };
+}
+
+export const testing = {
+  buildEmptyModelDiscoveryDiagnostics,
 }
 
 async function installOrUpdate(args, mode) {
@@ -2234,6 +2279,11 @@ function printResult(result, asJson) {
         console.log(`onboarding: skipped (${result.onboarding.reason})`);
       } else if (result.onboarding.status === "error") {
         console.log(`onboarding: failed (${result.onboarding.message})`);
+        if (Array.isArray(result.onboarding.diagnostics)) {
+          for (const line of result.onboarding.diagnostics) {
+            console.log(`onboarding: ${line}`);
+          }
+        }
       }
     }
     return;
@@ -2335,6 +2385,11 @@ function printResult(result, asJson) {
     }
     if (result.onboarding?.status === "error") {
       console.log(`onboard failed: ${result.onboarding.message}`);
+      if (Array.isArray(result.onboarding.diagnostics)) {
+        for (const line of result.onboarding.diagnostics) {
+          console.log(line);
+        }
+      }
       return;
     }
     console.log("onboard complete");
@@ -2366,6 +2421,9 @@ function evaluateResult(result) {
     const stopped =
       result?.unitStates?.[UNIT_OPENCODE] !== "active" && result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] !== "active";
     return stopped ? 0 : 2;
+  }
+  if (result.mode === "onboard") {
+    return result.onboarding?.status === "error" ? 2 : 0;
   }
   return 0;
 }
@@ -2417,7 +2475,9 @@ async function main() {
   process.exitCode = evaluateResult(result);
 }
 
-await main().catch(error => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (import.meta.main) {
+  await main().catch(error => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

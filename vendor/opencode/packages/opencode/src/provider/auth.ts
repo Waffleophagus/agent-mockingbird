@@ -11,7 +11,7 @@ export namespace ProviderAuth {
   const state = Instance.state(async () => {
     const methods = pipe(
       await Plugin.list(),
-      filter((x) => x.auth?.provider !== undefined),
+      filter((x) => x?.auth?.provider !== undefined),
       map((x) => [x.auth!.provider, x.auth!] as const),
       fromEntries(),
     )

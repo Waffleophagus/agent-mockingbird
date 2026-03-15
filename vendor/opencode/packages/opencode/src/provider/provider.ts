@@ -987,6 +987,7 @@ export namespace Provider {
     }
 
     for (const plugin of await Plugin.list()) {
+      if (!plugin) continue
       if (!plugin.auth) continue
       const providerID = plugin.auth.provider
       if (disabled.has(providerID)) continue

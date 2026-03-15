@@ -166,7 +166,7 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, 
 }
 
 export function resolvePluginProviders(input: {
-  hooks: Hooks[]
+  hooks: Array<Hooks | null | undefined>
   existingProviders: Record<string, unknown>
   disabled: Set<string>
   enabled?: Set<string>
@@ -176,6 +176,7 @@ export function resolvePluginProviders(input: {
   const result: Array<{ id: string; name: string }> = []
 
   for (const hook of input.hooks) {
+    if (!hook) continue
     if (!hook.auth) continue
     const id = hook.auth.provider
     if (seen.has(id)) continue
@@ -384,7 +385,7 @@ export const ProvidersLoginCommand = cmd({
           provider = selected as string
         }
 
-        const plugin = await Plugin.list().then((x) => x.findLast((x) => x.auth?.provider === provider))
+        const plugin = await Plugin.list().then((x) => x.findLast((x) => x?.auth?.provider === provider))
         if (plugin && plugin.auth) {
           const handled = await handlePluginAuth({ auth: plugin.auth }, provider, args.method)
           if (handled) return
@@ -398,7 +399,7 @@ export const ProvidersLoginCommand = cmd({
           if (prompts.isCancel(custom)) throw new UI.CancelledError()
           provider = custom.replace(/^@ai-sdk\//, "")
 
-          const customPlugin = await Plugin.list().then((x) => x.findLast((x) => x.auth?.provider === provider))
+          const customPlugin = await Plugin.list().then((x) => x.findLast((x) => x?.auth?.provider === provider))
           if (customPlugin && customPlugin.auth) {
             const handled = await handlePluginAuth({ auth: customPlugin.auth }, provider, args.method)
             if (handled) return

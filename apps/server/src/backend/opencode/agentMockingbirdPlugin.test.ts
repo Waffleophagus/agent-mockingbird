@@ -1,15 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import {
-  AgentMockingbirdPlugin,
-  resetAgentMockingbirdPluginCaches,
-} from "../../../../../runtime-assets/workspace/.opencode/plugins/agent-mockingbird";
+import { AgentMockingbirdPlugin } from "../../../../../runtime-assets/workspace/.opencode/plugins/agent-mockingbird";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  resetAgentMockingbirdPluginCaches();
   delete process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL;
   delete process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL;
   delete process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL;
