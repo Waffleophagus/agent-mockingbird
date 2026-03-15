@@ -4,6 +4,13 @@ const z = tool.schema
 
 type JsonObject = Record<string, unknown>
 
+type JsonSchema = {
+  type?: string
+  description?: string
+  properties?: Record<string, JsonSchema>
+  items?: JsonSchema
+}
+
 function resolveApiBaseUrl(...envKeys: string[]) {
   for (const key of envKeys) {
     const value = process.env[key]?.trim()
@@ -59,6 +66,74 @@ function toPreview(snippet: string) {
     .trim()
   if (compact.length <= 280) return compact
   return `${compact.slice(0, 280).trimEnd()}...`
+}
+
+function applyPropertyDescription(parameters: unknown, propertyName: string, description: string) {
+  if (!parameters || typeof parameters !== "object") return
+  const schema = parameters as JsonSchema
+  const property = schema.properties?.[propertyName]
+  if (!property) return
+  property.description = description
+}
+
+const toolDescriptionOverrides: Record<string, string> = {
+  question:
+    "Ask the user a short structured question when multiple-choice or explicit clarification will unblock the assistant faster than plain text.",
+  task:
+    "Delegate a bounded subtask to a specialized agent when parallel work or focused expertise will help the assistant move faster.",
+  bash:
+    "Run a shell command in the workspace when direct terminal execution is the fastest way to inspect, verify, or change something.",
+  read:
+    "Read a file or directory directly when the assistant needs exact local context before acting.",
+  write:
+    "Create a new file when the assistant needs to add fresh workspace content.",
+  edit:
+    "Make targeted edits to an existing file when a focused change is enough.",
+  apply_patch:
+    "Apply a precise patch to workspace files when the assistant needs controlled code or text edits.",
+  list:
+    "List files in a directory to quickly inspect local workspace structure.",
+  glob:
+    "Find files by path pattern when the assistant knows roughly where something should live.",
+  grep:
+    "Search local file contents for exact text or patterns when identifying relevant code or documents.",
+  websearch:
+    "Search the web for current external information when local context is insufficient and recency matters.",
+  webfetch:
+    "Fetch and read a specific URL when the assistant already knows which external page or API response is needed.",
+  todoread:
+    "Read the assistant todo list to understand current planned work.",
+  todowrite:
+    "Update the assistant todo list when tracking multi-step work would keep execution organized.",
+}
+
+function rewriteToolDefinition(toolID: string, output: { description: string; parameters: unknown }) {
+  const description = toolDescriptionOverrides[toolID]
+  if (description) {
+    output.description = description
+  }
+
+  if (toolID === "question") {
+    applyPropertyDescription(
+      output.parameters,
+      "questions",
+      "One or more short user-facing questions to ask when structured clarification is needed.",
+    )
+  }
+
+  if (toolID === "task") {
+    applyPropertyDescription(output.parameters, "description", "A short summary of the delegated subtask.")
+    applyPropertyDescription(output.parameters, "prompt", "Exact instructions for the specialized agent to complete.")
+    applyPropertyDescription(
+      output.parameters,
+      "subagent_type",
+      "The specialist agent type that should handle this delegated subtask.",
+    )
+  }
+
+  if (toolID === "bash") {
+    applyPropertyDescription(output.parameters, "description", "Short explanation of why this command is being run.")
+  }
 }
 
 async function fetchSystemPrompt() {
@@ -465,6 +540,9 @@ const AgentMockingbirdPlugin: Plugin = async () => {
       const context = await fetchCompactionContext()
       if (context.length === 0) return
       output.context.push(...context)
+    },
+    "tool.definition": async (input, output) => {
+      rewriteToolDefinition(input.toolID, output)
     },
     "shell.env": async (_input, output) => {
       const defaultBaseUrl = resolveApiBaseUrl(
