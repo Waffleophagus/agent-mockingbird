@@ -29,7 +29,6 @@ import {
   isWriteIntentMemoryQuery,
   memoryInjectionResultKey,
 } from "./memoryPromptDedup";
-import { buildWorkspaceBootstrapPromptContext } from "../agents/bootstrapContext";
 import type {
   ConfiguredMcpServer,
   AgentMockingbirdConfig,
@@ -92,7 +91,6 @@ import {
   upsertSessionMessages,
   type BackgroundRunRecord,
 } from "../db/repository";
-import { env } from "../env";
 import {
   normalizeMcpIds,
   normalizeMcpServerDefinitions,
@@ -598,9 +596,6 @@ export class OpencodeRuntime implements RuntimeEngine {
         (await this.resolvePrimaryAgentId(undefined, {
           emitRetryStatus: false,
         }));
-      const memorySystemPrompt = this.buildAgentMockingbirdSystemPrompt({
-        agentId: effectiveAgent,
-      });
       const promptParts = this.applyMemoryPromptToParts(
         inputParts,
         promptInput.content,
@@ -623,7 +618,7 @@ export class OpencodeRuntime implements RuntimeEngine {
           parts: promptParts,
           retryPartsOnSessionRecreate: recreatedSessionPromptParts,
           memoryContextFingerprint: promptInput.memoryContextFingerprint,
-          system: memorySystemPrompt,
+          system: undefined,
           agent: effectiveAgent,
         });
       } catch (error) {
@@ -1512,73 +1507,6 @@ export class OpencodeRuntime implements RuntimeEngine {
         .find((model: string) => model.trim())
         ?.trim() || this.currentSmallModel()
     );
-  }
-
-  private buildAgentMockingbirdSystemPrompt(input?: {
-    agentId?: string;
-  }): string | undefined {
-    const memoryConfig = currentMemoryConfig();
-    const config = getConfigSnapshot().config;
-    const workspaceContext = buildWorkspaceBootstrapPromptContext({
-      config,
-      agentId: input?.agentId,
-    });
-    const lines: string[] = [];
-
-    lines.push(
-      "Config policy:",
-      "- Use config_manager for runtime configuration changes.",
-      "- Use agent_type_manager for dedicated agent type CRUD operations.",
-      "- Prefer patch_config with expectedHash from get_config to avoid conflicts.",
-      "- Safe config writes enforce policy checks and may reject protected paths.",
-      "- Keep runSmokeTest enabled unless explicitly instructed otherwise.",
-    );
-
-    lines.push("");
-    lines.push(
-      "Interaction policy:",
-      "- If the user asks for an interactive multiple-choice question, use the question UI/tool instead of plain text.",
-      "- Keep option labels short and descriptions concise.",
-    );
-
-    if (memoryConfig.enabled && memoryConfig.toolMode !== "inject_only") {
-      lines.push("");
-      lines.push(
-        "Memory policy:",
-        "- Use memory_search when a request likely depends on prior durable context.",
-        "- Prefer one search call first; then use memory_get only for the top 1-2 cited records before relying on details.",
-        "- For people/relationships, use concrete terms (for example: daughter, spouse, partner, child, parent, names) instead of only generic words.",
-        "- For broad domains (for example: portfolio), run one adjacent-term refinement (for example: metals, silver, bonds, allocation) if the first search misses.",
-        "- Skip memory tool calls for clearly self-contained tasks.",
-        "- If the first memory_search misses, do one refined query with entity/relationship terms before concluding no memory exists.",
-        "- Use memory_remember when new context could be useful later.",
-        "- Prefer supersedes when replacing older memory records.",
-      );
-    }
-
-    if (env.AGENT_MOCKINGBIRD_CRON_ENABLED) {
-      lines.push("");
-      lines.push(
-        "Cron policy:",
-        "- Use cron_manager for recurring automation and background checks.",
-        "- Prefer deterministic jobs when possible; only invoke the model when useful.",
-        "- Review existing jobs before creating new ones to avoid duplicates.",
-      );
-    }
-
-    if (workspaceContext.section) {
-      lines.push("", workspaceContext.section);
-    }
-
-    if (workspaceContext.agentPrompt) {
-      lines.push(
-        "",
-        `## Active Agent Prompt (${workspaceContext.agentPromptSource ?? input?.agentId ?? "selected"})`,
-        workspaceContext.agentPrompt,
-      );
-    }
-
-    return lines.length ? lines.join("\n") : undefined;
   }
 
   private emit(event: RuntimeEvent) {

@@ -28,6 +28,16 @@ async function requestJson(pathname: string, init?: RequestInit) {
   return payload
 }
 
+const systemPromptCache = {
+  value: "",
+  expiresAtMs: 0,
+}
+
+const compactionContextCache = {
+  value: [] as string[],
+  expiresAtMs: 0,
+}
+
 async function postJson(pathname: string, body: unknown, envKeys: string[] = []) {
   const response = await fetch(`${resolveApiBaseUrl(...envKeys)}${pathname}`, {
     method: "POST",
@@ -49,6 +59,34 @@ function toPreview(snippet: string) {
     .trim()
   if (compact.length <= 280) return compact
   return `${compact.slice(0, 280).trimEnd()}...`
+}
+
+async function fetchSystemPrompt() {
+  const now = Date.now()
+  if (systemPromptCache.expiresAtMs > now) {
+    return systemPromptCache.value
+  }
+
+  const payload = await requestJson("/api/waffle/runtime/system-prompt")
+  const system = typeof payload.system === "string" ? payload.system : ""
+  systemPromptCache.value = system
+  systemPromptCache.expiresAtMs = now + 5_000
+  return system
+}
+
+async function fetchCompactionContext() {
+  const now = Date.now()
+  if (compactionContextCache.expiresAtMs > now) {
+    return compactionContextCache.value
+  }
+
+  const payload = await requestJson("/api/waffle/runtime/compaction-context")
+  const context = Array.isArray(payload.context)
+    ? payload.context.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : []
+  compactionContextCache.value = context
+  compactionContextCache.expiresAtMs = now + 5_000
+  return context
 }
 
 const scheduleKindSchema = z.enum(["at", "every", "cron"])
@@ -418,6 +456,34 @@ const configManagerTool = tool({
 
 const AgentMockingbirdPlugin: Plugin = async () => {
   return {
+    "experimental.chat.system.transform": async (_input, output) => {
+      const system = await fetchSystemPrompt()
+      if (!system.trim()) return
+      output.system.push(system)
+    },
+    "experimental.session.compacting": async (_input, output) => {
+      const context = await fetchCompactionContext()
+      if (context.length === 0) return
+      output.context.push(...context)
+    },
+    "shell.env": async (_input, output) => {
+      const defaultBaseUrl = resolveApiBaseUrl(
+        "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+        "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+        "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+      )
+      output.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL ??=
+        process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL?.trim() || defaultBaseUrl
+      output.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL ??=
+        process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim() || defaultBaseUrl
+      output.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL ??=
+        process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL?.trim() ||
+        process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim() ||
+        defaultBaseUrl
+      if (process.env.AGENT_MOCKINGBIRD_PORT?.trim()) {
+        output.env.AGENT_MOCKINGBIRD_PORT ??= process.env.AGENT_MOCKINGBIRD_PORT.trim()
+      }
+    },
     tool: {
       memory_search: memorySearchTool,
       memory_get: memoryGetTool,

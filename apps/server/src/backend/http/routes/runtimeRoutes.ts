@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import { applyConfigPatch, getConfigSnapshot, replaceConfig } from "../../config/service";
+import {
+  buildAgentMockingbirdCompactionContext,
+  buildAgentMockingbirdSystemPrompt,
+} from "../../opencode/systemPrompt";
 
 const runtimePatchSchema = z
   .object({
@@ -114,6 +118,20 @@ export function createRuntimeRoutes() {
           },
         });
       },
+    },
+
+    "/api/waffle/runtime/system-prompt": {
+      GET: () =>
+        Response.json({
+          system: buildAgentMockingbirdSystemPrompt() ?? "",
+        }),
+    },
+
+    "/api/waffle/runtime/compaction-context": {
+      GET: () =>
+        Response.json({
+          context: buildAgentMockingbirdCompactionContext(),
+        }),
     },
   };
 }
