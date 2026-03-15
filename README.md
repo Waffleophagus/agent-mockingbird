@@ -203,14 +203,20 @@ Memory mode environment variables:
 - `AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY` (default `true`)
 - `AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_MAX_TRACKED` (default `256`)
 
-OpenCode local memory tools:
+OpenCode local Agent Mockingbird plugin:
 
-- `.opencode/tools/memory_search.ts`
-- `.opencode/tools/memory_get.ts`
-- `.opencode/tools/memory_remember.ts`
-- `.opencode/tools/cron_manager.ts`
+- `.opencode/plugins/agent-mockingbird.ts`
 
-These tools call Agent Mockingbird APIs. Set `AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL` and/or `AGENT_MOCKINGBIRD_CRON_API_BASE_URL` for the OpenCode process if needed (default `http://127.0.0.1:3001`).
+The plugin registers these custom tools against Agent Mockingbird APIs:
+
+- `memory_search`
+- `memory_get`
+- `memory_remember`
+- `cron_manager`
+- `config_manager`
+- `agent_type_manager`
+
+Set `AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL`, `AGENT_MOCKINGBIRD_CRON_API_BASE_URL`, and/or `AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL` for the OpenCode process if needed (default `http://127.0.0.1:3001`).
 
 Memory API endpoints used by tools:
 

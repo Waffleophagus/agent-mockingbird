@@ -72,7 +72,7 @@ async function main() {
 
   if (!args.quiet) {
     console.log(
-      `runtime-assets summary: scanned=${result.scannedFiles}, copied=${result.copied}, overwritten=${result.overwritten}, unchanged=${result.unchanged}, keptLocal=${result.keptLocal}, conflicts=${result.conflicts}, backups=${result.backupsCreated}`,
+      `runtime-assets summary: scanned=${result.scannedFiles}, copied=${result.copied}, overwritten=${result.overwritten}, removed=${result.removed}, unchanged=${result.unchanged}, keptLocal=${result.keptLocal}, conflicts=${result.conflicts}, backups=${result.backupsCreated}`,
     );
   }
 }
