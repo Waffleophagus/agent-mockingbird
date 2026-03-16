@@ -10,6 +10,7 @@ APP_USER="${AGENT_MOCKINGBIRD_USER:-agent-mockingbird}"
 APP_GROUP="${AGENT_MOCKINGBIRD_GROUP:-${APP_USER}}"
 APP_DIR="${AGENT_MOCKINGBIRD_APP_DIR:-/srv/agent-mockingbird/app}"
 DATA_DIR="${AGENT_MOCKINGBIRD_DATA_DIR:-/var/lib/agent-mockingbird}"
+OPENCODE_CONFIG_DIR="${AGENT_MOCKINGBIRD_OPENCODE_CONFIG_DIR:-${DATA_DIR}/opencode-config/systemd}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UNIT_DIR="/etc/systemd/system"
 TMP_DIR="$(mktemp -d)"
@@ -48,9 +49,10 @@ tar -C "${SCRIPT_DIR}" -cf - . | tar -C "${APP_DIR}" -xf -
 chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}" "${DATA_DIR}"
 
 su -s /bin/bash -c "cd \"${APP_DIR}\" && bun install --frozen-lockfile" "${APP_USER}"
-su -s /bin/bash -c "cd \"${APP_DIR}\" && bun scripts/runtime-assets-sync.mjs --source \"${APP_DIR}/runtime-assets/workspace\" --target \"${APP_DIR}\" --state \"${DATA_DIR}/runtime-assets-state.json\" --mode install --non-interactive" "${APP_USER}"
-if [[ -f "${APP_DIR}/.opencode/package.json" ]]; then
-  su -s /bin/bash -c "cd \"${APP_DIR}/.opencode\" && bun install --frozen-lockfile" "${APP_USER}"
+su -s /bin/bash -c "cd \"${APP_DIR}\" && bun scripts/runtime-assets-sync.mjs --source \"${APP_DIR}/runtime-assets/workspace\" --target \"${APP_DIR}\" --state \"${DATA_DIR}/runtime-assets-workspace-state.json\" --mode install --non-interactive" "${APP_USER}"
+su -s /bin/bash -c "cd \"${APP_DIR}\" && bun scripts/runtime-assets-sync.mjs --source \"${APP_DIR}/runtime-assets/opencode-config\" --target \"${OPENCODE_CONFIG_DIR}\" --state \"${DATA_DIR}/runtime-assets-opencode-config-state.json\" --mode install --non-interactive" "${APP_USER}"
+if [[ -f "${OPENCODE_CONFIG_DIR}/package.json" ]]; then
+  su -s /bin/bash -c "cd \"${OPENCODE_CONFIG_DIR}\" && bun install --frozen-lockfile" "${APP_USER}"
 fi
 
 render_unit() {
@@ -61,6 +63,7 @@ render_unit() {
     -e "s|^User=.*$|User=${APP_USER}|" \
     -e "s|^Group=.*$|Group=${APP_GROUP}|" \
     -e "s|^WorkingDirectory=.*$|WorkingDirectory=${APP_DIR}|" \
+    -e "s|__AGENT_MOCKINGBIRD_OPENCODE_CONFIG_DIR__|${OPENCODE_CONFIG_DIR}|g" \
     -e "s|/srv/agent-mockingbird/app|${APP_DIR}|g" \
     -e "s|/var/lib/agent-mockingbird|${DATA_DIR}|g" \
     "${src}" > "${dst}"

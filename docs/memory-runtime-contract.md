@@ -37,6 +37,6 @@ This contract defines how OpenCode runtime memory is expected to behave in Agent
 ## Interfaces
 
 - Memory API routes under `/api/memory/*`.
-- OpenCode plugin-provided memory tools under `.opencode/plugins/agent-mockingbird.ts`.
+- OpenCode plugin-provided memory tools under the managed OpenCode config dir `plugins/agent-mockingbird.ts`.
 - Operator CLI via `bun run memory:*` scripts.
 - Retrieval debug can be requested via `POST /api/memory/retrieve` with `{ "debug": true }`.

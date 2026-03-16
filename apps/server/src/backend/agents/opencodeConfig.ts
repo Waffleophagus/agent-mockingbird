@@ -3,14 +3,13 @@ import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import type { AgentTypeDefinition, AgentMockingbirdConfig } from "../config/schema";
 import { agentTypeDefinitionSchema } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
-import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
+import { resolveOpencodeConfigDir, resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
 type OpenCodeAgentConfigRecord = Record<string, unknown>;
 
@@ -20,9 +19,10 @@ export interface OpencodeAgentValidationIssue {
 }
 
 export interface OpencodeAgentStorageInfo {
-  directory: string;
+  workspaceDirectory: string;
+  configDirectory: string;
   configFilePath: string;
-  persistenceMode: "project-opencode-jsonc";
+  persistenceMode: "managed-config-dir";
 }
 
 const NON_DELETABLE_BUILTIN_AGENT_IDS = new Set(["explore", "general"]);
@@ -105,12 +105,12 @@ function toOpenCodeAgentConfig(
 }
 
 function canonicalOpencodeConfigPath(baseDir: string) {
-  return path.join(baseDir, ".opencode", "opencode.jsonc");
+  return path.join(baseDir, "opencode.jsonc");
 }
 
 function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissing = true) {
-  const baseDir = resolveOpencodeWorkspaceDir(config);
-  const fallback = canonicalOpencodeConfigPath(baseDir);
+  const configDirectory = resolveOpencodeConfigDir(config);
+  const fallback = canonicalOpencodeConfigPath(configDirectory);
   if (!createIfMissing) {
     return fallback;
   }
@@ -122,37 +122,18 @@ function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissi
 }
 
 export function getOpencodeAgentStorageInfo(config: AgentMockingbirdConfig = getConfigSnapshot().config): OpencodeAgentStorageInfo {
-  const directory = resolveOpencodeWorkspaceDir(config);
+  const workspaceDirectory = resolveOpencodeWorkspaceDir(config);
+  const configDirectory = resolveOpencodeConfigDir(config);
   return {
-    directory,
+    workspaceDirectory,
+    configDirectory,
     configFilePath: resolveOpencodeConfigFile(config, false),
-    persistenceMode: "project-opencode-jsonc",
+    persistenceMode: "managed-config-dir",
   };
 }
 
 function listAgentSearchRoots(config: AgentMockingbirdConfig): string[] {
-  const roots = new Set<string>();
-  const baseDir = resolveOpencodeWorkspaceDir(config);
-  roots.add(baseDir);
-
-  // OpenCode scans .opencode directories walking up project + home.
-  let cursor = path.resolve(baseDir);
-  while (true) {
-    roots.add(path.join(cursor, ".opencode"));
-    const parent = path.dirname(cursor);
-    if (parent === cursor) break;
-    cursor = parent;
-  }
-
-  const homeDir = os.homedir();
-  roots.add(path.join(homeDir, ".opencode"));
-  roots.add(path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir, ".config"), "opencode"));
-
-  if (process.env.OPENCODE_CONFIG_DIR?.trim()) {
-    roots.add(process.env.OPENCODE_CONFIG_DIR.trim());
-  }
-
-  return [...roots];
+  return [resolveOpencodeConfigDir(config)];
 }
 
 function deleteAgentMarkdownFiles(config: AgentMockingbirdConfig, agentId: string): string[] {
@@ -440,7 +421,8 @@ export async function patchOpencodeAgentTypes(input: {
       deleted: input.deletes.slice().sort((a, b) => a.localeCompare(b)),
       deletedAgentFiles: deletedAgentFiles.sort((a, b) => a.localeCompare(b)),
       configFilePath: fileConfigPath,
-      directory: storage.directory,
+      workspaceDirectory: storage.workspaceDirectory,
+      configDirectory: storage.configDirectory,
     },
   };
 }

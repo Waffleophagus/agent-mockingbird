@@ -25,9 +25,9 @@ describe("syncRuntimeWorkspaceAssets", () => {
     const targetDir = makeTempDir();
     const stateFilePath = path.join(makeTempDir(), "runtime-assets-state.json");
 
-    fs.mkdirSync(path.join(sourceDir, ".opencode", "tools"), { recursive: true });
-    fs.mkdirSync(path.join(targetDir, ".opencode", "tools"), { recursive: true });
-    fs.writeFileSync(path.join(sourceDir, ".opencode", "tools", "memory_search.ts"), "export default 1\n");
+    fs.mkdirSync(path.join(sourceDir, "plugins"), { recursive: true });
+    fs.mkdirSync(path.join(targetDir, "plugins"), { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "plugins", "memory_search.ts"), "export default 1\n");
 
     await syncRuntimeWorkspaceAssets({
       sourceWorkspaceDir: sourceDir,
@@ -36,9 +36,9 @@ describe("syncRuntimeWorkspaceAssets", () => {
       mode: "install",
     });
 
-    expect(fs.existsSync(path.join(targetDir, ".opencode", "tools", "memory_search.ts"))).toBe(true);
+    expect(fs.existsSync(path.join(targetDir, "plugins", "memory_search.ts"))).toBe(true);
 
-    fs.rmSync(path.join(sourceDir, ".opencode", "tools", "memory_search.ts"));
+    fs.rmSync(path.join(sourceDir, "plugins", "memory_search.ts"));
     const result = await syncRuntimeWorkspaceAssets({
       sourceWorkspaceDir: sourceDir,
       targetWorkspaceDir: targetDir,
@@ -47,6 +47,6 @@ describe("syncRuntimeWorkspaceAssets", () => {
     });
 
     expect(result.removed).toBe(1);
-    expect(fs.existsSync(path.join(targetDir, ".opencode", "tools", "memory_search.ts"))).toBe(false);
+    expect(fs.existsSync(path.join(targetDir, "plugins", "memory_search.ts"))).toBe(false);
   });
 });

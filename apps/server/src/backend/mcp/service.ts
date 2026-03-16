@@ -2,10 +2,18 @@ import type { Config } from "@opencode-ai/sdk/client";
 import { parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 
-import type { AgentMockingbirdConfig, ConfiguredMcpServer } from "../config/schema";
-import { createOpencodeClientFromConnection, createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";
-import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
+import type {
+  AgentMockingbirdConfig,
+  ConfiguredMcpServer,
+} from "../config/schema";
+import {
+  createOpencodeClientFromConnection,
+  createOpencodeV2ClientFromConnection,
+  unwrapSdkData,
+} from "../opencode/client";
+import { resolveOpencodeConfigDir } from "../workspace/resolve";
 
 export type RuntimeMcpStatus =
   | "connected"
@@ -28,14 +36,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function stableSerialize(value: unknown): string {
   if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return `[${value.map(item => stableSerialize(item)).join(",")}]`;
+    return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
   }
   if (!isPlainObject(value)) return JSON.stringify(value);
-  const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+  const entries = Object.entries(value).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`).join(",")}}`;
 }
 
@@ -61,12 +75,17 @@ function normalizeRecordStringMap(value: unknown): Record<string, string> {
   if (!isPlainObject(value)) return {};
   return Object.fromEntries(
     Object.entries(value)
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      )
       .map(([key, entry]) => [key, entry]),
   );
 }
 
-function fromOpencodeMcp(id: string, value: unknown): ConfiguredMcpServer | null {
+function fromOpencodeMcp(
+  id: string,
+  value: unknown,
+): ConfiguredMcpServer | null {
   if (!isPlainObject(value)) return null;
   const enabled = value.enabled !== false;
   if (value.type === "remote" && typeof value.url === "string") {
@@ -85,7 +104,10 @@ function fromOpencodeMcp(id: string, value: unknown): ConfiguredMcpServer | null
       id,
       type: "local",
       enabled,
-      command: value.command.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0),
+      command: value.command.filter(
+        (entry): entry is string =>
+          typeof entry === "string" && entry.trim().length > 0,
+      ),
       environment: normalizeRecordStringMap(value.environment),
       timeoutMs: typeof value.timeout === "number" ? value.timeout : undefined,
     };
@@ -101,7 +123,9 @@ function toOpencodeMcp(server: ConfiguredMcpServer): Record<string, unknown> {
       url: server.url,
       headers: server.headers,
       ...(server.oauth === "off" ? { oauth: false } : {}),
-      ...(typeof server.timeoutMs === "number" ? { timeout: server.timeoutMs } : {}),
+      ...(typeof server.timeoutMs === "number"
+        ? { timeout: server.timeoutMs }
+        : {}),
     };
   }
   return {
@@ -109,7 +133,9 @@ function toOpencodeMcp(server: ConfiguredMcpServer): Record<string, unknown> {
     enabled: server.enabled,
     command: server.command,
     environment: server.environment,
-    ...(typeof server.timeoutMs === "number" ? { timeout: server.timeoutMs } : {}),
+    ...(typeof server.timeoutMs === "number"
+      ? { timeout: server.timeoutMs }
+      : {}),
   };
 }
 
@@ -131,10 +157,12 @@ function extractMcpError(value: unknown) {
 }
 
 function opencodeConfigFilePath(config: AgentMockingbirdConfig) {
-  return `${resolveOpencodeWorkspaceDir(config)}/.opencode/opencode.jsonc`;
+  return path.join(resolveOpencodeConfigDir(config), "opencode.jsonc");
 }
 
-export function readConfiguredMcpServersFromWorkspaceConfig(config: AgentMockingbirdConfig): Array<ConfiguredMcpServer> {
+export function readConfiguredMcpServersFromWorkspaceConfig(
+  config: AgentMockingbirdConfig,
+): Array<ConfiguredMcpServer> {
   try {
     const raw = readFileSync(opencodeConfigFilePath(config), "utf8");
     const parsed = parseJsonc(raw);
@@ -149,26 +177,36 @@ export function readConfiguredMcpServersFromWorkspaceConfig(config: AgentMocking
 }
 
 export function normalizeMcpIds(ids: Array<string>) {
-  const normalized = ids.map(id => id.trim()).filter(Boolean);
+  const normalized = ids.map((id) => id.trim()).filter(Boolean);
   return [...new Set(normalized)].sort((a, b) => a.localeCompare(b));
 }
 
-export function normalizeMcpServerDefinitions(servers: Array<ConfiguredMcpServer>) {
+export function normalizeMcpServerDefinitions(
+  servers: Array<ConfiguredMcpServer>,
+) {
   const deduped = new Map<string, ConfiguredMcpServer>();
   for (const server of servers) {
     const parsed = fromOpencodeMcp(server.id, toOpencodeMcp(server));
     if (!parsed) continue;
     deduped.set(parsed.id, parsed);
   }
-  return [...deduped.values()].sort((left, right) => left.id.localeCompare(right.id));
+  return [...deduped.values()].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
 }
 
 export function resolveConfiguredMcpServers(config: AgentMockingbirdConfig) {
-  return normalizeMcpServerDefinitions(readConfiguredMcpServersFromWorkspaceConfig(config));
+  return normalizeMcpServerDefinitions(
+    readConfiguredMcpServersFromWorkspaceConfig(config),
+  );
 }
 
 export function resolveConfiguredMcpIds(config: AgentMockingbirdConfig) {
-  return normalizeMcpIds(resolveConfiguredMcpServers(config).filter(server => server.enabled).map(server => server.id));
+  return normalizeMcpIds(
+    resolveConfiguredMcpServers(config)
+      .filter((server) => server.enabled)
+      .map((server) => server.id),
+  );
 }
 
 export async function getWorkspaceMcpConfig(config: AgentMockingbirdConfig) {
@@ -199,7 +237,9 @@ export async function updateWorkspaceMcpConfig(input: {
   const nextServers = normalizeMcpServerDefinitions(input.servers);
   const nextConfig = {
     ...current.config,
-    mcp: Object.fromEntries(nextServers.map(server => [server.id, toOpencodeMcp(server)])),
+    mcp: Object.fromEntries(
+      nextServers.map((server) => [server.id, toOpencodeMcp(server)]),
+    ),
   } as Config;
   await createConfigClient(input.config).config.update({
     body: nextConfig,
@@ -210,9 +250,13 @@ export async function updateWorkspaceMcpConfig(input: {
   return getWorkspaceMcpConfig(input.config);
 }
 
-export async function listRuntimeMcps(config: AgentMockingbirdConfig): Promise<RuntimeMcp[]> {
+export async function listRuntimeMcps(
+  config: AgentMockingbirdConfig,
+): Promise<RuntimeMcp[]> {
   const { servers } = await getWorkspaceMcpConfig(config);
-  const enabled = new Set(servers.filter(server => server.enabled).map(server => server.id));
+  const enabled = new Set(
+    servers.filter((server) => server.enabled).map((server) => server.id),
+  );
   const payload = unwrapSdkData<Record<string, unknown>>(
     await createMcpClient(config).mcp.status(undefined, {
       responseStyle: "data",
@@ -221,13 +265,15 @@ export async function listRuntimeMcps(config: AgentMockingbirdConfig): Promise<R
     }),
   );
 
-  const discoveredIds = Object.keys(isPlainObject(payload) ? payload : {}).map(id => id.trim()).filter(Boolean);
-  const configuredIds = servers.map(server => server.id);
+  const discoveredIds = Object.keys(isPlainObject(payload) ? payload : {})
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const configuredIds = servers.map((server) => server.id);
   const allIds = new Set([...configuredIds, ...discoveredIds]);
 
   return [...allIds]
     .sort((a, b) => a.localeCompare(b))
-    .map(id => {
+    .map((id) => {
       const rawStatus = isPlainObject(payload) ? payload[id] : undefined;
       const statusRecord = isPlainObject(rawStatus) ? rawStatus : {};
       return {
@@ -239,7 +285,10 @@ export async function listRuntimeMcps(config: AgentMockingbirdConfig): Promise<R
     });
 }
 
-export async function connectRuntimeMcp(config: AgentMockingbirdConfig, id: string) {
+export async function connectRuntimeMcp(
+  config: AgentMockingbirdConfig,
+  id: string,
+) {
   return unwrapSdkData<boolean>(
     await createMcpClient(config).mcp.connect(
       { name: id },
@@ -252,7 +301,10 @@ export async function connectRuntimeMcp(config: AgentMockingbirdConfig, id: stri
   );
 }
 
-export async function disconnectRuntimeMcp(config: AgentMockingbirdConfig, id: string) {
+export async function disconnectRuntimeMcp(
+  config: AgentMockingbirdConfig,
+  id: string,
+) {
   return unwrapSdkData<boolean>(
     await createMcpClient(config).mcp.disconnect(
       { name: id },
@@ -265,7 +317,10 @@ export async function disconnectRuntimeMcp(config: AgentMockingbirdConfig, id: s
   );
 }
 
-export async function startRuntimeMcpAuth(config: AgentMockingbirdConfig, id: string) {
+export async function startRuntimeMcpAuth(
+  config: AgentMockingbirdConfig,
+  id: string,
+) {
   const response = unwrapSdkData<{ authorizationUrl: string }>(
     await createMcpClient(config).mcp.auth.start(
       { name: id },
@@ -279,7 +334,10 @@ export async function startRuntimeMcpAuth(config: AgentMockingbirdConfig, id: st
   return response.authorizationUrl;
 }
 
-export async function removeRuntimeMcpAuth(config: AgentMockingbirdConfig, id: string) {
+export async function removeRuntimeMcpAuth(
+  config: AgentMockingbirdConfig,
+  id: string,
+) {
   return unwrapSdkData<{ success: true }>(
     await createMcpClient(config).mcp.auth.remove(
       { name: id },

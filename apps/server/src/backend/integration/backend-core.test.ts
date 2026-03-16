@@ -709,13 +709,19 @@ describe("runtime health route", () => {
     expect(response.status).toBe(200);
     const payload = (await response.json()) as {
       configAuthority?: { source?: string; path?: string; hash?: string };
-      opencode?: { baseUrl?: string; directory?: string; effectiveConfigPath?: string };
+      opencode?: {
+        baseUrl?: string;
+        workspaceDirectory?: string;
+        configDirectory?: string;
+        effectiveConfigPath?: string;
+      };
     };
     expect(payload.configAuthority?.source).toBe("agent-mockingbird-config-json");
     expect(typeof payload.configAuthority?.path).toBe("string");
     expect(typeof payload.configAuthority?.hash).toBe("string");
     expect(typeof payload.opencode?.baseUrl).toBe("string");
-    expect(typeof payload.opencode?.directory).toBe("string");
+    expect(typeof payload.opencode?.workspaceDirectory).toBe("string");
+    expect(typeof payload.opencode?.configDirectory).toBe("string");
     expect(typeof payload.opencode?.effectiveConfigPath).toBe("string");
   });
 });

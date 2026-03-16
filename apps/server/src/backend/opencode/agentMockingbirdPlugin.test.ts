@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { AgentMockingbirdPlugin } from "../../../../../runtime-assets/workspace/.opencode/plugins/agent-mockingbird";
+import { AgentMockingbirdPlugin } from "../../../../../runtime-assets/opencode-config/plugins/agent-mockingbird";
 
 const originalFetch = globalThis.fetch;
 

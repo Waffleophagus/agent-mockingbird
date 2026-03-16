@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -282,47 +283,17 @@ async function promptRuntimeAssetConflictDecision(conflict) {
   }
 }
 
-function prepareRuntimeAssetsSourceDir(agentMockingbirdAppDir) {
-  const packagedRuntimeAssetsDir = path.join(agentMockingbirdAppDir, "runtime-assets", "workspace");
-  if (fs.existsSync(packagedRuntimeAssetsDir)) {
-    return {
-      sourceDir: packagedRuntimeAssetsDir,
-      tempDir: null,
-      fallbackUsed: false,
-    };
-  }
-
-  const legacySkillsDir = path.join(agentMockingbirdAppDir, ".agents", "skills");
-  if (!fs.existsSync(legacySkillsDir)) {
+function prepareRuntimeAssetSources(agentMockingbirdAppDir) {
+  const workspaceSourceDir = path.join(agentMockingbirdAppDir, "runtime-assets", "workspace");
+  const opencodeConfigSourceDir = path.join(agentMockingbirdAppDir, "runtime-assets", "opencode-config");
+  if (!fs.existsSync(workspaceSourceDir) || !fs.existsSync(opencodeConfigSourceDir)) {
     throw new Error(
-      `runtime assets missing in package: expected ${packagedRuntimeAssetsDir} (or legacy fallback ${legacySkillsDir})`,
+      `runtime assets missing in package: expected ${workspaceSourceDir} and ${opencodeConfigSourceDir}`,
     );
   }
-
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-runtime-assets-"));
-  const tempSourceDir = path.join(tempDir, "workspace");
-  const tempSkillsDir = path.join(tempSourceDir, ".agents", "skills");
-  ensureDir(path.dirname(tempSkillsDir));
-  fs.cpSync(legacySkillsDir, tempSkillsDir, { recursive: true, force: true });
-  writeFile(
-    path.join(tempSourceDir, "AGENTS.md"),
-    [
-      "# Agent Mockingbird Runtime Agent Guide",
-      "",
-      "This workspace was initialized from legacy packaged skills fallback.",
-      "Prefer configured skills in `.agents/skills` and follow direct user instructions.",
-      "",
-    ].join("\n"),
-  );
-  writeFile(
-    path.join(tempSourceDir, "MEMORY.md"),
-    ["# Memory Index", "", "Store durable notes in `memory/*.md`.", ""].join("\n"),
-  );
-
   return {
-    sourceDir: tempSourceDir,
-    tempDir,
-    fallbackUsed: true,
+    workspaceSourceDir,
+    opencodeConfigSourceDir,
   };
 }
 
@@ -423,6 +394,18 @@ function userName() {
   return process.env.USER || process.env.LOGNAME || os.userInfo().username;
 }
 
+function workspaceFingerprint(workspaceDir) {
+  return createHash("sha256").update(path.resolve(workspaceDir)).digest("hex").slice(0, 16);
+}
+
+function opencodeEnvironment(paths, baseEnv = process.env) {
+  return {
+    ...baseEnv,
+    OPENCODE_CONFIG_DIR: paths.opencodeConfigDir,
+    OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+  };
+}
+
 function pathsFor(rootDir, scope) {
   const normalizedScope = scope.replace(/^@/, "");
   const npmPrefix = path.join(rootDir, "npm");
@@ -435,6 +418,7 @@ function pathsFor(rootDir, scope) {
     opencodeShimPath: path.join(localBinDir, "opencode"),
     dataDir: path.join(rootDir, "data"),
     workspaceDir: path.join(rootDir, "workspace"),
+    opencodeConfigDir: path.join(rootDir, "data", "opencode-config", workspaceFingerprint(path.join(rootDir, "workspace"))),
     logsDir: path.join(rootDir, "logs"),
     etcDir: path.join(rootDir, "etc"),
     npmrcPath: path.join(rootDir, "etc", "npmrc"),
@@ -610,6 +594,8 @@ function writeOpencodeShim(paths, opencodeBin) {
   const shim = `#!/usr/bin/env bash
 set -euo pipefail
 # managed-by: agent-mockingbird-installer
+export OPENCODE_CONFIG_DIR=${JSON.stringify(paths.opencodeConfigDir)}
+export OPENCODE_DISABLE_PROJECT_CONFIG=1
 exec "${opencodeBin}" "$@"
 `;
   writeFile(paths.opencodeShimPath, shim);
@@ -674,9 +660,9 @@ function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
 }
 
 function unitContents(paths, opencodeBin, agentMockingbirdExecStart, runtimeMode) {
-  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   return { opencode, agentMockingbird };
 }
@@ -1231,6 +1217,7 @@ function buildEmptyModelDiscoveryDiagnostics(input) {
   const lines = [
     "No runtime models were discovered after provider setup.",
     `Workspace: ${input.workspaceDir}`,
+    `OpenCode config dir: ${input.opencodeConfigDir}`,
   ];
   if (input.currentModel) {
     lines.push(`Current runtime default: ${input.currentModel}`);
@@ -1245,7 +1232,7 @@ function buildEmptyModelDiscoveryDiagnostics(input) {
   }
   lines.push("This usually means the runtime workspace config and the saved provider credentials are still out of sync.");
   lines.push("Recommended checks:");
-  lines.push(`- cd ${input.workspaceDir} && opencode auth list`);
+  lines.push(`- OPENCODE_CONFIG_DIR=${input.opencodeConfigDir} OPENCODE_DISABLE_PROJECT_CONFIG=1 opencode auth list`);
   lines.push("- curl -sS http://127.0.0.1:3001/api/opencode/models");
   lines.push("- verify the provider you authenticated actually exposes models in this workspace configuration");
   return lines;
@@ -1596,7 +1583,7 @@ async function runOpenclawMigrationWizard() {
 }
 
 async function runInteractiveProviderOnboarding(input) {
-  const { opencodeBin, workspaceDir } = input;
+  const { opencodeBin, workspaceDir, opencodeEnv } = input;
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return { status: "skipped", reason: "non-interactive" };
   }
@@ -1647,7 +1634,7 @@ async function runInteractiveProviderOnboarding(input) {
     console.log("");
     console.log(heading("Provider auth"));
     console.log(info("Current OpenCode credentials:"));
-    shell(opencodeBin, ["auth", "list"], { stdio: "inherit", cwd: workspaceDir });
+    shell(opencodeBin, ["auth", "list"], { stdio: "inherit", cwd: workspaceDir, env: opencodeEnv });
 
     while (true) {
       const selection = await promptSelect(
@@ -1676,7 +1663,7 @@ async function runInteractiveProviderOnboarding(input) {
       let result;
       if (selection.value === "__picker__") {
         authAttempts += 1;
-        result = shell(opencodeBin, ["auth", "login"], { stdio: "inherit", cwd: workspaceDir });
+        result = shell(opencodeBin, ["auth", "login"], { stdio: "inherit", cwd: workspaceDir, env: opencodeEnv });
       } else if (selection.value === "__manual_url__") {
         const providerUrl = (await promptText("Provider auth URL", "")).trim();
         if (!providerUrl) {
@@ -1691,14 +1678,14 @@ async function runInteractiveProviderOnboarding(input) {
           continue;
         }
         authAttempts += 1;
-        result = shell(opencodeBin, ["auth", "login", providerUrl], { stdio: "inherit", cwd: workspaceDir });
+        result = shell(opencodeBin, ["auth", "login", providerUrl], { stdio: "inherit", cwd: workspaceDir, env: opencodeEnv });
       } else {
         continue;
       }
 
       if (result.code === 0) {
         authSuccess = true;
-        shell(opencodeBin, ["auth", "list"], { stdio: "inherit", cwd: workspaceDir });
+        shell(opencodeBin, ["auth", "list"], { stdio: "inherit", cwd: workspaceDir, env: opencodeEnv });
       } else {
         console.log(warn("OpenCode login attempt did not complete successfully."));
       }
@@ -1736,6 +1723,7 @@ async function runInteractiveProviderOnboarding(input) {
     if (modelOptions.length === 0) {
       const diagnostics = buildEmptyModelDiscoveryDiagnostics({
         workspaceDir,
+        opencodeConfigDir: opencodeEnv.OPENCODE_CONFIG_DIR,
         currentModel,
         authAttempts,
         authSuccess,
@@ -1934,6 +1922,7 @@ async function installOrUpdate(args, mode) {
   ensureDir(paths.npmPrefix);
   ensureDir(paths.dataDir);
   ensureDir(paths.workspaceDir);
+  ensureDir(paths.opencodeConfigDir);
   ensureDir(paths.logsDir);
   ensureDir(paths.etcDir);
 
@@ -1974,33 +1963,31 @@ async function installOrUpdate(args, mode) {
       `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal} and ${paths.agentMockingbirdAppDirLocal}`,
     );
   }
-  const runtimeAssetsSource = prepareRuntimeAssetsSourceDir(agentMockingbirdAppDir);
-  const runtimeAssetsStatePath = path.join(paths.dataDir, "runtime-assets-state.json");
-  let runtimeAssets;
-  try {
-    runtimeAssets = await syncRuntimeWorkspaceAssets({
-      sourceWorkspaceDir: runtimeAssetsSource.sourceDir,
-      targetWorkspaceDir: paths.workspaceDir,
-      stateFilePath: runtimeAssetsStatePath,
-      mode,
-      interactive: mode === "update" && !args.yes,
-      onConflict: promptRuntimeAssetConflictDecision,
-    });
-  } finally {
-    if (runtimeAssetsSource.tempDir) {
-      fs.rmSync(runtimeAssetsSource.tempDir, { recursive: true, force: true });
-    }
-  }
-  runtimeAssets.fallbackUsed = runtimeAssetsSource.fallbackUsed;
-  const workspaceOpencodeDir = path.join(paths.workspaceDir, ".opencode");
-  const workspaceOpencodePackagePath = path.join(workspaceOpencodeDir, "package.json");
-  const workspaceOpencodeLockPath = path.join(workspaceOpencodeDir, "bun.lock");
-  if (fs.existsSync(workspaceOpencodePackagePath)) {
+  const runtimeAssetsSource = prepareRuntimeAssetSources(agentMockingbirdAppDir);
+  const workspaceRuntimeAssets = await syncRuntimeWorkspaceAssets({
+    sourceWorkspaceDir: runtimeAssetsSource.workspaceSourceDir,
+    targetWorkspaceDir: paths.workspaceDir,
+    stateFilePath: path.join(paths.dataDir, "runtime-assets-workspace-state.json"),
+    mode,
+    interactive: mode === "update" && !args.yes,
+    onConflict: promptRuntimeAssetConflictDecision,
+  });
+  const opencodeRuntimeAssets = await syncRuntimeWorkspaceAssets({
+    sourceWorkspaceDir: runtimeAssetsSource.opencodeConfigSourceDir,
+    targetWorkspaceDir: paths.opencodeConfigDir,
+    stateFilePath: path.join(paths.dataDir, "runtime-assets-opencode-config-state.json"),
+    mode,
+    interactive: mode === "update" && !args.yes,
+    onConflict: promptRuntimeAssetConflictDecision,
+  });
+  const opencodePackagePath = path.join(paths.opencodeConfigDir, "package.json");
+  const opencodeLockPath = path.join(paths.opencodeConfigDir, "bun.lock");
+  if (fs.existsSync(opencodePackagePath)) {
     const installArgs = ["install"];
-    if (fs.existsSync(workspaceOpencodeLockPath)) {
+    if (fs.existsSync(opencodeLockPath)) {
       installArgs.push("--frozen-lockfile");
     }
-    must(bunBin, installArgs, { cwd: workspaceOpencodeDir });
+    must(bunBin, installArgs, { cwd: paths.opencodeConfigDir });
   }
   const agentMockingbirdRuntime = resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin);
   if (!agentMockingbirdRuntime) {
@@ -2045,8 +2032,9 @@ async function installOrUpdate(args, mode) {
   if (mode === "install" && !args.yes) {
     try {
       onboarding = await runInteractiveProviderOnboarding({
-        opencodeBin,
+        opencodeBin: opencodeShimPath,
         workspaceDir: paths.workspaceDir,
+        opencodeEnv: opencodeEnvironment(paths),
       });
     } catch (error) {
       onboarding = {
@@ -2067,7 +2055,10 @@ async function installOrUpdate(args, mode) {
     opencodeShimPath,
     pathSetup,
     units: [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
-    runtimeAssets,
+    runtimeAssets: {
+      workspace: workspaceRuntimeAssets,
+      opencodeConfig: opencodeRuntimeAssets,
+    },
     defaultSkillSync,
     health,
     linger,
@@ -2201,17 +2192,17 @@ function printResult(result, asJson) {
         console.log(`path: add ${localBinDir} to PATH, then restart your shell`);
       }
     }
-    if (result.runtimeAssets?.target) {
-      console.log(`runtime-assets: source ${result.runtimeAssets.source}`);
-      console.log(`runtime-assets: target ${result.runtimeAssets.target}`);
-      if (result.runtimeAssets.fallbackUsed) {
-        console.log("runtime-assets: using legacy package fallback source");
+    for (const [name, assetResult] of Object.entries(result.runtimeAssets ?? {})) {
+      if (!assetResult || typeof assetResult !== "object" || !("target" in assetResult)) {
+        continue;
       }
+      console.log(`runtime-assets:${name}: source ${assetResult.source}`);
+      console.log(`runtime-assets:${name}: target ${assetResult.target}`);
       console.log(
-        `runtime-assets: copied=${result.runtimeAssets.copied}, overwritten=${result.runtimeAssets.overwritten}, unchanged=${result.runtimeAssets.unchanged}, keptLocal=${result.runtimeAssets.keptLocal}, conflicts=${result.runtimeAssets.conflicts}`,
+        `runtime-assets:${name}: copied=${assetResult.copied}, overwritten=${assetResult.overwritten}, unchanged=${assetResult.unchanged}, keptLocal=${assetResult.keptLocal}, conflicts=${assetResult.conflicts}`,
       );
-      if (result.runtimeAssets.backupsCreated > 0) {
-        console.log(`runtime-assets: backups created=${result.runtimeAssets.backupsCreated}`);
+      if (assetResult.backupsCreated > 0) {
+        console.log(`runtime-assets:${name}: backups created=${assetResult.backupsCreated}`);
       }
     }
     if (result.defaultSkillSync?.attempted) {

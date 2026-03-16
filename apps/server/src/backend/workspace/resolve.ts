@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import type { AgentMockingbirdConfig } from "../config/schema";
-import { getBinaryDir } from "../paths";
+import { getBinaryDir, resolveManagedOpencodeConfigDir } from "../paths";
 
 function resolvePathFromBinaryRoot(dirPath: string) {
   if (path.isAbsolute(dirPath)) return path.resolve(dirPath);
@@ -14,6 +14,10 @@ export function resolveMemoryWorkspaceDir(config: AgentMockingbirdConfig) {
 
 export function resolveOpencodeWorkspaceDir(config: AgentMockingbirdConfig) {
   return resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
+}
+
+export function resolveOpencodeConfigDir(config: AgentMockingbirdConfig) {
+  return resolveManagedOpencodeConfigDir(resolveOpencodeWorkspaceDir(config));
 }
 
 export function resolveWorkspaceAlignment(config: AgentMockingbirdConfig) {

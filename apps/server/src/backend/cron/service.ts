@@ -1,6 +1,8 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { CronTime, validateCronExpression } from "cron";
-import { relative, resolve } from "node:path";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
 
 import { getConfigSnapshot } from "../config/service";
 import { env } from "../env";
@@ -1199,6 +1201,12 @@ export class CronService {
     ctx: CronConditionalModuleContext,
   ): Promise<CronHandlerResult> {
     const timeoutMs = getConfigSnapshot().config.runtime.cron.conditionalModuleTimeoutMs;
+    const workspaceRoot = resolveWorkspaceRootPath();
+    const relativeModulePath = relative(workspaceRoot, absoluteModulePath);
+    const workerWorkspaceRoot = mkdtempSync(join(tmpdir(), "agent-mockingbird-cron-workspace-"));
+    const linkedWorkspaceRoot = join(workerWorkspaceRoot, "workspace");
+    symlinkSync(workspaceRoot, linkedWorkspaceRoot, "dir");
+    const workerModulePath = join(linkedWorkspaceRoot, relativeModulePath);
     const workerModuleUrl = URL.createObjectURL(
       new File([conditionWorkerSource], "conditionWorker.ts", { type: "text/typescript" }),
     );
@@ -1213,6 +1221,7 @@ export class CronService {
         clearTimeout(timer);
         worker.terminate();
         URL.revokeObjectURL(workerModuleUrl);
+        rmSync(workerWorkspaceRoot, { recursive: true, force: true });
         next();
       };
 
@@ -1239,7 +1248,7 @@ export class CronService {
       };
 
       worker.postMessage({
-        modulePath: absoluteModulePath,
+        modulePath: workerModulePath,
         context: ctx,
       });
     });

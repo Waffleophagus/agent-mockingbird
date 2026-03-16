@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
 import { applyConfigPatch, getConfigSnapshot, replaceConfig } from "../../config/service";
 import type { CronService } from "../../cron/service";
 import { getLocalSessionIdByRuntimeBinding } from "../../db/repository";
@@ -112,13 +113,16 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
     "/api/waffle/runtime/info": {
       GET: () => {
         const snapshot = getConfigSnapshot();
+        const storage = getOpencodeAgentStorageInfo(snapshot.config);
         return Response.json({
           hash: snapshot.hash,
           path: snapshot.path,
           pinnedWorkspace: snapshot.config.workspace.pinnedDirectory,
           opencode: {
             baseUrl: snapshot.config.runtime.opencode.baseUrl,
-            directory: snapshot.config.runtime.opencode.directory,
+            workspaceDirectory: snapshot.config.runtime.opencode.directory,
+            configDirectory: storage.configDirectory,
+            effectiveConfigPath: storage.configFilePath,
             timeoutMs: snapshot.config.runtime.opencode.timeoutMs,
           },
         });

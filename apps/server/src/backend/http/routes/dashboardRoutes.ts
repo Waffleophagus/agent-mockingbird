@@ -123,7 +123,8 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
           },
           opencode: {
             ...runtimeInfo.opencode,
-            directory: storage.directory,
+            workspaceDirectory: storage.workspaceDirectory,
+            configDirectory: storage.configDirectory,
             effectiveConfigPath: storage.configFilePath,
             persistenceMode: storage.persistenceMode,
             projection: {
@@ -145,7 +146,8 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
             workspace: {
               aligned: workspaceAlignment.aligned,
               opencodeDirectoryExplicit: workspaceAlignment.opencodeDirectoryExplicit,
-              opencodeDirectory: workspaceAlignment.opencodeWorkspaceDir,
+              opencodeWorkspaceDir: workspaceAlignment.opencodeWorkspaceDir,
+              opencodeConfigDir: storage.configDirectory,
               memoryWorkspaceDir: workspaceAlignment.memoryWorkspaceDir,
             },
           },

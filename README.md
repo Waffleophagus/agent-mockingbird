@@ -125,9 +125,9 @@ If you still have legacy `AGENT_MOCKINGBIRD_OPENCODE_*` runtime vars, run `bun r
 
 Skill deployment behavior (install/update):
 
-- Runtime bundle source files live in `runtime-assets/workspace`.
-- Install/update syncs that bundle into the active workspace root (including `.agents/skills` and `AGENTS.md`).
-- Sync state is tracked in `data/runtime-assets-state.json`.
+- Runtime bundle source files live in `runtime-assets/workspace` and `runtime-assets/opencode-config`.
+- Install/update syncs workspace files into the active workspace root, and syncs OpenCode managed config into an external config dir under `data/opencode-config/...`.
+- Sync state is tracked separately in `data/runtime-assets-workspace-state.json` and `data/runtime-assets-opencode-config-state.json`.
 - On update, interactive installs prompt only when both:
   - local file changed since last sync
   - packaged runtime asset also changed since last sync
@@ -138,7 +138,7 @@ Skill deployment behavior (install/update):
   - `config-auditor`
   - `runtime-diagnose`
   - `memory-ops`
-- Install/update also seeds runtime OpenCode workspace config at `.opencode/opencode.jsonc` from `runtime-assets/workspace`:
+- Install/update also seeds managed OpenCode config at `data/opencode-config/<fingerprint>/opencode.jsonc` from `runtime-assets/opencode-config`:
   - default `agent.general.tools` enables `memory_search`, `memory_get`, and `memory_remember`.
 
 Config API:
@@ -205,7 +205,7 @@ Memory mode environment variables:
 
 OpenCode local Agent Mockingbird plugin:
 
-- `.opencode/plugins/agent-mockingbird.ts`
+- `data/opencode-config/<fingerprint>/plugins/agent-mockingbird.ts`
 
 The plugin registers these custom tools against Agent Mockingbird APIs:
 
@@ -265,11 +265,11 @@ Environment variables are parsed and validated at startup via `@t3-oss/env-core`
 
 ## OpenCode Agent Persistence
 
-Agent Mockingbird now manages OpenCode agents directly in project-scoped OpenCode config.
+Agent Mockingbird now manages OpenCode agents directly in an external managed OpenCode config dir.
 
-- Save target is `<workspace>/.opencode/opencode.jsonc`.
-- OpenCode also loads `.opencode/agent/*.md` and `.opencode/agents/*.md`; deleting an agent in Agent Mockingbird removes matching files as well.
-- Agents UI shows `Saving to` and `Bound directory` so you can verify which workspace is authoritative.
+- Save target is `data/opencode-config/<fingerprint>/opencode.jsonc` by default.
+- Managed agent markdown files live under that external config dir as well.
+- Agents UI shows both the bound workspace and the effective config path.
 
 ## Workspace Bootstrap Context (OpenClaw-style)
 
@@ -315,7 +315,7 @@ If OpenCode UI/TUI looks different from Agent Mockingbird:
 
 1. Confirm `GET /api/runtime/info` reports the directory you expect.
 2. Launch/attach OpenCode against the same workspace directory.
-3. Verify the same `.opencode/opencode.jsonc` file path is being used.
+3. Verify the same external `opencode.jsonc` file path is being used.
 
 ## Deployment
 

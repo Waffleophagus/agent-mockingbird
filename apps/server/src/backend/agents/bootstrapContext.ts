@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type { AgentMockingbirdConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
-import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
+import { resolveOpencodeConfigDir, resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
 const DEFAULT_BOOTSTRAP_FILE_NAMES = [
   "AGENTS.md",
@@ -196,8 +196,7 @@ function trimBootstrapContent(content: string, fileName: string, maxChars: numbe
 }
 
 function resolveOpencodeConfigFilePath(config: AgentMockingbirdConfig): string {
-  const workspaceDir = resolveWorkspaceDir(config);
-  return path.join(workspaceDir, ".opencode", "opencode.jsonc");
+  return path.join(resolveOpencodeConfigDir(config), "opencode.jsonc");
 }
 
 function resolveAgentRuntimeDetails(config: AgentMockingbirdConfig, agentId: string): AgentRuntimeDetails | null {

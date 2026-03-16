@@ -6,8 +6,11 @@ services:
     working_dir: /workspace
     volumes:
       - ../:/workspace
+      - agent_mockingbird_data:/var/lib/agent-mockingbird
     environment:
       AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL: http://agent-mockingbird:3001
+      OPENCODE_CONFIG_DIR: /var/lib/agent-mockingbird/opencode-config/docker
+      OPENCODE_DISABLE_PROJECT_CONFIG: "1"
     ports:
       - "4096:4096"
 
@@ -18,7 +21,7 @@ services:
       [
         "/bin/bash",
         "-lc",
-        "AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://opencode:4096 AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY=/workspace bun run config:migrate-opencode-env >/dev/null || true; exec bun src/index.ts",
+        "AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://opencode:4096 OPENCODE_CONFIG_DIR=/var/lib/agent-mockingbird/opencode-config/docker OPENCODE_DISABLE_PROJECT_CONFIG=1 bun run config:migrate-opencode-env >/dev/null || true; exec bun src/index.ts",
       ]
     depends_on:
       - opencode
@@ -30,6 +33,8 @@ services:
       PORT: "3001"
       AGENT_MOCKINGBIRD_CONFIG_PATH: /var/lib/agent-mockingbird/agent-mockingbird.config.json
       AGENT_MOCKINGBIRD_DB_PATH: /var/lib/agent-mockingbird/agent-mockingbird.db
+      OPENCODE_CONFIG_DIR: /var/lib/agent-mockingbird/opencode-config/docker
+      OPENCODE_DISABLE_PROJECT_CONFIG: "1"
     ports:
       - "3001:3001"
 
