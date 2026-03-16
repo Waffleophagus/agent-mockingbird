@@ -1,11 +1,15 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline/promises";
 import { spawnSync } from "node:child_process";
+import {
+  opencodeEnvironment,
+  pathsFor,
+  prepareRuntimeAssetSources,
+} from "./runtime-layout.mjs";
 import { syncRuntimeWorkspaceAssets } from "./runtime-assets.mjs";
 
 const { console, fetch } = globalThis;
@@ -283,20 +287,6 @@ async function promptRuntimeAssetConflictDecision(conflict) {
   }
 }
 
-function prepareRuntimeAssetSources(agentMockingbirdAppDir) {
-  const workspaceSourceDir = path.join(agentMockingbirdAppDir, "runtime-assets", "workspace");
-  const opencodeConfigSourceDir = path.join(agentMockingbirdAppDir, "runtime-assets", "opencode-config");
-  if (!fs.existsSync(workspaceSourceDir) || !fs.existsSync(opencodeConfigSourceDir)) {
-    throw new Error(
-      `runtime assets missing in package: expected ${workspaceSourceDir} and ${opencodeConfigSourceDir}`,
-    );
-  }
-  return {
-    workspaceSourceDir,
-    opencodeConfigSourceDir,
-  };
-}
-
 async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
   const retries = typeof input.retries === "number" ? Math.max(1, input.retries) : 5;
   const delayMs = typeof input.delayMs === "number" ? Math.max(100, input.delayMs) : 750;
@@ -392,48 +382,6 @@ async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
 
 function userName() {
   return process.env.USER || process.env.LOGNAME || os.userInfo().username;
-}
-
-function workspaceFingerprint(workspaceDir) {
-  return createHash("sha256").update(path.resolve(workspaceDir)).digest("hex").slice(0, 16);
-}
-
-function opencodeEnvironment(paths, baseEnv = process.env) {
-  return {
-    ...baseEnv,
-    OPENCODE_CONFIG_DIR: paths.opencodeConfigDir,
-    OPENCODE_DISABLE_PROJECT_CONFIG: "1",
-  };
-}
-
-function pathsFor(rootDir, scope) {
-  const normalizedScope = scope.replace(/^@/, "");
-  const npmPrefix = path.join(rootDir, "npm");
-  const localBinDir = path.join(os.homedir(), ".local", "bin");
-  return {
-    rootDir,
-    npmPrefix,
-    localBinDir,
-    agentMockingbirdShimPath: path.join(localBinDir, "agent-mockingbird"),
-    opencodeShimPath: path.join(localBinDir, "opencode"),
-    dataDir: path.join(rootDir, "data"),
-    workspaceDir: path.join(rootDir, "workspace"),
-    opencodeConfigDir: path.join(rootDir, "data", "opencode-config", workspaceFingerprint(path.join(rootDir, "workspace"))),
-    logsDir: path.join(rootDir, "logs"),
-    etcDir: path.join(rootDir, "etc"),
-    npmrcPath: path.join(rootDir, "etc", "npmrc"),
-    agentMockingbirdAppDirGlobal: path.join(npmPrefix, "lib", "node_modules", `@${normalizedScope}`, "agent-mockingbird"),
-    agentMockingbirdAppDirLocal: path.join(npmPrefix, "node_modules", `@${normalizedScope}`, "agent-mockingbird"),
-    agentMockingbirdBinGlobal: path.join(npmPrefix, "bin", "agent-mockingbird"),
-    agentMockingbirdBinLocal: path.join(npmPrefix, "node_modules", ".bin", "agent-mockingbird"),
-    opencodeBinGlobal: path.join(npmPrefix, "bin", "opencode"),
-    opencodeBinLocal: path.join(npmPrefix, "node_modules", ".bin", "opencode"),
-    bunBinManagedGlobal: path.join(npmPrefix, "bin", "bun"),
-    bunBinManagedLocal: path.join(npmPrefix, "node_modules", ".bin", "bun"),
-    bunBinTools: path.join(rootDir, "tools", "bun", "bin", "bun"),
-    opencodeUnitPath: path.join(USER_UNIT_DIR, UNIT_OPENCODE),
-    agentMockingbirdUnitPath: path.join(USER_UNIT_DIR, UNIT_AGENT_MOCKINGBIRD),
-  };
 }
 
 function firstExistingPath(candidates) {
@@ -1031,7 +979,7 @@ async function runOnboardingCommand(args) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("Onboarding command requires an interactive TTY.");
   }
-  const paths = pathsFor(args.rootDir, args.scope);
+  const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
   const opencodeBin = resolveOpencodeBin(paths) ?? (commandExists("opencode") ? "opencode" : null);
   if (!opencodeBin) {
     throw new Error("opencode binary not found. Run `agent-mockingbird install` first.");
@@ -1916,7 +1864,7 @@ async function installOrUpdate(args, mode) {
     throw new Error("npm is required. Please install npm and run again.");
   }
 
-  const paths = pathsFor(args.rootDir, args.scope);
+  const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
   await confirmInstall(args, paths, mode);
   ensureDir(paths.rootDir);
   ensureDir(paths.npmPrefix);
@@ -2068,7 +2016,7 @@ async function installOrUpdate(args, mode) {
 }
 
 async function status(args) {
-  const paths = pathsFor(args.rootDir, args.scope);
+  const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
   const unitStates = {};
   for (const unit of [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]) {
     const result = shell("systemctl", ["--user", "is-active", unit]);
@@ -2102,7 +2050,7 @@ async function manageService(args, action) {
 }
 
 async function uninstall(args) {
-  const paths = pathsFor(args.rootDir, args.scope);
+  const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
 
   if (args.purgeData && args.keepData) {
     throw new Error("Choose only one of --purge-data or --keep-data.");
@@ -2437,7 +2385,10 @@ async function main() {
     result = await installOrUpdate(args, "install");
   } else if (args.command === "update") {
     if (args.dryRun) {
-      result = buildUpdateDryRun({ args, paths: pathsFor(args.rootDir, args.scope) });
+      result = buildUpdateDryRun({
+        args,
+        paths: pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR }),
+      });
     } else {
       result = await installOrUpdate(args, "update");
     }

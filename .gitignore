@@ -11,6 +11,7 @@ data/*
 data/*
 bin/*
 !bin/agent-mockingbird
+!bin/runtime-layout.mjs
 data/workspace/
 data/agent-mockingbird.config.json
 data/agent-mockingbird.config.json.bak
