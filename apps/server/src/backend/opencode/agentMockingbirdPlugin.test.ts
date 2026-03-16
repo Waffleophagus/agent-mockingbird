@@ -174,7 +174,32 @@ describe("AgentMockingbirdPlugin", () => {
     ]);
   });
 
-  test("compaction hook appends Agent Mockingbird compaction context from the runtime API", async () => {
+  test("compaction hook prefers a replacement prompt from the runtime API", async () => {
+    process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async (input) => {
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/runtime/compaction-context?sessionId=sess-1");
+      return new Response(
+        JSON.stringify({
+          prompt: "You are generating a compact factual continuation summary.\n## Decisions",
+          context: ["Agent Mockingbird continuation notes:\n- Mention config changes."],
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }) as typeof fetch;
+
+    const hooks = await AgentMockingbirdPlugin({} as never);
+    const output = { context: ["existing"], prompt: undefined as string | undefined };
+    await hooks["experimental.session.compacting"]?.({ sessionID: "sess-1" }, output);
+    expect(output.prompt).toContain("compact factual continuation summary");
+    expect(output.context).toEqual(["existing"]);
+  });
+
+  test("compaction hook falls back to appended context when no replacement prompt is returned", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input) => {
@@ -187,8 +212,9 @@ describe("AgentMockingbirdPlugin", () => {
     }) as typeof fetch;
 
     const hooks = await AgentMockingbirdPlugin({} as never);
-    const output = { context: ["existing"] };
+    const output = { context: ["existing"], prompt: undefined as string | undefined };
     await hooks["experimental.session.compacting"]?.({ sessionID: "sess-1" }, output);
+    expect(output.prompt).toBeUndefined();
     expect(output.context).toEqual(["existing", "Agent Mockingbird continuation notes:\n- Mention config changes."]);
   });
 

@@ -50,7 +50,7 @@ describe("systemPrompt helpers", () => {
     expect(prompt).toContain("Use the workspace guide.");
   });
 
-  test("builds compaction context with workspace and memory follow-through guidance", async () => {
+  test("builds a compaction prompt with OpenClaw-style headings and local guidance", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-compaction-context-"));
     tempDirs.push(root);
     const workspaceDir = path.join(root, "workspace");
@@ -71,16 +71,20 @@ describe("systemPrompt helpers", () => {
     writeFileSync(path.join(root, "config.json"), JSON.stringify(exampleConfig));
     process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = path.join(root, "config.json");
 
-    const { buildAgentMockingbirdCompactionContext } = await import("./systemPrompt");
-    const context = buildAgentMockingbirdCompactionContext();
+    const { buildAgentMockingbirdCompactionPrompt } = await import("./systemPrompt");
+    const prompt = buildAgentMockingbirdCompactionPrompt();
 
-    expect(context.join("\n\n")).toContain("Agent Mockingbird continuation notes:");
-    expect(context.join("\n\n")).toContain("Memory follow-through:");
-    expect(context.join("\n\n")).toContain("Workspace bootstrap context:");
-    expect(context.join("\n\n")).toContain("# Project Context");
+    expect(prompt).toContain("Compaction rules:");
+    expect(prompt).toContain("## Decisions");
+    expect(prompt).toContain("## Pending user asks");
+    expect(prompt).toContain("## Exact identifiers");
+    expect(prompt).toContain("Agent Mockingbird continuation notes:");
+    expect(prompt).toContain("Memory follow-through:");
+    expect(prompt).toContain("Workspace bootstrap context:");
+    expect(prompt).toContain("# Project Context");
   });
 
-  test("adds session-aware compaction continuity notes from the mirrored transcript", async () => {
+  test("adds session-aware compaction prompt context from the mirrored transcript", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-compaction-session-"));
     tempDirs.push(root);
     const workspaceDir = path.join(root, "workspace");
@@ -128,14 +132,15 @@ describe("systemPrompt helpers", () => {
       },
     });
 
-    const { buildAgentMockingbirdCompactionContext } = await import("./systemPrompt");
-    const context = buildAgentMockingbirdCompactionContext("sess-ctx").join("\n\n");
+    const { buildAgentMockingbirdCompactionPrompt } = await import("./systemPrompt");
+    const prompt = buildAgentMockingbirdCompactionPrompt("sess-ctx");
 
-    expect(context).toContain("Transcript continuity requirements:");
-    expect(context).toContain("Latest user ask to carry forward:");
-    expect(context).toContain("/api/waffle/runtime/compaction-context");
-    expect(context).toContain("2026-03-15");
-    expect(context).toContain("Recent turns to preserve verbatim when useful:");
-    expect(context).toContain("apps/server/src/backend/opencode/systemPrompt.ts");
+    expect(prompt).toContain("Session-specific context to preserve:");
+    expect(prompt).toContain("Transcript continuity requirements:");
+    expect(prompt).toContain("Latest user ask to carry forward:");
+    expect(prompt).toContain("/api/waffle/runtime/compaction-context");
+    expect(prompt).toContain("2026-03-15");
+    expect(prompt).toContain("Recent turns to preserve verbatim when useful:");
+    expect(prompt).toContain("apps/server/src/backend/opencode/systemPrompt.ts");
   });
 });

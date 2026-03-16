@@ -7,6 +7,13 @@ import {
 import { env } from "../env";
 
 const OPENCODE_RUNTIME_ID = "opencode";
+const OPENCODE_COMPACTION_HEADINGS = [
+  "## Decisions",
+  "## Open TODOs",
+  "## Constraints/Rules",
+  "## Pending user asks",
+  "## Exact identifiers",
+] as const;
 const MAX_COMPACTION_RECENT_MESSAGES = 6;
 const MAX_COMPACTION_RECENT_MESSAGE_CHARS = 220;
 const MAX_COMPACTION_IDENTIFIERS = 10;
@@ -125,6 +132,21 @@ function currentMemoryConfig() {
   return getConfigSnapshot().config.runtime.memory;
 }
 
+function buildCompactionRequirementLines() {
+  return [
+    "Compaction rules:",
+    "- Write the summary body in the primary language used in the conversation.",
+    "- Keep the exact section headings shown below unchanged.",
+    "- Do not translate or alter code, file paths, identifiers, error messages, URLs, ports, dates, hashes, or filenames.",
+    "- Preserve active tasks, current status, blockers, approvals, unresolved questions, and promised follow-ups.",
+    "- Preserve the latest unresolved user ask even if it appeared very recently.",
+    "- Prefer recent context over older history when choosing what to keep.",
+    "",
+    "Produce the summary with these exact headings, in this exact order:",
+    ...OPENCODE_COMPACTION_HEADINGS,
+  ];
+}
+
 function buildConfigPolicyLines() {
   return [
     "Config policy:",
@@ -233,4 +255,30 @@ export function buildAgentMockingbirdCompactionContext(externalSessionId?: strin
   }
 
   return sections;
+}
+
+export function buildAgentMockingbirdCompactionPrompt(externalSessionId?: string) {
+  const contextSections = buildAgentMockingbirdCompactionContext(externalSessionId);
+  const lines: string[] = [];
+
+  lines.push(
+    "You are generating a compact factual continuation summary for an Agent Mockingbird coding session.",
+  );
+  lines.push(
+    "The next agent will use your summary to resume work without losing important technical context.",
+  );
+  lines.push("");
+  lines.push(...buildCompactionRequirementLines());
+
+  if (contextSections.length > 0) {
+    lines.push("");
+    lines.push("Session-specific context to preserve:");
+    lines.push("");
+    lines.push(...contextSections);
+  }
+
+  lines.push("");
+  lines.push("Return only the summary, using the exact headings above.");
+
+  return lines.join("\n");
 }

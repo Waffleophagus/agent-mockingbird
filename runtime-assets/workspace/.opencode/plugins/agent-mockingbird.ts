@@ -41,8 +41,14 @@ const systemPromptCache = {
 }
 
 const compactionContextCache = {
+  prompt: "",
   value: [] as string[],
   expiresAtMs: 0,
+}
+
+type CompactionPayload = {
+  prompt?: string
+  context: string[]
 }
 
 type SessionScope = {
@@ -159,23 +165,28 @@ async function fetchSystemPrompt() {
   return system
 }
 
-async function fetchCompactionContext(sessionID?: string) {
+async function fetchCompactionContext(sessionID?: string): Promise<CompactionPayload> {
   const now = Date.now()
   const cacheKey = sessionID?.trim() || "__default__"
   if (compactionContextCache.expiresAtMs > now && cacheKey === "__default__") {
-    return compactionContextCache.value
+    return {
+      prompt: compactionContextCache.prompt || undefined,
+      context: compactionContextCache.value,
+    }
   }
 
   const search = sessionID?.trim() ? `?sessionId=${encodeURIComponent(sessionID.trim())}` : ""
   const payload = await requestJson(`/api/waffle/runtime/compaction-context${search}`)
+  const prompt = typeof payload.prompt === "string" && payload.prompt.trim().length > 0 ? payload.prompt : undefined
   const context = Array.isArray(payload.context)
     ? payload.context.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     : []
   if (cacheKey === "__default__") {
+    compactionContextCache.prompt = prompt ?? ""
     compactionContextCache.value = context
     compactionContextCache.expiresAtMs = now + 5_000
   }
-  return context
+  return { prompt, context }
 }
 
 async function fetchSessionScope(sessionID?: string) {
@@ -633,9 +644,13 @@ const AgentMockingbirdPlugin: Plugin = async () => {
       }
     },
     "experimental.session.compacting": async (_input, output) => {
-      const context = await fetchCompactionContext(_input.sessionID)
-      if (context.length === 0) return
-      output.context.push(...context)
+      const compaction = await fetchCompactionContext(_input.sessionID)
+      if (compaction.prompt) {
+        output.prompt = compaction.prompt
+        return
+      }
+      if (compaction.context.length === 0) return
+      output.context.push(...compaction.context)
     },
     "tool.definition": async (input, output) => {
       rewriteToolDefinition(input.toolID, output)

@@ -4,6 +4,7 @@ import { applyConfigPatch, getConfigSnapshot, replaceConfig } from "../../config
 import type { CronService } from "../../cron/service";
 import { getLocalSessionIdByRuntimeBinding } from "../../db/repository";
 import {
+  buildAgentMockingbirdCompactionPrompt,
   buildAgentMockingbirdCompactionContext,
   buildAgentMockingbirdSystemPrompt,
 } from "../../opencode/systemPrompt";
@@ -132,12 +133,13 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
     },
 
     "/api/waffle/runtime/compaction-context": {
-      GET: (req: Request) =>
-        Response.json({
-          context: buildAgentMockingbirdCompactionContext(
-            new URL(req.url).searchParams.get("sessionId")?.trim() || undefined,
-          ),
-        }),
+      GET: (req: Request) => {
+        const sessionId = new URL(req.url).searchParams.get("sessionId")?.trim() || undefined;
+        return Response.json({
+          prompt: buildAgentMockingbirdCompactionPrompt(sessionId),
+          context: buildAgentMockingbirdCompactionContext(sessionId),
+        });
+      },
     },
 
     "/api/waffle/runtime/session-scope": {
