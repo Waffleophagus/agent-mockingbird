@@ -2,12 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { isActiveHours } from "./activeHours";
 import { HEARTBEAT_SYSTEM_JOB_ID, migrateLegacyHeartbeatJobs, seedDefaultHeartbeatJob } from "./defaultJob";
-import {
-  DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
-  DEFAULT_HEARTBEAT_PROMPT,
-  isHeartbeatAck,
-  parseInterval,
-} from "./service";
+import { DEFAULT_HEARTBEAT_PROMPT, parseInterval } from "./service";
 import type { HeartbeatConfig } from "./types";
 import { clearCronTables } from "../cron/storage";
 import { sqlite } from "../db/client";
@@ -35,46 +30,6 @@ describe("parseInterval", () => {
 
   test("rejects missing unit", () => {
     expect(() => parseInterval("30")).toThrow();
-  });
-});
-
-describe("isHeartbeatAck", () => {
-  test("matches HEARTBEAT_OK at start", () => {
-    expect(isHeartbeatAck("HEARTBEAT_OK", 300)).toBe(true);
-  });
-
-  test("matches HEARTBEAT_OK at end", () => {
-    expect(isHeartbeatAck("All good. HEARTBEAT_OK", 300)).toBe(true);
-  });
-
-  test("matches HEARTBEAT_OK with brief status", () => {
-    expect(isHeartbeatAck("HEARTBEAT_OK - nothing urgent", 300)).toBe(true);
-  });
-
-  test("rejects HEARTBEAT_OK in middle", () => {
-    expect(isHeartbeatAck("All good HEARTBEAT_OK done", 300)).toBe(false);
-  });
-
-  test("rejects if remaining content too long", () => {
-    const longContent = "HEARTBEAT_OK " + "x".repeat(500);
-    expect(isHeartbeatAck(longContent, 300)).toBe(false);
-  });
-
-  test("rejects if no HEARTBEAT_OK", () => {
-    expect(isHeartbeatAck("Something needs attention!", 300)).toBe(false);
-  });
-
-  test("rejects partial match", () => {
-    expect(isHeartbeatAck("HEARTBEAT_OKAY", 300)).toBe(false);
-  });
-
-  test("accepts exactly at limit", () => {
-    const content = "HEARTBEAT_OK " + "x".repeat(300);
-    expect(isHeartbeatAck(content, 300)).toBe(true);
-  });
-
-  test("matches markup-free token at end with punctuation", () => {
-    expect(isHeartbeatAck("All good. HEARTBEAT_OK.", 300)).toBe(true);
   });
 });
 
@@ -112,7 +67,7 @@ describe("default heartbeat cron", () => {
     const row = sqlite
       .query(
         `
-        SELECT id, name, enabled, schedule_kind, every_ms, run_mode, handler_key, payload_json
+        SELECT id, name, enabled, schedule_kind, every_ms, run_mode, handler_key, agent_prompt_template, payload_json
         FROM cron_job_definitions
         WHERE id = ?1
       `,
@@ -125,7 +80,8 @@ describe("default heartbeat cron", () => {
           schedule_kind: string;
           every_ms: number;
           run_mode: string;
-          handler_key: string;
+          handler_key: string | null;
+          agent_prompt_template: string | null;
           payload_json: string;
         }
       | null;
@@ -135,12 +91,11 @@ describe("default heartbeat cron", () => {
     expect(row?.enabled).toBe(1);
     expect(row?.schedule_kind).toBe("every");
     expect(row?.every_ms).toBe(parseInterval("30m"));
-    expect(row?.run_mode).toBe("background");
-    expect(row?.handler_key).toBe("heartbeat.check");
+    expect(row?.run_mode).toBe("agent");
+    expect(row?.handler_key).toBeNull();
+    expect(row?.agent_prompt_template).toBe(DEFAULT_HEARTBEAT_PROMPT);
     expect(JSON.parse(row?.payload_json ?? "{}")).toEqual({
       agentId: "build",
-      prompt: DEFAULT_HEARTBEAT_PROMPT,
-      ackMaxChars: DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
     });
   });
 
@@ -169,12 +124,19 @@ describe("default heartbeat cron", () => {
     const rows = sqlite
       .query(
         `
-        SELECT id
+        SELECT id, run_mode, handler_key, agent_prompt_template
         FROM cron_job_definitions
         ORDER BY id
       `,
       )
-      .all() as Array<{ id: string }>;
-    expect(rows.map(row => row.id)).toEqual([HEARTBEAT_SYSTEM_JOB_ID]);
+      .all() as Array<{ id: string; run_mode: string; handler_key: string | null; agent_prompt_template: string | null }>;
+    expect(rows).toEqual([
+      {
+        id: HEARTBEAT_SYSTEM_JOB_ID,
+        run_mode: "agent",
+        handler_key: null,
+        agent_prompt_template: DEFAULT_HEARTBEAT_PROMPT,
+      },
+    ]);
   });
 });

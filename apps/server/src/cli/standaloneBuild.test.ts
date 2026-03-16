@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { createStandaloneBuildOptions, STANDALONE_ENTRYPOINTS_RELATIVE } from "./standaloneBuild";
 
-test("standalone build config includes the conditional agent worker entrypoint", () => {
+test("standalone build config uses the main server entrypoint", () => {
   const repoRoot = path.resolve(import.meta.dir, "../../../..");
   const outfile = path.join(repoRoot, "dist", "agent-mockingbird");
 

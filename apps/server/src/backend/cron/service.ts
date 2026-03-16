@@ -4,7 +4,8 @@ import { relative, resolve } from "node:path";
 
 import { getConfigSnapshot } from "../config/service";
 import { env } from "../env";
-import { getCronHandler, listCronHandlerKeys } from "./handlers";
+// @ts-expect-error -- Bun text imports are resolved by the bundler at runtime.
+import conditionWorkerSource from "./conditionWorker.ts" with { type: "text" };
 import { ensureCronTables } from "./storage";
 import type {
   CronConditionalModuleContext,
@@ -116,6 +117,10 @@ function normalizePayload(input: Record<string, unknown> | undefined): Record<st
   return input && typeof input === "object" && !Array.isArray(input) ? input : {};
 }
 
+function readLegacyHandlerKey(input: { handlerKey?: unknown }): string | null {
+  return typeof input.handlerKey === "string" ? input.handlerKey.trim() || null : null;
+}
+
 function definitionRowToModel(row: CronDefinitionRow): CronJobDefinition {
   return {
     id: row.id,
@@ -128,7 +133,6 @@ function definitionRowToModel(row: CronDefinitionRow): CronJobDefinition {
     atIso: row.at_iso,
     timezone: row.timezone,
     runMode: row.run_mode,
-    handlerKey: row.handler_key,
     conditionModulePath: row.condition_module_path,
     conditionDescription: row.condition_description,
     agentPromptTemplate: row.agent_prompt_template,
@@ -202,29 +206,26 @@ function validateSchedule(input: {
 
 function validateMode(input: {
   runMode: CronRunMode;
-  handlerKey: string | null;
   conditionModulePath: string | null;
   conditionDescription: string | null;
   agentPromptTemplate: string | null;
+  handlerKey?: string | null;
 }) {
+  if (input.handlerKey?.trim()) {
+    throw new Error("handlerKey is no longer supported");
+  }
+
   if (input.runMode === "background") {
-    if (input.conditionModulePath) {
-      throw new Error("runMode=background does not allow conditionModulePath");
+    if (!input.conditionModulePath?.trim()) {
+      throw new Error("runMode=background requires conditionModulePath");
     }
-    if (input.conditionDescription) {
-      throw new Error("runMode=background does not allow conditionDescription");
-    }
-    if (!input.handlerKey) throw new Error("runMode=background requires handlerKey");
-    if (!listCronHandlerKeys().includes(input.handlerKey)) {
-      throw new Error(`unknown handlerKey: ${input.handlerKey}`);
+    if (input.agentPromptTemplate?.trim()) {
+      throw new Error("runMode=background does not allow agentPromptTemplate");
     }
     return;
   }
 
   if (input.runMode === "agent") {
-    if (input.handlerKey) {
-      throw new Error("runMode=agent does not allow handlerKey");
-    }
     if (input.conditionModulePath) {
       throw new Error("runMode=agent does not allow conditionModulePath");
     }
@@ -237,9 +238,6 @@ function validateMode(input: {
     return;
   }
 
-  if (input.handlerKey) {
-    throw new Error("runMode=conditional_agent does not allow handlerKey");
-  }
   if (!input.conditionModulePath?.trim()) {
     throw new Error("runMode=conditional_agent requires conditionModulePath");
   }
@@ -453,7 +451,7 @@ export class CronService {
       atIso: input.atIso?.trim() ?? null,
       timezone: input.timezone?.trim() ?? null,
       runMode: input.runMode,
-      handlerKey: input.handlerKey?.trim() ?? null,
+      handlerKey: readLegacyHandlerKey(input as { handlerKey?: unknown }),
       conditionModulePath: input.conditionModulePath?.trim() ?? null,
       conditionDescription: input.conditionDescription?.trim() ?? null,
       agentPromptTemplate: input.agentPromptTemplate?.trim() ?? null,
@@ -492,7 +490,7 @@ export class CronService {
         normalized.atIso,
         normalized.timezone,
         normalized.runMode,
-        normalized.handlerKey,
+        null,
         normalized.conditionModulePath,
         normalized.conditionDescription,
         normalized.agentPromptTemplate,
@@ -531,7 +529,6 @@ export class CronService {
       atIso: input.atIso,
       timezone: input.timezone,
       runMode: input.runMode,
-      handlerKey: input.handlerKey,
       conditionModulePath: input.conditionModulePath,
       conditionDescription: input.conditionDescription,
       agentPromptTemplate: input.agentPromptTemplate,
@@ -558,7 +555,7 @@ export class CronService {
       atIso: patch.atIso !== undefined ? patch.atIso?.trim() ?? null : existing.atIso,
       timezone: patch.timezone !== undefined ? patch.timezone?.trim() ?? null : existing.timezone,
       runMode: patch.runMode ?? existing.runMode,
-      handlerKey: patch.handlerKey !== undefined ? patch.handlerKey?.trim() ?? null : existing.handlerKey,
+      handlerKey: readLegacyHandlerKey(patch as { handlerKey?: unknown }),
       conditionModulePath:
         patch.conditionModulePath !== undefined
           ? patch.conditionModulePath?.trim() ?? null
@@ -621,7 +618,7 @@ export class CronService {
         merged.atIso,
         merged.timezone,
         merged.runMode,
-        merged.handlerKey,
+        null,
         merged.conditionModulePath,
         merged.conditionDescription,
         merged.agentPromptTemplate,
@@ -781,17 +778,22 @@ export class CronService {
     return {
       runModes: {
         background: {
-          requires: ["handlerKey"],
-          forbids: ["conditionModulePath", "conditionDescription"],
+          requires: ["conditionModulePath"],
+          optional: ["conditionDescription"],
+          forbids: ["agentPromptTemplate"],
+          moduleContract: {
+            contextKeys: ["nowMs", "payload", "job", "instance"],
+            resultShape: "CronHandlerResult",
+            forbids: ["invokeAgent"],
+          },
         },
         agent: {
           requires: ["agentPromptTemplate"],
-          forbids: ["handlerKey", "conditionModulePath", "conditionDescription"],
+          forbids: ["conditionModulePath", "conditionDescription"],
         },
         conditional_agent: {
           requires: ["conditionModulePath"],
           optional: ["conditionDescription", "agentPromptTemplate"],
-          forbids: ["handlerKey"],
           moduleContract: {
             contextKeys: ["nowMs", "payload", "job", "instance"],
             resultShape: "CronHandlerResult",
@@ -1147,37 +1149,10 @@ export class CronService {
     }
   }
 
-  private async runDeterministicStep(
+  private async runModuleStep(
     definition: CronJobDefinition,
     instance: CronJobInstance,
-  ): Promise<CronHandlerResult> {
-    const handlerKey = definition.handlerKey;
-    if (!handlerKey) {
-      return {
-        status: "error",
-        summary: "missing handlerKey",
-      };
-    }
-
-    const handler = getCronHandler(handlerKey);
-    if (!handler) {
-      return {
-        status: "error",
-        summary: `unknown handlerKey: ${handlerKey}`,
-      };
-    }
-
-    return await handler({
-      nowMs: nowMs(),
-      payload: definition.payload,
-      job: definition,
-      instance,
-    });
-  }
-
-  private async runConditionalModuleStep(
-    definition: CronJobDefinition,
-    instance: CronJobInstance,
+    input: { allowAgentInvocation: boolean },
   ): Promise<CronHandlerResult> {
     const conditionModulePath = definition.conditionModulePath?.trim();
     if (!conditionModulePath) {
@@ -1198,12 +1173,19 @@ export class CronService {
     }
 
     try {
-      return await this.runConditionalModuleInWorker(absoluteModulePath, {
+      const result = await this.runConditionalModuleInWorker(absoluteModulePath, {
         nowMs: nowMs(),
         payload: definition.payload,
         job: definition,
         instance,
       });
+      if (!input.allowAgentInvocation && result.invokeAgent?.shouldInvoke) {
+        return {
+          status: "error",
+          summary: "runMode=background does not allow invokeAgent",
+        };
+      }
+      return result;
     } catch (error) {
       return {
         status: "error",
@@ -1217,7 +1199,9 @@ export class CronService {
     ctx: CronConditionalModuleContext,
   ): Promise<CronHandlerResult> {
     const timeoutMs = getConfigSnapshot().config.runtime.cron.conditionalModuleTimeoutMs;
-    const workerModuleUrl = new URL("./conditionWorker.ts", import.meta.url).href;
+    const workerModuleUrl = URL.createObjectURL(
+      new File([conditionWorkerSource], "conditionWorker.ts", { type: "text/typescript" }),
+    );
 
     return await new Promise<CronHandlerResult>((resolveResult, rejectResult) => {
       const worker = new Worker(workerModuleUrl, { type: "module" });
@@ -1228,6 +1212,7 @@ export class CronService {
         settled = true;
         clearTimeout(timer);
         worker.terminate();
+        URL.revokeObjectURL(workerModuleUrl);
         next();
       };
 
@@ -1291,6 +1276,7 @@ export class CronService {
 
     let finalSummary = "";
     try {
+      definition = await this.ensureCronThread(definition);
       if (definition.runMode === "agent") {
         insertStep({
           instanceId: claimed.id,
@@ -1332,9 +1318,6 @@ export class CronService {
           finishedAt: nowMs(),
         });
       } else {
-        if (definition.handlerKey === "heartbeat.check") {
-          definition = await this.ensureCronThread(definition);
-        }
         const stepKind: CronStepKind =
           definition.runMode === "background" ? "background" : "conditional_agent";
         insertStep({
@@ -1343,56 +1326,52 @@ export class CronService {
           status: "running",
           input: {
             payload: definition.payload,
-            handlerKey: definition.handlerKey,
             conditionModulePath: definition.conditionModulePath,
           },
           startedAt,
         });
-        const deterministicResult =
-          definition.runMode === "background"
-            ? await this.runDeterministicStep(definition, instance)
-            : await this.runConditionalModuleStep(definition, instance);
-        if (deterministicResult.status !== "ok") {
+        const moduleResult = await this.runModuleStep(definition, instance, {
+          allowAgentInvocation: definition.runMode === "conditional_agent",
+        });
+        if (moduleResult.status !== "ok") {
           insertStep({
             instanceId: claimed.id,
             stepKind,
             status: "failed",
             input: {
               payload: definition.payload,
-              handlerKey: definition.handlerKey,
               conditionModulePath: definition.conditionModulePath,
             },
-            output: deterministicResult,
-            error: { message: deterministicResult.summary ?? "handler failed" },
+            output: moduleResult,
+            error: { message: moduleResult.summary ?? "module failed" },
             startedAt,
             finishedAt: nowMs(),
           });
-          throw new Error(deterministicResult.summary ?? "deterministic handler failed");
+          throw new Error(moduleResult.summary ?? "module failed");
         }
-        finalSummary = deterministicResult.summary ?? "deterministic step completed";
+        finalSummary = moduleResult.summary ?? "module step completed";
         insertStep({
           instanceId: claimed.id,
           stepKind,
           status: "completed",
           input: {
             payload: definition.payload,
-            handlerKey: definition.handlerKey,
             conditionModulePath: definition.conditionModulePath,
           },
-          output: deterministicResult,
+          output: moduleResult,
           startedAt,
           finishedAt: nowMs(),
         });
 
         const shouldInvokeAgent =
           definition.runMode === "conditional_agent" &&
-          deterministicResult.invokeAgent?.shouldInvoke === true;
+          moduleResult.invokeAgent?.shouldInvoke === true;
 
         if (shouldInvokeAgent) {
-          const template = deterministicResult.invokeAgent?.prompt ?? definition.agentPromptTemplate ?? "";
+          const template = moduleResult.invokeAgent?.prompt ?? definition.agentPromptTemplate ?? "";
           const prompt = renderTemplate(template, {
             ...definitionPayloadContext(definition),
-            ...(deterministicResult.invokeAgent?.context ?? {}),
+            ...(moduleResult.invokeAgent?.context ?? {}),
           });
           const agentStartedAt = nowMs();
           insertStep({
@@ -1401,7 +1380,7 @@ export class CronService {
             status: "running",
             input: {
               promptTemplate: template,
-              invokeAgent: deterministicResult.invokeAgent ?? null,
+              invokeAgent: moduleResult.invokeAgent ?? null,
             },
             startedAt: agentStartedAt,
           });
@@ -1409,7 +1388,7 @@ export class CronService {
             definition,
             instance,
             prompt,
-            context: deterministicResult.invokeAgent?.context,
+            context: moduleResult.invokeAgent?.context,
           });
           if (!agentResult.ok) {
             insertStep({

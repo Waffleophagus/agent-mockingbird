@@ -155,6 +155,7 @@ interface CronJobInstanceLite {
   agentInvoked?: boolean;
   state: "queued" | "leased" | "running" | "completed" | "failed" | "dead";
   attempt: number;
+  error?: unknown;
 }
 
 interface CronServiceInstance {
@@ -168,7 +169,6 @@ interface CronServiceInstance {
     atIso?: string | null;
     timezone?: string | null;
     runMode: "background" | "agent" | "conditional_agent";
-    handlerKey?: string | null;
     conditionModulePath?: string | null;
     agentPromptTemplate?: string | null;
     maxAttempts?: number;
@@ -185,7 +185,6 @@ interface CronServiceInstance {
     atIso?: string | null;
     timezone?: string | null;
     runMode: "background" | "agent" | "conditional_agent";
-    handlerKey?: string | null;
     conditionModulePath?: string | null;
     agentPromptTemplate?: string | null;
     maxAttempts?: number;
@@ -1429,7 +1428,7 @@ describe("cron validation and retries", () => {
         everyMs: 5_000,
         runMode: "background",
       }),
-    ).rejects.toThrow("runMode=background requires handlerKey");
+    ).rejects.toThrow("runMode=background requires conditionModulePath");
 
     await expect(
       cronService.createJob({
@@ -1451,14 +1450,14 @@ describe("cron validation and retries", () => {
 
     await expect(
       cronService.createJob({
-        name: "invalid-conditional-handler",
+        name: "invalid-handler-key",
         scheduleKind: "every",
         everyMs: 5_000,
-        runMode: "conditional_agent",
-        handlerKey: "memory.maintenance",
+        runMode: "background",
         conditionModulePath: "cron/check-stock.ts",
-      }),
-    ).rejects.toThrow("runMode=conditional_agent does not allow handlerKey");
+        handlerKey: "memory.maintenance",
+      } as never),
+    ).rejects.toThrow("handlerKey is no longer supported");
   });
 
   test("failed agent jobs transition from failed to dead after maxAttempts", async () => {
@@ -1668,7 +1667,129 @@ describe("cron validation and retries", () => {
     const instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
     expect(instances[0]?.state).toBe("completed");
     expect(instances[0]?.agentInvoked).toBe(false);
-    expect(spawnCount).toBe(0);
+    expect(spawnCount).toBe(1);
+    const updatedJob = await cronService.getJob(job.id);
+    expect(updatedJob?.threadSessionId).toBeTruthy();
+  });
+
+  test("background module jobs get a durable cron thread and stay non-agent", async () => {
+    const captured: string[] = [];
+    let spawnCount = 0;
+    const cronThread = repository.createSession({ title: "Background Cron Thread" });
+    const runtime = {
+      ...createRuntimeStub(async input => {
+        captured.push(input.sessionId);
+        return { sessionId: input.sessionId, messages: [] };
+      }),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        sqlite
+          .query(
+            `
+            INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(runtime, session_id) DO UPDATE SET
+              external_session_id = excluded.external_session_id,
+              updated_at = excluded.updated_at
+          `,
+          )
+          .run("opencode", cronThread.id, `ext-bg-${spawnCount}`, Date.now());
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: `ext-bg-${spawnCount}`,
+          childSessionId: cronThread.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
+    const cronService = new CronService(runtime);
+
+    mkdirSync(path.join(testWorkspacePath, "cron"), { recursive: true });
+    writeFileSync(
+      path.join(testWorkspacePath, "cron", "background-check.ts"),
+      [
+        "export default async function run(ctx) {",
+        "  return { status: 'ok', summary: `checked ${ctx.payload.symbol}` };",
+        "}",
+      ].join("\n"),
+    );
+
+    const job = await cronService.createJob({
+      name: "background-check",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "background",
+      conditionModulePath: "cron/background-check.ts",
+      payload: { symbol: "AAPL" },
+    });
+
+    await cronService.runJobNow(job.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    const instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
+    expect(instances[0]?.state).toBe("completed");
+    expect(instances[0]?.agentInvoked).toBe(false);
+    expect(spawnCount).toBe(1);
+    expect(captured).toEqual([]);
+    const updatedJob = await cronService.getJob(job.id);
+    expect(updatedJob?.threadSessionId).toBe(cronThread.id);
+  });
+
+  test("background module jobs reject invokeAgent results", async () => {
+    let spawnCount = 0;
+    const runtime = {
+      ...createRuntimeStub(async () => ({ sessionId: "main", messages: [] })),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        const child = repository.createSession({ title: "Background Reject Thread" });
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: `ext-bg-reject-${spawnCount}`,
+          childSessionId: child.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
+    const cronService = new CronService(runtime);
+
+    mkdirSync(path.join(testWorkspacePath, "cron"), { recursive: true });
+    writeFileSync(
+      path.join(testWorkspacePath, "cron", "background-invalid.ts"),
+      [
+        "export default async function run() {",
+        "  return {",
+        "    status: 'ok',",
+        "    summary: 'invalid',",
+        "    invokeAgent: { shouldInvoke: true, prompt: 'should not happen' },",
+        "  };",
+        "}",
+      ].join("\n"),
+    );
+
+    const job = await cronService.createJob({
+      name: "background-invalid",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "background",
+      conditionModulePath: "cron/background-invalid.ts",
+    });
+
+    await cronService.runJobNow(job.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    const instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
+    expect(instances[0]?.state).toBe("failed");
+    expect(instances[0]?.error).toMatchObject({ message: "runMode=background does not allow invokeAgent" });
   });
 
   test("agent jobs reuse one durable thread per cron definition", async () => {
@@ -1730,12 +1851,11 @@ describe("cron validation and retries", () => {
     expect(updatedJob?.threadSessionId).toBe(cronThread.id);
   });
 
-  test("heartbeat jobs use a cron-owned thread and sync that thread model from main", async () => {
+  test("heartbeat-style agent jobs use a cron-owned thread and sync that thread model from main", async () => {
     const captured: Array<{
       sessionId: string;
       content: string;
       agent?: string;
-      metadata?: Record<string, unknown>;
     }> = [];
     let spawnCount = 0;
     const runtime = {
@@ -1789,11 +1909,10 @@ describe("cron validation and retries", () => {
       name: "heartbeat-threaded",
       scheduleKind: "every",
       everyMs: 10_000,
-      runMode: "background",
-      handlerKey: "heartbeat.check",
+      runMode: "agent",
+      agentPromptTemplate: "Read HEARTBEAT.md if it exists (workspace context).",
       payload: {
         agentId: "build",
-        sessionId: "main",
       },
     });
 
@@ -1804,7 +1923,6 @@ describe("cron validation and retries", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]?.sessionId).not.toBe("main");
     expect(captured[0]?.agent).toBe("build");
-    expect(captured[0]?.metadata).toMatchObject({ heartbeat: true });
 
     const updatedJob = await cronService.getJob(job.id);
     expect(updatedJob?.threadSessionId).toBeTruthy();

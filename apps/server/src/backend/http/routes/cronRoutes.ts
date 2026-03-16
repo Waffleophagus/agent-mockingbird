@@ -1,13 +1,8 @@
-import { listCronHandlerKeys } from "../../cron/handlers";
 import type { CronService } from "../../cron/service";
 import { cronJobCreateSchema, cronJobPatchSchema, cronManageSchema } from "../schemas";
 
 export function createCronRoutes(cronService: CronService) {
   return {
-    "/api/waffle/cron/handlers": {
-      GET: () => Response.json({ handlers: listCronHandlerKeys() }),
-    },
-
     "/api/waffle/cron/health": {
       GET: async () => {
         try {
@@ -138,8 +133,6 @@ export function createCronRoutes(cronService: CronService) {
           switch (command.action) {
             case "list_jobs":
               return Response.json({ ok: true, action: command.action, jobs: await cronService.listJobs() });
-            case "list_handlers":
-              return Response.json({ ok: true, action: command.action, handlers: listCronHandlerKeys() });
             case "health":
               return Response.json({ ok: true, action: command.action, health: await cronService.getHealth() });
             case "get_job": {
