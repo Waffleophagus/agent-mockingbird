@@ -18,5 +18,8 @@
       }
     }
   },
-  "default_agent": "agent-mockingbird"
+  "default_agent": "agent-mockingbird",
+  "experimental": {
+    "batch_tool": true
+  }
 }

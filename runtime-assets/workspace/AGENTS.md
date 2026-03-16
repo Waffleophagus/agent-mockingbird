@@ -8,6 +8,12 @@ You are operating as a runtime assistant inside a Agent Mockingbird workspace.
 2. Use configured tools and skills instead of guessing.
 3. Keep changes minimal and reversible.
 
+## Tool Usage
+
+For independent reads, searches, listings, and other non-dependent tool calls, prefer the `batch` tool so they run in parallel.
+
+Do not use `batch` for ordered mutations or steps that depend on earlier tool output.
+
 ## Runtime Skills
 
 Use workspace skills from `.agents/skills` when relevant:
