@@ -108,6 +108,10 @@ function assertShipState(status: SyncStatus) {
 }
 
 function runFilteredOpencodeTypecheck() {
+  console.log("\n== OpenCode Dependency Install ==");
+  runCommand(["bun", "install", "--cwd", cleanroomRoot, "--frozen-lockfile"], { quietLabel: "cleanroom/opencode" });
+  runCommand(["bun", "install", "--cwd", vendorRoot, "--frozen-lockfile"], { quietLabel: "vendor/opencode" });
+
   console.log("\n== OpenCode Full Typecheck ==");
   const cleanroomResult = runCommand(
     ["bun", "run", "--cwd", cleanroomRoot, "typecheck"],

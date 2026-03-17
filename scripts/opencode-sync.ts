@@ -630,7 +630,9 @@ function comparePatchDirectories(left: string, right: string) {
 }
 
 function normalizePatch(contents: string) {
-  return contents.replace(/^From [0-9a-f]+ Mon Sep 17 00:00:00 2001$/m, "From <normalized> Mon Sep 17 00:00:00 2001");
+  return contents
+    .replace(/^From [0-9a-f]+ Mon Sep 17 00:00:00 2001$/m, "From <normalized> Mon Sep 17 00:00:00 2001")
+    .replace(/\n-- \n[^\n]+\n?$/, "\n-- \n<git-version>\n");
 }
 
 function compareDirectories(left: string, right: string) {
