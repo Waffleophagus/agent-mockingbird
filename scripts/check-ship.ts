@@ -175,7 +175,7 @@ function runFilteredOpencodeTypecheck() {
 
 function collectDiagnostics(output: string, workspaceRoot: string) {
   const diagnostics = new Map<string, Diagnostic>();
-  const lines = output.split(/\r?\n/);
+  const lines = stripAnsi(output).split(/\r?\n/);
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
@@ -186,21 +186,20 @@ function collectDiagnostics(output: string, workspaceRoot: string) {
       continue;
     }
 
-    const task = (match.groups.task ?? "typecheck").trim();
     const file = normalizePath(match.groups.file, workspaceRoot);
     const row = match.groups.line;
     const column = match.groups.column;
     const code = `TS${match.groups.code}`;
     const message = match.groups.message.trim();
-    const key = [task, file, row, column, code, message].join("|");
-    diagnostics.set(key, { key, line: `${task} ${file}(${row},${column}): error ${code}: ${message}` });
+    const key = [file, row, column, code, message].join("|");
+    diagnostics.set(key, { key, line: `${file}(${row},${column}): error ${code}: ${message}` });
   }
 
   return [...diagnostics.values()];
 }
 
 function normalizeComparableOutput(output: string, workspaceRoot: string) {
-  const lines = output
+  const lines = stripAnsi(output)
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter(Boolean)
@@ -364,6 +363,10 @@ function indentBlock(value: string) {
     .split(/\r?\n/)
     .map((line) => `  ${line}`)
     .join("\n");
+}
+
+function stripAnsi(value: string) {
+  return value.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
 function bunInstallEnv() {
