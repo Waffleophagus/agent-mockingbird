@@ -9,6 +9,7 @@
   },
   "files": [
     "bin",
+    "opencode.lock.json",
     "README.md"
   ]
 }

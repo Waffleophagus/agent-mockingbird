@@ -1,0 +1,16 @@
+{
+  "upstream": {
+    "remote": "https://github.com/anomalyco/opencode.git",
+    "tag": "v1.2.27",
+    "commit": "4ee426ba549131c4903a71dfb6259200467aca81"
+  },
+  "packageVersion": "1.2.27",
+  "paths": {
+    "cleanroom": "cleanroom/opencode",
+    "vendor": "vendor/opencode",
+    "patches": "patches/opencode"
+  },
+  "branch": {
+    "name": "wafflebot/opencode"
+  }
+}

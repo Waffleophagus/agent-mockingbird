@@ -1863,6 +1863,10 @@ export const testing = {
 }
 
 function readOpenCodePackageVersion() {
+  const envVersion = process.env.AGENT_MOCKINGBIRD_OPENCODE_VERSION?.trim()
+  if (envVersion) {
+    return envVersion
+  }
   const candidatePaths = [
     path.resolve(MODULE_DIR, "../../../../opencode.lock.json"),
     path.resolve(MODULE_DIR, "../opencode.lock.json"),
