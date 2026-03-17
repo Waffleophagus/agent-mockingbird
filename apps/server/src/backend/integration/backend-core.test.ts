@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -1592,6 +1592,37 @@ describe("cron validation and retries", () => {
     const steps = await cronService.listSteps(instanceId);
     expect(steps.some(step => step.stepKind === "conditional_agent" && step.status === "completed")).toBe(true);
     expect(steps.some(step => step.stepKind === "agent" && step.status === "completed")).toBe(true);
+  });
+
+  test("background cron jobs reject symlinked module paths that escape the workspace", async () => {
+    const runtime = createRuntimeStub(async () => ({ sessionId: "main", messages: [] }));
+    const cronService = new CronService(runtime);
+
+    mkdirSync(path.join(testWorkspacePath, "cron"), { recursive: true });
+    const outsideModulePath = path.join(testRoot, "outside-cron-module.ts");
+    writeFileSync(
+      outsideModulePath,
+      "export default async function run() { return { status: 'ok', summary: 'escaped' }; }\n",
+      "utf8",
+    );
+    symlinkSync(outsideModulePath, path.join(testWorkspacePath, "cron", "escape.ts"));
+
+    const job = await cronService.createJob({
+      name: "escaped-module",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "background",
+      conditionModulePath: "cron/escape.ts",
+    });
+
+    await cronService.runJobNow(job.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    const instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
+    expect(instances[0]?.state).toBe("failed");
+    expect(instances[0]?.error).toMatchObject({
+      message: "conditionModulePath escapes the runtime workspace directory",
+    });
   });
 
   test("upsertJob is idempotent for stable cron IDs", async () => {

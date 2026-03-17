@@ -1,10 +1,9 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { CronTime, validateCronExpression } from "cron";
-import { relative, resolve } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { extname, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { getConfigSnapshot } from "../config/service";
-import { env } from "../env";
 import { ensureCronTables } from "./storage";
 import type {
   CronConditionalModule,
@@ -22,9 +21,12 @@ import type {
   CronStepKind,
   CronStepStatus,
 } from "./types";
+import { getConfigSnapshot } from "../config/service";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
 import { getSessionById, setSessionModel, setSessionTitle } from "../db/repository";
+import { env } from "../env";
+import { createLogger } from "../logging/logger";
 
 interface CronDefinitionRow {
   id: string;
@@ -83,6 +85,9 @@ interface CronStepRow {
 function nowMs() {
   return Date.now();
 }
+
+const CONDITION_MODULE_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".cjs"]);
+const logger = createLogger("cron");
 
 function toIso(ms: number | null | undefined): string | null {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
@@ -273,16 +278,30 @@ function resolveWorkspaceRootPath(): string {
 }
 
 function resolveConditionModuleAbsolutePath(conditionModulePath: string): string {
-  const workspaceRoot = resolveWorkspaceRootPath();
+  const extension = extname(conditionModulePath).toLowerCase();
+  if (!CONDITION_MODULE_EXTENSIONS.has(extension)) {
+    throw new Error("conditionModulePath must target a .ts, .js, .mjs, or .cjs file");
+  }
+
+  const workspaceRoot = realpathSync(resolveWorkspaceRootPath());
   const target = resolve(workspaceRoot, conditionModulePath);
-  const relativePath = relative(workspaceRoot, target);
+  let resolvedTarget: string;
+  try {
+    resolvedTarget = realpathSync(target);
+  } catch {
+    throw new Error("conditionModulePath must reference an existing file under the runtime workspace directory");
+  }
+  const relativePath = relative(workspaceRoot, resolvedTarget);
   if (!relativePath || relativePath === ".") {
     throw new Error("conditionModulePath must target a file under the runtime workspace directory");
   }
   if (relativePath.startsWith("..")) {
     throw new Error("conditionModulePath escapes the runtime workspace directory");
   }
-  return target;
+  if (!statSync(resolvedTarget).isFile()) {
+    throw new Error("conditionModulePath must reference a regular file");
+  }
+  return resolvedTarget;
 }
 
 function computeDueTimesForDefinition(row: CronDefinitionRow, now: number, maxPerTick: number): number[] {
@@ -327,7 +346,10 @@ function computeDueTimesForDefinition(row: CronDefinitionRow, now: number, maxPe
       cursor = nextMs + 1_000;
     }
   } catch {
-    // Invalid cron expressions should have been validated at write-time.
+    logger.warn("Ignoring invalid cron expression during scheduling", {
+      scheduleExpr: expr,
+      timezone: row.timezone,
+    });
   }
   return due;
 }

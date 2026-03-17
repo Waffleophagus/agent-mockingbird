@@ -2304,6 +2304,39 @@ describe("opencode runtime failover contract", () => {
     );
   });
 
+  test("memory injection state evicts oldest sessions when over limit", () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+      }),
+    );
+    const internal = runtime as unknown as {
+      setMemoryInjectionState: (sessionId: string, state: {
+        fingerprint: string;
+        forceReinject: boolean;
+        generation: number;
+        turn: number;
+        injectedKeysByGeneration: string[];
+      }) => void;
+      memoryInjectionStateBySessionId: Map<string, unknown>;
+    };
+
+    const totalEntries = 1_250;
+    for (let index = 0; index < totalEntries; index += 1) {
+      internal.setMemoryInjectionState(`ses-memory-${index}`, {
+        fingerprint: `fp-${index}`,
+        forceReinject: false,
+        generation: index,
+        turn: index,
+        injectedKeysByGeneration: [],
+      });
+    }
+
+    expect(internal.memoryInjectionStateBySessionId.size).toBe(1_000);
+    expect(internal.memoryInjectionStateBySessionId.has("ses-memory-0")).toBe(false);
+    expect(internal.memoryInjectionStateBySessionId.has(`ses-memory-${totalEntries - 1}`)).toBe(true);
+  });
+
   test("session.idle triggers best-effort parent transcript sync", async () => {
     const runtime = createRuntimeWithClient(
       createMockClient({

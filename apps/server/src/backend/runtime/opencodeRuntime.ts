@@ -91,6 +91,7 @@ import {
   upsertSessionMessages,
   type BackgroundRunRecord,
 } from "../db/repository";
+import { createLogger } from "../logging/logger";
 import {
   normalizeMcpIds,
   normalizeMcpServerDefinitions,
@@ -238,6 +239,8 @@ const STREAMED_METADATA_CACHE_LIMIT = 10_000;
 const STREAMDOWN_RENDER_DEBOUNCE_MS = 100;
 const STREAMDOWN_LIVE_HIGHLIGHT_DEBOUNCE_MS = 16;
 const AGENT_NAME_CACHE_TTL_MS = 5_000;
+const MEMORY_INJECTION_STATE_TTL_MS = 6 * 60 * 60_000;
+const MEMORY_INJECTION_STATE_MAX_ENTRIES = 1_000;
 const BUILTIN_SUBAGENT_IDS = new Set(["general", "explore"]);
 const BUILTIN_PRIMARY_AGENT_IDS = new Set([
   "build",
@@ -254,6 +257,11 @@ type MemoryInjectionState = {
   turn: number;
   injectedKeysByGeneration: string[];
 };
+type MemoryInjectionStateEntry = {
+  state: MemoryInjectionState;
+  lastTouchedAt: number;
+};
+const logger = createLogger("opencode-runtime");
 
 function shouldQueueWhenBusy(input: SendUserMessageInput): boolean {
   return input.metadata?.heartbeat !== true;
@@ -338,7 +346,7 @@ export class OpencodeRuntime implements RuntimeEngine {
   >();
   private memoryInjectionStateBySessionId = new Map<
     string,
-    MemoryInjectionState
+    MemoryInjectionStateEntry
   >();
   private availableAgentNamesCache: {
     fetchedAtMs: number;
@@ -1198,7 +1206,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       const dedupeRecallFallbackOnly =
         memoryConfig.injectionDedupeFallbackRecallOnly;
       const isRecallIntent = isMemoryRecallIntentQuery(query);
-      const state = this.memoryInjectionStateBySessionId.get(
+      const state = this.getMemoryInjectionState(
         opencodeSessionId,
       ) ?? {
         fingerprint: "",
@@ -1304,7 +1312,10 @@ export class OpencodeRuntime implements RuntimeEngine {
         suppressedAsIrrelevant: analyzed.filteredIrrelevantCount,
         memoryContextFingerprint: fingerprint,
       };
-    } catch {
+    } catch (error) {
+      logger.warnWithCause("Memory injection failed", error, {
+        sessionId: opencodeSessionId,
+      });
       return {
         content: userContent,
         freshSessionContent: userContent,
@@ -1323,7 +1334,13 @@ export class OpencodeRuntime implements RuntimeEngine {
   ) {
     const normalized = sessionId.trim();
     if (!normalized) return;
-    this.memoryInjectionStateBySessionId.set(normalized, state);
+    const now = Date.now();
+    this.memoryInjectionStateBySessionId.delete(normalized);
+    this.memoryInjectionStateBySessionId.set(normalized, {
+      state,
+      lastTouchedAt: now,
+    });
+    this.pruneMemoryInjectionState(now);
   }
 
   private clearMemoryInjectionState(sessionId: string) {
@@ -1332,12 +1349,44 @@ export class OpencodeRuntime implements RuntimeEngine {
     this.memoryInjectionStateBySessionId.delete(normalized);
   }
 
+  private getMemoryInjectionState(sessionId: string): MemoryInjectionState | null {
+    const normalized = sessionId.trim();
+    if (!normalized) return null;
+    const now = Date.now();
+    this.pruneMemoryInjectionState(now);
+    const entry = this.memoryInjectionStateBySessionId.get(normalized);
+    if (!entry) return null;
+    if (now - entry.lastTouchedAt > MEMORY_INJECTION_STATE_TTL_MS) {
+      this.memoryInjectionStateBySessionId.delete(normalized);
+      return null;
+    }
+    this.memoryInjectionStateBySessionId.delete(normalized);
+    this.memoryInjectionStateBySessionId.set(normalized, {
+      state: entry.state,
+      lastTouchedAt: now,
+    });
+    return entry.state;
+  }
+
+  private pruneMemoryInjectionState(now = Date.now()) {
+    for (const [sessionId, entry] of this.memoryInjectionStateBySessionId.entries()) {
+      if (now - entry.lastTouchedAt > MEMORY_INJECTION_STATE_TTL_MS) {
+        this.memoryInjectionStateBySessionId.delete(sessionId);
+      }
+    }
+    while (this.memoryInjectionStateBySessionId.size > MEMORY_INJECTION_STATE_MAX_ENTRIES) {
+      const oldest = this.memoryInjectionStateBySessionId.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.memoryInjectionStateBySessionId.delete(oldest);
+    }
+  }
+
   private markMemoryInjectionStateForReinject(sessionId: string) {
     const normalized = sessionId.trim();
     if (!normalized) return;
-    const existing = this.memoryInjectionStateBySessionId.get(normalized);
+    const existing = this.getMemoryInjectionState(normalized);
     if (existing) {
-      this.memoryInjectionStateBySessionId.set(normalized, {
+      this.setMemoryInjectionState(normalized, {
         ...existing,
         forceReinject: true,
         generation: existing.generation + 1,
@@ -1345,7 +1394,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       });
       return;
     }
-    this.memoryInjectionStateBySessionId.set(normalized, {
+    this.setMemoryInjectionState(normalized, {
       fingerprint: "",
       forceReinject: true,
       generation: 1,
@@ -1541,13 +1590,17 @@ export class OpencodeRuntime implements RuntimeEngine {
   private startEventSync() {
     if (this.eventSyncStarted || this.disposed) return;
     this.eventSyncStarted = true;
-    void this.runEventSyncLoop();
+    void this.runEventSyncLoop().catch((error) => {
+      logger.errorWithCause("Event sync loop crashed", error);
+    });
   }
 
   private startBackgroundSync() {
     if (this.backgroundSyncStarted || this.disposed) return;
     this.backgroundSyncStarted = true;
-    void this.runBackgroundSyncLoop();
+    void this.runBackgroundSyncLoop().catch((error) => {
+      logger.errorWithCause("Background sync loop crashed", error);
+    });
   }
 
   private async runBackgroundSyncLoop() {
@@ -1568,8 +1621,8 @@ export class OpencodeRuntime implements RuntimeEngine {
         await this.reconcileBackgroundChildrenFromParents();
         await this.refreshInFlightBackgroundRuns();
         await this.processPendingBackgroundAnnouncements();
-      } catch {
-        // Non-blocking: background sync should not impact foreground interactions.
+      } catch (error) {
+        logger.warnWithCause("Background sync failed", error);
       }
     })();
 
@@ -1603,8 +1656,11 @@ export class OpencodeRuntime implements RuntimeEngine {
             binding.sessionId,
           );
         }
-      } catch {
-        // best effort
+      } catch (error) {
+        logger.warnWithCause("Background child reconciliation failed", error, {
+          externalSessionId: binding.externalSessionId,
+          sessionId: binding.sessionId,
+        });
       }
     }
   }
@@ -1641,9 +1697,9 @@ export class OpencodeRuntime implements RuntimeEngine {
           if (this.disposed) return;
           this.handleOpencodeEvent(event);
         }
-      } catch {
+      } catch (error) {
         if (this.disposed) return;
-        // Non-blocking: event stream issues should not disrupt prompt handling.
+        logger.warnWithCause("Event stream sync failed", error);
       }
 
       await this.waitFor(1_000);
@@ -2794,8 +2850,12 @@ export class OpencodeRuntime implements RuntimeEngine {
         titleHint: input.titleHint,
         messages: [entry],
       });
-    } catch {
-      // best-effort message reconciliation
+    } catch (error) {
+      logger.warnWithCause("Message reconciliation failed", error, {
+        localSessionId: input.localSessionId,
+        externalSessionId: input.externalSessionId,
+        messageId: input.messageId,
+      });
     }
   }
 
@@ -2814,8 +2874,11 @@ export class OpencodeRuntime implements RuntimeEngine {
         force,
         messages,
       });
-    } catch {
-      // Non-blocking: transcript sync should never block run status updates.
+    } catch (error) {
+      logger.warnWithCause("Background transcript sync failed", error, {
+        runId: run.id,
+        childExternalSessionId: run.childExternalSessionId,
+      });
     }
   }
 
@@ -2878,7 +2941,10 @@ export class OpencodeRuntime implements RuntimeEngine {
         return this.applyOpencodeBackgroundStatus(run, status);
       }
       return run;
-    } catch {
+    } catch (error) {
+      logger.warnWithCause("Background run hydration failed", error, {
+        childExternalSessionId: normalizedChildExternalSessionId,
+      });
       return null;
     } finally {
       this.backgroundHydrationInFlight.delete(normalizedChildExternalSessionId);
@@ -3092,8 +3158,10 @@ export class OpencodeRuntime implements RuntimeEngine {
       while (queue.depth(sessionId) > 0) {
         await queue.drainAndExecute(sessionId);
       }
-    } catch {
-      // Queue drain is best-effort.
+    } catch (error) {
+      logger.warnWithCause("Queue drain failed", error, {
+        sessionId,
+      });
     } finally {
       this.drainingSessions.delete(sessionId);
     }
@@ -3496,7 +3564,7 @@ export class OpencodeRuntime implements RuntimeEngine {
       } catch (error) {
         if (getOpencodeErrorStatus(error) === 404) {
           const previousSessionState =
-            this.memoryInjectionStateBySessionId.get(sessionId);
+            this.getMemoryInjectionState(sessionId);
           try {
             sessionId = await this.createOpencodeSession(
               input.localSessionId,
@@ -3799,8 +3867,11 @@ export class OpencodeRuntime implements RuntimeEngine {
         this.emit(createSessionStateUpdatedEvent(updated, "runtime"));
       }
       return true;
-    } catch {
-      // Non-blocking: title sync should never break prompt handling.
+    } catch (error) {
+      logger.warnWithCause("Session title sync failed", error, {
+        localSessionId,
+        localTitle,
+      });
       return false;
     }
   }

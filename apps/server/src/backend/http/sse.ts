@@ -8,11 +8,13 @@ import type {
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
 
+import { createBoundedQueue, type BoundedQueue } from "./boundedQueue";
 import {
   createHeartbeatUpdatedEvent,
   createUsageUpdatedEvent,
   type RuntimeEvent,
 } from "../contracts/events";
+import { createLogger } from "../logging/logger";
 
 type Controller = ReadableStreamDefaultController<string>;
 type MobileRealtimeWebSocket = Bun.ServerWebSocket<MobileRealtimeSocketData>;
@@ -23,6 +25,7 @@ interface BufferedRealtimeEvent extends DashboardRealtimeEventFrame {
 
 export interface MobileRealtimeSocketData {
   afterSeq: number | null;
+  outboundQueue?: BoundedQueue<string>;
 }
 
 export interface RuntimeEventStream {
@@ -37,6 +40,10 @@ export interface RuntimeEventStream {
 
 const MOBILE_REPLAY_WINDOW_SIZE = 5_000;
 const MOBILE_REPLAY_WINDOW_TTL_MS = 15 * 60_000;
+const SSE_MAX_QUEUED_FRAMES = 256;
+const MOBILE_WS_MAX_QUEUED_FRAMES = 512;
+const STREAM_DRAIN_DELAY_MS = 25;
+const logger = createLogger("runtime-event-stream");
 
 function toMobileDashboardEvent(event: RuntimeEvent): DashboardEvent | null {
   switch (event.type) {
@@ -168,10 +175,32 @@ export function createRuntimeEventStream(input: {
   getHeartbeatSnapshot: () => HeartbeatSnapshot;
   getUsageSnapshot: () => UsageSnapshot;
 }): RuntimeEventStream {
-  const controllers = new Set<Controller>();
+  const controllerQueues = new Map<Controller, BoundedQueue<string>>();
   const sockets = new Set<MobileRealtimeWebSocket>();
   const replayBuffer: BufferedRealtimeEvent[] = [];
   let latestSeq = 0;
+
+  const closeSocket = (
+    ws: MobileRealtimeWebSocket,
+    reason: string,
+    options?: { code?: number; logError?: unknown },
+  ) => {
+    sockets.delete(ws);
+    ws.data.outboundQueue?.close();
+    ws.data.outboundQueue = undefined;
+    if (options?.logError !== undefined) {
+      logger.warnWithCause("Closing mobile realtime socket", options.logError, {
+        reason,
+      });
+    } else {
+      logger.warn("Closing mobile realtime socket", { reason });
+    }
+    try {
+      ws.close(options?.code ?? 1008, reason);
+    } catch {
+      // Socket is already closed.
+    }
+  };
 
   const publish = (event: RuntimeEvent) => {
     const frame = toSseFrame(event);
@@ -192,20 +221,12 @@ export function createRuntimeEventStream(input: {
 
       const encodedRealtimeFrame = toRealtimeFrameJson(realtimeFrame);
       for (const socket of sockets) {
-        try {
-          socket.send(encodedRealtimeFrame);
-        } catch {
-          sockets.delete(socket);
-        }
+        socket.data.outboundQueue?.enqueue(encodedRealtimeFrame);
       }
     }
 
-    for (const controller of controllers) {
-      try {
-        controller.enqueue(frame);
-      } catch {
-        controllers.delete(controller);
-      }
+    for (const queue of controllerQueues.values()) {
+      queue.enqueue(frame);
     }
   };
 
@@ -248,7 +269,7 @@ export function createRuntimeEventStream(input: {
       latestSeq,
       replayWindowSize: MOBILE_REPLAY_WINDOW_SIZE,
     };
-    ws.send(toRealtimeFrameJson(helloFrame));
+    ws.data.outboundQueue?.enqueue(toRealtimeFrameJson(helloFrame));
   }
 
   return {
@@ -269,6 +290,20 @@ export function createRuntimeEventStream(input: {
     websocket: {
       data: {} as MobileRealtimeSocketData,
       open(ws) {
+        ws.data.outboundQueue = createBoundedQueue<string>({
+          maxSize: MOBILE_WS_MAX_QUEUED_FRAMES,
+          drainDelayMs: STREAM_DRAIN_DELAY_MS,
+          tryWrite: (value) => {
+            ws.send(value);
+            return true;
+          },
+          onOverflow: () => {
+            closeSocket(ws, "outbound queue overflow", { code: 4002 });
+          },
+          onWriteError: (error) => {
+            closeSocket(ws, "write failure", { logError: error });
+          },
+        });
         sendHello(ws);
         const replayPlan = resolveReplayPlan(ws.data.afterSeq);
         if (replayPlan.kind === "resync") {
@@ -277,14 +312,20 @@ export function createRuntimeEventStream(input: {
             latestSeq,
             reason: replayPlan.reason,
           };
-          ws.send(toRealtimeFrameJson(resyncFrame));
-          ws.close(4001, replayPlan.reason);
+          try {
+            ws.send(toRealtimeFrameJson(resyncFrame));
+          } catch (error) {
+            logger.warnWithCause("Failed to send resync frame", error, {
+              reason: replayPlan.reason,
+            });
+          }
+          closeSocket(ws, replayPlan.reason, { code: 4001 });
           return;
         }
 
         if (replayPlan.kind === "replay") {
           for (const replayFrame of replayPlan.frames) {
-            ws.send(toRealtimeFrameJson(replayFrame));
+            ws.data.outboundQueue?.enqueue(toRealtimeFrameJson(replayFrame));
           }
           sockets.add(ws);
           const latestAfterSubscription = latestSeq;
@@ -293,7 +334,7 @@ export function createRuntimeEventStream(input: {
               frame => frame.seq > replayPlan.snapshotLatestSeq && frame.seq <= latestAfterSubscription,
             );
             for (const catchupFrame of catchupFrames) {
-              ws.send(toRealtimeFrameJson(catchupFrame));
+              ws.data.outboundQueue?.enqueue(toRealtimeFrameJson(catchupFrame));
             }
           }
           return;
@@ -303,6 +344,8 @@ export function createRuntimeEventStream(input: {
       },
       close(ws) {
         sockets.delete(ws);
+        ws.data.outboundQueue?.close();
+        ws.data.outboundQueue = undefined;
       },
       message() {
         // Mobile transport is server-push only for now.
@@ -311,21 +354,60 @@ export function createRuntimeEventStream(input: {
     route: {
       GET: () => {
         let streamController: Controller | null = null;
+        let outboundQueue: BoundedQueue<string> | null = null;
+        let closed = false;
 
         const stream = new ReadableStream<string>({
           start(controller) {
             streamController = controller;
-            controllers.add(controller);
-            controller.enqueue(
+            outboundQueue = createBoundedQueue<string>({
+              maxSize: SSE_MAX_QUEUED_FRAMES,
+              drainDelayMs: STREAM_DRAIN_DELAY_MS,
+              tryWrite: (value) => {
+                if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+                  return false;
+                }
+                controller.enqueue(value);
+                return true;
+              },
+              onOverflow: () => {
+                if (closed) return;
+                closed = true;
+                controllerQueues.delete(controller);
+                logger.warn("Closing SSE consumer", { reason: "outbound queue overflow" });
+                try {
+                  controller.close();
+                } catch {
+                  // Stream already closed.
+                }
+              },
+              onWriteError: (error) => {
+                if (closed) return;
+                closed = true;
+                controllerQueues.delete(controller);
+                logger.warnWithCause("Closing SSE consumer", error, {
+                  reason: "write failure",
+                });
+                try {
+                  controller.close();
+                } catch {
+                  // Stream already closed.
+                }
+              },
+            });
+            controllerQueues.set(controller, outboundQueue);
+            outboundQueue.enqueue(
               toSseFrame(createHeartbeatUpdatedEvent(input.getHeartbeatSnapshot(), "system")),
             );
-            controller.enqueue(
+            outboundQueue.enqueue(
               toSseFrame(createUsageUpdatedEvent(input.getUsageSnapshot(), "system")),
             );
           },
           cancel() {
+            closed = true;
+            outboundQueue?.close();
             if (streamController) {
-              controllers.delete(streamController);
+              controllerQueues.delete(streamController);
             }
           },
         });

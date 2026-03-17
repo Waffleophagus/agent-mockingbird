@@ -1,8 +1,14 @@
 import { getConfigSnapshot } from "../../config/service";
 import type { RuntimeInputPart } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
+import { createLogger } from "../../logging/logger";
 import type { RunService } from "../../run/service";
 import type { AgentRunEvent } from "../../run/types";
+import { createBoundedQueue, type BoundedQueue } from "../boundedQueue";
+
+const RUN_STREAM_MAX_QUEUED_FRAMES = 256;
+const RUN_STREAM_DRAIN_DELAY_MS = 25;
+const logger = createLogger("run-event-stream");
 
 function runStreamConfig() {
   return getConfigSnapshot().config.runtime.runStream;
@@ -168,12 +174,15 @@ export function createRunRoutes(runService: RunService) {
         let streamController: ReadableStreamDefaultController<string> | null = null;
         let unsubscribe: (() => void) | null = null;
         let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+        let outboundQueue: BoundedQueue<string> | null = null;
         let closed = false;
         let cursor = initialAfterSeq;
 
         const close = () => {
           if (closed) return;
           closed = true;
+          outboundQueue?.close();
+          outboundQueue = null;
           if (heartbeatTimer) {
             clearInterval(heartbeatTimer);
             heartbeatTimer = null;
@@ -193,15 +202,10 @@ export function createRunRoutes(runService: RunService) {
         };
 
         const emit = (event: AgentRunEvent) => {
-          if (closed || !streamController) return;
+          if (closed || !outboundQueue) return;
           if (event.seq <= cursor) return;
           cursor = event.seq;
-          try {
-            streamController.enqueue(toRunEventFrame(event));
-          } catch {
-            close();
-            return;
-          }
+          outboundQueue.enqueue(toRunEventFrame(event));
           if (event.type === "run.completed" || event.type === "run.failed") {
             close();
           }
@@ -210,6 +214,31 @@ export function createRunRoutes(runService: RunService) {
         const stream = new ReadableStream<string>({
           start(controller) {
             streamController = controller;
+            outboundQueue = createBoundedQueue<string>({
+              maxSize: RUN_STREAM_MAX_QUEUED_FRAMES,
+              drainDelayMs: RUN_STREAM_DRAIN_DELAY_MS,
+              tryWrite: (value) => {
+                if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+                  return false;
+                }
+                controller.enqueue(value);
+                return true;
+              },
+              onOverflow: () => {
+                logger.warn("Closing run SSE consumer", {
+                  runId,
+                  reason: "outbound queue overflow",
+                });
+                close();
+              },
+              onWriteError: (error) => {
+                logger.warnWithCause("Closing run SSE consumer", error, {
+                  runId,
+                  reason: "write failure",
+                });
+                close();
+              },
+            });
             unsubscribe = runService.subscribe(event => {
               if (event.runId !== runId) return;
               emit(event);
@@ -237,12 +266,8 @@ export function createRunRoutes(runService: RunService) {
             }
 
             heartbeatTimer = setInterval(() => {
-              if (closed || !streamController) return;
-              try {
-                streamController.enqueue(toRunHeartbeatFrame(runId));
-              } catch {
-                close();
-              }
+              if (closed || !outboundQueue) return;
+              outboundQueue.enqueue(toRunHeartbeatFrame(runId));
             }, runStreamConfig().heartbeatMs);
           },
           cancel() {

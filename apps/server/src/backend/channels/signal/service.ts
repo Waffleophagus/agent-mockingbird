@@ -21,12 +21,14 @@ import {
   type ChannelAllowlistEntryRecord,
   type ChannelPairingRequestRecord,
 } from "../../db/repository";
+import { createLogger } from "../../logging/logger";
 import { RuntimeSessionBusyError, RuntimeSessionQueuedError } from "../../runtime";
 
 const CHANNEL_ID = "signal";
 const LOOP_IDLE_MS = 5_000;
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+const logger = createLogger("signal-channel");
 
 interface SignalEnvelope {
   source?: string;
@@ -262,7 +264,11 @@ export class SignalChannelService {
           account: signalConfig.account,
           signal: this.loopAbortController.signal,
           onEvent: event => {
-            void this.handleEvent(event);
+            void this.handleEvent(event).catch(error => {
+              logger.errorWithCause("Signal event handler failed", error, {
+                event: event.event ?? null,
+              });
+            });
           },
         });
       } catch (error) {
@@ -287,6 +293,9 @@ export class SignalChannelService {
     try {
       payload = JSON.parse(event.data) as SignalReceivePayload;
     } catch {
+      logger.warn("Ignoring invalid Signal event payload", {
+        event: event.event,
+      });
       return;
     }
     const envelope = payload.envelope;
