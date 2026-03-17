@@ -207,12 +207,18 @@ export function createRunRoutes(runService: RunService) {
           cursor = event.seq;
           outboundQueue.enqueue(toRunEventFrame(event));
           if (event.type === "run.completed" || event.type === "run.failed") {
-            close();
+            if (outboundQueue.size() === 0) {
+              close();
+              return;
+            }
+            setTimeout(() => {
+              close();
+            }, RUN_STREAM_DRAIN_DELAY_MS * 2);
           }
         };
 
         const stream = new ReadableStream<string>({
-          start(controller) {
+          async start(controller) {
             streamController = controller;
             outboundQueue = createBoundedQueue<string>({
               maxSize: RUN_STREAM_MAX_QUEUED_FRAMES,
@@ -261,6 +267,22 @@ export function createRunRoutes(runService: RunService) {
             if (closed) return;
             const latestRun = runService.getRunById(runId);
             if (latestRun?.state === "completed" || latestRun?.state === "failed") {
+              const deadlineAt = Date.now() + RUN_STREAM_DRAIN_DELAY_MS * 10;
+              while (!closed) {
+                const finalReplay = runService.listRunEvents({
+                  runId,
+                  afterSeq: cursor,
+                  limit: runStreamConfig().replayPageSize,
+                });
+                for (const event of finalReplay.events) {
+                  emit(event);
+                  if (closed) return;
+                }
+                if (finalReplay.events.length > 0 || Date.now() >= deadlineAt) {
+                  break;
+                }
+                await new Promise(resolve => setTimeout(resolve, RUN_STREAM_DRAIN_DELAY_MS));
+              }
               close();
               return;
             }

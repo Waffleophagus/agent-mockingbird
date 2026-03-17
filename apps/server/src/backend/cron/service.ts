@@ -1,14 +1,6 @@
-import type { SQLQueryBindings } from "bun:sqlite";
-import { CronTime, validateCronExpression } from "cron";
-import { realpathSync, statSync } from "node:fs";
-import { extname, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-
+/* eslint-disable import/order */
 import { ensureCronTables } from "./storage";
 import type {
-  CronConditionalModule,
-  CronConditionalModuleContext,
-  CronHandlerResult,
   CronHealthSnapshot,
   CronJobCreateInput,
   CronJobDefinition,
@@ -16,387 +8,28 @@ import type {
   CronJobPatchInput,
   CronJobState,
   CronJobStep,
-  CronRunMode,
-  CronScheduleKind,
-  CronStepKind,
-  CronStepStatus,
 } from "./types";
-import { getConfigSnapshot } from "../config/service";
+import {
+  definitionRowToModel,
+  instanceRowToModel,
+  selectAll,
+  selectOne,
+  stepRowToModel,
+} from "./repository";
+import type { CronDefinitionRow, CronInstanceRow, CronStepRow } from "./repository";
+import { CronExecutor } from "./executor";
+import {
+  buildNormalizedJobInput,
+  computeDueTimesForDefinition,
+  createUniqueId,
+  nowMs,
+  normalizePayload,
+  validateMode,
+  validateSchedule,
+} from "./utils";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
-import { getSessionById, setSessionModel, setSessionTitle } from "../db/repository";
 import { env } from "../env";
-import { createLogger } from "../logging/logger";
-
-interface CronDefinitionRow {
-  id: string;
-  name: string;
-  thread_session_id: string | null;
-  enabled: number;
-  schedule_kind: CronScheduleKind;
-  schedule_expr: string | null;
-  every_ms: number | null;
-  at_iso: string | null;
-  timezone: string | null;
-  run_mode: CronRunMode;
-  handler_key: string | null;
-  condition_module_path: string | null;
-  condition_description: string | null;
-  agent_prompt_template: string | null;
-  agent_model_override: string | null;
-  max_attempts: number;
-  retry_backoff_ms: number;
-  payload_json: string;
-  last_enqueued_for: number | null;
-  created_at: number;
-  updated_at: number;
-}
-
-interface CronInstanceRow {
-  id: string;
-  job_definition_id: string;
-  scheduled_for: number;
-  agent_invoked: number;
-  state: CronJobState;
-  attempt: number;
-  next_attempt_at: number | null;
-  lease_owner: string | null;
-  lease_expires_at: number | null;
-  last_heartbeat_at: number | null;
-  result_summary: string | null;
-  error_json: string | null;
-  created_at: number;
-  updated_at: number;
-}
-
-interface CronStepRow {
-  id: string;
-  job_instance_id: string;
-  step_kind: CronStepKind;
-  status: CronStepStatus;
-  input_json: string | null;
-  output_json: string | null;
-  error_json: string | null;
-  started_at: number | null;
-  finished_at: number | null;
-  created_at: number;
-}
-
-function nowMs() {
-  return Date.now();
-}
-
-const CONDITION_MODULE_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".cjs"]);
-const logger = createLogger("cron");
-
-function toIso(ms: number | null | undefined): string | null {
-  if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
-  return new Date(ms).toISOString();
-}
-
-function parseJson(value: string | null): unknown {
-  if (!value) return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function normalizePayload(input: Record<string, unknown> | undefined): Record<string, unknown> {
-  return input && typeof input === "object" && !Array.isArray(input) ? input : {};
-}
-
-function normalizeConditionalModuleResult(value: unknown): CronHandlerResult {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("conditional module must return an object");
-  }
-  const result = value as Record<string, unknown>;
-  if (result.status !== "ok" && result.status !== "error") {
-    throw new Error("conditional module result.status must be 'ok' or 'error'");
-  }
-  return value as CronHandlerResult;
-}
-
-function readLegacyHandlerKey(input: { handlerKey?: unknown }): string | null {
-  return typeof input.handlerKey === "string" ? input.handlerKey.trim() || null : null;
-}
-
-function definitionRowToModel(row: CronDefinitionRow): CronJobDefinition {
-  return {
-    id: row.id,
-    name: row.name,
-    threadSessionId: row.thread_session_id,
-    enabled: row.enabled === 1,
-    scheduleKind: row.schedule_kind,
-    scheduleExpr: row.schedule_expr,
-    everyMs: row.every_ms,
-    atIso: row.at_iso,
-    timezone: row.timezone,
-    runMode: row.run_mode,
-    conditionModulePath: row.condition_module_path,
-    conditionDescription: row.condition_description,
-    agentPromptTemplate: row.agent_prompt_template,
-    agentModelOverride: row.agent_model_override,
-    maxAttempts: row.max_attempts,
-    retryBackoffMs: row.retry_backoff_ms,
-    payload: (parseJson(row.payload_json) as Record<string, unknown>) ?? {},
-    lastEnqueuedFor: toIso(row.last_enqueued_for),
-    createdAt: toIso(row.created_at) ?? new Date(0).toISOString(),
-    updatedAt: toIso(row.updated_at) ?? new Date(0).toISOString(),
-  };
-}
-
-function instanceRowToModel(row: CronInstanceRow): CronJobInstance {
-  return {
-    id: row.id,
-    jobDefinitionId: row.job_definition_id,
-    scheduledFor: toIso(row.scheduled_for) ?? new Date(0).toISOString(),
-    agentInvoked: row.agent_invoked === 1,
-    state: row.state,
-    attempt: row.attempt,
-    nextAttemptAt: toIso(row.next_attempt_at),
-    leaseOwner: row.lease_owner,
-    leaseExpiresAt: toIso(row.lease_expires_at),
-    lastHeartbeatAt: toIso(row.last_heartbeat_at),
-    resultSummary: row.result_summary,
-    error: parseJson(row.error_json),
-    createdAt: toIso(row.created_at) ?? new Date(0).toISOString(),
-    updatedAt: toIso(row.updated_at) ?? new Date(0).toISOString(),
-  };
-}
-
-function stepRowToModel(row: CronStepRow): CronJobStep {
-  return {
-    id: row.id,
-    jobInstanceId: row.job_instance_id,
-    stepKind: row.step_kind,
-    status: row.status,
-    input: parseJson(row.input_json),
-    output: parseJson(row.output_json),
-    error: parseJson(row.error_json),
-    startedAt: toIso(row.started_at),
-    finishedAt: toIso(row.finished_at),
-    createdAt: toIso(row.created_at) ?? new Date(0).toISOString(),
-  };
-}
-
-function validateSchedule(input: {
-  scheduleKind: CronScheduleKind;
-  scheduleExpr: string | null;
-  everyMs: number | null;
-  atIso: string | null;
-}) {
-  if (input.scheduleKind === "at") {
-    if (!input.atIso) throw new Error("scheduleKind=at requires atIso");
-    const parsedAt = Date.parse(input.atIso);
-    if (!Number.isFinite(parsedAt)) throw new Error("atIso must be a valid ISO timestamp");
-  } else if (input.scheduleKind === "every") {
-    if (typeof input.everyMs !== "number" || !Number.isFinite(input.everyMs) || input.everyMs < 1_000) {
-      throw new Error("scheduleKind=every requires everyMs >= 1000");
-    }
-  } else if (input.scheduleKind === "cron") {
-    const expr = input.scheduleExpr?.trim();
-    if (!expr) throw new Error("scheduleKind=cron requires scheduleExpr");
-    const valid = validateCronExpression(expr);
-    if (!valid.valid) {
-      throw new Error(`invalid cron expression: ${valid.error?.message ?? "parse failed"}`);
-    }
-  }
-}
-
-function validateMode(input: {
-  runMode: CronRunMode;
-  conditionModulePath: string | null;
-  conditionDescription: string | null;
-  agentPromptTemplate: string | null;
-  handlerKey?: string | null;
-}) {
-  if (input.handlerKey?.trim()) {
-    throw new Error("handlerKey is no longer supported");
-  }
-
-  if (input.runMode === "background") {
-    if (!input.conditionModulePath?.trim()) {
-      throw new Error("runMode=background requires conditionModulePath");
-    }
-    if (input.agentPromptTemplate?.trim()) {
-      throw new Error("runMode=background does not allow agentPromptTemplate");
-    }
-    return;
-  }
-
-  if (input.runMode === "agent") {
-    if (input.conditionModulePath) {
-      throw new Error("runMode=agent does not allow conditionModulePath");
-    }
-    if (input.conditionDescription) {
-      throw new Error("runMode=agent does not allow conditionDescription");
-    }
-    if (!input.agentPromptTemplate?.trim()) {
-      throw new Error("runMode=agent requires agentPromptTemplate");
-    }
-    return;
-  }
-
-  if (!input.conditionModulePath?.trim()) {
-    throw new Error("runMode=conditional_agent requires conditionModulePath");
-  }
-}
-
-function computeBackoffMs(base: number, attempt: number): number {
-  const cappedAttempt = Math.max(1, Math.min(10, attempt));
-  return Math.min(base * 2 ** (cappedAttempt - 1), getConfigSnapshot().config.runtime.cron.retryBackoffCapMs);
-}
-
-function renderTemplate(template: string, ctx: Record<string, unknown>): string {
-  return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_full, key: string) => {
-    const raw = ctx[key];
-    if (raw === undefined || raw === null) return "";
-    if (typeof raw === "string") return raw;
-    if (typeof raw === "number" || typeof raw === "boolean") return String(raw);
-    return JSON.stringify(raw);
-  });
-}
-
-function createUniqueId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
-}
-
-function definitionPayloadContext(definition: CronJobDefinition, extra?: Record<string, unknown>) {
-  return {
-    ...definition.payload,
-    jobId: definition.id,
-    jobName: definition.name,
-    ...(extra ?? {}),
-  };
-}
-
-function resolveWorkspaceRootPath(): string {
-  const configured = getConfigSnapshot().config.runtime.opencode.directory?.trim();
-  return resolve(configured || process.cwd());
-}
-
-function resolveConditionModuleAbsolutePath(conditionModulePath: string): string {
-  const extension = extname(conditionModulePath).toLowerCase();
-  if (!CONDITION_MODULE_EXTENSIONS.has(extension)) {
-    throw new Error("conditionModulePath must target a .ts, .js, .mjs, or .cjs file");
-  }
-
-  const workspaceRoot = realpathSync(resolveWorkspaceRootPath());
-  const target = resolve(workspaceRoot, conditionModulePath);
-  let resolvedTarget: string;
-  try {
-    resolvedTarget = realpathSync(target);
-  } catch {
-    throw new Error("conditionModulePath must reference an existing file under the runtime workspace directory");
-  }
-  const relativePath = relative(workspaceRoot, resolvedTarget);
-  if (!relativePath || relativePath === ".") {
-    throw new Error("conditionModulePath must target a file under the runtime workspace directory");
-  }
-  if (relativePath.startsWith("..")) {
-    throw new Error("conditionModulePath escapes the runtime workspace directory");
-  }
-  if (!statSync(resolvedTarget).isFile()) {
-    throw new Error("conditionModulePath must reference a regular file");
-  }
-  return resolvedTarget;
-}
-
-function computeDueTimesForDefinition(row: CronDefinitionRow, now: number, maxPerTick: number): number[] {
-  const due: number[] = [];
-  const lastEnqueued = row.last_enqueued_for ?? null;
-
-  if (row.schedule_kind === "at") {
-    if (!row.at_iso) return due;
-    const atMs = Date.parse(row.at_iso);
-    if (!Number.isFinite(atMs)) return due;
-    if (atMs <= now && (lastEnqueued === null || lastEnqueued < atMs)) {
-      due.push(atMs);
-    }
-    return due;
-  }
-
-  if (row.schedule_kind === "every") {
-    const everyMs = row.every_ms ?? 0;
-    if (!Number.isFinite(everyMs) || everyMs <= 0) return due;
-    let cursor = lastEnqueued ?? row.created_at;
-    for (let i = 0; i < maxPerTick; i += 1) {
-      const next = cursor + everyMs;
-      if (next > now) break;
-      due.push(next);
-      cursor = next;
-    }
-    return due;
-  }
-
-  const expr = row.schedule_expr?.trim();
-  if (!expr) return due;
-  try {
-    const cronTime = new CronTime(expr, row.timezone ?? undefined);
-    let cursor = lastEnqueued ?? row.created_at - 1_000;
-    for (let i = 0; i < maxPerTick; i += 1) {
-      const nextDate = cronTime.getNextDateFrom(new Date(cursor));
-      const nextMs = nextDate.toMillis();
-      if (!Number.isFinite(nextMs)) break;
-      if (nextMs > now) break;
-      if (nextMs <= cursor) break;
-      due.push(nextMs);
-      cursor = nextMs + 1_000;
-    }
-  } catch {
-    logger.warn("Ignoring invalid cron expression during scheduling", {
-      scheduleExpr: expr,
-      timezone: row.timezone,
-    });
-  }
-  return due;
-}
-
-function selectOne<T>(query: string, ...args: SQLQueryBindings[]): T | null {
-  const row = sqlite.query(query).get(...args);
-  return (row as T | null) ?? null;
-}
-
-function selectAll<T>(query: string, ...args: SQLQueryBindings[]): T[] {
-  return sqlite.query(query).all(...args) as T[];
-}
-
-function insertStep(input: {
-  instanceId: string;
-  stepKind: CronStepKind;
-  status: CronStepStatus;
-  input: unknown;
-  output?: unknown;
-  error?: unknown;
-  startedAt?: number | null;
-  finishedAt?: number | null;
-}) {
-  const createdAt = nowMs();
-  sqlite
-    .query(
-      `
-      INSERT INTO cron_job_steps (
-        id, job_instance_id, step_kind, status, input_json, output_json, error_json,
-        started_at, finished_at, created_at
-      )
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-    `,
-    )
-    .run(
-      createUniqueId("step"),
-      input.instanceId,
-      input.stepKind,
-      input.status,
-      JSON.stringify(input.input ?? {}),
-      input.output === undefined ? null : JSON.stringify(input.output),
-      input.error === undefined ? null : JSON.stringify(input.error),
-      input.startedAt ?? null,
-      input.finishedAt ?? null,
-      createdAt,
-    );
-}
 
 export class CronService {
   private schedulerTimer: Timer | null = null;
@@ -404,9 +37,14 @@ export class CronService {
   private schedulerBusy = false;
   private workerBusy = false;
   private readonly workerId = `agent-mockingbird-${process.pid}`;
+  private readonly executor: CronExecutor;
 
   constructor(private runtime: RuntimeEngine) {
     ensureCronTables();
+    this.executor = new CronExecutor(runtime, {
+      getJob: (jobId) => this.getJob(jobId),
+      setInstanceState: (input) => this.setInstanceState(input),
+    });
   }
 
   start() {
@@ -430,14 +68,13 @@ export class CronService {
 
   async listJobs(): Promise<CronJobDefinition[]> {
     ensureCronTables();
-    const rows = selectAll<CronDefinitionRow>(
+    return selectAll<CronDefinitionRow>(
       `
       SELECT *
       FROM cron_job_definitions
       ORDER BY created_at DESC
     `,
-    );
-    return rows.map(definitionRowToModel);
+    ).map(definitionRowToModel);
   }
 
   async getJob(jobId: string): Promise<CronJobDefinition | null> {
@@ -456,33 +93,10 @@ export class CronService {
   async createJob(input: CronJobCreateInput): Promise<CronJobDefinition> {
     ensureCronTables();
     const now = nowMs();
-    const name = input.name.trim();
-    if (!name) throw new Error("name is required");
-
-    const normalized = {
-      id: input.id?.trim() ? input.id.trim() : createUniqueId("cron"),
-      name,
-      enabled: input.enabled ?? true,
-      scheduleKind: input.scheduleKind,
-      scheduleExpr: input.scheduleExpr?.trim() ?? null,
-      everyMs: input.everyMs ?? null,
-      atIso: input.atIso?.trim() ?? null,
-      timezone: input.timezone?.trim() ?? null,
-      runMode: input.runMode,
-      handlerKey: readLegacyHandlerKey(input as { handlerKey?: unknown }),
-      conditionModulePath: input.conditionModulePath?.trim() ?? null,
-      conditionDescription: input.conditionDescription?.trim() ?? null,
-      agentPromptTemplate: input.agentPromptTemplate?.trim() ?? null,
-      agentModelOverride: input.agentModelOverride?.trim() ?? null,
-      maxAttempts: Math.max(1, input.maxAttempts ?? getConfigSnapshot().config.runtime.cron.defaultMaxAttempts),
-      retryBackoffMs: Math.max(
-        1_000,
-        input.retryBackoffMs ?? getConfigSnapshot().config.runtime.cron.defaultRetryBackoffMs,
-      ),
-      payload: normalizePayload(input.payload),
-    };
-
+    const normalized = buildNormalizedJobInput(input);
+    if (!normalized.name) throw new Error("name is required");
     if (!normalized.id) throw new Error("id is required");
+
     validateSchedule(normalized);
     validateMode(normalized);
 
@@ -515,7 +129,7 @@ export class CronService {
         normalized.agentModelOverride,
         normalized.maxAttempts,
         normalized.retryBackoffMs,
-        JSON.stringify(normalized.payload),
+        JSON.stringify(normalizePayload(normalized.payload)),
         now,
       );
 
@@ -531,31 +145,16 @@ export class CronService {
     }
     const existing = await this.getJob(explicitId);
     if (!existing) {
-      const job = await this.createJob({
-        ...input,
-        id: explicitId,
-      });
-      return { created: true, job };
+      return {
+        created: true,
+        job: await this.createJob({ ...input, id: explicitId }),
+      };
     }
 
-    const job = await this.updateJob(explicitId, {
-      name: input.name,
-      enabled: input.enabled,
-      scheduleKind: input.scheduleKind,
-      scheduleExpr: input.scheduleExpr,
-      everyMs: input.everyMs,
-      atIso: input.atIso,
-      timezone: input.timezone,
-      runMode: input.runMode,
-      conditionModulePath: input.conditionModulePath,
-      conditionDescription: input.conditionDescription,
-      agentPromptTemplate: input.agentPromptTemplate,
-      agentModelOverride: input.agentModelOverride,
-      maxAttempts: input.maxAttempts,
-      retryBackoffMs: input.retryBackoffMs,
-      payload: input.payload,
-    });
-    return { created: false, job };
+    return {
+      created: false,
+      job: await this.updateJob(explicitId, input),
+    };
   }
 
   async updateJob(jobId: string, patch: CronJobPatchInput): Promise<CronJobDefinition> {
@@ -563,42 +162,10 @@ export class CronService {
     const existing = await this.getJob(jobId);
     if (!existing) throw new Error(`Unknown cron job: ${jobId}`);
 
-    const merged = {
-      ...existing,
-      name: patch.name?.trim() ?? existing.name,
-      enabled: patch.enabled ?? existing.enabled,
-      scheduleKind: patch.scheduleKind ?? existing.scheduleKind,
-      scheduleExpr: patch.scheduleExpr !== undefined ? patch.scheduleExpr?.trim() ?? null : existing.scheduleExpr,
-      everyMs: patch.everyMs !== undefined ? patch.everyMs : existing.everyMs,
-      atIso: patch.atIso !== undefined ? patch.atIso?.trim() ?? null : existing.atIso,
-      timezone: patch.timezone !== undefined ? patch.timezone?.trim() ?? null : existing.timezone,
-      runMode: patch.runMode ?? existing.runMode,
-      handlerKey: readLegacyHandlerKey(patch as { handlerKey?: unknown }),
-      conditionModulePath:
-        patch.conditionModulePath !== undefined
-          ? patch.conditionModulePath?.trim() ?? null
-          : existing.conditionModulePath,
-      conditionDescription:
-        patch.conditionDescription !== undefined
-          ? patch.conditionDescription?.trim() ?? null
-          : existing.conditionDescription,
-      agentPromptTemplate:
-        patch.agentPromptTemplate !== undefined
-          ? patch.agentPromptTemplate?.trim() ?? null
-          : existing.agentPromptTemplate,
-      agentModelOverride:
-        patch.agentModelOverride !== undefined
-          ? patch.agentModelOverride?.trim() ?? null
-          : existing.agentModelOverride,
-      maxAttempts: Math.max(1, patch.maxAttempts ?? existing.maxAttempts),
-      retryBackoffMs: Math.max(1_000, patch.retryBackoffMs ?? existing.retryBackoffMs),
-      payload: patch.payload !== undefined ? normalizePayload(patch.payload) : existing.payload,
-    };
-
+    const merged = buildNormalizedJobInput({ ...patch, id: jobId }, existing);
     validateSchedule(merged);
     validateMode(merged);
 
-    const updatedAt = nowMs();
     sqlite
       .query(
         `
@@ -644,7 +211,7 @@ export class CronService {
         merged.maxAttempts,
         merged.retryBackoffMs,
         JSON.stringify(merged.payload),
-        updatedAt,
+        nowMs(),
       );
 
     const updated = await this.getJob(jobId);
@@ -703,7 +270,7 @@ export class CronService {
 
   async listSteps(instanceId: string): Promise<CronJobStep[]> {
     ensureCronTables();
-    const rows = selectAll<CronStepRow>(
+    return selectAll<CronStepRow>(
       `
       SELECT *
       FROM cron_job_steps
@@ -711,8 +278,7 @@ export class CronService {
       ORDER BY created_at ASC
     `,
       instanceId,
-    );
-    return rows.map(stepRowToModel);
+    ).map(stepRowToModel);
   }
 
   async runJobNow(jobId: string): Promise<{ queued: boolean; instanceId: string | null }> {
@@ -746,41 +312,43 @@ export class CronService {
 
   async getHealth(): Promise<CronHealthSnapshot> {
     ensureCronTables();
-    const jobs = selectOne<{ total: number; enabled: number }>(
-      `
-      SELECT
-        COUNT(*) AS total,
-        COALESCE(SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END), 0) AS enabled
-      FROM cron_job_definitions
-    `,
-    ) ?? { total: 0, enabled: 0 };
+    const jobs =
+      selectOne<{ total: number; enabled: number }>(
+        `
+        SELECT
+          COUNT(*) AS total,
+          COALESCE(SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END), 0) AS enabled
+        FROM cron_job_definitions
+      `,
+      ) ?? { total: 0, enabled: 0 };
 
-    const instances = selectOne<{
-      queued: number;
-      leased: number;
-      running: number;
-      completed: number;
-      failed: number;
-      dead: number;
-    }>(
-      `
-      SELECT
-        COALESCE(SUM(CASE WHEN state = 'queued' THEN 1 ELSE 0 END), 0) AS queued,
-        COALESCE(SUM(CASE WHEN state = 'leased' THEN 1 ELSE 0 END), 0) AS leased,
-        COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0) AS running,
-        COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
-        COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
-        COALESCE(SUM(CASE WHEN state = 'dead' THEN 1 ELSE 0 END), 0) AS dead
-      FROM cron_job_instances
-    `,
-    ) ?? {
-      queued: 0,
-      leased: 0,
-      running: 0,
-      completed: 0,
-      failed: 0,
-      dead: 0,
-    };
+    const instances =
+      selectOne<{
+        queued: number;
+        leased: number;
+        running: number;
+        completed: number;
+        failed: number;
+        dead: number;
+      }>(
+        `
+        SELECT
+          COALESCE(SUM(CASE WHEN state = 'queued' THEN 1 ELSE 0 END), 0) AS queued,
+          COALESCE(SUM(CASE WHEN state = 'leased' THEN 1 ELSE 0 END), 0) AS leased,
+          COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0) AS running,
+          COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
+          COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+          COALESCE(SUM(CASE WHEN state = 'dead' THEN 1 ELSE 0 END), 0) AS dead
+        FROM cron_job_instances
+      `,
+      ) ?? {
+        queued: 0,
+        leased: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+        dead: 0,
+      };
 
     return {
       enabled: env.AGENT_MOCKINGBIRD_CRON_ENABLED,
@@ -857,9 +425,7 @@ export class CronService {
       `,
         runtimeSessionId,
       )?.session_id ?? null;
-    if (!threadSessionId) {
-      throw new Error("Unknown runtime session");
-    }
+    if (!threadSessionId) throw new Error("Unknown runtime session");
 
     const job = this.getJobByThreadSessionId(threadSessionId);
     if (!job) {
@@ -900,11 +466,14 @@ export class CronService {
       );
 
       for (const row of definitions) {
-        const dueTimes = computeDueTimesForDefinition(row, now, env.AGENT_MOCKINGBIRD_CRON_MAX_ENQUEUE_PER_JOB_TICK);
+        const dueTimes = computeDueTimesForDefinition(
+          row,
+          now,
+          env.AGENT_MOCKINGBIRD_CRON_MAX_ENQUEUE_PER_JOB_TICK,
+        );
         if (!dueTimes.length) continue;
         let lastEnqueued = row.last_enqueued_for ?? null;
         for (const scheduledFor of dueTimes) {
-          const instanceId = createUniqueId("ins");
           sqlite
             .query(
               `
@@ -917,7 +486,7 @@ export class CronService {
               ON CONFLICT(job_definition_id, scheduled_for) DO NOTHING
             `,
             )
-            .run(instanceId, row.id, scheduledFor, now);
+            .run(createUniqueId("ins"), row.id, scheduledFor, now);
           if (lastEnqueued === null || scheduledFor > lastEnqueued) {
             lastEnqueued = scheduledFor;
           }
@@ -965,7 +534,6 @@ export class CronService {
   private claimNextInstance(now: number): CronInstanceRow | null {
     const tx = sqlite.transaction(() => {
       this.reclaimExpiredLeases(now);
-
       const candidate = selectOne<CronInstanceRow>(
         `
         SELECT *
@@ -1012,10 +580,24 @@ export class CronService {
     if (!env.AGENT_MOCKINGBIRD_CRON_ENABLED || this.workerBusy) return;
     this.workerBusy = true;
     try {
-      const now = nowMs();
-      const claimed = this.claimNextInstance(now);
+      const claimed = this.claimNextInstance(nowMs());
       if (!claimed) return;
-      await this.executeInstance(claimed);
+
+      const definitionRow = this.loadDefinitionById(claimed.job_definition_id);
+      if (!definitionRow) {
+        this.setInstanceState({
+          instanceId: claimed.id,
+          state: "dead",
+          error: { message: `missing job definition ${claimed.job_definition_id}` },
+        });
+        return;
+      }
+
+      await this.executor.executeInstance(
+        claimed,
+        definitionRowToModel(definitionRow),
+        instanceRowToModel(claimed),
+      );
     } finally {
       this.workerBusy = false;
     }
@@ -1040,7 +622,6 @@ export class CronService {
     resultSummary?: string | null;
     error?: unknown;
   }) {
-    const updatedAt = nowMs();
     sqlite
       .query(
         `
@@ -1065,376 +646,7 @@ export class CronService {
         input.nextAttemptAt ?? null,
         input.resultSummary ?? null,
         input.error === undefined ? null : JSON.stringify(input.error),
-        updatedAt,
+        nowMs(),
       );
-  }
-
-  private async ensureCronThread(definition: CronJobDefinition): Promise<CronJobDefinition> {
-    if (definition.threadSessionId) {
-      const existingThread = getSessionById(definition.threadSessionId);
-      if (existingThread) {
-        const mainSession = getSessionById("main");
-        const desiredTitle = `Cron: ${definition.name}`;
-        if (existingThread.title !== desiredTitle) {
-          setSessionTitle(existingThread.id, desiredTitle);
-        }
-        if (mainSession && existingThread.model !== mainSession.model) {
-          setSessionModel(existingThread.id, mainSession.model);
-        }
-        return (await this.getJob(definition.id)) ?? definition;
-      }
-    }
-
-    if (!this.runtime.spawnBackgroundSession) {
-      throw new Error("runtime does not support cron thread sessions");
-    }
-
-    const spawned = await this.runtime.spawnBackgroundSession({
-      parentSessionId: "main",
-      title: `Cron: ${definition.name}`,
-      requestedBy: `cron:${definition.id}`,
-      prompt: "",
-    });
-    const threadSessionId = spawned.childSessionId?.trim();
-    if (!threadSessionId) {
-      throw new Error("Failed to create cron thread session");
-    }
-
-    sqlite
-      .query(
-        `
-        UPDATE cron_job_definitions
-        SET thread_session_id = ?2, updated_at = ?3
-        WHERE id = ?1
-      `,
-      )
-      .run(definition.id, threadSessionId, nowMs());
-
-    const mainSession = getSessionById("main");
-    if (mainSession) {
-      setSessionModel(threadSessionId, mainSession.model);
-    }
-    setSessionTitle(threadSessionId, `Cron: ${definition.name}`);
-
-    const refreshed = await this.getJob(definition.id);
-    if (!refreshed) {
-      throw new Error(`Unknown cron job: ${definition.id}`);
-    }
-    return refreshed;
-  }
-
-  private async invokeAgent(input: {
-    definition: CronJobDefinition;
-    instance: CronJobInstance;
-    prompt: string;
-    context?: Record<string, unknown>;
-  }): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
-    const promptText = input.prompt.trim();
-    if (!promptText) return { ok: false, error: "agent prompt was empty" };
-    const definition = await this.ensureCronThread(input.definition);
-    const targetSession = definition.threadSessionId;
-    if (!targetSession) return { ok: false, error: "cron thread session was not created" };
-
-    const context = input.context ?? {};
-    const agentFromPayload =
-      typeof input.definition.payload.agentId === "string"
-        ? input.definition.payload.agentId.trim()
-        : typeof input.definition.payload.agent === "string"
-          ? input.definition.payload.agent.trim()
-          : "";
-    const expanded = renderTemplate(promptText, {
-      ...definitionPayloadContext(definition),
-      threadSessionId: targetSession,
-      ...context,
-      instanceId: input.instance.id,
-      scheduledFor: input.instance.scheduledFor,
-    });
-
-    try {
-      const ack = await this.runtime.sendUserMessage({
-        sessionId: targetSession,
-        content: expanded,
-        agent: agentFromPayload || undefined,
-      });
-      const assistant = [...ack.messages].reverse().find(message => message.role === "assistant");
-      return {
-        ok: true,
-        summary: assistant?.content?.slice(0, 300) ?? "agent invocation completed",
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "agent invocation failed";
-      return { ok: false, error: message };
-    }
-  }
-
-  private async runModuleStep(
-    definition: CronJobDefinition,
-    instance: CronJobInstance,
-    input: { allowAgentInvocation: boolean },
-  ): Promise<CronHandlerResult> {
-    const conditionModulePath = definition.conditionModulePath?.trim();
-    if (!conditionModulePath) {
-      return {
-        status: "error",
-        summary: "missing conditionModulePath",
-      };
-    }
-
-    let absoluteModulePath = "";
-    try {
-      absoluteModulePath = resolveConditionModuleAbsolutePath(conditionModulePath);
-    } catch (error) {
-      return {
-        status: "error",
-        summary: error instanceof Error ? error.message : "invalid conditionModulePath",
-      };
-    }
-
-    try {
-      const result = await this.runConditionalModuleInWorker(absoluteModulePath, {
-        nowMs: nowMs(),
-        payload: definition.payload,
-        job: definition,
-        instance,
-      });
-      if (!input.allowAgentInvocation && result.invokeAgent?.shouldInvoke) {
-        return {
-          status: "error",
-          summary: "runMode=background does not allow invokeAgent",
-        };
-      }
-      return result;
-    } catch (error) {
-      return {
-        status: "error",
-        summary: error instanceof Error ? error.message : "conditional module failed",
-      };
-    }
-  }
-
-  private async runConditionalModuleInWorker(
-    absoluteModulePath: string,
-    ctx: CronConditionalModuleContext,
-  ): Promise<CronHandlerResult> {
-    const timeoutMs = getConfigSnapshot().config.runtime.cron.conditionalModuleTimeoutMs;
-    const moduleUrl = pathToFileURL(absoluteModulePath).href;
-    const task = (async () => {
-      const loaded = (await import(`${moduleUrl}?cronRun=${Date.now()}`)) as {
-        default?: CronConditionalModule;
-      };
-      if (typeof loaded.default !== "function") {
-        throw new Error("conditional module must export a default function");
-      }
-      return normalizeConditionalModuleResult(await loaded.default(ctx));
-    })();
-
-    return await Promise.race([
-      task,
-      new Promise<CronHandlerResult>((_resolve, reject) => {
-        setTimeout(() => reject(new Error(`conditional module timed out after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  }
-
-  private async executeInstance(claimed: CronInstanceRow) {
-    const definitionRow = this.loadDefinitionById(claimed.job_definition_id);
-    if (!definitionRow) {
-      this.setInstanceState({
-        instanceId: claimed.id,
-        state: "dead",
-        error: { message: `missing job definition ${claimed.job_definition_id}` },
-      });
-      return;
-    }
-    let definition = definitionRowToModel(definitionRow);
-    const instance = instanceRowToModel(claimed);
-    const attempt = claimed.attempt + 1;
-    const startedAt = nowMs();
-
-    sqlite
-      .query(
-        `
-        UPDATE cron_job_instances
-        SET
-          state = 'running',
-          attempt = ?2,
-          last_heartbeat_at = ?3,
-          updated_at = ?3
-        WHERE id = ?1
-      `,
-      )
-      .run(claimed.id, attempt, startedAt);
-
-    let finalSummary = "";
-    try {
-      definition = await this.ensureCronThread(definition);
-      if (definition.runMode === "agent") {
-        insertStep({
-          instanceId: claimed.id,
-          stepKind: "agent",
-          status: "running",
-          input: {
-            promptTemplate: definition.agentPromptTemplate,
-            payload: definition.payload,
-          },
-          startedAt,
-        });
-        const template = definition.agentPromptTemplate ?? "";
-        const prompt = renderTemplate(template, definitionPayloadContext(definition));
-        const agentResult = await this.invokeAgent({
-          definition,
-          instance,
-          prompt,
-        });
-        if (!agentResult.ok) {
-          insertStep({
-            instanceId: claimed.id,
-            stepKind: "agent",
-            status: "failed",
-            input: { promptTemplate: template },
-            error: { message: agentResult.error },
-            startedAt,
-            finishedAt: nowMs(),
-          });
-          throw new Error(agentResult.error);
-        }
-        finalSummary = agentResult.summary;
-        insertStep({
-          instanceId: claimed.id,
-          stepKind: "agent",
-          status: "completed",
-          input: { promptTemplate: template },
-          output: { summary: agentResult.summary },
-          startedAt,
-          finishedAt: nowMs(),
-        });
-      } else {
-        const stepKind: CronStepKind =
-          definition.runMode === "background" ? "background" : "conditional_agent";
-        insertStep({
-          instanceId: claimed.id,
-          stepKind,
-          status: "running",
-          input: {
-            payload: definition.payload,
-            conditionModulePath: definition.conditionModulePath,
-          },
-          startedAt,
-        });
-        const moduleResult = await this.runModuleStep(definition, instance, {
-          allowAgentInvocation: definition.runMode === "conditional_agent",
-        });
-        if (moduleResult.status !== "ok") {
-          insertStep({
-            instanceId: claimed.id,
-            stepKind,
-            status: "failed",
-            input: {
-              payload: definition.payload,
-              conditionModulePath: definition.conditionModulePath,
-            },
-            output: moduleResult,
-            error: { message: moduleResult.summary ?? "module failed" },
-            startedAt,
-            finishedAt: nowMs(),
-          });
-          throw new Error(moduleResult.summary ?? "module failed");
-        }
-        finalSummary = moduleResult.summary ?? "module step completed";
-        insertStep({
-          instanceId: claimed.id,
-          stepKind,
-          status: "completed",
-          input: {
-            payload: definition.payload,
-            conditionModulePath: definition.conditionModulePath,
-          },
-          output: moduleResult,
-          startedAt,
-          finishedAt: nowMs(),
-        });
-
-        const shouldInvokeAgent =
-          definition.runMode === "conditional_agent" &&
-          moduleResult.invokeAgent?.shouldInvoke === true;
-
-        if (shouldInvokeAgent) {
-          const template = moduleResult.invokeAgent?.prompt ?? definition.agentPromptTemplate ?? "";
-          const prompt = renderTemplate(template, {
-            ...definitionPayloadContext(definition),
-            ...(moduleResult.invokeAgent?.context ?? {}),
-          });
-          const agentStartedAt = nowMs();
-          insertStep({
-            instanceId: claimed.id,
-            stepKind: "agent",
-            status: "running",
-            input: {
-              promptTemplate: template,
-              invokeAgent: moduleResult.invokeAgent ?? null,
-            },
-            startedAt: agentStartedAt,
-          });
-          const agentResult = await this.invokeAgent({
-            definition,
-            instance,
-            prompt,
-            context: moduleResult.invokeAgent?.context,
-          });
-          if (!agentResult.ok) {
-            insertStep({
-              instanceId: claimed.id,
-              stepKind: "agent",
-              status: "failed",
-              input: {
-                promptTemplate: template,
-              },
-              error: { message: agentResult.error },
-              startedAt: agentStartedAt,
-              finishedAt: nowMs(),
-            });
-            throw new Error(agentResult.error);
-          }
-          finalSummary = `${finalSummary}; ${agentResult.summary}`;
-          insertStep({
-            instanceId: claimed.id,
-            stepKind: "agent",
-            status: "completed",
-            input: {
-              promptTemplate: template,
-            },
-            output: { summary: agentResult.summary },
-            startedAt: agentStartedAt,
-            finishedAt: nowMs(),
-          });
-        }
-      }
-
-      this.setInstanceState({
-        instanceId: claimed.id,
-        state: "completed",
-        attempt,
-        resultSummary: finalSummary || "completed",
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "job execution failed";
-      const canRetry = attempt < definition.maxAttempts;
-      if (canRetry) {
-        this.setInstanceState({
-          instanceId: claimed.id,
-          state: "failed",
-          attempt,
-          nextAttemptAt: nowMs() + computeBackoffMs(definition.retryBackoffMs, attempt),
-          error: { message },
-        });
-      } else {
-        this.setInstanceState({
-          instanceId: claimed.id,
-          state: "dead",
-          attempt,
-          error: { message },
-        });
-      }
-    }
   }
 }
