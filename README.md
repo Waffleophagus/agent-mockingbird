@@ -38,7 +38,7 @@ bun run build
 bun run build:bin
 ```
 
-and stages the committed web bundle in `dist/app` plus the tracked CLI shim.
+and builds local output into `dist/app` plus the tracked CLI shim.
 
 Run agent-mockingbird + OpenCode together for smoke testing:
 
@@ -342,7 +342,7 @@ Deployment artifacts:
 This repo uses one CI/CD workflow:
 
 - `.github/workflows/ci.yml` runs `bun run check:ship`, then publishes the same packed artifact to your npm-compatible package registry.
-- `.github/workflows/ci.yml` verifies the committed `dist/app` bundle, rebuilds the standalone binary locally in CI, then publishes the packed artifact to your npm-compatible package registry.
+- `.github/workflows/ci.yml` rebuilds `dist/app` and the standalone binary in CI, then publishes the packed artifact to your npm-compatible package registry.
 - Pull requests run checks only (no publish).
 - Any publishable push updates npm tag `latest`. For now, `latest` simply means "most recent successful publish," regardless of branch.
 - Pushes to matching `v*` tags publish the exact `package.json` version with npm tag `latest`.
