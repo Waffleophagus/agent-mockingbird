@@ -109,8 +109,14 @@ function assertShipState(status: SyncStatus) {
 
 function runFilteredOpencodeTypecheck() {
   console.log("\n== OpenCode Dependency Install ==");
-  runCommand(["bun", "install", "--cwd", cleanroomRoot, "--frozen-lockfile"], { quietLabel: "cleanroom/opencode" });
-  runCommand(["bun", "install", "--cwd", vendorRoot, "--frozen-lockfile"], { quietLabel: "vendor/opencode" });
+  runCommand(["bun", "install", "--cwd", cleanroomRoot, "--frozen-lockfile"], {
+    quietLabel: "cleanroom/opencode",
+    env: bunInstallEnv(),
+  });
+  runCommand(["bun", "install", "--cwd", vendorRoot, "--frozen-lockfile"], {
+    quietLabel: "vendor/opencode",
+    env: bunInstallEnv(),
+  });
 
   console.log("\n== OpenCode Full Typecheck ==");
   const cleanroomResult = runCommand(
@@ -306,6 +312,7 @@ function runCommand(
     printCommand?: boolean;
     quietLabel?: string;
     suppressOutput?: boolean;
+    env?: NodeJS.ProcessEnv;
   } = {},
 ): CommandResult {
   const cwd = options.cwd ?? repoRoot;
@@ -316,7 +323,7 @@ function runCommand(
   const result = spawnSync(command[0], command.slice(1), {
     cwd,
     encoding: "utf8",
-    env: process.env,
+    env: options.env ?? process.env,
   });
 
   const stdout = result.stdout || "";
@@ -357,6 +364,14 @@ function indentBlock(value: string) {
     .split(/\r?\n/)
     .map((line) => `  ${line}`)
     .join("\n");
+}
+
+function bunInstallEnv() {
+  return {
+    ...process.env,
+    GITHUB_SERVER_URL: "https://github.com",
+    GITHUB_API_URL: "https://api.github.com",
+  };
 }
 
 function fail(message: string, code = 1): never {

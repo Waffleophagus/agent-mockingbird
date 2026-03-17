@@ -640,10 +640,18 @@ function gitAmEnv() {
   };
 }
 
+function bunInstallEnv() {
+  return {
+    ...process.env,
+    GITHUB_SERVER_URL: "https://github.com",
+    GITHUB_API_URL: "https://api.github.com",
+  };
+}
+
 function runValidation(vendorPath: string, options?: { includeRepoValidation?: boolean }) {
   const includeRepoValidation =
     options?.includeRepoValidation ?? path.resolve(vendorPath) === path.resolve(repoRoot, readLock().paths.vendor);
-  run(["bun", "install", "--cwd", vendorPath], repoRoot);
+  run(["bun", "install", "--cwd", vendorPath], repoRoot, { env: bunInstallEnv() });
   run(["bun", "run", "typecheck"], path.join(vendorPath, "packages", "app"));
   run(["bun", "run", "build"], path.join(vendorPath, "packages", "app"));
   run(
