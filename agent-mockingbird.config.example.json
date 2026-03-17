@@ -1,5 +1,8 @@
 {
-  "version": 1,
+  "version": 2,
+  "workspace": {
+    "pinnedDirectory": "./data/workspace"
+  },
   "runtime": {
     "opencode": {
       "baseUrl": "http://127.0.0.1:4096",

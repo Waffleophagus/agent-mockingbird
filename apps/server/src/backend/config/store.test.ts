@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { parseConfig } from "./store";
+import { resolveExampleConfigPath } from "./testFixtures";
 import { ConfigApplyError } from "./types";
 
 test("parseConfig reports a clear error when AGENT_MOCKINGBIRD_CONFIG_PATH points to OpenCode config.json", () => {
@@ -23,7 +24,7 @@ test("parseConfig uses AGENT_MOCKINGBIRD_OPENCODE_* env vars as runtime fallback
   const previousModelId = process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID;
   process.env.AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID = "env-only-model";
   try {
-    const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
+    const filePath = resolveExampleConfigPath();
     const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
       runtime?: { opencode?: Record<string, unknown> };
     };
@@ -41,41 +42,44 @@ test("parseConfig uses AGENT_MOCKINGBIRD_OPENCODE_* env vars as runtime fallback
   }
 });
 
-test("parseConfig auto-fills opencode directory from memory workspace when unset", () => {
-  const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
+test("parseConfig aligns runtime workspace paths to workspace.pinnedDirectory", () => {
+  const filePath = resolveExampleConfigPath();
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
-    runtime?: { opencode?: Record<string, unknown>; memory?: Record<string, unknown> };
+    workspace?: Record<string, unknown>;
   };
-  if (!raw.runtime?.opencode || !raw.runtime.memory) {
-    throw new Error("Test fixture missing runtime workspace settings");
+  if (!raw.workspace) {
+    throw new Error("Test fixture missing workspace settings");
   }
 
-  raw.runtime.opencode.directory = null;
-  raw.runtime.memory.workspaceDir = "./custom-workspace";
+  raw.workspace.pinnedDirectory = "./custom-workspace";
   const parsed = parseConfig(raw);
   const expected = path.resolve(process.cwd(), "custom-workspace");
+  expect(parsed.workspace.pinnedDirectory).toBe(expected);
   expect(parsed.runtime.opencode.directory).toBe(expected);
   expect(parsed.runtime.memory.workspaceDir).toBe(expected);
 });
 
-test("parseConfig auto-aligns mismatched memory workspace to explicit opencode directory", () => {
-  const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
+test("parseConfig ignores legacy mismatched runtime workspace fields in favor of workspace.pinnedDirectory", () => {
+  const filePath = resolveExampleConfigPath();
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    workspace?: Record<string, unknown>;
     runtime?: { opencode?: Record<string, unknown>; memory?: Record<string, unknown> };
   };
-  if (!raw.runtime?.opencode || !raw.runtime.memory) {
+  if (!raw.workspace || !raw.runtime?.opencode || !raw.runtime.memory) {
     throw new Error("Test fixture missing runtime workspace settings");
   }
 
+  raw.workspace.pinnedDirectory = "/tmp/pinned-workspace";
   raw.runtime.opencode.directory = "/tmp/opencode-workspace";
   raw.runtime.memory.workspaceDir = "/tmp/memory-workspace";
   const parsed = parseConfig(raw);
-  expect(parsed.runtime.opencode.directory).toBe("/tmp/opencode-workspace");
-  expect(parsed.runtime.memory.workspaceDir).toBe("/tmp/opencode-workspace");
+  expect(parsed.workspace.pinnedDirectory).toBe("/tmp/pinned-workspace");
+  expect(parsed.runtime.opencode.directory).toBe("/tmp/pinned-workspace");
+  expect(parsed.runtime.memory.workspaceDir).toBe("/tmp/pinned-workspace");
 });
 
 test("example config no longer ships heartbeat config on the default build agent", () => {
-  const filePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
+  const filePath = resolveExampleConfigPath();
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
     ui?: { agentTypes?: Array<{ id?: string; heartbeat?: unknown }> };
   };

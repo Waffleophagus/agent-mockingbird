@@ -303,6 +303,8 @@ export class OpencodeRuntime implements RuntimeEngine {
   private listeners = new Set<Listener>();
   private client: OpencodeClient | null = null;
   private clientConnectionKey: string | null = null;
+  private readonly disposeController = new AbortController();
+  private disposed = false;
   private eventSyncStarted = false;
   private busySessions = new Set<string>();
   private healthSnapshot: RuntimeHealthSnapshot | null = null;
@@ -362,6 +364,29 @@ export class OpencodeRuntime implements RuntimeEngine {
     return () => {
       this.listeners.delete(onEvent);
     };
+  }
+
+  async dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.disposeController.abort();
+    this.listeners.clear();
+    this.backgroundHydrationInFlight.clear();
+    this.backgroundAnnouncementInFlight.clear();
+    this.backgroundLastEmitByRunId.clear();
+    this.backgroundMessageSyncAtByChildSessionId.clear();
+    this.busySessions.clear();
+    this.drainingSessions.clear();
+    this.messageRoleByScopedMessageId.clear();
+    this.partTypeByScopedPartId.clear();
+    this.streamedAssistantContentByScopedMessageId.clear();
+    this.emittedCodeHighlightLinesByScopedMessageId.clear();
+    this.memoryInjectionStateBySessionId.clear();
+    this.clearAllTimers(this.renderSnapshotTimerByScopedMessageId);
+    this.clearAllTimers(this.liveCodeHighlightTimerByScopedMessageId);
+    if (this.backgroundSyncInFlight) {
+      await this.backgroundSyncInFlight.catch(() => {});
+    }
   }
 
   async syncSessionMessages(sessionId: string): Promise<void> {
@@ -1507,29 +1532,28 @@ export class OpencodeRuntime implements RuntimeEngine {
   }
 
   private emit(event: RuntimeEvent) {
+    if (this.disposed) return;
     for (const listener of this.listeners) {
       listener(event);
     }
   }
 
   private startEventSync() {
-    if (this.eventSyncStarted) return;
+    if (this.eventSyncStarted || this.disposed) return;
     this.eventSyncStarted = true;
     void this.runEventSyncLoop();
   }
 
   private startBackgroundSync() {
-    if (this.backgroundSyncStarted) return;
+    if (this.backgroundSyncStarted || this.disposed) return;
     this.backgroundSyncStarted = true;
     void this.runBackgroundSyncLoop();
   }
 
   private async runBackgroundSyncLoop() {
-    while (true) {
+    while (!this.disposed) {
       await this.syncBackgroundRuns();
-      await new Promise((resolve) =>
-        setTimeout(resolve, BACKGROUND_SYNC_INTERVAL_MS),
-      );
+      await this.waitFor(BACKGROUND_SYNC_INTERVAL_MS);
     }
   }
 
@@ -1606,20 +1630,23 @@ export class OpencodeRuntime implements RuntimeEngine {
   }
 
   private async runEventSyncLoop() {
-    while (true) {
+    while (!this.disposed) {
       try {
         const subscription = await this.getClient().event.subscribe({
           responseStyle: "data",
           throwOnError: true,
+          signal: this.disposeController.signal,
         });
         for await (const event of subscription.stream) {
+          if (this.disposed) return;
           this.handleOpencodeEvent(event);
         }
       } catch {
+        if (this.disposed) return;
         // Non-blocking: event stream issues should not disrupt prompt handling.
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await this.waitFor(1_000);
     }
   }
 
@@ -2503,6 +2530,11 @@ export class OpencodeRuntime implements RuntimeEngine {
         "runtime",
       ),
     );
+
+    if (run.status === "completed" || run.status === "failed" || run.status === "aborted") {
+      this.backgroundLastEmitByRunId.delete(run.id);
+      this.backgroundMessageSyncAtByChildSessionId.delete(run.childExternalSessionId);
+    }
   }
 
   private ensureLocalSessionForBackgroundRun(
@@ -4090,6 +4122,29 @@ export class OpencodeRuntime implements RuntimeEngine {
         RUNTIME_HEALTH_TIMEOUT_CAP_MS,
       ),
     );
+  }
+
+  private async waitFor(ms: number) {
+    if (this.disposed) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        this.disposeController.signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        this.disposeController.signal.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      this.disposeController.signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  private clearAllTimers(timers: Map<string, ReturnType<typeof setTimeout>>) {
+    for (const timer of timers.values()) {
+      clearTimeout(timer);
+    }
+    timers.clear();
   }
 
   private normalizeHealthProbeError(error: unknown, timeoutMs: number): Error {

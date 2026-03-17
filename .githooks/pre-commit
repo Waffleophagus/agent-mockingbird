@@ -30,4 +30,4 @@ bun run typecheck
 bun run build
 bun run build:bin
 
-git add bin/agent-mockingbird dist/app
+git add bin/agent-mockingbird bin/runtime-layout.mjs

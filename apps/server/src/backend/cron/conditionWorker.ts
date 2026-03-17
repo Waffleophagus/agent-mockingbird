@@ -1,9 +1,7 @@
-import { pathToFileURL } from "node:url";
-
 import type { CronConditionalModule, CronConditionalModuleContext, CronHandlerResult } from "./types";
 
 interface WorkerRequest {
-  modulePath: string;
+  moduleUrl: string;
   context: CronConditionalModuleContext;
 }
 
@@ -28,11 +26,11 @@ function normalizeModuleResult(value: unknown): CronHandlerResult {
 }
 
 async function run(request: WorkerRequest): Promise<CronHandlerResult> {
-  if (!request.modulePath?.trim()) {
-    throw new Error("conditional module path was empty");
+  const moduleUrl = request.moduleUrl?.trim();
+  if (!moduleUrl) {
+    throw new Error("conditional module URL was empty");
   }
-  const moduleUrl = `${pathToFileURL(request.modulePath).href}?cronRun=${Date.now()}`;
-  const loaded = (await import(moduleUrl)) as {
+  const loaded = (await import(`${moduleUrl}?cronRun=${Date.now()}`)) as {
     default?: CronConditionalModule;
   };
   if (typeof loaded.default !== "function") {

@@ -83,11 +83,13 @@ test(
     mkdirSync(path.join(workspaceDir, "cron"), { recursive: true });
 
     const config = JSON.parse(readFileSync(path.join(repoRoot, "agent-mockingbird.config.example.json"), "utf8")) as {
+      workspace: { pinnedDirectory: string };
       runtime: {
         opencode: { baseUrl: string; directory: string };
         memory: { enabled: boolean; workspaceDir: string };
       };
     };
+    config.workspace.pinnedDirectory = workspaceDir;
     config.runtime.opencode.baseUrl = `http://127.0.0.1:${sidecarPort}`;
     config.runtime.opencode.directory = workspaceDir;
     config.runtime.memory.enabled = false;

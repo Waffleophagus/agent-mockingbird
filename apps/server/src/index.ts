@@ -70,7 +70,7 @@ const apiRoutes = createApiRoutes({
   runService,
 });
 
-runtime.subscribe(eventStream.publish);
+const unsubscribeRuntimeEvents = runtime.subscribe(eventStream.publish);
 
 async function proxyOpenCodeSidecar(req: Request) {
   const sidecarBaseUrl = getConfigSnapshot().config.runtime.opencode.baseUrl;
@@ -138,15 +138,29 @@ const server = serve({
 });
 
 const shutdown = () => {
+  unsubscribeRuntimeEvents();
   runService.stop();
   cronService.stop();
   signalService.stop();
 };
 
+let shuttingDown = false;
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
+  process.once(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     shutdown();
-    process.exit(0);
+    void Promise.resolve(runtime.dispose?.())
+      .catch(() => {})
+      .finally(() => {
+        try {
+          server.stop(true);
+        } catch {
+          // ignore shutdown races
+        }
+        process.exit(0);
+      });
   });
 }
 

@@ -1,15 +1,13 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { CronTime, validateCronExpression } from "cron";
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { getConfigSnapshot } from "../config/service";
 import { env } from "../env";
-// @ts-expect-error -- Bun text imports are resolved by the bundler at runtime.
-import conditionWorkerSource from "./conditionWorker.ts" with { type: "text" };
 import { ensureCronTables } from "./storage";
 import type {
+  CronConditionalModule,
   CronConditionalModuleContext,
   CronHandlerResult,
   CronHealthSnapshot,
@@ -82,21 +80,6 @@ interface CronStepRow {
   created_at: number;
 }
 
-interface ConditionWorkerSuccess {
-  ok: true;
-  result: CronHandlerResult;
-}
-
-interface ConditionWorkerFailure {
-  ok: false;
-  error: {
-    message: string;
-    stack?: string;
-  };
-}
-
-type ConditionWorkerMessage = ConditionWorkerSuccess | ConditionWorkerFailure;
-
 function nowMs() {
   return Date.now();
 }
@@ -117,6 +100,17 @@ function parseJson(value: string | null): unknown {
 
 function normalizePayload(input: Record<string, unknown> | undefined): Record<string, unknown> {
   return input && typeof input === "object" && !Array.isArray(input) ? input : {};
+}
+
+function normalizeConditionalModuleResult(value: unknown): CronHandlerResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("conditional module must return an object");
+  }
+  const result = value as Record<string, unknown>;
+  if (result.status !== "ok" && result.status !== "error") {
+    throw new Error("conditional module result.status must be 'ok' or 'error'");
+  }
+  return value as CronHandlerResult;
 }
 
 function readLegacyHandlerKey(input: { handlerKey?: unknown }): string | null {
@@ -1201,57 +1195,23 @@ export class CronService {
     ctx: CronConditionalModuleContext,
   ): Promise<CronHandlerResult> {
     const timeoutMs = getConfigSnapshot().config.runtime.cron.conditionalModuleTimeoutMs;
-    const workspaceRoot = resolveWorkspaceRootPath();
-    const relativeModulePath = relative(workspaceRoot, absoluteModulePath);
-    const workerWorkspaceRoot = mkdtempSync(join(tmpdir(), "agent-mockingbird-cron-workspace-"));
-    const linkedWorkspaceRoot = join(workerWorkspaceRoot, "workspace");
-    symlinkSync(workspaceRoot, linkedWorkspaceRoot, "dir");
-    const workerModulePath = join(linkedWorkspaceRoot, relativeModulePath);
-    const workerModuleUrl = URL.createObjectURL(
-      new File([conditionWorkerSource], "conditionWorker.ts", { type: "text/typescript" }),
-    );
-
-    return await new Promise<CronHandlerResult>((resolveResult, rejectResult) => {
-      const worker = new Worker(workerModuleUrl, { type: "module" });
-      let settled = false;
-
-      const settle = (next: () => void) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        worker.terminate();
-        URL.revokeObjectURL(workerModuleUrl);
-        rmSync(workerWorkspaceRoot, { recursive: true, force: true });
-        next();
+    const moduleUrl = pathToFileURL(absoluteModulePath).href;
+    const task = (async () => {
+      const loaded = (await import(`${moduleUrl}?cronRun=${Date.now()}`)) as {
+        default?: CronConditionalModule;
       };
+      if (typeof loaded.default !== "function") {
+        throw new Error("conditional module must export a default function");
+      }
+      return normalizeConditionalModuleResult(await loaded.default(ctx));
+    })();
 
-      const timer = setTimeout(() => {
-        settle(() => rejectResult(new Error(`conditional module timed out after ${timeoutMs}ms`)));
-      }, timeoutMs);
-
-      worker.onmessage = event => {
-        const message = event.data as ConditionWorkerMessage;
-        if (!message || typeof message !== "object") {
-          settle(() => rejectResult(new Error("conditional worker returned malformed message")));
-          return;
-        }
-        if (message.ok) {
-          settle(() => resolveResult(message.result));
-          return;
-        }
-        settle(() => rejectResult(new Error(message.error.message)));
-      };
-
-      worker.onerror = event => {
-        const rawMessage = typeof event.message === "string" ? event.message.trim() : "";
-        settle(() => rejectResult(new Error(rawMessage || "conditional worker crashed")));
-      };
-
-      worker.postMessage({
-        modulePath: workerModulePath,
-        context: ctx,
-      });
-    });
+    return await Promise.race([
+      task,
+      new Promise<CronHandlerResult>((_resolve, reject) => {
+        setTimeout(() => reject(new Error(`conditional module timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
   }
 
   private async executeInstance(claimed: CronInstanceRow) {

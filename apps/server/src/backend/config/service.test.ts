@@ -3,11 +3,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { resolveExampleConfigPath } from "./testFixtures";
+
 test("applyConfigPatch skips OpenCode semantic validation for memory-only changes", async () => {
   const tempRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-config-service-"));
   const configPath = path.join(tempRoot, "agent-mockingbird.config.json");
   const workspacePath = path.join(tempRoot, "workspace");
-  const fixturePath = path.resolve(process.cwd(), "agent-mockingbird.config.example.json");
+  const fixturePath = resolveExampleConfigPath();
   const raw = JSON.parse(readFileSync(fixturePath, "utf8")) as {
     runtime?: {
       configPolicy?: Record<string, unknown>;
