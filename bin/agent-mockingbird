@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline/promises";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   opencodeEnvironment,
   pathsFor,
@@ -24,6 +25,7 @@ const UNIT_OPENCODE = "opencode.service";
 const UNIT_AGENT_MOCKINGBIRD = "agent-mockingbird.service";
 const AGENT_MOCKINGBIRD_API_BASE_URL = "http://127.0.0.1:3001";
 const DEFAULT_ENABLED_SKILLS = ["config-editor", "config-auditor", "runtime-diagnose", "memory-ops"];
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -863,6 +865,7 @@ async function promptSelect(message, options, defaultIndex = 0) {
 
 function buildInstallSummary({ args, paths }) {
   const target = args.version ?? `tag:${args.tag}`;
+  const opencodePackageVersion = readOpenCodePackageVersion();
   const hasBun = Boolean(resolveBunBinary(paths));
   const hasSystemdUser = checkSystemdUserStatus();
   const hasLoginctl = commandExists("loginctl");
@@ -881,7 +884,7 @@ function buildInstallSummary({ args, paths }) {
     hasBun
       ? `   - bun: ${success(`found at ${resolveBunBinary(paths)}`)}`
       : `   - bun: ${warn(`not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`)}`,
-    "3. Install/refresh OpenCode CLI dependency (`opencode-ai@latest`) from npmjs.",
+    `3. Install/refresh OpenCode CLI dependency (\`opencode-ai@${opencodePackageVersion}\`) from npmjs.`,
     `4. Install Agent Mockingbird package (@${args.scope.replace(/^@/, "")}/agent-mockingbird) from your scoped registry.`,
     "5. Create/refresh runtime directories under the install root.",
     `6. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
@@ -1859,11 +1862,30 @@ export const testing = {
   buildEmptyModelDiscoveryDiagnostics,
 }
 
+function readOpenCodePackageVersion() {
+  const candidatePaths = [
+    path.resolve(MODULE_DIR, "../../../../opencode.lock.json"),
+    path.resolve(MODULE_DIR, "../opencode.lock.json"),
+  ];
+  for (const candidatePath of candidatePaths) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+    if (typeof parsed.packageVersion !== "string" || parsed.packageVersion.length === 0) {
+      throw new Error(`Invalid packageVersion in ${candidatePath}`);
+    }
+    return parsed.packageVersion;
+  }
+  throw new Error("Unable to locate opencode.lock.json for installer version pinning.");
+}
+
 async function installOrUpdate(args, mode) {
   if (!commandExists("npm")) {
     throw new Error("npm is required. Please install npm and run again.");
   }
 
+  const opencodePackageVersion = readOpenCodePackageVersion();
   const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
   await confirmInstall(args, paths, mode);
   ensureDir(paths.rootDir);
@@ -1881,7 +1903,11 @@ async function installOrUpdate(args, mode) {
     tryInstallBun(paths);
   }
 
-  npmInstall(paths.npmPrefix, ["opencode-ai@latest"], ["-g", "--registry", PUBLIC_NPM_REGISTRY]);
+  npmInstall(
+    paths.npmPrefix,
+    [`opencode-ai@${opencodePackageVersion}`],
+    ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+  );
 
   const env = {
     ...process.env,

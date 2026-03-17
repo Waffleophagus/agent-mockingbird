@@ -57,23 +57,23 @@ export const DialogSettings: Component = () => {
                   <Tabs.SectionTitle>Agent Mockingbird</Tabs.SectionTitle>
                   <div class="flex flex-col gap-1.5 w-full">
                     <Tabs.Trigger value="agents">
-                      <Icon name="sparkles" />
+                      <Icon name="brain" />
                       {language.t("settings.agents.title")}
                     </Tabs.Trigger>
                     <Tabs.Trigger value="mcp">
-                      <Icon name="plug-2" />
+                      <Icon name="providers" />
                       {language.t("settings.mcp.title")}
                     </Tabs.Trigger>
                     <Tabs.Trigger value="skills">
-                      <Icon name="book-open" />
+                      <Icon name="help" />
                       {language.t("settings.skills.title")}
                     </Tabs.Trigger>
                     <Tabs.Trigger value="runtime">
-                      <Icon name="terminal-square" />
+                      <Icon name="terminal" />
                       {language.t("settings.runtime.title")}
                     </Tabs.Trigger>
                     <Tabs.Trigger value="cron">
-                      <Icon name="clock-3" />
+                      <Icon name="warning" />
                       {language.t("settings.cron.title")}
                     </Tabs.Trigger>
                   </div>

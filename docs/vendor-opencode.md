@@ -1,22 +1,38 @@
-# Vendored OpenCode
+# OpenCode Workflow
 
-- Upstream remote: `https://github.com/anomalyco/opencode`
-- Current pinned commit: `6b9f8fb9b3ec48859c2db0c230d0cab69f6ae727`
-- Vendored path: `vendor/opencode`
+## Layout
 
-## Patch Policy
+- `opencode.lock.json` is the source of truth for the shipped OpenCode tag, commit, package version, local paths, and patch branch name.
+- `cleanroom/opencode` is a local-only pristine upstream clone managed by `bun run opencode:sync`.
+- `vendor/opencode` is a generated git worktree on the Wafflebot patch branch. It is editable, but it is not tracked by the main repo.
+- `patches/opencode/*.patch` is the tracked serialized patch stack exported from the patch branch.
 
-- Keep OpenCode chat/session behavior as close to upstream as possible.
-- Put Agent Mockingbird-specific integration changes in the vendored fork only when they are required for:
-  - same-origin local app serving
-  - pinned single-workspace UI behavior
-  - Agent Mockingbird settings tabs and API wiring
-- Keep product-specific backend services in `apps/server` under `/api/waffle/*`.
+## Commands
 
-## Update Procedure
+- `bun run opencode:sync --status`
+  - Show the locked version, cleanroom state, vendor worktree state, and whether the patch series matches the branch.
+- `bun run opencode:sync --status --json`
+  - Machine-readable version of the same state.
+- `bun run opencode:sync --rebuild-only`
+  - Recreate `vendor/opencode` from `opencode.lock.json` plus the tracked patches.
+- `bun run opencode:sync --export-patches`
+  - Export committed OpenCode changes from the patch branch back into `patches/opencode`.
+- `bun run opencode:sync --ref vX.Y.Z`
+  - Fetch a new upstream release tag, apply the tracked patch series, validate it, and update the lock only after success.
+- `bun run opencode:sync --check`
+  - CI-safe validation that reproduces the generated tree from the lock and patches in temporary state.
 
-1. Run `scripts/vendor/sync-opencode.sh <ref>` to refresh `vendor/opencode`.
-2. Reapply or reconcile local Agent Mockingbird patches under `vendor/opencode`.
-3. Run `bun run vendor:opencode:install`.
-4. Run `bun run vendor:opencode:build`.
+## Edit Loop
+
+1. Run `bun run opencode:sync --rebuild-only`.
+2. Edit files in `vendor/opencode`.
+3. Commit those changes inside the `vendor/opencode` worktree on branch `wafflebot/opencode`.
+4. Run `bun run opencode:sync --export-patches`.
 5. Run `bun run build` and `bun run typecheck`.
+
+## Rules
+
+- Never edit `cleanroom/opencode` directly.
+- Never hand-maintain a copied `vendor/opencode` tree.
+- If `vendor/opencode` is dirty, do not run `--ref` or `--export-patches`.
+- Treat `patches/opencode` as exported artifacts of the patch branch, not as the primary editing surface.

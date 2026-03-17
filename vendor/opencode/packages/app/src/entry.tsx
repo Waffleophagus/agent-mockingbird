@@ -9,6 +9,8 @@ import { handleNotificationClick } from "@/utils/notification-click"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 
+const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
+
 const getLocale = () => {
   if (typeof navigator !== "object") return "en" as const
   const languages = navigator.languages?.length ? navigator.languages : [navigator.language]
@@ -24,6 +26,31 @@ const getRootNotFoundError = () => {
   const locale = getLocale()
   return locale === "zh" ? (zh[key] ?? en[key]) : en[key]
 }
+
+const getStorage = (key: string) => {
+  if (typeof localStorage === "undefined") return null
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+const setStorage = (key: string, value: string | null) => {
+  if (typeof localStorage === "undefined") return
+  try {
+    if (value !== null) {
+      localStorage.setItem(key, value)
+      return
+    }
+    localStorage.removeItem(key)
+  } catch {
+    return
+  }
+}
+
+const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
+const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
 
 const notify: Platform["notify"] = async (title, description, href) => {
   if (!("Notification" in window)) return
@@ -70,6 +97,13 @@ if (!(root instanceof HTMLElement) && import.meta.env.DEV) {
   throw new Error(getRootNotFoundError())
 }
 
+const getCurrentUrl = () => {
+  if (location.hostname.includes("opencode.ai")) return "http://localhost:4096"
+  if (import.meta.env.DEV)
+    return `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`
+  return location.origin
+}
+
 const platform: Platform = {
   platform: "web",
   version: pkg.version,
@@ -78,19 +112,24 @@ const platform: Platform = {
   forward,
   restart,
   notify,
-  getDefaultServerUrl: async () => location.origin,
-  setDefaultServerUrl: () => undefined,
+  getDefaultServer: async () => {
+    const stored = readDefaultServerUrl()
+    return stored ? ServerConnection.Key.make(stored) : null
+  },
+  setDefaultServer: writeDefaultServerUrl,
 }
-
-const defaultUrl = location.origin
-
 if (root instanceof HTMLElement) {
-  const server: ServerConnection.Http = { type: "http", http: { url: defaultUrl } }
+  const server: ServerConnection.Http = { type: "http", http: { url: getCurrentUrl() } }
   render(
     () => (
       <PlatformProvider value={platform}>
         <AppBaseProviders>
-          <AppInterface defaultServer={ServerConnection.key(server)} servers={[server]} lockServerSelection />
+          <AppInterface
+            defaultServer={ServerConnection.key(server)}
+            servers={[server]}
+            lockServerSelection
+            disableHealthCheck
+          />
         </AppBaseProviders>
       </PlatformProvider>
     ),

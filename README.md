@@ -46,7 +46,7 @@ Run agent-mockingbird + OpenCode together for smoke testing:
 bun run dev:stack
 ```
 
-`dev:stack` runs `build:cli` first so the local `bin/agent-mockingbird` command stays in sync.
+`dev:stack` now builds the bundled app, starts the local OpenCode sidecar on `127.0.0.1:4096`, and starts the Agent Mockingbird server in one command. `bun run dev:opencode` is also available if you want to run the sidecar separately.
 
 Production build and run:
 
@@ -65,14 +65,15 @@ bun run typecheck
 
 `bun run test` is intentionally scoped to `src` so local `opencode/` clone tests are not included.
 
-Optional local OpenCode checkout for smoke testing and sync scripts:
+OpenCode workflow:
 
 ```bash
-git clone https://github.com/anomalyco/opencode.git opencode
-bash scripts/pull-opencode.sh
+bun run opencode:sync --status
+bun run opencode:sync --rebuild-only
+bun run opencode:sync --check
 ```
 
-`opencode/` is intentionally gitignored in this repo. The frontend no longer imports UI CSS/fonts from that sibling checkout during normal builds.
+The repo now treats `cleanroom/opencode` as a pristine upstream clone, `vendor/opencode` as a generated editable worktree, and `patches/opencode/*.patch` as the tracked patch stack. If `vendor/opencode` is missing, run `bun run opencode:sync --rebuild-only` before local build/dev commands that need OpenCode sources.
 
 Database migrations (Drizzle + SQLite):
 

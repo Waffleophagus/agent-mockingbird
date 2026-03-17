@@ -1,0 +1,153 @@
+{
+  "version": 2,
+  "workspace": {
+    "pinnedDirectory": "./data/workspace"
+  },
+  "runtime": {
+    "opencode": {
+      "baseUrl": "http://127.0.0.1:4096",
+      "providerId": "opencode",
+      "modelId": "big-pickle",
+      "fallbackModels": [],
+      "imageModel": null,
+      "smallModel": "opencode/big-pickle",
+      "timeoutMs": 120000,
+      "promptTimeoutMs": 300000,
+      "runWaitTimeoutMs": 180000,
+      "childSessionHideAfterDays": 3,
+      "directory": "./data/workspace",
+      "bootstrap": {
+        "enabled": true,
+        "maxCharsPerFile": 20000,
+        "maxCharsTotal": 150000,
+        "subagentMinimal": true,
+        "includeAgentPrompt": true
+      }
+    },
+    "smokeTest": {
+      "prompt": "Just respond \"OK\" to this to confirm the gateway is working.",
+      "expectedResponsePattern": "\\bok\\b"
+    },
+    "runStream": {
+      "heartbeatMs": 15000,
+      "replayPageSize": 200
+    },
+    "memory": {
+      "enabled": true,
+      "workspaceDir": "./data/workspace",
+      "embedProvider": "ollama",
+      "embedModel": "granite-embedding:278m",
+      "ollamaBaseUrl": "http://127.0.0.1:11434",
+      "chunkTokens": 400,
+      "chunkOverlap": 80,
+      "maxResults": 4,
+      "minScore": 0.35,
+      "syncCooldownMs": 10000,
+      "toolMode": "tool_only",
+      "injectionDedupeEnabled": true,
+      "injectionDedupeFallbackRecallOnly": true,
+      "injectionDedupeMaxTracked": 256,
+      "retrieval": {
+        "engine": "qmd_hybrid",
+        "strongSignalMinScore": 0.85,
+        "strongSignalMinGap": 0.15,
+        "candidateLimit": 40,
+        "rrfK": 60,
+        "expansionEnabled": true,
+        "conceptExpansionEnabled": true,
+        "conceptExpansionMaxPacks": 3,
+        "conceptExpansionMaxTerms": 10,
+        "rerankEnabled": true,
+        "rerankTopN": 40,
+        "semanticRescueEnabled": true,
+        "semanticRescueMinVectorScore": 0.75,
+        "semanticRescueMaxResults": 2,
+        "expansionModel": null,
+        "rerankModel": null,
+        "vectorBackend": "sqlite_vec",
+        "vectorUnavailableFallback": "disabled",
+        "vectorK": 60,
+        "vectorProbeLimit": 20
+      }
+    },
+    "cron": {
+      "defaultMaxAttempts": 3,
+      "defaultRetryBackoffMs": 30000,
+      "retryBackoffCapMs": 3600000,
+      "conditionalModuleTimeoutMs": 30000
+    },
+    "queue": {
+      "enabled": true,
+      "defaultMode": "collect",
+      "maxDepth": 10,
+      "coalesceDebounceMs": 500
+    },
+    "channels": {
+      "signal": {
+        "enabled": false,
+        "httpUrl": "http://127.0.0.1:8080",
+        "account": null,
+        "dmPolicy": "pairing",
+        "allowFrom": [],
+        "groupPolicy": "allowlist",
+        "groupAllowFrom": [],
+        "groups": {},
+        "mentionPatterns": [],
+        "groupActivationDefault": "mention",
+        "textChunkLimit": 4000,
+        "chunkMode": "length",
+        "pairing": {
+          "ttlMs": 3600000,
+          "maxPending": 3
+        }
+      }
+    },
+    "configPolicy": {
+      "mode": "builder",
+      "denyPaths": [
+        "version",
+        "runtime.configPolicy",
+        "runtime.smokeTest"
+      ],
+      "strictAllowPaths": [
+        "runtime.opencode.runWaitTimeoutMs",
+        "runtime.opencode.childSessionHideAfterDays",
+        "runtime.opencode.bootstrap",
+        "runtime.runStream",
+        "runtime.memory",
+        "runtime.cron",
+        "runtime.queue",
+        "runtime.channels",
+        "ui.skills",
+        "ui.mcps",
+        "ui.mcpServers",
+        "ui.agents",
+        "ui.agentTypes"
+      ],
+      "requireExpectedHash": true,
+      "requireSmokeTest": true,
+      "autoRollbackOnFailure": true
+    }
+  },
+  "ui": {
+    "skills": [
+      "config-editor",
+      "config-auditor",
+      "runtime-diagnose"
+    ],
+    "mcps": [],
+    "mcpServers": [],
+    "agents": [],
+    "agentTypes": [
+      {
+        "id": "build",
+        "name": "Agent Mockingbird",
+        "description": "Default primary agent.",
+        "mode": "primary",
+        "hidden": false,
+        "disable": false,
+        "options": {}
+      }
+    ]
+  }
+}

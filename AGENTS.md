@@ -114,3 +114,13 @@ For the mobile Streamdown integration effort:
 - Do not patch Streamdown library internals in this repo when the same change can be made in the Streamdown fork.
 - Keep changes in this repo limited to integration wiring (dependencies, config, app usage), while implementing library fixes/features in the Streamdown fork for upstream publishing.
 - If a Streamdown-side change is required, make it in the fork first, then consume it here via local dependency links.
+
+## OpenCode Workflow
+
+- Do not edit `cleanroom/opencode` directly.
+- If a task needs shipped OpenCode source changes, run `bun run opencode:sync --rebuild-only` first.
+- Make OpenCode edits only in `vendor/opencode`.
+- Commit OpenCode changes in the `vendor/opencode` worktree before exporting them.
+- Run `bun run opencode:sync --export-patches` after committing OpenCode changes.
+- Use `bun run opencode:sync --ref <tag>` for upstream bumps.
+- If `vendor/opencode` is dirty, do not run `--ref` or `--export-patches`.
