@@ -1,4 +1,4 @@
-From 97e71554a7fe704672a293bd20fbc66f54b6efea Mon Sep 17 00:00:00 2001
+From 899693643713d5081e08bd98943006b1cea73610 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 16 Mar 2026 21:06:59 -0500
 Subject: [PATCH 3/3] fix(app): remove duplicate sidebar mount

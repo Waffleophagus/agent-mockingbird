@@ -1,4 +1,4 @@
-From 64187e024bc8189c4f1579029bcf901b33e00960 Mon Sep 17 00:00:00 2001
+From a97f2d7fc0b5f9c2b4e091af108c0dc29b827b58 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 16 Mar 2026 14:17:21 -0500
 Subject: [PATCH 2/3] Fix OpenCode web entry and settings icons
