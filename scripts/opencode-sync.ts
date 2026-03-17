@@ -595,7 +595,7 @@ function verifyPatchReproducibility(
     run(["git", "checkout", "-B", lock.branch.name, options.baseCommit], compareWorktree);
     const patches = patchFiles(path.resolve(repoRoot, lock.paths.patches));
     if (patches.length > 0) {
-      run(["git", "am", "--3way", ...patches], compareWorktree);
+      run(["git", "am", "--3way", ...patches], compareWorktree, { env: gitAmEnv() });
     }
     compareDirectories(compareWorktree, options.compareDir);
   } finally {
