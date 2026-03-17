@@ -21,6 +21,8 @@
   - Fetch a new upstream release tag, apply the tracked patch series, validate it, and update the lock only after success.
 - `bun run opencode:sync --check`
   - CI-safe validation that reproduces the generated tree from the lock and patches in temporary state.
+- `bun run check:ship`
+  - Canonical ship gate. Bootstraps the generated vendor worktree if needed, requires a clean/exported patch state, runs `opencode:sync --check`, and compares full cleanroom vs vendor OpenCode typecheck results so upstream-only baseline failures do not fail the ship check.
 
 ## Edit Loop
 
@@ -28,11 +30,12 @@
 2. Edit files in `vendor/opencode`.
 3. Commit those changes inside the `vendor/opencode` worktree on branch `wafflebot/opencode`.
 4. Run `bun run opencode:sync --export-patches`.
-5. Run `bun run build` and `bun run typecheck`.
+5. Run `bun run check:ship`.
 
 ## Rules
 
 - Never edit `cleanroom/opencode` directly.
 - Never hand-maintain a copied `vendor/opencode` tree.
 - If `vendor/opencode` is dirty, do not run `--ref` or `--export-patches`.
+- `bun run check:ship` only validates clean, exported vendor state. Dirty `vendor/opencode` is a hard failure.
 - Treat `patches/opencode` as exported artifacts of the patch branch, not as the primary editing surface.

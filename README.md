@@ -61,9 +61,12 @@ Code quality:
 bun run test
 bun run lint
 bun run typecheck
+bun run check:ship
 ```
 
 `bun run test` is intentionally scoped to `src` so local `opencode/` clone tests are not included.
+
+`bun run check:ship` is the full ship-readiness gate. It bootstraps `vendor/opencode` if needed, verifies the OpenCode patch stack is reproducible, runs the repo lint/typecheck/build checks, checks generated artifacts, and compares full OpenCode workspace typecheck results against cleanroom so upstream-only baseline failures can be ignored.
 
 OpenCode workflow:
 
@@ -338,7 +341,7 @@ Deployment artifacts:
 
 This repo uses one CI/CD workflow:
 
-- `.github/workflows/ci.yml` runs lint/typecheck/build, then publishes the same packed artifact to your npm-compatible package registry.
+- `.github/workflows/ci.yml` runs `bun run check:ship`, then publishes the same packed artifact to your npm-compatible package registry.
 - `.github/workflows/ci.yml` verifies the committed `dist/app` bundle, rebuilds the standalone binary locally in CI, then publishes the packed artifact to your npm-compatible package registry.
 - Pull requests run checks only (no publish).
 - Any publishable push updates npm tag `latest`. For now, `latest` simply means "most recent successful publish," regardless of branch.
@@ -348,7 +351,7 @@ This repo uses one CI/CD workflow:
 
 Published package artifact:
 
-- `@<scope>/agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after lint/typecheck/build.
+- `@<scope>/agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after `bun run check:ship`.
 
 Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
 
