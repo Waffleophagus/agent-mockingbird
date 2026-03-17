@@ -7,6 +7,8 @@ dist/*
 !dist/app/
 !dist/app/**
 *.tgz
+cleanroom/opencode
+vendor/opencode
 data/*
 data/*
 bin/*
