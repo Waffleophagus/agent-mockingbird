@@ -498,7 +498,15 @@ function applyPatchSeries(lock: LockFile, vendorPath: string) {
   if (patches.length === 0) {
     return;
   }
-  run(["git", "am", "--3way", ...patches], vendorPath);
+  run(["git", "am", "--3way", ...patches], vendorPath, {
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME ?? "Wafflebot CI",
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL ?? "wafflebot-ci@example.invalid",
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME ?? "Wafflebot CI",
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL ?? "wafflebot-ci@example.invalid",
+    },
+  });
 }
 
 function exportPatchesFromBranch(lock: LockFile, baseCommit?: string) {
