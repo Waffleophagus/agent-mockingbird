@@ -498,15 +498,7 @@ function applyPatchSeries(lock: LockFile, vendorPath: string) {
   if (patches.length === 0) {
     return;
   }
-  run(["git", "am", "--3way", ...patches], vendorPath, {
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME ?? "Wafflebot CI",
-      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL ?? "wafflebot-ci@example.invalid",
-      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME ?? "Wafflebot CI",
-      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL ?? "wafflebot-ci@example.invalid",
-    },
-  });
+  run(["git", "am", "--3way", ...patches], vendorPath, { env: gitAmEnv() });
 }
 
 function exportPatchesFromBranch(lock: LockFile, baseCommit?: string) {
@@ -555,27 +547,28 @@ function verifyBranchMatchesPatches(lock: LockFile) {
 }
 
 function branchMatchesPatches(lock: LockFile, vendorPath: string) {
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), patchComparePrefix));
+  const cleanroomPath = path.resolve(repoRoot, lock.paths.cleanroom);
+  if (!isGitRepository(cleanroomPath)) {
+    return false;
+  }
+
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "wafflebot-opencode-branch-match-"));
   try {
-    const tempExport = path.join(tempDir, "patches");
-    mkdirSync(tempExport, { recursive: true });
-    const formatResult = run(
-      [
-        "git",
-        "format-patch",
-        "--quiet",
-        "--output-directory",
-        tempExport,
-        `${lock.upstream.commit}..HEAD`,
-      ],
-      vendorPath,
-      { allowFailure: true },
-    );
-    if (formatResult.status !== 0) {
-      return false;
+    const compareWorktree = path.join(tempDir, "vendor");
+    run(["git", "worktree", "add", "--detach", compareWorktree, lock.upstream.commit], cleanroomPath);
+    const patches = patchFiles(path.resolve(repoRoot, lock.paths.patches));
+    if (patches.length > 0) {
+      run(["git", "am", "--3way", ...patches], compareWorktree, { env: gitAmEnv() });
     }
-    return comparePatchDirectories(tempExport, path.resolve(repoRoot, lock.paths.patches));
+    const compareTree = gitOutput(compareWorktree, ["rev-parse", "HEAD^{tree}"]).trim();
+    const vendorTree = gitOutput(vendorPath, ["rev-parse", "HEAD^{tree}"]).trim();
+    return compareTree === vendorTree;
   } finally {
+    const compareWorktree = path.join(tempDir, "vendor");
+    if (existsSync(compareWorktree)) {
+      run(["git", "worktree", "remove", "--force", compareWorktree], cleanroomPath, { allowFailure: true });
+      run(["git", "worktree", "prune"], cleanroomPath, { allowFailure: true });
+    }
     rmSync(tempDir, { recursive: true, force: true });
   }
 }
@@ -610,31 +603,6 @@ function verifyPatchReproducibility(
   }
 }
 
-function comparePatchDirectories(left: string, right: string) {
-  const leftFiles = patchFiles(left).map((item) => path.basename(item));
-  const rightFiles = patchFiles(right).map((item) => path.basename(item));
-  if (leftFiles.length !== rightFiles.length) {
-    return false;
-  }
-  for (let index = 0; index < leftFiles.length; index += 1) {
-    if (leftFiles[index] !== rightFiles[index]) {
-      return false;
-    }
-    const leftContents = normalizePatch(readFileSync(path.join(left, leftFiles[index]), "utf8"));
-    const rightContents = normalizePatch(readFileSync(path.join(right, rightFiles[index]), "utf8"));
-    if (leftContents !== rightContents) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function normalizePatch(contents: string) {
-  return contents
-    .replace(/^From [0-9a-f]+ Mon Sep 17 00:00:00 2001$/m, "From <normalized> Mon Sep 17 00:00:00 2001")
-    .replace(/\n-- \n[^\n]+\n?$/, "\n-- \n<git-version>\n");
-}
-
 function compareDirectories(left: string, right: string) {
   if (isGitRepository(left) && isGitRepository(right)) {
     const leftDirty = gitOutput(left, ["status", "--porcelain", "--untracked-files=no"]).trim();
@@ -660,6 +628,16 @@ function patchFiles(patchesPath: string) {
     .filter((entry) => entry.endsWith(".patch"))
     .sort()
     .map((entry) => path.join(patchesPath, entry));
+}
+
+function gitAmEnv() {
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME ?? "Wafflebot CI",
+    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL ?? "wafflebot-ci@example.invalid",
+    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME ?? "Wafflebot CI",
+    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL ?? "wafflebot-ci@example.invalid",
+  };
 }
 
 function runValidation(vendorPath: string, options?: { includeRepoValidation?: boolean }) {
