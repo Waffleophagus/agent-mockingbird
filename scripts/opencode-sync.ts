@@ -37,6 +37,7 @@ type ParsedArgs = {
   exportPatches: boolean;
   check: boolean;
   ref?: string;
+  hardRef?: string;
 };
 
 type ExecOptions = {
@@ -143,8 +144,37 @@ async function main() {
     return;
   }
 
+  if (args.hardRef) {
+    ensureCleanroomClone(lock);
+    ensureCleanroomPristine(lock);
+    const targetTag = normalizeTag(args.hardRef);
+    const targetCommit = resolveUpstreamCommit(lock.paths.cleanroom, targetTag);
+    ensureCleanroomAtCommit(lock, targetCommit);
+    recreateVendorWorktree(lock, targetCommit, { force: true });
+    runValidation(lock.paths.vendor);
+    exportPatchesFromBranch(lock, targetCommit);
+    verifyBranchMatchesPatches(lock);
+    verifyPatchReproducibility(lock, {
+      baseCommit: targetCommit,
+      compareDir: path.resolve(repoRoot, lock.paths.vendor),
+      useTemporaryClone: true,
+    });
+    writeLock(lock, {
+      upstream: {
+        remote: lock.upstream.remote,
+        tag: targetTag,
+        commit: targetCommit,
+      },
+      packageVersion: stripLeadingV(targetTag),
+      paths: lock.paths,
+      branch: lock.branch,
+    });
+    console.log(`Force-updated ${path.relative(repoRoot, lockPath)} to ${targetTag} (${targetCommit}).`);
+    return;
+  }
+
   throw new Error(
-    "Specify one of --status, --rebuild-only, --export-patches, --check, or --ref <tag>.",
+    "Specify one of --status, --rebuild-only, --export-patches, --check, --ref <tag>, or --hard-ref <tag>.",
   );
 }
 
@@ -188,6 +218,15 @@ function parseArgs(argv: string[]): ParsedArgs {
       index += 1;
       continue;
     }
+    if (arg === "--hard-ref") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("Missing value after --hard-ref.");
+      }
+      parsed.hardRef = value;
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -197,6 +236,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     parsed.exportPatches,
     parsed.check,
     Boolean(parsed.ref),
+    Boolean(parsed.hardRef),
   ].filter(Boolean);
   if (selected.length !== 1) {
     throw new Error("Exactly one primary operation is required.");
@@ -412,10 +452,11 @@ function ensureVendorSafeForRefChange(lock: LockFile) {
   }
 }
 
-function recreateVendorWorktree(lock: LockFile, baseCommit: string) {
+function recreateVendorWorktree(lock: LockFile, baseCommit: string, options?: { force?: boolean }) {
   const cleanroomPath = path.resolve(repoRoot, lock.paths.cleanroom);
   const vendorPath = path.resolve(repoRoot, lock.paths.vendor);
-  removeVendorWorktree(lock, false);
+  removeVendorWorktree(lock, options?.force ?? false);
+  run(["git", "worktree", "prune"], cleanroomPath);
   mkdirSync(path.dirname(vendorPath), { recursive: true });
   run(["git", "worktree", "add", "--detach", vendorPath, baseCommit], cleanroomPath);
   run(["git", "checkout", "-B", lock.branch.name, baseCommit], vendorPath);
@@ -425,6 +466,7 @@ function recreateVendorWorktree(lock: LockFile, baseCommit: string) {
 function removeVendorWorktree(lock: LockFile, force: boolean) {
   const cleanroomPath = path.resolve(repoRoot, lock.paths.cleanroom);
   const vendorPath = path.resolve(repoRoot, lock.paths.vendor);
+  run(["git", "worktree", "prune"], cleanroomPath, { allowFailure: true });
   if (!existsSync(vendorPath)) {
     return;
   }
