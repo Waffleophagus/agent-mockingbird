@@ -22,7 +22,7 @@
     "dev:cleanroom:web": "VITE_OPENCODE_SERVER_HOST=127.0.0.1 VITE_OPENCODE_SERVER_PORT=4097 bun run --cwd cleanroom/opencode/packages/app dev -- --host 127.0.0.1 --port 4444",
     "dev:cleanroom": "concurrently -k -n cleanroom-opencode,cleanroom-web -c cyan,green \"bun run dev:cleanroom:opencode\" \"bun run dev:cleanroom:web\"",
     "dev:server": "turbo run dev --filter=@agent-mockingbird/server",
-    "dev:stack": "bun run build:app && concurrently -k -n opencode,server -c cyan,green \"bun run dev:opencode\" \"bun run dev:server\"",
+    "dev:stack": "bash scripts/dev-stack-opencode.sh",
     "build:cli": "bun run ./build-cli.mjs",
     "build:bin": "bun run ./build-bin.ts",
     "build": "turbo run build",
