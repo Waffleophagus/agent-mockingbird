@@ -36,7 +36,7 @@ type Diagnostic = {
 const repoRoot = path.resolve(import.meta.dir, "..");
 const cleanroomRoot = path.join(repoRoot, "cleanroom", "opencode");
 const vendorRoot = path.join(repoRoot, "vendor", "opencode");
-const trackedArtifactPaths = ["bin/agent-mockingbird", "dist/app"];
+const trackedArtifactPaths = ["bin/agent-mockingbird"];
 
 main();
 
