@@ -54,3 +54,7 @@ apps/mobile/web-build
 
 #Expo Android stuff
 apps/mobile/android/*
+apps/server/data/workspace/config.json
+apps/server/data/agent-mockingbird.db
+apps/server/data/agent-mockingbird.db-shm
+apps/server/data/agent-mockingbird.db-wal
