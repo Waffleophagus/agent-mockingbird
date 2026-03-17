@@ -527,11 +527,12 @@ function ensureLocalBinPath(paths) {
   return { inPath: false, updatedFiles };
 }
 
-function writeAgentMockingbirdShim(paths, agentMockingbirdBin) {
+function writeAgentMockingbirdShim(paths, agentMockingbirdBin, opencodePackageVersion) {
   ensureDir(paths.localBinDir);
   const shim = `#!/usr/bin/env bash
 set -euo pipefail
 # managed-by: agent-mockingbird-installer
+export AGENT_MOCKINGBIRD_OPENCODE_VERSION=${JSON.stringify(opencodePackageVersion)}
 exec "${agentMockingbirdBin}" "$@"
 `;
   writeFile(paths.agentMockingbirdShimPath, shim);
@@ -1860,17 +1861,83 @@ async function runInteractiveProviderOnboarding(input) {
 
 export const testing = {
   buildEmptyModelDiscoveryDiagnostics,
+  readOpenCodePackageVersion,
 }
 
-function readOpenCodePackageVersion() {
-  const envVersion = process.env.AGENT_MOCKINGBIRD_OPENCODE_VERSION?.trim()
+/**
+ * @typedef {{
+ *   agentMockingbirdAppDirGlobal?: string,
+ *   agentMockingbirdAppDirLocal?: string,
+ * }} ReadOpenCodePackageVersionPaths
+ */
+
+/**
+ * @typedef {{
+ *   paths?: ReadOpenCodePackageVersionPaths,
+ *   moduleDir?: string,
+ *   argv?: string[],
+ *   env?: NodeJS.ProcessEnv,
+ * }} ReadOpenCodePackageVersionOptions
+ */
+
+/**
+ * @param {ReadOpenCodePackageVersionOptions} [options]
+ */
+function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
+  const candidates = [];
+  const seen = new Set();
+  const add = (value) => {
+    if (!value) return;
+    const resolved = path.resolve(value);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    candidates.push(resolved);
+  };
+
+  add(path.resolve(moduleDir, "../../../../opencode.lock.json"));
+  add(path.resolve(moduleDir, "../opencode.lock.json"));
+
+  const invokedScript = argv[1];
+  if (typeof invokedScript === "string" && invokedScript.trim()) {
+    add(path.resolve(path.dirname(invokedScript), "../opencode.lock.json"));
+    try {
+      const realScript = fs.realpathSync(invokedScript);
+      add(path.resolve(path.dirname(realScript), "../opencode.lock.json"));
+      add(path.resolve(path.dirname(realScript), "../../opencode.lock.json"));
+    } catch {
+      // Ignore missing or unreadable realpaths.
+    }
+  }
+
+  if (paths) {
+    add(path.join(paths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
+    add(path.join(paths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
+  }
+
+  const explicitRoot = env.AGENT_MOCKINGBIRD_ROOT_DIR?.trim();
+  const explicitScope = env.AGENT_MOCKINGBIRD_INSTALLER_SCOPE?.trim() || env.AGENT_MOCKINGBIRD_SCOPE?.trim();
+  if (explicitRoot && explicitScope) {
+    const derivedPaths = pathsFor({
+      rootDir: path.resolve(explicitRoot),
+      scope: explicitScope,
+      userUnitDir: USER_UNIT_DIR,
+    });
+    add(path.join(derivedPaths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
+    add(path.join(derivedPaths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
+  }
+
+  return candidates;
+}
+
+/**
+ * @param {ReadOpenCodePackageVersionOptions} [options]
+ */
+function readOpenCodePackageVersion({ paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
+  const envVersion = env.AGENT_MOCKINGBIRD_OPENCODE_VERSION?.trim()
   if (envVersion) {
     return envVersion
   }
-  const candidatePaths = [
-    path.resolve(MODULE_DIR, "../../../../opencode.lock.json"),
-    path.resolve(MODULE_DIR, "../opencode.lock.json"),
-  ];
+  const candidatePaths = candidateLockPaths({ paths, moduleDir, argv, env });
   for (const candidatePath of candidatePaths) {
     if (!fs.existsSync(candidatePath)) {
       continue;
@@ -1889,8 +1956,8 @@ async function installOrUpdate(args, mode) {
     throw new Error("npm is required. Please install npm and run again.");
   }
 
-  const opencodePackageVersion = readOpenCodePackageVersion();
   const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
+  const opencodePackageVersion = readOpenCodePackageVersion({ paths });
   await confirmInstall(args, paths, mode);
   ensureDir(paths.rootDir);
   ensureDir(paths.npmPrefix);
@@ -1927,7 +1994,7 @@ async function installOrUpdate(args, mode) {
       `agent-mockingbird binary missing: looked in ${paths.agentMockingbirdBinGlobal} and ${paths.agentMockingbirdBinLocal}`,
     );
   }
-  const shimPath = writeAgentMockingbirdShim(paths, agentMockingbirdBin);
+  const shimPath = writeAgentMockingbirdShim(paths, agentMockingbirdBin, opencodePackageVersion);
   const pathSetup = ensureLocalBinPath(paths);
 
   const bunBin = resolveBunBinary(paths);

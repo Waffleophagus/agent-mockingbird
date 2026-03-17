@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { testing } from "./agent-mockingbird.mjs";
 
@@ -22,5 +25,44 @@ describe("agent-mockingbird CLI onboarding diagnostics", () => {
     expect(diagnostics).toContain(
       "- curl -sS http://127.0.0.1:3001/api/opencode/models",
     );
+  });
+});
+
+describe("agent-mockingbird CLI opencode version resolution", () => {
+  test("prefers explicit env version", () => {
+    const version = testing.readOpenCodePackageVersion({
+      env: { AGENT_MOCKINGBIRD_OPENCODE_VERSION: "1.2.99" },
+      argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+      moduleDir: "/tmp/fake-module",
+    });
+
+    expect(version).toBe("1.2.99");
+  });
+
+  test("resolves version from installed package root", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-cli-test-"));
+    const appDir = path.join(tempRoot, "npm", "lib", "node_modules", "@waffleophagus", "agent-mockingbird");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "opencode.lock.json"),
+      JSON.stringify({ packageVersion: "1.2.27" }),
+      "utf8",
+    );
+
+    try {
+      const version = testing.readOpenCodePackageVersion({
+        paths: {
+          agentMockingbirdAppDirGlobal: appDir,
+          agentMockingbirdAppDirLocal: path.join(tempRoot, "missing-local"),
+        },
+        env: {},
+        argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+        moduleDir: "/tmp/fake-module",
+      });
+
+      expect(version).toBe("1.2.27");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 });
