@@ -1,4 +1,4 @@
-/* eslint-disable import/order */
+import { searchMemory } from "../../memory/service";
 import {
   analyzeMemoryInjectionResults,
   buildMemoryContextFingerprint,
@@ -6,7 +6,6 @@ import {
   isWriteIntentMemoryQuery,
   memoryInjectionResultKey,
 } from "../memoryPromptDedup";
-import { searchMemory } from "../../memory/service";
 import type { OpencodeRuntime } from "../opencodeRuntime";
 import {
   currentMemoryConfig,

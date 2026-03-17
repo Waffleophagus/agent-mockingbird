@@ -1,8 +1,17 @@
-/* eslint-disable import/order, @typescript-eslint/no-unsafe-declaration-merging */
 import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk/client";
 
 import type { RuntimeEngine } from "../contracts/runtime";
 import { createOpencodeClient } from "../opencode/client";
+import type { OpencodeRuntimeBackgroundMethods } from "./opencodeRuntime/backgroundMethods";
+import { opencodeRuntimeBackgroundMethods } from "./opencodeRuntime/backgroundMethods";
+import type { OpencodeRuntimeCoreMethods } from "./opencodeRuntime/coreMethods";
+import { opencodeRuntimeCoreMethods } from "./opencodeRuntime/coreMethods";
+import type { OpencodeRuntimeEventMethods } from "./opencodeRuntime/eventMethods";
+import { opencodeRuntimeEventMethods } from "./opencodeRuntime/eventMethods";
+import type { OpencodeRuntimeMemoryMethods } from "./opencodeRuntime/memoryMethods";
+import { opencodeRuntimeMemoryMethods } from "./opencodeRuntime/memoryMethods";
+import type { OpencodeRuntimePromptMethods } from "./opencodeRuntime/promptMethods";
+import { opencodeRuntimePromptMethods } from "./opencodeRuntime/promptMethods";
 import type {
   Listener,
   MemoryInjectionStateEntry,
@@ -10,25 +19,8 @@ import type {
   RuntimeAgentCatalog,
   RuntimeHealthSnapshot,
 } from "./opencodeRuntime/shared";
-import type { OpencodeRuntimeCoreMethods } from "./opencodeRuntime/coreMethods";
-import { opencodeRuntimeCoreMethods } from "./opencodeRuntime/coreMethods";
-import type { OpencodeRuntimeMemoryMethods } from "./opencodeRuntime/memoryMethods";
-import { opencodeRuntimeMemoryMethods } from "./opencodeRuntime/memoryMethods";
-import type { OpencodeRuntimeEventMethods } from "./opencodeRuntime/eventMethods";
-import { opencodeRuntimeEventMethods } from "./opencodeRuntime/eventMethods";
-import type { OpencodeRuntimeBackgroundMethods } from "./opencodeRuntime/backgroundMethods";
-import { opencodeRuntimeBackgroundMethods } from "./opencodeRuntime/backgroundMethods";
-import type { OpencodeRuntimePromptMethods } from "./opencodeRuntime/promptMethods";
-import { opencodeRuntimePromptMethods } from "./opencodeRuntime/promptMethods";
 
-export interface OpencodeRuntime
-  extends OpencodeRuntimeCoreMethods,
-    OpencodeRuntimeMemoryMethods,
-    OpencodeRuntimeEventMethods,
-    OpencodeRuntimeBackgroundMethods,
-    OpencodeRuntimePromptMethods {}
-
-export class OpencodeRuntime implements RuntimeEngine {
+class OpencodeRuntimeImpl {
   private listeners = new Set<Listener>();
   private client: OpencodeClient | null = null;
   private clientConnectionKey: string | null = null;
@@ -73,6 +65,14 @@ export class OpencodeRuntime implements RuntimeEngine {
     fetchedAtMs: number;
     catalog: RuntimeAgentCatalog;
   } | null = null;
+  declare readonly sendUserMessage: RuntimeEngine["sendUserMessage"];
+  declare readonly checkHealth: RuntimeEngine["checkHealth"];
+  declare readonly syncSessionMessages: RuntimeEngine["syncSessionMessages"];
+  declare readonly abortSession: RuntimeEngine["abortSession"];
+  declare readonly compactSession: RuntimeEngine["compactSession"];
+  declare readonly startEventSync: OpencodeRuntimeEventMethods["startEventSync"];
+  declare readonly startBackgroundSync: OpencodeRuntimeEventMethods["startBackgroundSync"];
+  declare readonly clearAllTimers: OpencodeRuntimePromptMethods["clearAllTimers"];
 
   constructor(private options: OpencodeRuntimeOptions) {
     if (options.client) {
@@ -119,10 +119,22 @@ export class OpencodeRuntime implements RuntimeEngine {
   }
 }
 Object.assign(
-  OpencodeRuntime.prototype,
+  OpencodeRuntimeImpl.prototype,
   opencodeRuntimeCoreMethods,
   opencodeRuntimeMemoryMethods,
   opencodeRuntimeEventMethods,
   opencodeRuntimeBackgroundMethods,
   opencodeRuntimePromptMethods,
 );
+
+export type OpencodeRuntime = OpencodeRuntimeImpl &
+  OpencodeRuntimeCoreMethods &
+  OpencodeRuntimeEventMethods &
+  OpencodeRuntimeMemoryMethods &
+  OpencodeRuntimeBackgroundMethods &
+  OpencodeRuntimePromptMethods;
+
+export const OpencodeRuntime = OpencodeRuntimeImpl as unknown as {
+  new (options: OpencodeRuntimeOptions): OpencodeRuntime;
+  prototype: OpencodeRuntime;
+};

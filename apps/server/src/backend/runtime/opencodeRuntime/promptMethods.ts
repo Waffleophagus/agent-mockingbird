@@ -1,22 +1,17 @@
-/* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/consistent-type-imports */
 import {
   AGENT_NAME_CACHE_TTL_MS,
   BUILTIN_PRIMARY_AGENT_IDS,
   BUILTIN_SUBAGENT_IDS,
-  DEFAULT_RUNTIME_PROMPT_TIMEOUT_MS,
-  DEFAULT_RUNTIME_TIMEOUT_MS,
   RUNTIME_HEALTH_CACHE_TTL_MS,
   RUNTIME_HEALTH_OK_PATTERN,
   RUNTIME_HEALTH_PROMPT,
   RUNTIME_HEALTH_TIMEOUT_CAP_MS,
-  currentMemoryConfig,
   isPlainObject,
   logger,
   normalizeStringArray,
-  normalizeUsageDelta,
-  normalizeCostDelta,
   shallowEqualStringArrays,
   type AssistantInfo,
+  type ChatMessagePart,
   type Config,
   type Part,
   type ResolvedModel,
@@ -26,39 +21,25 @@ import {
   type Message,
   type Session,
 } from "./shared";
-import { getConfigSnapshot } from "../../config/service";
 import {
-  createHeartbeatUpdatedEvent,
-  createSessionMessageCreatedEvent,
-  createSessionRunErrorEvent,
   createSessionRunStatusUpdatedEvent,
   createSessionStateUpdatedEvent,
-  createUsageUpdatedEvent,
 } from "../../contracts/events";
 import {
-  appendChatExchange,
   getSessionById,
   getRuntimeSessionBinding,
-  setMessageMemoryTrace,
-  setMessageRenderSnapshot,
   setRuntimeSessionBinding,
   setSessionTitle,
 } from "../../db/repository";
 import { getOpencodeErrorStatus, unwrapSdkData } from "../../opencode/client";
-import { getLaneQueue } from "../../queue/service";
-import { buildStreamdownRenderSnapshot } from "../../render/streamdownSnapshots";
 import {
   buildManagedSkillPaths,
   getManagedSkillsRootPath,
 } from "../../skills/service";
 import {
-  RuntimeContinuationDetachedError,
   RuntimeProviderAuthError,
   RuntimeProviderQuotaError,
   RuntimeProviderRateLimitError,
-  RuntimeSessionBusyError,
-  RuntimeSessionNotFoundError,
-  RuntimeSessionQueuedError,
 } from "../errors";
 import type { OpencodeRuntime } from "../opencodeRuntime";
 
@@ -69,10 +50,8 @@ export interface OpencodeRuntimePromptMethods {
   extractCompletedToolOutputText(parts: Array<Part>): string | null;
   extractSubtaskPrompt(parts: Array<Part>): string | null;
   summarizeBackgroundResult(text: string | null): string;
-  mapChatMessagePart(part: Part): import("./shared").ChatMessagePart | null;
-  buildChatMessageParts(
-    parts: Array<Part>,
-  ): import("./shared").ChatMessagePart[];
+  mapChatMessagePart(part: Part): ChatMessagePart | null;
+  buildChatMessageParts(parts: Array<Part>): ChatMessagePart[];
   extractAssistantError(info: AssistantInfo, parts: Array<Part>): string | null;
   describeUnknownError(error: unknown): string | null;
   sendPrompt(
@@ -290,11 +269,9 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
   buildChatMessageParts(this: OpencodeRuntime, parts) {
     const mapped = parts
       .map((part) => this.mapChatMessagePart(part))
-      .filter((part): part is import("./shared").ChatMessagePart =>
-        Boolean(part),
-      );
+      .filter((part): part is ChatMessagePart => Boolean(part));
     if (mapped.length === 0) return [];
-    const deduped = new Map<string, import("./shared").ChatMessagePart>();
+    const deduped = new Map<string, ChatMessagePart>();
     for (const part of mapped) {
       deduped.set(part.id, part);
     }

@@ -1,6 +1,6 @@
-/* eslint-disable import/order */
 import { pathToFileURL } from "node:url";
 
+import { insertStep } from "./repository";
 import type {
   CronConditionalModule,
   CronConditionalModuleContext,
@@ -9,7 +9,6 @@ import type {
   CronJobInstance,
   CronStepKind,
 } from "./types";
-import { insertStep } from "./repository";
 import {
   buildAgentPromptContext,
   computeBackoffMs,

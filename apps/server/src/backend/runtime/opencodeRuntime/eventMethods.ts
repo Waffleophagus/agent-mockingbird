@@ -1,22 +1,3 @@
-/* eslint-disable import/order, @typescript-eslint/no-unused-vars */
-import {
-  createBackgroundRunUpdatedEvent,
-  createSessionCompactedEvent,
-  createSessionMessageCodeHighlightEvent,
-  createSessionMessageDeltaEvent,
-  createSessionMessagePartUpdatedEvent,
-  createSessionMessageRenderSnapshotEvent,
-  createSessionPermissionRequestedEvent,
-  createSessionPermissionResolvedEvent,
-  createSessionQuestionRequestedEvent,
-  createSessionQuestionResolvedEvent,
-  createSessionRunErrorEvent,
-  createSessionRunStatusUpdatedEvent,
-  createSessionStateUpdatedEvent,
-} from "../../contracts/events";
-import { getLocalSessionIdByRuntimeBinding, getSessionById, setSessionTitle } from "../../db/repository";
-import { buildStreamdownCodeLineHighlights, buildStreamdownRenderSnapshot } from "../../render/streamdownSnapshots";
-import type { OpencodeRuntime } from "../opencodeRuntime";
 import {
   BACKGROUND_SYNC_INTERVAL_MS,
   OPENCODE_RUNTIME_ID,
@@ -37,6 +18,23 @@ import {
   type OpencodeRuntimeEvent,
   type Part,
 } from "./shared";
+import {
+  createSessionCompactedEvent,
+  createSessionMessageCodeHighlightEvent,
+  createSessionMessageDeltaEvent,
+  createSessionMessagePartUpdatedEvent,
+  createSessionMessageRenderSnapshotEvent,
+  createSessionPermissionRequestedEvent,
+  createSessionPermissionResolvedEvent,
+  createSessionQuestionRequestedEvent,
+  createSessionQuestionResolvedEvent,
+  createSessionRunErrorEvent,
+  createSessionRunStatusUpdatedEvent,
+  createSessionStateUpdatedEvent,
+} from "../../contracts/events";
+import { getLocalSessionIdByRuntimeBinding, getSessionById, setSessionTitle } from "../../db/repository";
+import { buildStreamdownCodeLineHighlights, buildStreamdownRenderSnapshot } from "../../render/streamdownSnapshots";
+import type { OpencodeRuntime } from "../opencodeRuntime";
 
 export interface OpencodeRuntimeEventMethods {
   startEventSync(): void;

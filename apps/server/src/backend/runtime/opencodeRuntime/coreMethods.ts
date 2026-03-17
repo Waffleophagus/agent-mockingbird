@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/consistent-type-imports */
+import type { RuntimeEvent } from "../../contracts/events";
 import {
-  createBackgroundRunUpdatedEvent,
   createHeartbeatUpdatedEvent,
   createSessionMessageCreatedEvent,
   createSessionRunErrorEvent,
@@ -9,12 +8,10 @@ import {
   createUsageUpdatedEvent,
 } from "../../contracts/events";
 import {
-  appendAssistantMessage,
   appendChatExchange,
   createBackgroundRun,
   getBackgroundRunById,
   getBackgroundRunByChildExternalSessionId,
-  getLocalSessionIdByRuntimeBinding,
   getRuntimeSessionBinding,
   getSessionById,
   setBackgroundRunStatus,
@@ -37,15 +34,20 @@ import {
 import { getLaneQueue } from "../../queue/service";
 import { buildStreamdownRenderSnapshot } from "../../render/streamdownSnapshots";
 import { normalizeSkillIds } from "../../skills/service";
+import {
+  RuntimeContinuationDetachedError,
+  RuntimeSessionBusyError,
+  RuntimeSessionNotFoundError,
+  RuntimeSessionQueuedError,
+} from "../errors";
 import type { OpencodeRuntime } from "../opencodeRuntime";
 import {
   isQueueDrainRequest,
-  logger,
   OPENCODE_RUNTIME_ID,
   shouldQueueWhenBusy,
   type BackgroundRunHandle,
-  type BackgroundRunStatus,
   type ListBackgroundRunsInput,
+  type OpencodeSessionStatus,
   type PromptBackgroundAsyncInput,
   type ResolvedModel,
   type RuntimeHealthCheckInput,
@@ -57,12 +59,6 @@ import {
   type Part,
   type Session,
 } from "./shared";
-import {
-  RuntimeContinuationDetachedError,
-  RuntimeSessionBusyError,
-  RuntimeSessionNotFoundError,
-  RuntimeSessionQueuedError,
-} from "../errors";
 
 export interface OpencodeRuntimeCoreMethods {
   syncSessionMessages(sessionId: string): Promise<void>;
@@ -88,7 +84,7 @@ export interface OpencodeRuntimeCoreMethods {
   compactSession(sessionId: string): Promise<boolean>;
   modelSupportsImageInput(model: ResolvedModel): Promise<boolean>;
   currentImageModel(): string;
-  emit(event: import("../../contracts/events").RuntimeEvent): void;
+  emit(event: RuntimeEvent): void;
 }
 
 export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
@@ -527,7 +523,7 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
     let run = getBackgroundRunById(normalizedRunId);
     if (!run) return null;
     try {
-      const statuses = unwrapSdkData<Record<string, import("./shared").OpencodeSessionStatus>>(
+      const statuses = unwrapSdkData<Record<string, OpencodeSessionStatus>>(
         await this.getClient().session.status({
           responseStyle: "data",
           throwOnError: true,

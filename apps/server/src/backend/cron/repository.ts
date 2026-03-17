@@ -1,4 +1,3 @@
-/* eslint-disable import/order */
 import type { SQLQueryBindings } from "bun:sqlite";
 
 import type {
@@ -10,8 +9,8 @@ import type {
   CronStepKind,
   CronStepStatus,
 } from "./types";
-import { sqlite } from "../db/client";
 import { nowMs, parseJson, toIso, createUniqueId } from "./utils";
+import { sqlite } from "../db/client";
 
 export interface CronDefinitionRow {
   id: string;
