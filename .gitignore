@@ -50,6 +50,5 @@ apps/mobile/web-build
 # Finder (MacOS) folder config
 .DS_Store
 
-#Expo Android stuff
-apps/mobile/android/*
+#local test data
 apps/server/data/*
