@@ -22,7 +22,6 @@
     "@opencode-ai/plugin": "^1.2.15",
     "@opencode-ai/sdk": "^1.2.15",
     "@t3-oss/env-core": "^0.13.10",
-    "@trpc/server": "^11.7.1",
     "@agent-mockingbird/contracts": "workspace:*",
     "@streamdown/code": "1.1.1",
     "@streamdown/core": "0.1.5",

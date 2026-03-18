@@ -19,8 +19,6 @@ export default tseslint.config(
       "sandbox-agent/**",
       "data/**",
       "runtime-assets/**",
-      "apps/server/src/test-embedded.ts",
-      "apps/server/src/test-embedded2.ts",
     ],
   },
   js.configs.recommended,
