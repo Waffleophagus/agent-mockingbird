@@ -4,6 +4,7 @@ import { migrateOpenclawWorkspace } from "../../agents/openclawImport";
 import type { SignalChannelService } from "../../channels/signal/service";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import type { CronService } from "../../cron/service";
+import type { HeartbeatRuntimeService } from "../../heartbeat/runtimeService";
 import { syncMemoryIndex } from "../../memory/service";
 import type { RunService } from "../../run/service";
 import type { RouteTable } from "../router";
@@ -15,6 +16,7 @@ import { createConfigRoutes } from "./configRoutes";
 import { createCronRoutes } from "./cronRoutes";
 import { createDashboardRoutes } from "./dashboardRoutes";
 import { createEventRoutes } from "./eventRoutes";
+import { createHeartbeatRoutes } from "./heartbeatRoutes";
 import { createMcpRoutes } from "./mcpRoutes";
 import { createMemoryRoutes } from "./memoryRoutes";
 import { createRunRoutes } from "./runRoutes";
@@ -74,6 +76,7 @@ async function importOpenclaw(req: Request) {
 export function createApiRoutes(input: {
   runtime: RuntimeEngine;
   cronService: CronService;
+  heartbeatService: HeartbeatRuntimeService;
   signalService: SignalChannelService;
   eventStream: RuntimeEventStream;
   runService: RunService;
@@ -83,6 +86,7 @@ export function createApiRoutes(input: {
       POST: (req: Request) => importOpenclaw(req),
     },
     ...createRuntimeRoutes({ cronService: input.cronService }),
+    ...createHeartbeatRoutes(input.heartbeatService),
     ...createChatRoutes(input.runtime),
     ...createRunRoutes(input.runService),
     ...createBackgroundRoutes(input.runtime),

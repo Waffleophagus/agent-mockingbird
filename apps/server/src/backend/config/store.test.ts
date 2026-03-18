@@ -88,3 +88,36 @@ test("example config no longer ships heartbeat config on the default build agent
   expect(buildAgent).toBeDefined();
   expect(buildAgent?.heartbeat).toBeUndefined();
 });
+
+test("parseConfig migrates legacy agent heartbeat blocks into runtime.heartbeat", () => {
+  const filePath = resolveExampleConfigPath();
+  const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    runtime?: Record<string, unknown>;
+    ui?: { agentTypes?: Array<Record<string, unknown>> };
+  };
+  if (!raw.runtime || !raw.ui?.agentTypes?.[0]) {
+    throw new Error("Test fixture missing runtime/ui.agentTypes");
+  }
+
+  delete raw.runtime.heartbeat;
+  raw.ui.agentTypes[0] = {
+    ...raw.ui.agentTypes[0],
+    id: "build",
+    model: "opencode/legacy-heartbeat-model",
+    heartbeat: {
+      enabled: true,
+      interval: "45m",
+      prompt: "legacy heartbeat prompt",
+      ackMaxChars: 123,
+    },
+  };
+
+  const parsed = parseConfig(raw);
+  expect(parsed.runtime.heartbeat.agentId).toBe("build");
+  expect(parsed.runtime.heartbeat.model).toBe("opencode/legacy-heartbeat-model");
+  expect(parsed.runtime.heartbeat.interval).toBe("45m");
+  expect(parsed.runtime.heartbeat.prompt).toBe("legacy heartbeat prompt");
+  expect(parsed.runtime.heartbeat.ackMaxChars).toBe(123);
+  expect(parsed.ui.agentTypes[0]?.id).toBe("build");
+  expect("heartbeat" in (parsed.ui.agentTypes[0] ?? {})).toBe(false);
+});

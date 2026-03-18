@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { isActiveHours } from "./activeHours";
-import { HEARTBEAT_SYSTEM_JOB_ID, migrateLegacyHeartbeatJobs, seedDefaultHeartbeatJob } from "./defaultJob";
-import { DEFAULT_HEARTBEAT_PROMPT, parseInterval } from "./service";
+import { deleteLegacyHeartbeatJobs, HEARTBEAT_SYSTEM_JOB_ID, seedDefaultHeartbeatJob } from "./defaultJob";
+import { parseInterval } from "./service";
 import type { HeartbeatConfig } from "./types";
 import { clearCronTables } from "../cron/storage";
 import { sqlite } from "../db/client";
@@ -38,6 +38,7 @@ describe("isActiveHours", () => {
     const config: HeartbeatConfig = {
       enabled: true,
       interval: "30m",
+      prompt: "heartbeat",
       ackMaxChars: 300,
     };
     expect(isActiveHours(config)).toBe(true);
@@ -47,6 +48,7 @@ describe("isActiveHours", () => {
     const config: HeartbeatConfig = {
       enabled: true,
       interval: "30m",
+      prompt: "heartbeat",
       ackMaxChars: 300,
       activeHours: {
         start: "00:00",
@@ -58,48 +60,26 @@ describe("isActiveHours", () => {
   });
 });
 
-describe("default heartbeat cron", () => {
-  test("seeds the reserved heartbeat-system cron with OpenClaw defaults", () => {
+describe("legacy heartbeat cron cleanup", () => {
+  test("removes the reserved heartbeat cron job", () => {
     clearCronTables();
     const createdAt = Date.now();
     seedDefaultHeartbeatJob(createdAt);
 
-    const row = sqlite
+    expect(deleteLegacyHeartbeatJobs()).toBe(1);
+    const remaining = sqlite
       .query(
         `
-        SELECT id, name, enabled, schedule_kind, every_ms, run_mode, handler_key, agent_prompt_template, payload_json
+        SELECT COUNT(*) as count
         FROM cron_job_definitions
         WHERE id = ?1
       `,
       )
-      .get(HEARTBEAT_SYSTEM_JOB_ID) as
-      | {
-          id: string;
-          name: string;
-          enabled: number;
-          schedule_kind: string;
-          every_ms: number;
-          run_mode: string;
-          handler_key: string | null;
-          agent_prompt_template: string | null;
-          payload_json: string;
-        }
-      | null;
-
-    expect(row).not.toBeNull();
-    expect(row?.name).toBe("Heartbeat");
-    expect(row?.enabled).toBe(1);
-    expect(row?.schedule_kind).toBe("every");
-    expect(row?.every_ms).toBe(parseInterval("30m"));
-    expect(row?.run_mode).toBe("agent");
-    expect(row?.handler_key).toBeNull();
-    expect(row?.agent_prompt_template).toBe(DEFAULT_HEARTBEAT_PROMPT);
-    expect(JSON.parse(row?.payload_json ?? "{}")).toEqual({
-      agentId: "build",
-    });
+      .get(HEARTBEAT_SYSTEM_JOB_ID) as { count: number };
+    expect(remaining.count).toBe(0);
   });
 
-  test("migrates legacy heartbeat-* jobs to the reserved heartbeat-system job once", () => {
+  test("removes legacy heartbeat-prefixed jobs", () => {
     clearCronTables();
     sqlite
       .query(
@@ -114,29 +94,17 @@ describe("default heartbeat cron", () => {
       )
       .run("heartbeat-build", "Heartbeat: build", parseInterval("30m"), Date.now());
 
-    const result = migrateLegacyHeartbeatJobs();
-    expect(result).toEqual({
-      migrated: true,
-      removedLegacy: 1,
-      createdDefault: true,
-    });
+    expect(deleteLegacyHeartbeatJobs()).toBe(1);
 
     const rows = sqlite
       .query(
         `
-        SELECT id, run_mode, handler_key, agent_prompt_template
+        SELECT id
         FROM cron_job_definitions
         ORDER BY id
       `,
       )
-      .all() as Array<{ id: string; run_mode: string; handler_key: string | null; agent_prompt_template: string | null }>;
-    expect(rows).toEqual([
-      {
-        id: HEARTBEAT_SYSTEM_JOB_ID,
-        run_mode: "agent",
-        handler_key: null,
-        agent_prompt_template: DEFAULT_HEARTBEAT_PROMPT,
-      },
-    ]);
+      .all() as Array<{ id: string }>;
+    expect(rows).toEqual([]);
   });
 });

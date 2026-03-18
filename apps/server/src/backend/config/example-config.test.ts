@@ -10,7 +10,9 @@ test("agent-mockingbird.config.example.json stays aligned with schema", () => {
 
   const runtime = raw.runtime as Record<string, unknown> | undefined;
   const opencode = runtime?.opencode as Record<string, unknown> | undefined;
+  const heartbeat = runtime?.heartbeat as Record<string, unknown> | undefined;
   expect(typeof opencode?.childSessionHideAfterDays).toBe("number");
+  expect(typeof heartbeat?.model).toBe("string");
   expect(typeof runtime?.configPolicy).toBe("object");
 
   const parsed = agentMockingbirdConfigSchema.safeParse(raw);

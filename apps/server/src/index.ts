@@ -7,7 +7,7 @@ import { CronService } from "./backend/cron/service";
 import "./backend/db/migrate";
 import { ensureSeedData, getHeartbeatSnapshot, getUsageSnapshot } from "./backend/db/repository";
 import { env } from "./backend/env";
-import { migrateLegacyHeartbeatJobs } from "./backend/heartbeat/defaultJob";
+import { HeartbeatRuntimeService } from "./backend/heartbeat/runtimeService";
 import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream, type MobileRealtimeSocketData } from "./backend/http/sse";
@@ -50,10 +50,10 @@ function isOpenCodeServerPath(pathname: string) {
 
 ensureSeedData();
 ensureConfigFile();
-migrateLegacyHeartbeatJobs();
 const configSnapshot = getConfigSnapshot();
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
+const heartbeatService = new HeartbeatRuntimeService();
 const signalService = new SignalChannelService(runtime);
 const runService = new RunService(runtime);
 const eventStream = createRuntimeEventStream({
@@ -65,6 +65,7 @@ const appDistDir = resolveAppDistDir();
 const apiRoutes = createApiRoutes({
   runtime,
   cronService,
+  heartbeatService,
   signalService,
   eventStream,
   runService,
@@ -116,6 +117,7 @@ void initializeMemory().catch(() => {
 
 runService.start();
 cronService.start();
+heartbeatService.start();
 signalService.start();
 
 const server = serve({
@@ -141,6 +143,7 @@ const shutdown = () => {
   unsubscribeRuntimeEvents();
   runService.stop();
   cronService.stop();
+  heartbeatService.stop();
   signalService.stop();
 };
 

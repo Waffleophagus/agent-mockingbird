@@ -37,6 +37,8 @@ const DEFAULT_OPENCODE_SMALL_MODEL = "opencode/big-pickle";
 const DEFAULT_OPENCODE_TIMEOUT_MS = 120_000;
 const DEFAULT_OPENCODE_PROMPT_TIMEOUT_MS = 300_000;
 const DEFAULT_OPENCODE_RUN_WAIT_TIMEOUT_MS = 180_000;
+const DEFAULT_HEARTBEAT_PROMPT =
+  'Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.';
 const legacyStringListSchema = z.array(z.string().min(1));
 const legacyAgentListSchema = z.array(specialistAgentSchema);
 const legacyAgentTypeListSchema = z.array(agentTypeDefinitionSchema);
@@ -302,6 +304,15 @@ function buildLegacyBootstrappedConfig() {
           vectorProbeLimit: 20,
         },
       },
+      heartbeat: {
+        enabled: true,
+        interval: "30m",
+        agentId: "build",
+        model: `${DEFAULT_OPENCODE_PROVIDER_ID}/${DEFAULT_OPENCODE_MODEL_ID}`,
+        prompt: DEFAULT_HEARTBEAT_PROMPT,
+        ackMaxChars: 300,
+        activeHours: null,
+      },
       cron: {
         defaultMaxAttempts: 3,
         defaultRetryBackoffMs: 30_000,
@@ -343,6 +354,7 @@ function buildLegacyBootstrappedConfig() {
           "runtime.opencode.bootstrap",
           "runtime.runStream",
           "runtime.memory",
+          "runtime.heartbeat",
           "runtime.cron",
           "runtime.queue",
           "runtime.channels",
@@ -415,8 +427,60 @@ function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
   return root;
 }
 
+function migrateLegacyHeartbeatConfig(raw: unknown): unknown {
+  if (!isPlainObject(raw)) return raw;
+
+  const root = { ...raw };
+  const runtime = isPlainObject(root.runtime) ? { ...root.runtime } : {};
+  const ui = isPlainObject(root.ui) ? { ...root.ui } : {};
+  const agentTypes = Array.isArray(ui.agentTypes)
+    ? ui.agentTypes.map(value => (isPlainObject(value) ? { ...value } : value))
+    : [];
+
+  let derivedHeartbeat: Record<string, unknown> | null = null;
+  for (const rawAgentType of agentTypes) {
+    if (!isPlainObject(rawAgentType)) continue;
+    const heartbeat = isPlainObject(rawAgentType.heartbeat) ? rawAgentType.heartbeat : null;
+    if (!heartbeat) continue;
+
+    if (!derivedHeartbeat) {
+      const model =
+        typeof rawAgentType.model === "string" && rawAgentType.model.trim()
+          ? rawAgentType.model.trim()
+          : `${DEFAULT_OPENCODE_PROVIDER_ID}/${DEFAULT_OPENCODE_MODEL_ID}`;
+      derivedHeartbeat = {
+        enabled: typeof heartbeat.enabled === "boolean" ? heartbeat.enabled : true,
+        interval: typeof heartbeat.interval === "string" && heartbeat.interval.trim() ? heartbeat.interval.trim() : "30m",
+        agentId: typeof rawAgentType.id === "string" && rawAgentType.id.trim() ? rawAgentType.id.trim() : "build",
+        model,
+        prompt:
+          typeof heartbeat.prompt === "string" && heartbeat.prompt.trim()
+            ? heartbeat.prompt.trim()
+            : DEFAULT_HEARTBEAT_PROMPT,
+        ackMaxChars:
+          typeof heartbeat.ackMaxChars === "number" && Number.isFinite(heartbeat.ackMaxChars)
+            ? heartbeat.ackMaxChars
+            : 300,
+        activeHours: isPlainObject(heartbeat.activeHours) ? heartbeat.activeHours : null,
+      };
+    }
+
+    delete rawAgentType.heartbeat;
+  }
+
+  if (!isPlainObject(runtime.heartbeat) && derivedHeartbeat) {
+    runtime.heartbeat = derivedHeartbeat;
+  }
+  root.runtime = runtime;
+  if (agentTypes.length > 0) {
+    ui.agentTypes = agentTypes;
+  }
+  root.ui = ui;
+  return root;
+}
+
 export function parseConfig(raw: unknown) {
-  const normalized = migrateConfigShape(stripLegacyMemoryWriteConfig(raw));
+  const normalized = migrateLegacyHeartbeatConfig(migrateConfigShape(stripLegacyMemoryWriteConfig(raw)));
   if (appearsToBeOpencodeConfig(normalized)) {
     throw new ConfigApplyError(
       "schema",

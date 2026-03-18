@@ -216,6 +216,28 @@ export const runtimeCronSchema = z
   })
   .strict();
 
+const runtimeHeartbeatActiveHoursSchema = z
+  .object({
+    start: z.string().regex(/^\d{2}:\d{2}$/),
+    end: z.string().regex(/^\d{2}:\d{2}$/),
+    timezone: z.string().min(1),
+  })
+  .strict();
+
+export const runtimeHeartbeatSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    interval: z.string().regex(/^\d+[mhd]$/).default("30m"),
+    agentId: z.string().min(1).default("build"),
+    model: z.string().min(1),
+    prompt: z.string().min(1).default(
+      'Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.',
+    ),
+    ackMaxChars: z.number().int().positive().max(4_000).default(300),
+    activeHours: runtimeHeartbeatActiveHoursSchema.nullable().default(null),
+  })
+  .strict();
+
 export const runtimeQueueSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -326,6 +348,7 @@ export const runtimeConfigPolicySchema = z
       "runtime.opencode.imageModel",
       "runtime.runStream",
       "runtime.memory",
+      "runtime.heartbeat",
       "runtime.cron",
       "runtime.queue",
       "runtime.channels",
@@ -395,6 +418,16 @@ export const agentMockingbirdConfigSchema = z
             vectorProbeLimit: 20,
           },
         }),
+        heartbeat: runtimeHeartbeatSchema.default({
+          enabled: true,
+          interval: "30m",
+          agentId: "build",
+          model: "opencode/big-pickle",
+          prompt:
+            "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.",
+          ackMaxChars: 300,
+          activeHours: null,
+        }),
         cron: runtimeCronSchema.default({
           defaultMaxAttempts: 3,
           defaultRetryBackoffMs: 30_000,
@@ -418,6 +451,7 @@ export const agentMockingbirdConfigSchema = z
             "runtime.opencode.imageModel",
             "runtime.runStream",
             "runtime.memory",
+            "runtime.heartbeat",
             "runtime.cron",
             "runtime.queue",
             "runtime.channels",

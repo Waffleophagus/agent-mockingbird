@@ -17,7 +17,7 @@ import { toLegacySpecialistAgent } from "../agents/service";
 import { getConfig as getManagedConfig } from "../config/service";
 import { clearCronTables } from "../cron/storage";
 import { DEFAULT_SESSIONS } from "../defaults";
-import { seedDefaultHeartbeatJob } from "../heartbeat/defaultJob";
+import { ensureHeartbeatStateTable } from "../heartbeat/state";
 import { clearRunTables } from "../run/storage";
 import { listManagedSkillCatalog } from "../skills/service";
 
@@ -634,6 +634,7 @@ function ensureAuxiliaryTables() {
 }
 
 ensureAuxiliaryTables();
+ensureHeartbeatStateTable();
 
 function getDefaultSessionModel() {
   try {
@@ -700,8 +701,6 @@ function seedDefaultState(createdAt: number) {
     `,
     )
     .run(crypto.randomUUID(), createdAt);
-
-  seedDefaultHeartbeatJob(createdAt);
 }
 
 export function ensureSeedData() {
@@ -749,6 +748,7 @@ export function resetDatabaseToDefaults(): DashboardBootstrap {
     sqlite.query("DELETE FROM messages").run();
     sqlite.query("DELETE FROM usage_events").run();
     sqlite.query("DELETE FROM heartbeat_events").run();
+    sqlite.query("DELETE FROM heartbeat_runtime_state").run();
     sqlite.query("DELETE FROM runtime_config").run();
     sqlite.query("DELETE FROM runtime_session_bindings").run();
     sqlite.query("DELETE FROM channel_conversation_bindings").run();

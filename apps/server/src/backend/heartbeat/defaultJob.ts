@@ -113,3 +113,26 @@ export function migrateLegacyHeartbeatJobs() {
 
   return tx();
 }
+
+export function deleteLegacyHeartbeatJobs() {
+  ensureCronTables();
+  sqlite
+    .query(
+      `
+      DELETE FROM cron_job_instances
+      WHERE job_definition_id = ?1
+         OR job_definition_id LIKE 'heartbeat-%'
+    `,
+    )
+    .run(HEARTBEAT_SYSTEM_JOB_ID);
+  const deleted = sqlite
+    .query(
+      `
+      DELETE FROM cron_job_definitions
+      WHERE id = ?1
+         OR id LIKE 'heartbeat-%'
+    `,
+    )
+    .run(HEARTBEAT_SYSTEM_JOB_ID).changes;
+  return deleted;
+}

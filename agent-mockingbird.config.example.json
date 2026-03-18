@@ -70,6 +70,15 @@
         "vectorProbeLimit": 20
       }
     },
+    "heartbeat": {
+      "enabled": true,
+      "interval": "30m",
+      "agentId": "build",
+      "model": "opencode/big-pickle",
+      "prompt": "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.",
+      "ackMaxChars": 300,
+      "activeHours": null
+    },
     "cron": {
       "defaultMaxAttempts": 3,
       "defaultRetryBackoffMs": 30000,
@@ -109,6 +118,7 @@
         "runtime.opencode.bootstrap",
         "runtime.runStream",
         "runtime.memory",
+        "runtime.heartbeat",
         "runtime.cron",
         "runtime.channels",
         "ui.skills",

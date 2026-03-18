@@ -5,9 +5,14 @@ export interface HeartbeatConfig {
     start: string;
     end: string;
     timezone: string;
-  };
-  prompt?: string;
+  } | null;
+  prompt: string;
   ackMaxChars: number;
+}
+
+export interface HeartbeatRuntimeConfig extends HeartbeatConfig {
+  agentId: string;
+  model: string;
 }
 
 export interface HeartbeatContext {
@@ -35,5 +40,23 @@ export interface HeartbeatJobPayload {
     start: string;
     end: string;
     timezone: string;
-  };
+  } | null;
+}
+
+export type HeartbeatLastResult = "idle" | "acknowledged" | "attention" | "skipped" | "error";
+
+export interface HeartbeatRuntimeState {
+  sessionId: string | null;
+  running: boolean;
+  lastRunAt: string | null;
+  lastResult: HeartbeatLastResult;
+  lastResponse: string | null;
+  lastError: string | null;
+  updatedAt: string;
+}
+
+export interface HeartbeatStatus {
+  config: HeartbeatRuntimeConfig;
+  state: HeartbeatRuntimeState;
+  nextDueAt: string | null;
 }
