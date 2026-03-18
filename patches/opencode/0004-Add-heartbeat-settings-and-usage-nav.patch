@@ -1,7 +1,7 @@
-From 1629cda51eb0bb662bebbebee0e7b13db4464241 Mon Sep 17 00:00:00 2001
+From b21aa318ea5d5d0a3a6d8ef91a484c3f3bdb3b04 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Wed, 18 Mar 2026 15:36:33 -0500
-Subject: [PATCH 4/4] Add heartbeat settings and usage nav
+Subject: [PATCH 4/5] Add heartbeat settings and usage nav
 
 ---
  .../app/src/components/dialog-settings.tsx    |   8 +
