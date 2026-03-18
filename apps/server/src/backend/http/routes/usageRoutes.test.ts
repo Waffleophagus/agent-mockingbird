@@ -88,6 +88,9 @@ describe("usage routes", () => {
     const html = await response.text();
     expect(html).toContain("<title>Usage</title>");
     expect(html).toContain("/api/usage/dashboard");
+    expect(html).toContain("Back to app");
+    expect(html).toContain("window.history.back()");
+    expect(html).toContain("window.location.origin");
     expect(html).toContain("All time");
     expect(html).toContain("24h");
     expect(html).toContain("7d");

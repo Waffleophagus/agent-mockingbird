@@ -107,8 +107,31 @@ function usagePageHtml() {
       .usage-header {
         display: flex;
         align-items: center;
+        justify-content: space-between;
         gap: 1rem;
         padding: 1rem 1.1rem;
+      }
+
+      .usage-header-copy {
+        min-width: 0;
+      }
+
+      .usage-back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        text-decoration: none;
+        color: var(--text-weak);
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 0.45rem 0.7rem;
+        transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+      }
+
+      .usage-back-link:hover {
+        color: var(--text-strong);
+        background: var(--surface-raised-base-hover);
+        border-color: var(--border-weak-base);
       }
 
       .usage-toolbar {
@@ -222,9 +245,14 @@ function usagePageHtml() {
       <main class="usage-main">
         <div class="usage-content">
           <section class="usage-card usage-header">
-            <div class="flex flex-col gap-1.5 min-w-0">
+            <div class="usage-header-copy flex flex-col gap-1.5">
               <div class="text-16-medium text-text-strong">Runtime Usage Dashboard</div>
+              <div class="text-12-regular text-text-weak">Live runtime metrics, grouped snapshots, and the most recent usage deltas.</div>
             </div>
+            <a class="usage-back-link text-12-medium" href="/" data-action="usage-back-link" aria-label="Back to app">
+              <span aria-hidden="true">←</span>
+              <span>Back to app</span>
+            </a>
           </section>
 
           <section class="usage-toolbar">
@@ -276,6 +304,7 @@ function usagePageHtml() {
       const providersEl = document.getElementById("providers");
       const modelsEl = document.getElementById("models");
       const recentEl = document.getElementById("recent");
+      const backLink = document.querySelector("[data-action='usage-back-link']");
       const buttons = Array.from(document.querySelectorAll("[data-window]"));
       let currentWindow = "all";
 
@@ -375,6 +404,15 @@ function usagePageHtml() {
           void loadUsage();
         });
       }
+
+      backLink?.addEventListener("click", (event) => {
+        const referrer = document.referrer ? new URL(document.referrer) : null;
+        const sameOriginReferrer = referrer && referrer.origin === window.location.origin;
+        if (sameOriginReferrer && window.history.length > 1) {
+          event.preventDefault();
+          window.history.back();
+        }
+      });
 
       setButtons();
       void loadUsage();
