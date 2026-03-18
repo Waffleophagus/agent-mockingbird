@@ -337,6 +337,8 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
         userMessageId: assistantMessage.info.parentID,
         assistantMessageId: assistantMessage.info.id,
         usage: {
+          providerId: assistantMessage.info.providerID ?? null,
+          modelId: assistantMessage.info.modelID ?? null,
           requestCountDelta: 1,
           inputTokensDelta:
             assistantMessage.info.tokens?.input ??

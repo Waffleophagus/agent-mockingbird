@@ -451,6 +451,8 @@ export const opencodeRuntimeBackgroundMethods: OpencodeRuntimeBackgroundMethods 
         recordUsageDelta({
           id: `assistant-message:${entry.info.id}`,
           sessionId: localSessionId,
+          providerId: entry.info.providerID ?? null,
+          modelId: entry.info.modelID ?? null,
           requestCountDelta: 1,
           inputTokensDelta: normalizeUsageDelta(entry.info.tokens?.input),
           outputTokensDelta: normalizeUsageDelta(entry.info.tokens?.output),

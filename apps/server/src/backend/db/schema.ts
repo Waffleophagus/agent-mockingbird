@@ -37,6 +37,8 @@ export const usageEvents = sqliteTable(
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id").references(() => sessions.id, { onDelete: "set null" }),
+    providerId: text("provider_id"),
+    modelId: text("model_id"),
     requestCountDelta: integer("request_count_delta").notNull().default(0),
     inputTokensDelta: integer("input_tokens_delta").notNull().default(0),
     outputTokensDelta: integer("output_tokens_delta").notNull().default(0),
@@ -44,7 +46,11 @@ export const usageEvents = sqliteTable(
     source: text("source", { enum: ["api", "runtime", "scheduler", "system"] }).notNull().default("system"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(nowMs),
   },
-  table => [index("usage_events_created_idx").on(table.createdAt)],
+  table => [
+    index("usage_events_created_idx").on(table.createdAt),
+    index("usage_events_provider_created_idx").on(table.providerId, table.createdAt),
+    index("usage_events_provider_model_created_idx").on(table.providerId, table.modelId, table.createdAt),
+  ],
 );
 
 export const heartbeatEvents = sqliteTable(

@@ -67,6 +67,18 @@ interface UsageAggregateRow {
   cost_micros: number;
 }
 
+interface UsageGroupedRow extends UsageAggregateRow {
+  provider_id: string | null;
+  model_id: string | null;
+}
+
+interface UsageRecentRow extends UsageGroupedRow {
+  id: string;
+  session_id: string | null;
+  created_at: number;
+  title: string | null;
+}
+
 interface RuntimeSessionBindingRow {
   runtime: string;
   session_id: string;
@@ -183,6 +195,38 @@ export interface BackgroundRunRecord {
   completedAt: string | null;
 }
 
+export interface UsageDashboardWindowSnapshot {
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+}
+
+export interface UsageDashboardGroupRecord extends UsageDashboardWindowSnapshot {
+  providerId: string;
+  modelId?: string;
+}
+
+export interface UsageDashboardRecentRecord extends UsageDashboardWindowSnapshot {
+  id: string;
+  createdAt: string;
+  sessionId: string | null;
+  sessionTitle: string | null;
+  providerId: string | null;
+  modelId: string | null;
+}
+
+export interface UsageDashboardSnapshot {
+  window: "all" | "24h" | "7d" | "30d";
+  totals: UsageDashboardWindowSnapshot;
+  unattributedTotals: UsageDashboardWindowSnapshot;
+  providers: UsageDashboardGroupRecord[];
+  models: UsageDashboardGroupRecord[];
+  recent: UsageDashboardRecentRecord[];
+  forwardOnlyBreakdown: true;
+}
+
 export interface SessionMessageImportInput {
   id: string;
   role: "user" | "assistant";
@@ -199,6 +243,47 @@ const toMillisOrNull = (isoTimestamp: string | null) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 const sessionIdPrefix = "session";
+const usageWindows = ["all", "24h", "7d", "30d"] as const;
+
+function parseQualifiedModelRef(rawModel: string | null | undefined) {
+  const trimmed = rawModel?.trim() ?? "";
+  if (!trimmed) return { providerId: null, modelId: null };
+  const slash = trimmed.indexOf("/");
+  if (slash <= 0 || slash === trimmed.length - 1) {
+    return { providerId: null, modelId: null };
+  }
+  const providerId = trimmed.slice(0, slash).trim();
+  const modelId = trimmed.slice(slash + 1).trim();
+  if (!providerId || !modelId) {
+    return { providerId: null, modelId: null };
+  }
+  return { providerId, modelId };
+}
+
+function usageSnapshotFromAggregate(row: UsageAggregateRow): UsageDashboardWindowSnapshot {
+  return {
+    requestCount: row.request_count,
+    inputTokens: row.input_tokens,
+    outputTokens: row.output_tokens,
+    totalTokens: row.input_tokens + row.output_tokens,
+    estimatedCostUsd: row.cost_micros / 1_000_000,
+  };
+}
+
+function usageWindowLowerBound(window: UsageDashboardSnapshot["window"]): number | null {
+  const now = nowMs();
+  switch (window) {
+    case "24h":
+      return now - 24 * 60 * 60 * 1000;
+    case "7d":
+      return now - 7 * 24 * 60 * 60 * 1000;
+    case "30d":
+      return now - 30 * 24 * 60 * 60 * 1000;
+    case "all":
+    default:
+      return null;
+  }
+}
 
 function scalar<T>(query: string, ...bindings: SQLQueryBindings[]): T {
   const row = sqlite.query(query).get(...bindings);
@@ -934,17 +1019,20 @@ export function getUsageSnapshot(): UsageSnapshot {
     `,
   );
 
+  const snapshot = usageSnapshotFromAggregate(row);
   return {
-    requestCount: row.request_count,
-    inputTokens: row.input_tokens,
-    outputTokens: row.output_tokens,
-    estimatedCostUsd: row.cost_micros / 1_000_000,
+    requestCount: snapshot.requestCount,
+    inputTokens: snapshot.inputTokens,
+    outputTokens: snapshot.outputTokens,
+    estimatedCostUsd: snapshot.estimatedCostUsd,
   };
 }
 
 export function recordUsageDelta(input: {
   id?: string;
   sessionId?: string;
+  providerId?: string | null;
+  modelId?: string | null;
   requestCountDelta: number;
   inputTokensDelta: number;
   outputTokensDelta: number;
@@ -953,19 +1041,40 @@ export function recordUsageDelta(input: {
   createdAt?: number;
 }) {
   const createdAt = input.createdAt ?? nowMs();
+  let providerId = input.providerId?.trim() || null;
+  let modelId = input.modelId?.trim() || null;
+
+  if ((!providerId || !modelId) && input.sessionId) {
+    const session = scalar<{ model: string } | null>(
+      `
+      SELECT model
+      FROM sessions
+      WHERE id = ?1
+    `,
+      input.sessionId,
+    );
+    if (session?.model) {
+      const parsed = parseQualifiedModelRef(session.model);
+      providerId ||= parsed.providerId;
+      modelId ||= parsed.modelId;
+    }
+  }
+
   sqlite
     .query(
       `
       INSERT OR IGNORE INTO usage_events (
-        id, session_id, request_count_delta, input_tokens_delta,
+        id, session_id, provider_id, model_id, request_count_delta, input_tokens_delta,
         output_tokens_delta, estimated_cost_usd_delta_micros, source, created_at
       )
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
     `,
     )
     .run(
       input.id ?? crypto.randomUUID(),
       input.sessionId ?? null,
+      providerId,
+      modelId,
       input.requestCountDelta,
       input.inputTokensDelta,
       input.outputTokensDelta,
@@ -973,6 +1082,116 @@ export function recordUsageDelta(input: {
       input.source,
       createdAt,
     );
+}
+
+export function getUsageDashboardSnapshot(window: UsageDashboardSnapshot["window"] = "all"): UsageDashboardSnapshot {
+  const normalizedWindow = usageWindows.includes(window) ? window : "all";
+  const lowerBound = usageWindowLowerBound(normalizedWindow);
+  const usageEventsWhereClause = lowerBound === null ? "" : "WHERE usage_events.created_at >= ?1";
+  const bindings = lowerBound === null ? [] : [lowerBound];
+
+  const totals = scalar<UsageAggregateRow>(
+    `
+      SELECT
+        COALESCE(SUM(request_count_delta), 0) AS request_count,
+        COALESCE(SUM(input_tokens_delta), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
+        COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
+      FROM usage_events
+      ${usageEventsWhereClause}
+    `,
+    ...bindings,
+  );
+  const unattributedTotals = scalar<UsageAggregateRow>(
+    `
+      SELECT
+        COALESCE(SUM(request_count_delta), 0) AS request_count,
+        COALESCE(SUM(input_tokens_delta), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
+        COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
+      FROM usage_events
+      ${lowerBound === null ? "WHERE" : `${usageEventsWhereClause} AND`} (provider_id IS NULL OR model_id IS NULL)
+    `,
+    ...bindings,
+  );
+  const providers = allRows<UsageGroupedRow>(
+    `
+      SELECT
+        provider_id,
+        NULL AS model_id,
+        COALESCE(SUM(request_count_delta), 0) AS request_count,
+        COALESCE(SUM(input_tokens_delta), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
+        COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
+      FROM usage_events
+      ${lowerBound === null ? "WHERE provider_id IS NOT NULL" : `${usageEventsWhereClause} AND provider_id IS NOT NULL`}
+      GROUP BY provider_id
+      ORDER BY cost_micros DESC, output_tokens DESC, provider_id ASC
+    `,
+    ...bindings,
+  ).map(row => ({
+    providerId: row.provider_id ?? "unknown",
+    ...usageSnapshotFromAggregate(row),
+  }));
+  const models = allRows<UsageGroupedRow>(
+    `
+      SELECT
+        provider_id,
+        model_id,
+        COALESCE(SUM(request_count_delta), 0) AS request_count,
+        COALESCE(SUM(input_tokens_delta), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
+        COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
+      FROM usage_events
+      ${lowerBound === null ? "WHERE provider_id IS NOT NULL AND model_id IS NOT NULL" : `${usageEventsWhereClause} AND provider_id IS NOT NULL AND model_id IS NOT NULL`}
+      GROUP BY provider_id, model_id
+      ORDER BY cost_micros DESC, output_tokens DESC, provider_id ASC, model_id ASC
+    `,
+    ...bindings,
+  ).map(row => ({
+    providerId: row.provider_id ?? "unknown",
+    modelId: row.model_id ?? "unknown",
+    ...usageSnapshotFromAggregate(row),
+  }));
+  const recent = allRows<UsageRecentRow>(
+    `
+      SELECT
+        usage_events.id,
+        usage_events.session_id,
+        usage_events.provider_id,
+        usage_events.model_id,
+        usage_events.request_count_delta AS request_count,
+        usage_events.input_tokens_delta AS input_tokens,
+        usage_events.output_tokens_delta AS output_tokens,
+        usage_events.estimated_cost_usd_delta_micros AS cost_micros,
+        usage_events.created_at,
+        sessions.title
+      FROM usage_events
+      LEFT JOIN sessions ON sessions.id = usage_events.session_id
+      ${usageEventsWhereClause}
+      ORDER BY usage_events.created_at DESC, usage_events.id DESC
+      LIMIT 50
+    `,
+    ...bindings,
+  ).map(row => ({
+    id: row.id,
+    createdAt: toIso(row.created_at),
+    sessionId: row.session_id,
+    sessionTitle: row.title,
+    providerId: row.provider_id,
+    modelId: row.model_id,
+    ...usageSnapshotFromAggregate(row),
+  }));
+
+  return {
+    window: normalizedWindow,
+    totals: usageSnapshotFromAggregate(totals),
+    unattributedTotals: usageSnapshotFromAggregate(unattributedTotals),
+    providers,
+    models,
+    recent,
+    forwardOnlyBreakdown: true,
+  };
 }
 
 export function getHeartbeatSnapshot(): HeartbeatSnapshot {
@@ -1862,6 +2081,8 @@ export function appendChatExchange(input: {
   userMessageId?: string;
   assistantMessageId?: string;
   usage: {
+    providerId?: string | null;
+    modelId?: string | null;
     requestCountDelta: number;
     inputTokensDelta: number;
     outputTokensDelta: number;
@@ -2043,6 +2264,8 @@ export function appendChatExchange(input: {
     recordUsageDelta({
       id: `assistant-message:${assistantMessage.id}`,
       sessionId: input.sessionId,
+      providerId: input.usage.providerId,
+      modelId: input.usage.modelId,
       requestCountDelta: input.usage.requestCountDelta,
       inputTokensDelta: input.usage.inputTokensDelta,
       outputTokensDelta: input.usage.outputTokensDelta,

@@ -43,6 +43,13 @@
       "when": 1772409600000,
       "tag": "0005_signal_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1773619200000,
+      "tag": "0006_usage_event_dimensions",
+      "breakpoints": true
     }
   ]
 }

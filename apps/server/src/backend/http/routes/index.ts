@@ -22,6 +22,7 @@ import { createRuntimeRoutes } from "./runtimeRoutes";
 import { createSignalRoutes } from "./signalRoutes";
 import { createSkillRoutes } from "./skillRoutes";
 import { createUiRoutes } from "./uiRoutes";
+import { createUsageRoutes } from "./usageRoutes";
 
 async function importOpenclaw(req: Request) {
   const schema = z.object({
@@ -88,6 +89,7 @@ export function createApiRoutes(input: {
     ...createDashboardRoutes(input.runtime),
     ...createConfigRoutes(input.eventStream),
     ...createUiRoutes(input.runtime, input.eventStream),
+    ...createUsageRoutes(),
     ...createEventRoutes(input.eventStream),
     ...createAgentRoutes(),
     ...createMcpRoutes(),
