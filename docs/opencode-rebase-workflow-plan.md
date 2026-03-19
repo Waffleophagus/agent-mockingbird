@@ -5,7 +5,7 @@
 Replace the current "copy upstream into `vendor/opencode` and hand-edit it" workflow with a release-tag-pinned, rebasable OpenCode workflow that gives us all of the following at once:
 
 - a pristine local upstream reference checkout
-- a reliable way to carry Wafflebot patches forward onto newer OpenCode releases
+- a reliable way to carry Agent Mockingbird patches forward onto newer OpenCode releases
 - a generated shipped source tree instead of a permanently committed vendor tree
 - a single source of truth for which OpenCode version we ship
 - a pinned installed OpenCode CLI/sidecar version that matches the shipped UI version
@@ -101,7 +101,7 @@ Recommended shape:
     "patches": "patches/opencode"
   },
   "branch": {
-    "name": "wafflebot/opencode"
+    "name": "agent-mockingbird/opencode"
   }
 }
 ```
@@ -382,7 +382,7 @@ Only after all previous gates are green:
 
 1. Create a pristine upstream cleanroom checkout at the current baseline.
 2. Recreate `vendor/opencode` as a git worktree.
-3. Port the current Wafflebot changes from the committed vendor tree into the patch worktree.
+3. Port the current Agent Mockingbird changes from the committed vendor tree into the patch worktree.
 4. Commit those changes as a readable stack rather than one giant blob if feasible.
 5. Export that stack to `patches/opencode/`.
 
@@ -610,5 +610,5 @@ The work is done when all of the following are true:
 - Expect the first migration to be the hardest part. Capturing the existing patch delta correctly matters more than perfect commit hygiene.
 - If the existing delta is too large to split safely, take the initial baseline as one patch stack and improve granularity only after the workflow is working.
 - The most important invariant is that the lock file is never advanced on a broken rebase.
-- The second most important invariant is that `cleanroom/opencode` never becomes the place where local Wafflebot changes live.
+- The second most important invariant is that `cleanroom/opencode` never becomes the place where local Agent Mockingbird changes live.
 - If this gets messy, favor correctness and repeatability over elegance. The whole point of this work is to stop having an opaque hand-maintained vendor tree.

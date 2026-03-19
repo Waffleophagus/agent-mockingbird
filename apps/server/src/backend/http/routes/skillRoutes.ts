@@ -15,14 +15,14 @@ import {
 
 export function createSkillRoutes() {
   return {
-    "/api/waffle/skills": {
+    "/api/mockingbird/skills": {
       GET: async () => {
         const result = await loadRuntimeSkillCatalog();
         return Response.json(result.payload, { status: result.status });
       },
     },
 
-    "/api/waffle/skills/import": {
+    "/api/mockingbird/skills/import": {
       POST: async (req: Request) => {
         const body = (await req.json()) as {
           id?: string;
@@ -49,7 +49,7 @@ export function createSkillRoutes() {
       },
     },
 
-    "/api/waffle/skills/enabled": {
+    "/api/mockingbird/skills/enabled": {
       PUT: async (req: Request) => {
         const body = (await req.json()) as { skills?: unknown; expectedHash?: string };
         if (!Array.isArray(body.skills)) {
@@ -69,7 +69,7 @@ export function createSkillRoutes() {
       },
     },
 
-    "/api/waffle/skills/:id": {
+    "/api/mockingbird/skills/:id": {
       PATCH: async (req: Request & { params: { id: string } }) => {
         const body = (await req.json()) as { enabled?: unknown };
         if (typeof body.enabled !== "boolean") {

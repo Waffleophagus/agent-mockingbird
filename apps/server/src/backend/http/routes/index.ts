@@ -82,7 +82,7 @@ export function createApiRoutes(input: {
   runService: RunService;
 }): RouteTable {
   return {
-    "/api/waffle/runtime/import-openclaw": {
+    "/api/mockingbird/runtime/import-openclaw": {
       POST: (req: Request) => importOpenclaw(req),
     },
     ...createRuntimeRoutes({ cronService: input.cronService }),

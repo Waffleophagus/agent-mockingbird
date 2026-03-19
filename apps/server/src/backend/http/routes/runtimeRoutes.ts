@@ -51,7 +51,7 @@ function buildRuntimePayload() {
 
 export function createRuntimeRoutes(input: { cronService: CronService }) {
   return {
-    "/api/waffle/runtime/pinned-workspace": {
+    "/api/mockingbird/runtime/pinned-workspace": {
       GET: () => {
         const snapshot = getConfigSnapshot();
         return Response.json({
@@ -61,7 +61,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
       },
     },
 
-    "/api/waffle/runtime/config": {
+    "/api/mockingbird/runtime/config": {
       GET: () => Response.json(buildRuntimePayload()),
       PATCH: async (req: Request) => {
         const body = (await req.json()) as Record<string, unknown>;
@@ -91,7 +91,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
       },
     },
 
-    "/api/waffle/runtime/config/replace": {
+    "/api/mockingbird/runtime/config/replace": {
       POST: async (req: Request) => {
         const body = (await req.json()) as { config?: unknown; expectedHash?: unknown };
         try {
@@ -112,7 +112,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
       },
     },
 
-    "/api/waffle/runtime/info": {
+    "/api/mockingbird/runtime/info": {
       GET: () => {
         const snapshot = getConfigSnapshot();
         const storage = getOpencodeAgentStorageInfo(snapshot.config);
@@ -131,14 +131,14 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
       },
     },
 
-    "/api/waffle/runtime/system-prompt": {
+    "/api/mockingbird/runtime/system-prompt": {
       GET: () =>
         Response.json({
           system: buildAgentMockingbirdSystemPrompt() ?? "",
         }),
     },
 
-    "/api/waffle/runtime/compaction-context": {
+    "/api/mockingbird/runtime/compaction-context": {
       GET: (req: Request) => {
         const sessionId = new URL(req.url).searchParams.get("sessionId")?.trim() || undefined;
         return Response.json({
@@ -148,7 +148,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
       },
     },
 
-    "/api/waffle/runtime/session-scope": {
+    "/api/mockingbird/runtime/session-scope": {
       GET: (req: Request) => {
         const sessionId = new URL(req.url).searchParams.get("sessionId")?.trim() ?? "";
         if (!sessionId) {
@@ -169,7 +169,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
       },
     },
 
-    "/api/waffle/runtime/notify-main-thread": {
+    "/api/mockingbird/runtime/notify-main-thread": {
       POST: async (req: Request) => {
         const body = (await req.json()) as {
           sessionId?: unknown;

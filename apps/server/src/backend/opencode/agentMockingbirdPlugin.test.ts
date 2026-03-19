@@ -30,7 +30,7 @@ describe("AgentMockingbirdPlugin", () => {
     process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input) => {
-      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/memory/retrieve");
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/memory/retrieve");
       return new Response(
         JSON.stringify({
           results: [
@@ -78,14 +78,14 @@ describe("AgentMockingbirdPlugin", () => {
 
     globalThis.fetch = (async (input) => {
       const url = String(input);
-      if (url === "http://127.0.0.1:3001/api/waffle/runtime/system-prompt") {
+      if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/system-prompt") {
         return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
           headers: {
             "Content-Type": "application/json",
           },
         });
       }
-      if (url === "http://127.0.0.1:3001/api/waffle/runtime/session-scope?sessionId=sess-1") {
+      if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/session-scope?sessionId=sess-1") {
         return new Response(JSON.stringify({ localSessionId: "session-123", isMain: false, kind: "other" }), {
           headers: {
             "Content-Type": "application/json",
@@ -106,14 +106,14 @@ describe("AgentMockingbirdPlugin", () => {
 
     globalThis.fetch = (async (input) => {
       const url = String(input);
-      if (url === "http://127.0.0.1:3001/api/waffle/runtime/system-prompt") {
+      if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/system-prompt") {
         return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
           headers: {
             "Content-Type": "application/json",
           },
         });
       }
-      if (url === "http://127.0.0.1:3001/api/waffle/runtime/session-scope?sessionId=sess-main") {
+      if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/session-scope?sessionId=sess-main") {
         return new Response(JSON.stringify({ localSessionId: "main", isMain: true, kind: "main" }), {
           headers: {
             "Content-Type": "application/json",
@@ -138,14 +138,14 @@ describe("AgentMockingbirdPlugin", () => {
 
     globalThis.fetch = (async (input) => {
       const url = String(input);
-      if (url === "http://127.0.0.1:3001/api/waffle/runtime/system-prompt") {
+      if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/system-prompt") {
         return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
           headers: {
             "Content-Type": "application/json",
           },
         });
       }
-      if (url === "http://127.0.0.1:3001/api/waffle/runtime/session-scope?sessionId=sess-cron") {
+      if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/session-scope?sessionId=sess-cron") {
         return new Response(
           JSON.stringify({
             localSessionId: "session-cron-1",
@@ -178,7 +178,7 @@ describe("AgentMockingbirdPlugin", () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input) => {
-      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/runtime/compaction-context?sessionId=sess-1");
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/runtime/compaction-context?sessionId=sess-1");
       return new Response(
         JSON.stringify({
           prompt: "You are generating a compact factual continuation summary.\n## Decisions",
@@ -203,7 +203,7 @@ describe("AgentMockingbirdPlugin", () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input) => {
-      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/runtime/compaction-context?sessionId=sess-1");
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/runtime/compaction-context?sessionId=sess-1");
       return new Response(JSON.stringify({ context: ["Agent Mockingbird continuation notes:\n- Mention config changes."] }), {
         headers: {
           "Content-Type": "application/json",
@@ -281,7 +281,7 @@ describe("AgentMockingbirdPlugin", () => {
     process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input, init) => {
-      expect(String(input)).toBe("http://127.0.0.1:3001/api/waffle/runtime/notify-main-thread");
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/runtime/notify-main-thread");
       expect(init?.method).toBe("POST");
       expect(init?.headers).toEqual({ "Content-Type": "application/json" });
       expect(init?.body).toBe(

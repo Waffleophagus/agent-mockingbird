@@ -7,7 +7,7 @@ import {
 
 export function createAgentRoutes() {
   return {
-    "/api/waffle/agents": {
+    "/api/mockingbird/agents": {
       GET: async () => {
         try {
           const payload = await listOpencodeAgentTypes();
@@ -53,7 +53,7 @@ export function createAgentRoutes() {
       },
     },
 
-    "/api/waffle/agents/validate": {
+    "/api/mockingbird/agents/validate": {
       POST: async (req: Request) => {
         const body = (await req.json()) as { upserts?: unknown; deletes?: unknown };
         const result = await validateOpencodeAgentPatch({

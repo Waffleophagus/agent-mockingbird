@@ -3,7 +3,7 @@ import { cronJobCreateSchema, cronJobPatchSchema, cronManageSchema } from "../sc
 
 export function createCronRoutes(cronService: CronService) {
   return {
-    "/api/waffle/cron/health": {
+    "/api/mockingbird/cron/health": {
       GET: async () => {
         try {
           return Response.json({ health: await cronService.getHealth() });
@@ -14,7 +14,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/waffle/cron/jobs": {
+    "/api/mockingbird/cron/jobs": {
       GET: async () => {
         try {
           return Response.json({ jobs: await cronService.listJobs() });
@@ -41,7 +41,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/waffle/cron/jobs/:id": {
+    "/api/mockingbird/cron/jobs/:id": {
       GET: async (req: Request & { params: { id: string } }) => {
         const job = await cronService.getJob(req.params.id);
         if (!job) {
@@ -75,7 +75,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/waffle/cron/jobs/:id/run": {
+    "/api/mockingbird/cron/jobs/:id/run": {
       POST: async (req: Request & { params: { id: string } }) => {
         try {
           const run = await cronService.runJobNow(req.params.id);
@@ -88,7 +88,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/waffle/cron/instances": {
+    "/api/mockingbird/cron/instances": {
       GET: async (req: Request) => {
         try {
           const url = new URL(req.url);
@@ -107,7 +107,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/waffle/cron/instances/:id/steps": {
+    "/api/mockingbird/cron/instances/:id/steps": {
       GET: async (req: Request & { params: { id: string } }) => {
         try {
           const steps = await cronService.listSteps(req.params.id);
@@ -119,7 +119,7 @@ export function createCronRoutes(cronService: CronService) {
       },
     },
 
-    "/api/waffle/cron/manage": {
+    "/api/mockingbird/cron/manage": {
       POST: async (req: Request) => {
         const parsed = cronManageSchema.safeParse(await req.json());
         if (!parsed.success) {

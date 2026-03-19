@@ -246,17 +246,18 @@ Run API endpoints:
 
 Cron API endpoints:
 
-- `GET /api/cron/handlers`
-- `GET /api/cron/health`
-- `GET /api/cron/jobs`
-- `POST /api/cron/jobs`
-- `GET /api/cron/jobs/:id`
-- `PATCH /api/cron/jobs/:id`
-- `DELETE /api/cron/jobs/:id`
-- `POST /api/cron/jobs/:id/run`
-- `GET /api/cron/instances`
-- `GET /api/cron/instances/:id/steps`
-- `POST /api/cron/manage` (used by `cron_manager`)
+- `GET /api/mockingbird/cron/health`
+- `GET /api/mockingbird/cron/jobs`
+- `POST /api/mockingbird/cron/jobs`
+- `GET /api/mockingbird/cron/jobs/:id`
+- `PATCH /api/mockingbird/cron/jobs/:id`
+- `DELETE /api/mockingbird/cron/jobs/:id`
+- `POST /api/mockingbird/cron/jobs/:id/run`
+- `GET /api/mockingbird/cron/instances`
+- `GET /api/mockingbird/cron/instances/:id/steps`
+- `POST /api/mockingbird/cron/manage` (used by `cron_manager` and `describe_contract`)
+
+Cron jobs no longer support `handlerKey`; use the current `runMode` contract with `conditionModulePath` and/or `agentPromptTemplate` instead.
 
 Environment variables are parsed and validated at startup via `@t3-oss/env-core` + `zod`.
 

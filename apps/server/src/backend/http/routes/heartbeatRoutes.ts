@@ -2,7 +2,7 @@ import type { HeartbeatRuntimeService } from "../../heartbeat/runtimeService";
 
 export function createHeartbeatRoutes(heartbeatService: HeartbeatRuntimeService) {
   return {
-    "/api/waffle/heartbeat": {
+    "/api/mockingbird/heartbeat": {
       GET: async () => {
         try {
           return Response.json({ heartbeat: heartbeatService.getStatus() });
@@ -13,7 +13,7 @@ export function createHeartbeatRoutes(heartbeatService: HeartbeatRuntimeService)
       },
     },
 
-    "/api/waffle/heartbeat/run": {
+    "/api/mockingbird/heartbeat/run": {
       POST: async () => {
         try {
           const heartbeat = await heartbeatService.runNow();

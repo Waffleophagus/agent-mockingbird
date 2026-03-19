@@ -358,7 +358,7 @@ function stringifyStatus(value: boolean | null) {
 
 function runCheck(lock: LockFile) {
   validateLock(lock);
-  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "wafflebot-opencode-check-"));
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-check-"));
   try {
     const cleanroomPath = path.join(tempRoot, "cleanroom");
     run(["git", "clone", lock.upstream.remote, cleanroomPath], repoRoot);
@@ -552,7 +552,7 @@ function branchMatchesPatches(lock: LockFile, vendorPath: string) {
     return false;
   }
 
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), "wafflebot-opencode-branch-match-"));
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-branch-match-"));
   try {
     const compareWorktree = path.join(tempDir, "vendor");
     run(["git", "worktree", "add", "--detach", compareWorktree, lock.upstream.commit], cleanroomPath);
@@ -582,7 +582,7 @@ function verifyPatchReproducibility(
     cleanroomOverride?: string;
   },
 ) {
-  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "wafflebot-opencode-repro-"));
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-repro-"));
   try {
     const cleanroomPath = options.cleanroomOverride ?? path.join(tempRoot, "cleanroom");
     if (!options.cleanroomOverride) {
@@ -633,10 +633,10 @@ function patchFiles(patchesPath: string) {
 function gitAmEnv() {
   return {
     ...process.env,
-    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME ?? "Wafflebot CI",
-    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL ?? "wafflebot-ci@example.invalid",
-    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME ?? "Wafflebot CI",
-    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL ?? "wafflebot-ci@example.invalid",
+    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME ?? "Agent Mockingbird CI",
+    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL ?? "agent-mockingbird-ci@example.invalid",
+    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME ?? "Agent Mockingbird CI",
+    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL ?? "agent-mockingbird-ci@example.invalid",
   };
 }
 

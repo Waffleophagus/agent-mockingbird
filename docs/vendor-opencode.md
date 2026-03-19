@@ -4,7 +4,7 @@
 
 - `opencode.lock.json` is the source of truth for the shipped OpenCode tag, commit, package version, local paths, and patch branch name.
 - `cleanroom/opencode` is a local-only pristine upstream clone managed by `bun run opencode:sync`.
-- `vendor/opencode` is a generated git worktree on the Wafflebot patch branch. It is editable, but it is not tracked by the main repo.
+- `vendor/opencode` is a generated git worktree on the Agent Mockingbird patch branch. It is editable, but it is not tracked by the main repo.
 - `patches/opencode/*.patch` is the tracked serialized patch stack exported from the patch branch.
 
 ## Commands
@@ -28,7 +28,7 @@
 
 1. Run `bun run opencode:sync --rebuild-only`.
 2. Edit files in `vendor/opencode`.
-3. Commit those changes inside the `vendor/opencode` worktree on branch `wafflebot/opencode`.
+3. Commit those changes inside the `vendor/opencode` worktree on branch `agent-mockingbird/opencode`.
 4. Run `bun run opencode:sync --export-patches`.
 5. Run `bun run check:ship`.
 

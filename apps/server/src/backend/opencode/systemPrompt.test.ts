@@ -121,7 +121,7 @@ describe("systemPrompt helpers", () => {
     });
     appendChatExchange({
       sessionId: session.id,
-      userContent: "Do not lose the unresolved follow-up about /api/waffle/runtime/compaction-context on 2026-03-15.",
+      userContent: "Do not lose the unresolved follow-up about /api/mockingbird/runtime/compaction-context on 2026-03-15.",
       assistantContent: "I will preserve that exact endpoint and date in the continuation notes.",
       source: "runtime",
       usage: {
@@ -138,7 +138,7 @@ describe("systemPrompt helpers", () => {
     expect(prompt).toContain("Session-specific context to preserve:");
     expect(prompt).toContain("Transcript continuity requirements:");
     expect(prompt).toContain("Latest user ask to carry forward:");
-    expect(prompt).toContain("/api/waffle/runtime/compaction-context");
+    expect(prompt).toContain("/api/mockingbird/runtime/compaction-context");
     expect(prompt).toContain("2026-03-15");
     expect(prompt).toContain("Recent turns to preserve verbatim when useful:");
     expect(prompt).toContain("apps/server/src/backend/opencode/systemPrompt.ts");

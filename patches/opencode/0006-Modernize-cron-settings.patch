@@ -1,0 +1,399 @@
+From e224b8cc85184b4f732098e967e91f6683054981 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Thu, 19 Mar 2026 15:15:18 -0500
+Subject: [PATCH 6/8] Modernize cron settings
+
+---
+ .../src/components/settings-cron-data.test.ts |  96 +++++++++++++++
+ .../app/src/components/settings-cron-data.ts  | 101 +++++++++++++++
+ packages/app/src/components/settings-cron.tsx | 116 +++++-------------
+ 3 files changed, 229 insertions(+), 84 deletions(-)
+ create mode 100644 packages/app/src/components/settings-cron-data.test.ts
+ create mode 100644 packages/app/src/components/settings-cron-data.ts
+
+diff --git a/packages/app/src/components/settings-cron-data.test.ts b/packages/app/src/components/settings-cron-data.test.ts
+new file mode 100644
+index 000000000..faf702691
+--- /dev/null
++++ b/packages/app/src/components/settings-cron-data.test.ts
+@@ -0,0 +1,96 @@
++import { describe, expect, test } from "bun:test"
++import { DEFAULT_JOB, loadCronSettings, serializeCronJobForEdit, type CronJobDefinition } from "./settings-cron-data"
++
++describe("loadCronSettings", () => {
++  test("loads jobs, health, and contract without requesting handlers", async () => {
++    const calls: Array<{ path: string; init?: RequestInit }> = []
++    const requestJson = async <T>(path: string, init?: RequestInit) => {
++      calls.push({ path, init })
++      if (path === "/api/waffle/cron/jobs") {
++        return { jobs: [] } as T
++      }
++      if (path === "/api/waffle/cron/health") {
++        return { health: { enabled: true, jobs: { total: 0, enabled: 0 } } } as T
++      }
++      if (path === "/api/waffle/cron/manage") {
++        return {
++          contract: {
++            runModes: {
++              agent: { requires: ["agentPromptTemplate"], forbids: ["conditionModulePath"] },
++            },
++          },
++        } as T
++      }
++      throw new Error(`Unexpected path: ${path}`)
++    }
++
++    const payload = await loadCronSettings(requestJson)
++
++    expect(payload).toEqual({
++      jobs: [],
++      health: { enabled: true, jobs: { total: 0, enabled: 0 } },
++      contract: {
++        runModes: {
++          agent: { requires: ["agentPromptTemplate"], forbids: ["conditionModulePath"] },
++        },
++      },
++    })
++    expect(calls).toEqual([
++      { path: "/api/waffle/cron/jobs", init: undefined },
++      { path: "/api/waffle/cron/health", init: undefined },
++      {
++        path: "/api/waffle/cron/manage",
++        init: {
++          method: "POST",
++          body: JSON.stringify({ action: "describe_contract" }),
++        },
++      },
++    ])
++  })
++})
++
++describe("Cron settings payload helpers", () => {
++  test("default job example uses the current agent contract", () => {
++    const parsed = JSON.parse(DEFAULT_JOB)
++    expect(parsed).toMatchObject({
++      name: "Hourly review",
++      scheduleKind: "every",
++      everyMs: 3_600_000,
++      runMode: "agent",
++      agentPromptTemplate: expect.any(String),
++      payload: {},
++    })
++    expect(parsed.handlerKey).toBeUndefined()
++  })
++
++  test("edit payload excludes deprecated handlerKey", () => {
++    const job = {
++      id: "cron-1",
++      name: "Daily review",
++      enabled: true,
++      scheduleKind: "cron",
++      scheduleExpr: "0 9 * * *",
++      everyMs: null,
++      atIso: null,
++      timezone: "America/Chicago",
++      runMode: "background",
++      conditionModulePath: "cron/check.ts",
++      conditionDescription: "Checks for changes",
++      agentPromptTemplate: null,
++      agentModelOverride: null,
++      maxAttempts: 3,
++      retryBackoffMs: 1_000,
++      payload: { channel: "main" },
++    } satisfies CronJobDefinition
++
++    const parsed = JSON.parse(serializeCronJobForEdit(job)) as Record<string, unknown>
++
++    expect(parsed).toMatchObject({
++      name: "Daily review",
++      runMode: "background",
++      conditionModulePath: "cron/check.ts",
++      payload: { channel: "main" },
++    })
++    expect(parsed.handlerKey).toBeUndefined()
++  })
++})
+diff --git a/packages/app/src/components/settings-cron-data.ts b/packages/app/src/components/settings-cron-data.ts
+new file mode 100644
+index 000000000..c747ce06f
+--- /dev/null
++++ b/packages/app/src/components/settings-cron-data.ts
+@@ -0,0 +1,101 @@
++import { prettyJson, waffleJson } from "@/utils/waffle"
++
++export type CronJobDefinition = {
++  id: string
++  name: string
++  enabled: boolean
++  scheduleKind: "at" | "every" | "cron"
++  scheduleExpr: string | null
++  everyMs: number | null
++  atIso: string | null
++  timezone: string | null
++  runMode: "background" | "conditional_agent" | "agent"
++  conditionModulePath: string | null
++  conditionDescription: string | null
++  agentPromptTemplate: string | null
++  agentModelOverride: string | null
++  maxAttempts: number
++  retryBackoffMs: number
++  payload: Record<string, unknown>
++}
++
++export type CronHealthSnapshot = {
++  enabled: boolean
++  jobs: {
++    total: number
++    enabled: number
++  }
++}
++
++type CronContractMode = {
++  requires?: string[]
++  optional?: string[]
++  forbids?: string[]
++}
++
++export type CronContract = {
++  runModes: Record<string, CronContractMode>
++}
++
++type CronJobsResponse = {
++  jobs: CronJobDefinition[]
++}
++
++type CronHealthResponse = {
++  health: CronHealthSnapshot
++}
++
++type CronContractResponse = {
++  contract: CronContract
++}
++
++type WaffleJson = <T>(path: string, init?: RequestInit) => Promise<T>
++
++const DEFAULT_AGENT_JOB = {
++  name: "Hourly review",
++  enabled: true,
++  scheduleKind: "every",
++  everyMs: 3_600_000,
++  runMode: "agent",
++  agentPromptTemplate: "Review recent workspace activity and summarize anything that needs attention.",
++  payload: {},
++} as const
++
++export const DEFAULT_JOB = prettyJson(DEFAULT_AGENT_JOB)
++
++export async function loadCronSettings(requestJson: WaffleJson = waffleJson) {
++  const [jobs, health, contract] = await Promise.all([
++    requestJson<CronJobsResponse>("/api/waffle/cron/jobs"),
++    requestJson<CronHealthResponse>("/api/waffle/cron/health"),
++    requestJson<CronContractResponse>("/api/waffle/cron/manage", {
++      method: "POST",
++      body: JSON.stringify({ action: "describe_contract" }),
++    }),
++  ])
++
++  return {
++    jobs: jobs.jobs,
++    health: health.health,
++    contract: contract.contract,
++  }
++}
++
++export function serializeCronJobForEdit(job: CronJobDefinition) {
++  return prettyJson({
++    name: job.name,
++    enabled: job.enabled,
++    scheduleKind: job.scheduleKind,
++    scheduleExpr: job.scheduleExpr,
++    everyMs: job.everyMs,
++    atIso: job.atIso,
++    timezone: job.timezone,
++    runMode: job.runMode,
++    conditionModulePath: job.conditionModulePath,
++    conditionDescription: job.conditionDescription,
++    agentPromptTemplate: job.agentPromptTemplate,
++    agentModelOverride: job.agentModelOverride,
++    maxAttempts: job.maxAttempts,
++    retryBackoffMs: job.retryBackoffMs,
++    payload: job.payload,
++  })
++}
+diff --git a/packages/app/src/components/settings-cron.tsx b/packages/app/src/components/settings-cron.tsx
+index 8bda2bf9c..a5b15cb11 100644
+--- a/packages/app/src/components/settings-cron.tsx
++++ b/packages/app/src/components/settings-cron.tsx
+@@ -1,49 +1,11 @@
+ import { Button } from "@opencode-ai/ui/button"
+ import { showToast } from "@opencode-ai/ui/toast"
+-import { createSignal, For, onMount, Show, type Component } from "solid-js"
++import { For, onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+-import { prettyJson, waffleJson } from "@/utils/waffle"
++import { waffleJson } from "@/utils/waffle"
++import { DEFAULT_JOB, loadCronSettings, serializeCronJobForEdit, type CronContract, type CronHealthSnapshot, type CronJobDefinition } from "./settings-cron-data"
+ import { WaffleCard, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
+ 
+-type CronJobDefinition = {
+-  id: string
+-  name: string
+-  enabled: boolean
+-  scheduleKind: "at" | "every" | "cron"
+-  scheduleExpr: string | null
+-  everyMs: number | null
+-  atIso: string | null
+-  timezone: string | null
+-  runMode: "background" | "conditional_agent" | "agent"
+-  handlerKey: string | null
+-  conditionModulePath: string | null
+-  conditionDescription: string | null
+-  agentPromptTemplate: string | null
+-  agentModelOverride: string | null
+-  maxAttempts: number
+-  retryBackoffMs: number
+-  payload: Record<string, unknown>
+-}
+-
+-type CronHealthSnapshot = {
+-  enabled: boolean
+-  jobs: {
+-    total: number
+-    enabled: number
+-  }
+-}
+-
+-const DEFAULT_JOB = prettyJson({
+-  name: "Daily summary",
+-  enabled: true,
+-  scheduleKind: "cron",
+-  scheduleExpr: "0 9 * * *",
+-  timezone: "America/Phoenix",
+-  runMode: "background",
+-  handlerKey: "daily_summary",
+-  payload: {},
+-})
+-
+ export const SettingsCron: Component = () => {
+   const [state, setState] = createStore({
+     loading: true,
+@@ -51,27 +13,21 @@ export const SettingsCron: Component = () => {
+     busyId: "",
+     error: "",
+     jobs: [] as CronJobDefinition[],
+-    handlers: [] as string[],
+     health: null as CronHealthSnapshot | null,
++    contract: null as CronContract | null,
+     createText: DEFAULT_JOB,
+     editingId: "",
+     editText: "",
+   })
+-  const [refreshTick, setRefreshTick] = createSignal(0)
+ 
+   async function load() {
+-    refreshTick()
+     setState("loading", true)
+     setState("error", "")
+     try {
+-      const [jobs, handlers, health] = await Promise.all([
+-        waffleJson<{ jobs: CronJobDefinition[] }>("/api/waffle/cron/jobs"),
+-        waffleJson<{ handlers: string[] }>("/api/waffle/cron/handlers"),
+-        waffleJson<{ health: CronHealthSnapshot }>("/api/waffle/cron/health"),
+-      ])
+-      setState("jobs", jobs.jobs)
+-      setState("handlers", handlers.handlers)
+-      setState("health", health.health)
++      const payload = await loadCronSettings()
++      setState("jobs", payload.jobs)
++      setState("health", payload.health)
++      setState("contract", payload.contract)
+     } catch (error) {
+       setState("error", error instanceof Error ? error.message : "Failed to load cron jobs")
+     } finally {
+@@ -80,7 +36,6 @@ export const SettingsCron: Component = () => {
+   }
+ 
+   async function refresh() {
+-    setRefreshTick((value) => value + 1)
+     await load()
+   }
+ 
+@@ -203,13 +158,28 @@ export const SettingsCron: Component = () => {
+         )}
+       </Show>
+ 
+-      <WaffleSettingsSection title="Registered handlers">
+-        <div class="px-4 py-3 text-13-regular text-text-strong break-words">
+-          <Show when={state.handlers.length > 0} fallback={<span class="text-text-weak">No handlers registered.</span>}>
+-            {state.handlers.join(", ")}
+-          </Show>
+-        </div>
+-      </WaffleSettingsSection>
++      <Show when={state.contract}>
++        {(contract) => (
++          <WaffleSettingsSection title="Run mode contract" description="Current backend requirements for each cron run mode.">
++            <For each={Object.entries(contract().runModes)}>
++              {([mode, details]) => (
++                <div class="px-4 py-4 border-b border-border-weak-base last:border-none flex flex-col gap-1">
++                  <div class="text-14-medium text-text-strong">{mode}</div>
++                  <div class="text-12-regular text-text-weak">
++                    Requires: {details.requires?.length ? details.requires.join(", ") : "Nothing special"}
++                  </div>
++                  <Show when={details.optional?.length}>
++                    <div class="text-12-regular text-text-weak">Optional: {details.optional?.join(", ")}</div>
++                  </Show>
++                  <Show when={details.forbids?.length}>
++                    <div class="text-12-regular text-text-weak">Forbids: {details.forbids?.join(", ")}</div>
++                  </Show>
++                </div>
++              )}
++            </For>
++          </WaffleSettingsSection>
++        )}
++      </Show>
+ 
+       <WaffleSettingsSection title="Jobs">
+         <Show
+@@ -235,29 +205,7 @@ export const SettingsCron: Component = () => {
+                       size="large"
+                       onClick={() => {
+                         setState("editingId", state.editingId === job.id ? "" : job.id)
+-                        setState(
+-                          "editText",
+-                          state.editingId === job.id
+-                            ? ""
+-                            : prettyJson({
+-                                name: job.name,
+-                                enabled: job.enabled,
+-                                scheduleKind: job.scheduleKind,
+-                                scheduleExpr: job.scheduleExpr,
+-                                everyMs: job.everyMs,
+-                                atIso: job.atIso,
+-                                timezone: job.timezone,
+-                                runMode: job.runMode,
+-                                handlerKey: job.handlerKey,
+-                                conditionModulePath: job.conditionModulePath,
+-                                conditionDescription: job.conditionDescription,
+-                                agentPromptTemplate: job.agentPromptTemplate,
+-                                agentModelOverride: job.agentModelOverride,
+-                                maxAttempts: job.maxAttempts,
+-                                retryBackoffMs: job.retryBackoffMs,
+-                                payload: job.payload,
+-                              }),
+-                        )
++                        setState("editText", state.editingId === job.id ? "" : serializeCronJobForEdit(job))
+                       }}
+                     >
+                       {state.editingId === job.id ? "Close editor" : "Edit JSON"}
+@@ -301,7 +249,7 @@ export const SettingsCron: Component = () => {
+         </Show>
+       </WaffleSettingsSection>
+ 
+-      <WaffleSettingsSection title="Create job" description="Post a complete cron job definition as JSON.">
++      <WaffleSettingsSection title="Create job" description="Post a complete cron job definition as JSON using the current run mode contract.">
+         <WaffleCard
+           footer={
+             <div class="flex justify-end">
+-- 
+2.53.0
+

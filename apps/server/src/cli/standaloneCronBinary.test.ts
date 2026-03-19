@@ -48,7 +48,7 @@ async function waitForJson(url: string, timeoutMs: number) {
 async function waitForInstance(baseUrl: string, jobId: string, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const response = await fetch(`${baseUrl}/api/waffle/cron/instances?jobId=${encodeURIComponent(jobId)}&limit=1`);
+    const response = await fetch(`${baseUrl}/api/mockingbird/cron/instances?jobId=${encodeURIComponent(jobId)}&limit=1`);
     const payload = (await response.json()) as {
       instances?: Array<{ state?: string; error?: { message?: string } | null }>;
     };
@@ -147,9 +147,9 @@ test(
     });
 
     try {
-      await waitForJson(`http://127.0.0.1:${apiPort}/api/waffle/cron/health`, 15_000);
+      await waitForJson(`http://127.0.0.1:${apiPort}/api/mockingbird/cron/health`, 15_000);
 
-      const createResponse = await fetch(`http://127.0.0.1:${apiPort}/api/waffle/cron/jobs`, {
+      const createResponse = await fetch(`http://127.0.0.1:${apiPort}/api/mockingbird/cron/jobs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -166,7 +166,7 @@ test(
       });
       expect(createResponse.status).toBe(201);
 
-      const runResponse = await fetch(`http://127.0.0.1:${apiPort}/api/waffle/cron/jobs/compiled-background-check/run`, {
+      const runResponse = await fetch(`http://127.0.0.1:${apiPort}/api/mockingbird/cron/jobs/compiled-background-check/run`, {
         method: "POST",
       });
       expect(runResponse.status).toBe(202);

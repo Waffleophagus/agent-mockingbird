@@ -11,6 +11,6 @@
     "patches": "patches/opencode"
   },
   "branch": {
-    "name": "wafflebot/opencode"
+    "name": "agent-mockingbird/opencode"
   }
 }

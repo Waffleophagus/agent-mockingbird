@@ -158,7 +158,7 @@ async function fetchSystemPrompt() {
     return systemPromptCache.value
   }
 
-  const payload = await requestJson("/api/waffle/runtime/system-prompt")
+  const payload = await requestJson("/api/mockingbird/runtime/system-prompt")
   const system = typeof payload.system === "string" ? payload.system : ""
   systemPromptCache.value = system
   systemPromptCache.expiresAtMs = now + 5_000
@@ -176,7 +176,7 @@ async function fetchCompactionContext(sessionID?: string): Promise<CompactionPay
   }
 
   const search = sessionID?.trim() ? `?sessionId=${encodeURIComponent(sessionID.trim())}` : ""
-  const payload = await requestJson(`/api/waffle/runtime/compaction-context${search}`)
+  const payload = await requestJson(`/api/mockingbird/runtime/compaction-context${search}`)
   const prompt = typeof payload.prompt === "string" && payload.prompt.trim().length > 0 ? payload.prompt : undefined
   const context = Array.isArray(payload.context)
     ? payload.context.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
@@ -201,7 +201,7 @@ async function fetchSessionScope(sessionID?: string) {
     return cached.value
   }
 
-  const payload = await requestJson(`/api/waffle/runtime/session-scope?sessionId=${encodeURIComponent(cacheKey)}`)
+  const payload = await requestJson(`/api/mockingbird/runtime/session-scope?sessionId=${encodeURIComponent(cacheKey)}`)
   const kind: SessionScope["kind"] =
     payload.kind === "main" || payload.kind === "cron" || payload.kind === "other" ? payload.kind : "other"
   const value = {
@@ -360,7 +360,7 @@ const memorySearchTool = tool({
   },
   async execute(args: { query: string; maxResults?: number; minScore?: number; debug?: boolean }) {
     const response = await postJson(
-      "/api/waffle/memory/retrieve",
+      "/api/mockingbird/memory/retrieve",
       {
         query: args.query,
         maxResults: args.maxResults,
@@ -409,7 +409,7 @@ const memoryGetTool = tool({
   },
   async execute(args: { path: string; from?: number; lines?: number }) {
     const response = await postJson(
-      "/api/waffle/memory/read",
+      "/api/mockingbird/memory/read",
       {
         path: args.path,
         from: args.from,
@@ -449,7 +449,7 @@ const memoryRememberTool = tool({
     topic?: string
   }) {
     const response = await postJson(
-      "/api/waffle/memory/remember",
+      "/api/mockingbird/memory/remember",
       {
         ...args,
         source: args.source ?? "assistant",
@@ -497,7 +497,7 @@ const cronManagerTool = tool({
   },
   async execute(rawArgs) {
     const args = cronArgsSchema.parse(rawArgs)
-    const response = await postJson("/api/waffle/cron/manage", args, [
+    const response = await postJson("/api/mockingbird/cron/manage", args, [
       "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
       "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
     ])
@@ -519,7 +519,7 @@ const notifyMainThreadTool = tool({
     severity: z.enum(["info", "warn", "critical"]).optional(),
   },
   async execute(args: { prompt: string; severity?: "info" | "warn" | "critical" }, context: ToolContext) {
-    const response = await postJson("/api/waffle/runtime/notify-main-thread", {
+    const response = await postJson("/api/mockingbird/runtime/notify-main-thread", {
       sessionId: context.sessionID,
       prompt: args.prompt,
       severity: args.severity,
@@ -553,12 +553,12 @@ const agentTypeManagerTool = tool({
     const args = agentArgsSchema.parse(rawArgs)
 
     if (args.action === "list") {
-      const payload = await requestJson("/api/waffle/agents")
+      const payload = await requestJson("/api/mockingbird/agents")
       return JSON.stringify({ ok: true, ...payload })
     }
 
     if (args.action === "validate_patch") {
-      const payload = await requestJson("/api/waffle/agents/validate", {
+      const payload = await requestJson("/api/mockingbird/agents/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -569,7 +569,7 @@ const agentTypeManagerTool = tool({
       return JSON.stringify({ ok: true, ...payload })
     }
 
-    const payload = await requestJson("/api/waffle/agents", {
+    const payload = await requestJson("/api/mockingbird/agents", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -602,12 +602,12 @@ const configManagerTool = tool({
     const args = configArgsSchema.parse(rawArgs)
 
     if (args.action === "get_config") {
-      const payload = await requestJson("/api/waffle/runtime/config")
+      const payload = await requestJson("/api/mockingbird/runtime/config")
       return JSON.stringify({ ok: true, ...payload })
     }
 
     if (args.action === "patch_config") {
-      const payload = await requestJson("/api/waffle/runtime/config", {
+      const payload = await requestJson("/api/mockingbird/runtime/config", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -618,7 +618,7 @@ const configManagerTool = tool({
       return JSON.stringify({ ok: true, ...payload })
     }
 
-    const payload = await requestJson("/api/waffle/runtime/config/replace", {
+    const payload = await requestJson("/api/mockingbird/runtime/config/replace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

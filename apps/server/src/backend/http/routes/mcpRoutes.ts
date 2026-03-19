@@ -104,7 +104,7 @@ async function loadStatuses() {
 
 export function createMcpRoutes() {
   return {
-    "/api/waffle/mcp": {
+    "/api/mockingbird/mcp": {
       GET: async () => {
         try {
           const config = await loadOpencodeConfig();
@@ -138,7 +138,7 @@ export function createMcpRoutes() {
       },
     },
 
-    "/api/waffle/mcp/:id/connect": {
+    "/api/mockingbird/mcp/:id/connect": {
       POST: async (req: Request & { params: { id: string } }) => {
         const connection = getConnectionConfig();
         const client = createOpencodeV2ClientFromConnection(connection);
@@ -156,7 +156,7 @@ export function createMcpRoutes() {
       },
     },
 
-    "/api/waffle/mcp/:id/disconnect": {
+    "/api/mockingbird/mcp/:id/disconnect": {
       POST: async (req: Request & { params: { id: string } }) => {
         const connection = getConnectionConfig();
         const client = createOpencodeV2ClientFromConnection(connection);
@@ -174,7 +174,7 @@ export function createMcpRoutes() {
       },
     },
 
-    "/api/waffle/mcp/:id/auth/start": {
+    "/api/mockingbird/mcp/:id/auth/start": {
       POST: async (req: Request & { params: { id: string } }) => {
         const connection = getConnectionConfig();
         const client = createOpencodeV2ClientFromConnection(connection);
@@ -192,7 +192,7 @@ export function createMcpRoutes() {
       },
     },
 
-    "/api/waffle/mcp/:id/auth/remove": {
+    "/api/mockingbird/mcp/:id/auth/remove": {
       POST: async (req: Request & { params: { id: string } }) => {
         const connection = getConnectionConfig();
         const client = createOpencodeV2ClientFromConnection(connection);

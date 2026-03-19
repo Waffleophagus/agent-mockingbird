@@ -23,8 +23,8 @@ interface ConfigRow {
 }
 
 const CONFIG_VERSION = 2 as const;
-const DEFAULT_CONFIG_FILENAME = "wafflebot.config.json";
-const LEGACY_CONFIG_FILENAME = "agent-mockingbird.config.json";
+const DEFAULT_CONFIG_FILENAME = "agent-mockingbird.config.json";
+const LEGACY_CONFIG_FILENAME = "mockingbird.config.json";
 const BACKUP_SUFFIX = ".bak";
 const DEFAULT_SMOKE_TEST_PROMPT = 'Just respond "OK" to this to confirm the gateway is working.';
 const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
