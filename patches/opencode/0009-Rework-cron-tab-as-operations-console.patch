@@ -1,0 +1,414 @@
+From 694b2760c7c48a3db9091794811dd196717f7015 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Thu, 19 Mar 2026 17:40:25 -0500
+Subject: [PATCH 9/9] Rework cron tab as operations console
+
+---
+ .../src/components/settings-cron-data.test.ts | 102 +++++++++++-----
+ .../app/src/components/settings-cron-data.ts  |  65 +++++-----
+ packages/app/src/components/settings-cron.tsx | 112 ++++--------------
+ 3 files changed, 131 insertions(+), 148 deletions(-)
+
+diff --git a/packages/app/src/components/settings-cron-data.test.ts b/packages/app/src/components/settings-cron-data.test.ts
+index 2cc587ed7..a81509423 100644
+--- a/packages/app/src/components/settings-cron-data.test.ts
++++ b/packages/app/src/components/settings-cron-data.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, test } from "bun:test"
+-import { DEFAULT_JOB, loadCronSettings, serializeCronJobForEdit, type CronJobDefinition } from "./settings-cron-data"
++import { describeCronJobTarget, formatCronSchedule, loadCronSettings, type CronJobDefinition } from "./settings-cron-data"
+ 
+ describe("loadCronSettings", () => {
+   test("loads jobs and health without requesting handlers or contract metadata", async () => {
+@@ -28,48 +28,96 @@ describe("loadCronSettings", () => {
+   })
+ })
+ 
+-describe("Cron settings payload helpers", () => {
+-  test("default job example uses the current agent contract", () => {
+-    const parsed = JSON.parse(DEFAULT_JOB)
+-    expect(parsed).toMatchObject({
+-      name: "Hourly review",
++describe("Cron settings display helpers", () => {
++  test("formats every schedules as human intervals", () => {
++    const job = {
++      id: "cron-1",
++      name: "Location tracker",
++      enabled: true,
+       scheduleKind: "every",
+-      everyMs: 3_600_000,
+-      runMode: "agent",
+-      agentPromptTemplate: expect.any(String),
++      scheduleExpr: null,
++      everyMs: 120_000,
++      atIso: null,
++      timezone: null,
++      runMode: "conditional_agent",
++      conditionModulePath: "cron/location-tracker.ts",
++      conditionDescription: null,
++      agentPromptTemplate: null,
++      agentModelOverride: null,
++      maxAttempts: 3,
++      retryBackoffMs: 1_000,
+       payload: {},
+-    })
+-    expect(parsed.handlerKey).toBeUndefined()
++    } satisfies CronJobDefinition
++
++    expect(formatCronSchedule(job)).toBe("Every 2m")
+   })
+ 
+-  test("edit payload excludes deprecated handlerKey", () => {
++  test("formats cron schedules with timezone", () => {
+     const job = {
+-      id: "cron-1",
+-      name: "Daily review",
++      id: "cron-2",
++      name: "Release check",
+       enabled: true,
+       scheduleKind: "cron",
+-      scheduleExpr: "0 9 * * *",
++      scheduleExpr: "0 16 * * *",
+       everyMs: null,
+       atIso: null,
+       timezone: "America/Chicago",
+-      runMode: "background",
+-      conditionModulePath: "cron/check.ts",
+-      conditionDescription: "Checks for changes",
++      runMode: "conditional_agent",
++      conditionModulePath: "cron/release-check.ts",
++      conditionDescription: null,
+       agentPromptTemplate: null,
+       agentModelOverride: null,
+       maxAttempts: 3,
+       retryBackoffMs: 1_000,
+-      payload: { channel: "main" },
++      payload: {},
+     } satisfies CronJobDefinition
+ 
+-    const parsed = JSON.parse(serializeCronJobForEdit(job)) as Record<string, unknown>
++    expect(formatCronSchedule(job)).toBe("0 16 * * * (America/Chicago)")
++  })
+ 
+-    expect(parsed).toMatchObject({
+-      name: "Daily review",
+-      runMode: "background",
+-      conditionModulePath: "cron/check.ts",
+-      payload: { channel: "main" },
+-    })
+-    expect(parsed.handlerKey).toBeUndefined()
++  test("describes code-backed cron targets", () => {
++    const job = {
++      id: "cron-3",
++      name: "WiFi monitor",
++      enabled: true,
++      scheduleKind: "every",
++      scheduleExpr: null,
++      everyMs: 120_000,
++      atIso: null,
++      timezone: null,
++      runMode: "conditional_agent",
++      conditionModulePath: "cron/wifi-device-monitor.ts",
++      conditionDescription: "Checks for nearby devices",
++      agentPromptTemplate: null,
++      agentModelOverride: null,
++      maxAttempts: 3,
++      retryBackoffMs: 1_000,
++      payload: {},
++    } satisfies CronJobDefinition
++
++    expect(describeCronJobTarget(job)).toBe("cron/wifi-device-monitor.ts")
++  })
++
++  test("labels prompt-backed agent jobs without exposing editable prompt UI", () => {
++    const job = {
++      id: "cron-4",
++      name: "Summary",
++      enabled: true,
++      scheduleKind: "cron",
++      scheduleExpr: "0 9 * * *",
++      everyMs: null,
++      atIso: null,
++      timezone: "America/Chicago",
++      runMode: "agent",
++      conditionModulePath: null,
++      conditionDescription: null,
++      agentPromptTemplate: "Summarize",
++      agentModelOverride: null,
++      maxAttempts: 3,
++      retryBackoffMs: 1_000,
++      payload: {},
++    } satisfies CronJobDefinition
++
++    expect(describeCronJobTarget(job)).toBe("Prompt-backed agent job")
+   })
+ })
+diff --git a/packages/app/src/components/settings-cron-data.ts b/packages/app/src/components/settings-cron-data.ts
+index 8c044168f..992820096 100644
+--- a/packages/app/src/components/settings-cron-data.ts
++++ b/packages/app/src/components/settings-cron-data.ts
+@@ -1,4 +1,4 @@
+-import { prettyJson, mockingbirdJson } from "@/utils/mockingbird"
++import { mockingbirdJson } from "@/utils/mockingbird"
+ 
+ export type CronJobDefinition = {
+   id: string
+@@ -37,18 +37,6 @@ type CronHealthResponse = {
+ 
+ type MockingbirdJson = <T>(path: string, init?: RequestInit) => Promise<T>
+ 
+-const DEFAULT_AGENT_JOB = {
+-  name: "Hourly review",
+-  enabled: true,
+-  scheduleKind: "every",
+-  everyMs: 3_600_000,
+-  runMode: "agent",
+-  agentPromptTemplate: "Review recent workspace activity and summarize anything that needs attention.",
+-  payload: {},
+-} as const
+-
+-export const DEFAULT_JOB = prettyJson(DEFAULT_AGENT_JOB)
+-
+ export async function loadCronSettings(requestJson: MockingbirdJson = mockingbirdJson) {
+   const [jobs, health] = await Promise.all([
+     requestJson<CronJobsResponse>("/api/mockingbird/cron/jobs"),
+@@ -61,22 +49,37 @@ export async function loadCronSettings(requestJson: MockingbirdJson = mockingbir
+   }
+ }
+ 
+-export function serializeCronJobForEdit(job: CronJobDefinition) {
+-  return prettyJson({
+-    name: job.name,
+-    enabled: job.enabled,
+-    scheduleKind: job.scheduleKind,
+-    scheduleExpr: job.scheduleExpr,
+-    everyMs: job.everyMs,
+-    atIso: job.atIso,
+-    timezone: job.timezone,
+-    runMode: job.runMode,
+-    conditionModulePath: job.conditionModulePath,
+-    conditionDescription: job.conditionDescription,
+-    agentPromptTemplate: job.agentPromptTemplate,
+-    agentModelOverride: job.agentModelOverride,
+-    maxAttempts: job.maxAttempts,
+-    retryBackoffMs: job.retryBackoffMs,
+-    payload: job.payload,
+-  })
++function formatEveryInterval(everyMs: number | null) {
++  if (!everyMs || !Number.isFinite(everyMs) || everyMs < 1_000) return "Every custom interval"
++  if (everyMs % 86_400_000 === 0) return `Every ${everyMs / 86_400_000}d`
++  if (everyMs % 3_600_000 === 0) return `Every ${everyMs / 3_600_000}h`
++  if (everyMs % 60_000 === 0) return `Every ${everyMs / 60_000}m`
++  if (everyMs % 1_000 === 0) return `Every ${everyMs / 1_000}s`
++  return `Every ${everyMs}ms`
++}
++
++export function formatCronSchedule(job: CronJobDefinition) {
++  if (job.scheduleKind === "every") {
++    return formatEveryInterval(job.everyMs)
++  }
++
++  if (job.scheduleKind === "cron") {
++    const expr = job.scheduleExpr?.trim() || "Missing cron expression"
++    return job.timezone ? `${expr} (${job.timezone})` : expr
++  }
++
++  const atIso = job.atIso?.trim()
++  return atIso ? `At ${atIso}` : "No schedule"
++}
++
++export function describeCronJobTarget(job: CronJobDefinition) {
++  if (job.conditionModulePath?.trim()) {
++    return job.conditionModulePath
++  }
++
++  if (job.runMode === "agent") {
++    return "Prompt-backed agent job"
++  }
++
++  return "No code target"
+ }
+diff --git a/packages/app/src/components/settings-cron.tsx b/packages/app/src/components/settings-cron.tsx
+index f56fef497..24395d8b5 100644
+--- a/packages/app/src/components/settings-cron.tsx
++++ b/packages/app/src/components/settings-cron.tsx
+@@ -1,22 +1,19 @@
+ import { Button } from "@opencode-ai/ui/button"
++import { Switch } from "@opencode-ai/ui/switch"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { For, onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+ import { mockingbirdJson } from "@/utils/mockingbird"
+-import { DEFAULT_JOB, loadCronSettings, serializeCronJobForEdit, type CronHealthSnapshot, type CronJobDefinition } from "./settings-cron-data"
+-import { MockingbirdCard, MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdTextArea, MockingbirdToolbar } from "./settings-mockingbird-shared"
++import { describeCronJobTarget, formatCronSchedule, loadCronSettings, type CronHealthSnapshot, type CronJobDefinition } from "./settings-cron-data"
++import { MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdToolbar } from "./settings-mockingbird-shared"
+ 
+ export const SettingsCron: Component = () => {
+   const [state, setState] = createStore({
+     loading: true,
+-    saving: false,
+     busyId: "",
+     error: "",
+     jobs: [] as CronJobDefinition[],
+     health: null as CronHealthSnapshot | null,
+-    createText: DEFAULT_JOB,
+-    editingId: "",
+-    editText: "",
+   })
+ 
+   async function load() {
+@@ -37,55 +34,19 @@ export const SettingsCron: Component = () => {
+     await load()
+   }
+ 
+-  async function createJob() {
+-    let payload: unknown
+-    try {
+-      payload = JSON.parse(state.createText)
+-    } catch (error) {
+-      setState("error", error instanceof Error ? error.message : "Invalid cron job JSON")
+-      return
+-    }
+-
+-    setState("saving", true)
++  async function setEnabled(id: string, enabled: boolean) {
++    setState("busyId", id)
+     setState("error", "")
+     try {
+-      await mockingbirdJson("/api/mockingbird/cron/jobs", {
+-        method: "POST",
+-        body: JSON.stringify(payload),
++      await mockingbirdJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(id)}`, {
++        method: "PATCH",
++        body: JSON.stringify({ enabled }),
+       })
+       showToast({
+         variant: "success",
+         icon: "circle-check",
+-        title: "Cron job created",
+-      })
+-      await refresh()
+-    } catch (error) {
+-      setState("error", error instanceof Error ? error.message : "Failed to create cron job")
+-    } finally {
+-      setState("saving", false)
+-    }
+-  }
+-
+-  async function saveEdit() {
+-    if (!state.editingId) return
+-
+-    let payload: unknown
+-    try {
+-      payload = JSON.parse(state.editText)
+-    } catch (error) {
+-      setState("error", error instanceof Error ? error.message : "Invalid cron patch JSON")
+-      return
+-    }
+-
+-    setState("busyId", state.editingId)
+-    setState("error", "")
+-    try {
+-      await mockingbirdJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(state.editingId)}`, {
+-        method: "PATCH",
+-        body: JSON.stringify(payload),
++        title: enabled ? "Cron job enabled" : "Cron job disabled",
+       })
+-      setState("editingId", "")
+-      setState("editText", "")
+       await refresh()
+     } catch (error) {
+       setState("error", error instanceof Error ? error.message : "Failed to update cron job")
+@@ -133,10 +94,10 @@ export const SettingsCron: Component = () => {
+   return (
+     <MockingbirdSettingsPage
+       title="Cron"
+-      description="Inspect cron health, create jobs, update jobs with JSON patches, and run them immediately."
++      description="Inspect cron health, enable or disable jobs, run them immediately, and remove them when needed."
+       actions={
+         <MockingbirdToolbar>
+-          <Button variant="ghost" size="large" onClick={() => void refresh()} disabled={state.loading || state.saving}>
++          <Button variant="ghost" size="large" onClick={() => void refresh()} disabled={state.loading}>
+             Refresh
+           </Button>
+         </MockingbirdToolbar>
+@@ -168,23 +129,23 @@ export const SettingsCron: Component = () => {
+                   <div class="flex flex-col gap-1">
+                     <div class="text-14-medium text-text-strong">{job.name}</div>
+                     <div class="text-12-regular text-text-weak">
+-                      {job.id} | {job.scheduleKind} | {job.runMode}
++                      {job.id} | {job.runMode} | {job.enabled ? "Enabled" : "Disabled"}
+                     </div>
+                     <div class="text-12-regular text-text-weak">
+-                      {job.scheduleExpr ?? job.everyMs ?? job.atIso ?? "No schedule"}
++                      {formatCronSchedule(job)}
++                    </div>
++                    <div class="text-12-regular text-text-weak">
++                      {describeCronJobTarget(job)}
+                     </div>
+                   </div>
+                   <div class="flex flex-wrap items-center gap-2">
+-                    <Button
+-                      variant="ghost"
+-                      size="large"
+-                      onClick={() => {
+-                        setState("editingId", state.editingId === job.id ? "" : job.id)
+-                        setState("editText", state.editingId === job.id ? "" : serializeCronJobForEdit(job))
+-                      }}
++                    <Switch
++                      checked={job.enabled}
++                      onChange={(enabled) => void setEnabled(job.id, enabled)}
++                      disabled={state.busyId === job.id}
+                     >
+-                      {state.editingId === job.id ? "Close editor" : "Edit JSON"}
+-                    </Button>
++                      Enabled
++                    </Switch>
+                     <Button
+                       variant="ghost"
+                       size="large"
+@@ -203,40 +164,11 @@ export const SettingsCron: Component = () => {
+                     </Button>
+                   </div>
+                 </div>
+-
+-                <Show when={state.editingId === job.id}>
+-                  <div class="flex flex-col gap-3">
+-                    <MockingbirdTextArea
+-                      rows={12}
+-                      value={state.editText}
+-                      onInput={(event) => setState("editText", event.currentTarget.value)}
+-                    />
+-                    <div class="flex justify-end">
+-                      <Button size="large" onClick={() => void saveEdit()} disabled={state.busyId === job.id}>
+-                        Save patch
+-                      </Button>
+-                    </div>
+-                  </div>
+-                </Show>
+               </div>
+             )}
+           </For>
+         </Show>
+       </MockingbirdSettingsSection>
+-
+-      <MockingbirdSettingsSection title="Create job" description="Post a complete cron job definition as JSON using the current run mode contract.">
+-        <MockingbirdCard
+-          footer={
+-            <div class="flex justify-end">
+-              <Button size="large" onClick={() => void createJob()} disabled={state.saving}>
+-                Create job
+-              </Button>
+-            </div>
+-          }
+-        >
+-          <MockingbirdTextArea rows={16} value={state.createText} onInput={(event) => setState("createText", event.currentTarget.value)} />
+-        </MockingbirdCard>
+-      </MockingbirdSettingsSection>
+     </MockingbirdSettingsPage>
+   )
+ }
+-- 
+2.53.0
+

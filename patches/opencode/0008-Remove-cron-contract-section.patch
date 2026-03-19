@@ -1,7 +1,7 @@
 From fa594f82b983b65787667c68ed185a84fc07df8f Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Thu, 19 Mar 2026 16:50:15 -0500
-Subject: [PATCH 8/8] Remove cron contract section
+Subject: [PATCH 8/9] Remove cron contract section
 
 ---
  .../src/components/settings-cron-data.test.ts | 23 +---------------
