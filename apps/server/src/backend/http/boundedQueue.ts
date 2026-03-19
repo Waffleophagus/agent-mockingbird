@@ -1,4 +1,4 @@
-export interface BoundedQueueOptions<T> {
+interface BoundedQueueOptions<T> {
   maxSize: number;
   drainDelayMs?: number;
   tryWrite: (value: T) => boolean;

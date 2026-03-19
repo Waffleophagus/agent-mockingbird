@@ -264,13 +264,13 @@ type CreateRuntimeEventStreamFn = (input: {
   getUsageSnapshot: () => UsageSnapshotLite;
 }) => RuntimeEventStreamApi;
 
-type ToSseFrameFn = (event: {
+type RuntimeEventLite = {
   id: string;
   type: string;
   source: string;
   at: string;
   payload: unknown;
-}) => string;
+};
 
 type StreamChunk = Uint8Array | string;
 
@@ -284,14 +284,12 @@ let repository: RepositoryApi;
 let memoryService: MemoryServiceApi;
 let createApiRoutes: CreateApiRoutesFn;
 let createRuntimeEventStream: CreateRuntimeEventStreamFn;
-let toSseFrame: ToSseFrameFn;
 let CronService: CronServiceCtor;
 let RunService: RunServiceCtor;
 let RuntimeSessionNotFoundError: RuntimeSessionNotFoundErrorCtor;
 let RuntimeSessionQueuedError: RuntimeSessionQueuedErrorCtor;
 let RuntimeContinuationDetachedError: RuntimeContinuationDetachedErrorCtor;
 let sqlite: SqliteDb;
-let setRuntimeForTests: (runtime: RuntimeStub | null) => void;
 
 beforeAll(async () => {
   await import("../db/migrate");
@@ -300,9 +298,8 @@ beforeAll(async () => {
   ({ createApiRoutes } = (await import("../http/routes")) as unknown as {
     createApiRoutes: CreateApiRoutesFn;
   });
-  ({ createRuntimeEventStream, toSseFrame } = (await import("../http/sse")) as unknown as {
+  ({ createRuntimeEventStream } = (await import("../http/sse")) as unknown as {
     createRuntimeEventStream: CreateRuntimeEventStreamFn;
-    toSseFrame: ToSseFrameFn;
   });
   ({ CronService } = (await import("../cron/service")) as unknown as {
     CronService: CronServiceCtor;
@@ -322,9 +319,6 @@ beforeAll(async () => {
   ({ sqlite } = (await import("../db/client")) as unknown as {
     sqlite: SqliteDb;
   });
-  ({ setRuntimeForTests } = (await import("../runtime")) as unknown as {
-    setRuntimeForTests: (runtime: RuntimeStub | null) => void;
-  });
 
   repository.ensureSeedData();
   await memoryService.initializeMemory();
@@ -332,7 +326,6 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   repository.resetDatabaseToDefaults();
-  setRuntimeForTests(null);
   rmSync(testWorkspacePath, { recursive: true, force: true });
   await memoryService.initializeMemory();
 });
@@ -448,6 +441,49 @@ async function readWithTimeout(
 
 async function sleep(ms: number) {
   await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function drainInitialSseFrames(reader: ReadableStreamDefaultReader<StreamChunk>) {
+  const decoder = new TextDecoder();
+  let combined = "";
+  for (let i = 0; i < 3; i += 1) {
+    const chunk = await readWithTimeout(reader, 250);
+    if (chunk.done || !chunk.value) break;
+    combined += typeof chunk.value === "string" ? chunk.value : decoder.decode(chunk.value);
+    if (combined.includes("event: heartbeat") && combined.includes("event: usage")) {
+      return;
+    }
+  }
+}
+
+async function publishAndReadSseFrame(event: RuntimeEventLite) {
+  const eventStream = createRuntimeEventStream({
+    getHeartbeatSnapshot: repository.getHeartbeatSnapshot,
+    getUsageSnapshot: repository.getUsageSnapshot,
+  });
+  const response = eventStream.route.GET();
+  const reader = response.body?.getReader() as ReadableStreamDefaultReader<StreamChunk> | undefined;
+  expect(reader).toBeTruthy();
+  if (!reader) {
+    throw new Error("Missing SSE reader");
+  }
+
+  await drainInitialSseFrames(reader);
+  eventStream.publish(event);
+
+  const decoder = new TextDecoder();
+  let combined = "";
+  for (let i = 0; i < 3; i += 1) {
+    const chunk = await readWithTimeout(reader, 250);
+    if (chunk.done || !chunk.value) break;
+    combined += typeof chunk.value === "string" ? chunk.value : decoder.decode(chunk.value);
+    if (combined.includes(`data: ${JSON.stringify(event.payload)}`)) {
+      break;
+    }
+  }
+
+  await reader.cancel();
+  return combined;
 }
 
 describe("chat routes", () => {
@@ -1382,12 +1418,7 @@ describe("background routes", () => {
 
 describe("memory validation and logging", () => {
   test("duplicate remember writes are rejected and logged in memory_write_events", async () => {
-    const { getConfigPath, getConfigSnapshot } = (await import("../config/service")) as unknown as {
-      getConfigPath: () => string;
-      getConfigSnapshot: () => { hash: string };
-    };
-    getConfigSnapshot();
-    const configPath = getConfigPath();
+    const configPath = testConfigPath;
     if (!existsSync(configPath)) {
       throw new Error(`Expected config path to exist: ${configPath}`);
     }
@@ -1938,7 +1969,6 @@ describe("cron validation and retries", () => {
         };
       },
     };
-    setRuntimeForTests(runtime);
     repository.setSessionModel("main", "opencode/follow-main");
 
     const cronService = new CronService(runtime);
@@ -2067,8 +2097,8 @@ describe("cron validation and retries", () => {
 });
 
 describe("sse contract", () => {
-  test("toSseFrame maps usage.updated to usage event", () => {
-    const frame = toSseFrame(
+  test("maps usage.updated to usage event", async () => {
+    const frame = await publishAndReadSseFrame(
       {
         id: "evt-1",
         type: "usage.updated",
@@ -2081,8 +2111,8 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
-  test("toSseFrame maps session.run.status.updated to session-status event", () => {
-    const frame = toSseFrame({
+  test("maps session.run.status.updated to session-status event", async () => {
+    const frame = await publishAndReadSseFrame({
       id: "evt-2",
       type: "session.run.status.updated",
       source: "runtime",
@@ -2099,8 +2129,8 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
-  test("toSseFrame maps session.message.part.updated to session-message-part event", () => {
-    const frame = toSseFrame({
+  test("maps session.message.part.updated to session-message-part event", async () => {
+    const frame = await publishAndReadSseFrame({
       id: "evt-part-1",
       type: "session.message.part.updated",
       source: "runtime",
@@ -2124,8 +2154,8 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
-  test("toSseFrame maps session.message.delta to session-message-delta event", () => {
-    const frame = toSseFrame({
+  test("maps session.message.delta to session-message-delta event", async () => {
+    const frame = await publishAndReadSseFrame({
       id: "evt-delta-1",
       type: "session.message.delta",
       source: "runtime",
@@ -2142,8 +2172,8 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
-  test("toSseFrame maps session.message.code_highlight to session-message-code-highlight event", () => {
-    const frame = toSseFrame({
+  test("maps session.message.code_highlight to session-message-code-highlight event", async () => {
+    const frame = await publishAndReadSseFrame({
       id: "evt-code-highlight-1",
       type: "session.message.code_highlight",
       source: "runtime",
@@ -2167,8 +2197,8 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
-  test("toSseFrame maps background.run.updated to background-run event", () => {
-    const frame = toSseFrame({
+  test("maps background.run.updated to background-run event", async () => {
+    const frame = await publishAndReadSseFrame({
       id: "evt-bg-1",
       type: "background.run.updated",
       source: "runtime",
@@ -2194,8 +2224,8 @@ describe("sse contract", () => {
     expect(frame).toContain("data:");
   });
 
-  test("toSseFrame maps prompt events to prompt SSE names", () => {
-    const permissionRequested = toSseFrame({
+  test("maps prompt events to prompt SSE names", async () => {
+    const permissionRequested = await publishAndReadSseFrame({
       id: "evt-perm-req-1",
       type: "session.permission.requested",
       source: "runtime",
@@ -2211,7 +2241,7 @@ describe("sse contract", () => {
     });
     expect(permissionRequested).toContain("event: permission-requested");
 
-    const permissionResolved = toSseFrame({
+    const permissionResolved = await publishAndReadSseFrame({
       id: "evt-perm-res-1",
       type: "session.permission.resolved",
       source: "runtime",
@@ -2224,7 +2254,7 @@ describe("sse contract", () => {
     });
     expect(permissionResolved).toContain("event: permission-resolved");
 
-    const questionRequested = toSseFrame({
+    const questionRequested = await publishAndReadSseFrame({
       id: "evt-question-req-1",
       type: "session.question.requested",
       source: "runtime",
@@ -2243,7 +2273,7 @@ describe("sse contract", () => {
     });
     expect(questionRequested).toContain("event: question-requested");
 
-    const questionResolved = toSseFrame({
+    const questionResolved = await publishAndReadSseFrame({
       id: "evt-question-res-1",
       type: "session.question.resolved",
       source: "runtime",

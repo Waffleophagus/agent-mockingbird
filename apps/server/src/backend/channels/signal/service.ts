@@ -60,7 +60,7 @@ interface SignalReceivePayload {
   envelope?: SignalEnvelope;
 }
 
-export interface SignalChannelStatus {
+interface SignalChannelStatus {
   running: boolean;
   enabled: boolean;
   connected: boolean;

@@ -9,7 +9,7 @@ const RECORD_BLOCK_RE =
 const LEGACY_RECORD_BLOCK_RE =
   /###\s+\[memory:([a-zA-Z0-9_-]+)\][^\n]*\n```json\n([\s\S]*?)\n```\n([\s\S]*?)(?=\n###\s+\[memory:|$)/g;
 
-export interface ParsedMemoryRecordBlock {
+interface ParsedMemoryRecordBlock {
   recordId: string;
   startLine: number;
   endLine: number;
@@ -111,11 +111,6 @@ export function formatMemoryRecord(record: MemoryRecord): string {
     record.content,
     "",
   ].join("\n");
-}
-
-export function hasMemoryRecord(content: string, recordId: string): boolean {
-  const heading = `### [memory:${recordId}]`;
-  return content.includes(heading);
 }
 
 export function parseMemoryRecords(content: string): MemoryRecord[] {

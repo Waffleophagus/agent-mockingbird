@@ -8,10 +8,6 @@ function resolvePathFromBinaryRoot(dirPath: string) {
   return path.resolve(getBinaryDir(), dirPath);
 }
 
-export function resolveMemoryWorkspaceDir(config: AgentMockingbirdConfig) {
-  return resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
-}
-
 export function resolveOpencodeWorkspaceDir(config: AgentMockingbirdConfig) {
   return resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
 }

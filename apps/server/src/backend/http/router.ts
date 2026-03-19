@@ -1,4 +1,4 @@
-export interface RouteRequest<TParams extends Record<string, string> = Record<string, string>>
+interface RouteRequest<TParams extends Record<string, string> = Record<string, string>>
   extends Request {
   params: TParams;
 }
@@ -7,7 +7,7 @@ type RouteMethod<TParams extends Record<string, string> = Record<string, string>
   bivarianceHack(req: RouteRequest<TParams>): Response | Promise<Response>;
 }["bivarianceHack"];
 
-export interface RouteHandler {
+interface RouteHandler {
   GET?: RouteMethod;
   POST?: RouteMethod;
   PUT?: RouteMethod;

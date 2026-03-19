@@ -114,13 +114,6 @@ export interface CronJobPatchInput {
   payload?: Record<string, unknown>;
 }
 
-export interface CronHandlerContext {
-  nowMs: number;
-  payload: Record<string, unknown>;
-  job: CronJobDefinition;
-  instance: CronJobInstance;
-}
-
 export interface CronHandlerResult {
   status: "ok" | "error";
   summary?: string;
@@ -132,8 +125,6 @@ export interface CronHandlerResult {
     severity?: "info" | "warn" | "critical";
   };
 }
-
-export type CronHandler = (ctx: CronHandlerContext) => Promise<CronHandlerResult> | CronHandlerResult;
 
 export interface CronConditionalModuleContext {
   nowMs: number;

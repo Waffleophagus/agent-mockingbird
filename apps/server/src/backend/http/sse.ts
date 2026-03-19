@@ -143,7 +143,7 @@ function toSseEventName(event: RuntimeEvent): string {
   }
 }
 
-export function toSseFrame(event: RuntimeEvent): string {
+function toSseFrame(event: RuntimeEvent): string {
   return `event: ${toSseEventName(event)}\ndata: ${JSON.stringify(event.payload)}\n\n`;
 }
 

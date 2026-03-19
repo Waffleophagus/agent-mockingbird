@@ -2,6 +2,7 @@ import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk/client";
 
 import type { RuntimeEngine } from "../contracts/runtime";
 import { createOpencodeClient } from "../opencode/client";
+import { getLaneQueue } from "../queue/service";
 import type { OpencodeRuntimeBackgroundMethods } from "./opencodeRuntime/backgroundMethods";
 import { opencodeRuntimeBackgroundMethods } from "./opencodeRuntime/backgroundMethods";
 import type { OpencodeRuntimeCoreMethods } from "./opencodeRuntime/coreMethods";
@@ -80,6 +81,17 @@ class OpencodeRuntimeImpl {
     } else if (!options.getRuntimeConfig) {
       this.client = createOpencodeClient();
     }
+    getLaneQueue().setDrainHandler(async (sessionId, messages) => {
+      for (const message of messages) {
+        await this.sendUserMessage({
+          sessionId,
+          content: message.content,
+          parts: message.parts,
+          agent: message.agent,
+          metadata: { ...message.metadata, __queueDrain: true },
+        });
+      }
+    });
     if (options.enableEventSync !== false) {
       this.startEventSync();
     }

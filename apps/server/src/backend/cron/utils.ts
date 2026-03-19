@@ -56,7 +56,7 @@ export function normalizeConditionalModuleResult(
   return value as CronHandlerResult;
 }
 
-export function readLegacyHandlerKey(input: { handlerKey?: unknown }): string | null {
+function readLegacyHandlerKey(input: { handlerKey?: unknown }): string | null {
   return typeof input.handlerKey === "string" ? input.handlerKey.trim() || null : null;
 }
 
@@ -242,7 +242,7 @@ export function buildNormalizedJobInput(
   };
 }
 
-export function resolveWorkspaceRootPath(): string {
+function resolveWorkspaceRootPath(): string {
   const configured = getConfigSnapshot().config.runtime.opencode.directory?.trim();
   return resolve(configured || process.cwd());
 }

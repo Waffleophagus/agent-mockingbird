@@ -2,7 +2,7 @@ import path from "node:path";
 
 export const STANDALONE_ENTRYPOINTS_RELATIVE = ["apps/server/src/index.ts"] as const;
 
-export function resolveStandaloneEntrypoints(repoRoot: string): string[] {
+function resolveStandaloneEntrypoints(repoRoot: string): string[] {
   return STANDALONE_ENTRYPOINTS_RELATIVE.map(entrypoint => path.join(repoRoot, entrypoint));
 }
 

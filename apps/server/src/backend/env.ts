@@ -39,7 +39,7 @@ function loadEnv() {
   });
 }
 
-export type AppEnv = ReturnType<typeof loadEnv>;
+type AppEnv = ReturnType<typeof loadEnv>;
 
 export const env = new Proxy({} as AppEnv, {
   get(_target, property) {

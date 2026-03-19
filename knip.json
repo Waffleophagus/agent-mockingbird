@@ -2,13 +2,17 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "ignore": [
     ".opencode/tools/*.ts",
-    "apps/server/src/backend/memory/cli.ts",
     "runtime-assets/opencode-config/plugins/agent-mockingbird.ts",
     "scripts/runtime-assets-sync.mjs"
   ],
   "ignoreDependencies": ["@opencode-ai/plugin"],
   "workspaces": {
     ".": {},
-    "apps/server": {}
+    "apps/server": {
+      "entry": [
+        "src/backend/memory/cli.ts",
+        "src/cli/agent-mockingbird.mjs"
+      ]
+    }
   }
 }

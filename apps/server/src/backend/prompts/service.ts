@@ -1,5 +1,4 @@
 import {
-  type QuestionAnswer,
   type QuestionInfo,
   type QuestionRequest,
   type PermissionRequest,
@@ -11,7 +10,7 @@ import { createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode
 
 const OPENCODE_RUNTIME_ID = "opencode";
 
-export interface PendingPermissionPrompt {
+interface PendingPermissionPrompt {
   id: string;
   sessionId: string;
   permission: string;
@@ -20,13 +19,13 @@ export interface PendingPermissionPrompt {
   always: string[];
 }
 
-export interface PendingQuestionPrompt {
+interface PendingQuestionPrompt {
   id: string;
   sessionId: string;
   questions: QuestionInfo[];
 }
 
-export interface PendingPromptsSnapshot {
+interface PendingPromptsSnapshot {
   pendingPermissions: PendingPermissionPrompt[];
   pendingQuestions: PendingQuestionPrompt[];
 }
@@ -98,53 +97,4 @@ export async function listPendingPrompts(): Promise<PendingPromptsSnapshot> {
     pendingPermissions: permissions,
     pendingQuestions: questions,
   };
-}
-
-export async function replyPermissionPrompt(input: {
-  requestId: string;
-  reply: "once" | "always" | "reject";
-  message?: string;
-}) {
-  const { client, timeoutMs } = createPromptClient();
-  await client.permission.reply(
-    {
-      requestID: input.requestId,
-      reply: input.reply,
-      message: input.message,
-    },
-    {
-      responseStyle: "data",
-      throwOnError: true,
-      signal: AbortSignal.timeout(timeoutMs),
-    },
-  );
-}
-
-export async function replyQuestionPrompt(input: { requestId: string; answers: QuestionAnswer[] }) {
-  const { client, timeoutMs } = createPromptClient();
-  await client.question.reply(
-    {
-      requestID: input.requestId,
-      answers: input.answers,
-    },
-    {
-      responseStyle: "data",
-      throwOnError: true,
-      signal: AbortSignal.timeout(timeoutMs),
-    },
-  );
-}
-
-export async function rejectQuestionPrompt(input: { requestId: string }) {
-  const { client, timeoutMs } = createPromptClient();
-  await client.question.reject(
-    {
-      requestID: input.requestId,
-    },
-    {
-      responseStyle: "data",
-      throwOnError: true,
-      signal: AbortSignal.timeout(timeoutMs),
-    },
-  );
 }

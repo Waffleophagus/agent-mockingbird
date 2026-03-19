@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import { sqlite } from "../db/client";
 
-export interface SqliteVecState {
+interface SqliteVecState {
   available: boolean;
   version: string | null;
   error: string | null;
@@ -55,13 +55,4 @@ export async function ensureSqliteVecLoaded(db: Database = sqlite): Promise<Sqli
 
 export function getSqliteVecState() {
   return state;
-}
-
-export function resetSqliteVecStateForTests() {
-  state = {
-    available: false,
-    version: null,
-    error: null,
-    loaded: false,
-  };
 }

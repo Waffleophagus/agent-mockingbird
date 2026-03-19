@@ -3,7 +3,7 @@ import type { ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "./client";
 import { getConfig } from "../config/service";
 
-export interface OpencodeModelOption {
+interface OpencodeModelOption {
   id: string;
   providerId: string;
   modelId: string;

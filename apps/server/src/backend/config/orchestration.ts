@@ -29,9 +29,9 @@ interface RuntimeMcpSnapshot {
   error?: string;
 }
 
-export type RuntimeMcpAction = "connect" | "disconnect" | "authStart" | "authRemove";
+type RuntimeMcpAction = "connect" | "disconnect" | "authStart" | "authRemove";
 
-export interface RuntimeMcpActionResult {
+interface RuntimeMcpActionResult {
   id: string;
   hash: string;
   mcps: RuntimeMcpSnapshot[];
@@ -41,7 +41,7 @@ export interface RuntimeMcpActionResult {
   authRemoved?: { success: true };
 }
 
-export interface RuntimeSkillCatalogResult {
+interface RuntimeSkillCatalogResult {
   status: 200;
   payload: {
     skills: Array<{
@@ -66,7 +66,7 @@ export interface RuntimeSkillCatalogResult {
   };
 }
 
-export interface RuntimeMcpCatalogResult {
+interface RuntimeMcpCatalogResult {
   status: 200 | 502;
   payload: {
     mcps: RuntimeMcpSnapshot[];
@@ -77,7 +77,7 @@ export interface RuntimeMcpCatalogResult {
   };
 }
 
-export async function runRuntimeMcpAction(
+async function runRuntimeMcpAction(
   config: AgentMockingbirdConfig,
   id: string,
   action: RuntimeMcpAction,

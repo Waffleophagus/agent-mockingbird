@@ -13,12 +13,12 @@ import { resolveOpencodeConfigDir, resolveOpencodeWorkspaceDir } from "../worksp
 
 type OpenCodeAgentConfigRecord = Record<string, unknown>;
 
-export interface OpencodeAgentValidationIssue {
+interface OpencodeAgentValidationIssue {
   path: string;
   message: string;
 }
 
-export interface OpencodeAgentStorageInfo {
+interface OpencodeAgentStorageInfo {
   workspaceDirectory: string;
   configDirectory: string;
   configFilePath: string;

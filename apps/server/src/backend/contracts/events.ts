@@ -9,7 +9,7 @@ import type {
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
 
-export type RuntimeEventSource = "api" | "runtime" | "scheduler" | "system";
+type RuntimeEventSource = "api" | "runtime" | "scheduler" | "system";
 
 interface RuntimeEventBase<TType extends string, TPayload> {
   id: string;
@@ -23,13 +23,13 @@ export type HeartbeatUpdatedEvent = RuntimeEventBase<"heartbeat.updated", Heartb
 export type UsageUpdatedEvent = RuntimeEventBase<"usage.updated", UsageSnapshot>;
 export type SessionStateUpdatedEvent = RuntimeEventBase<"session.state.updated", SessionSummary>;
 
-export interface SessionMessageCreatedPayload {
+interface SessionMessageCreatedPayload {
   sessionId: string;
   message: ChatMessage;
 }
 export type SessionMessageCreatedEvent = RuntimeEventBase<"session.message.created", SessionMessageCreatedPayload>;
 
-export interface SessionMessagePartUpdatedPayload {
+interface SessionMessagePartUpdatedPayload {
   sessionId: string;
   messageId: string;
   part: ChatMessagePart;
@@ -38,7 +38,7 @@ export interface SessionMessagePartUpdatedPayload {
 }
 export type SessionMessagePartUpdatedEvent = RuntimeEventBase<"session.message.part.updated", SessionMessagePartUpdatedPayload>;
 
-export interface SessionMessageDeltaPayload {
+interface SessionMessageDeltaPayload {
   sessionId: string;
   messageId: string;
   text: string;
@@ -47,7 +47,7 @@ export interface SessionMessageDeltaPayload {
 }
 export type SessionMessageDeltaEvent = RuntimeEventBase<"session.message.delta", SessionMessageDeltaPayload>;
 
-export interface SessionMessageRenderSnapshotPayload {
+interface SessionMessageRenderSnapshotPayload {
   sessionId: string;
   messageId: string;
   renderSnapshot: StreamdownRenderSnapshot;
@@ -58,7 +58,7 @@ export type SessionMessageRenderSnapshotEvent = RuntimeEventBase<
   SessionMessageRenderSnapshotPayload
 >;
 
-export interface SessionMessageCodeHighlightPayload {
+interface SessionMessageCodeHighlightPayload {
   sessionId: string;
   messageId: string;
   highlight: StreamdownCodeLineHighlight;
@@ -69,7 +69,7 @@ export type SessionMessageCodeHighlightEvent = RuntimeEventBase<
   SessionMessageCodeHighlightPayload
 >;
 
-export interface SessionRunStatusPayload {
+interface SessionRunStatusPayload {
   sessionId: string;
   status: "idle" | "busy" | "retry";
   attempt?: number;
@@ -78,19 +78,19 @@ export interface SessionRunStatusPayload {
 }
 export type SessionRunStatusUpdatedEvent = RuntimeEventBase<"session.run.status.updated", SessionRunStatusPayload>;
 
-export interface SessionCompactedPayload {
+interface SessionCompactedPayload {
   sessionId: string;
 }
 export type SessionCompactedEvent = RuntimeEventBase<"session.compacted", SessionCompactedPayload>;
 
-export interface SessionRunErrorPayload {
+interface SessionRunErrorPayload {
   sessionId: string | null;
   name?: string;
   message: string;
 }
 export type SessionRunErrorEvent = RuntimeEventBase<"session.run.error", SessionRunErrorPayload>;
 
-export interface SessionPermissionRequestPayload {
+interface SessionPermissionRequestPayload {
   id: string;
   sessionId: string;
   permission: string;
@@ -103,7 +103,7 @@ export type SessionPermissionRequestedEvent = RuntimeEventBase<
   SessionPermissionRequestPayload
 >;
 
-export interface SessionPermissionResolvedPayload {
+interface SessionPermissionResolvedPayload {
   sessionId: string;
   requestId: string;
   reply: "once" | "always" | "reject";
@@ -113,12 +113,12 @@ export type SessionPermissionResolvedEvent = RuntimeEventBase<
   SessionPermissionResolvedPayload
 >;
 
-export interface SessionQuestionOption {
+interface SessionQuestionOption {
   label: string;
   description: string;
 }
 
-export interface SessionQuestionInfo {
+interface SessionQuestionInfo {
   question: string;
   header: string;
   options: SessionQuestionOption[];
@@ -126,7 +126,7 @@ export interface SessionQuestionInfo {
   custom?: boolean;
 }
 
-export interface SessionQuestionRequestPayload {
+interface SessionQuestionRequestPayload {
   id: string;
   sessionId: string;
   questions: SessionQuestionInfo[];
@@ -136,7 +136,7 @@ export type SessionQuestionRequestedEvent = RuntimeEventBase<
   SessionQuestionRequestPayload
 >;
 
-export interface SessionQuestionResolvedPayload {
+interface SessionQuestionResolvedPayload {
   sessionId: string;
   requestId: string;
   outcome: "replied" | "rejected";
@@ -146,7 +146,7 @@ export type SessionQuestionResolvedEvent = RuntimeEventBase<
   SessionQuestionResolvedPayload
 >;
 
-export interface BackgroundRunUpdatedPayload {
+interface BackgroundRunUpdatedPayload {
   runId: string;
   parentSessionId: string;
   parentExternalSessionId: string;
@@ -164,7 +164,7 @@ export interface BackgroundRunUpdatedPayload {
 }
 export type BackgroundRunUpdatedEvent = RuntimeEventBase<"background.run.updated", BackgroundRunUpdatedPayload>;
 
-export interface ConfigUpdatedPayload {
+interface ConfigUpdatedPayload {
   hash: string;
   path: string;
   providerCount: number;
@@ -174,25 +174,25 @@ export interface ConfigUpdatedPayload {
 }
 export type ConfigUpdatedEvent = RuntimeEventBase<"config.updated", ConfigUpdatedPayload>;
 
-export interface ConfigUpdateFailedPayload {
+interface ConfigUpdateFailedPayload {
   stage: string;
   message: string;
 }
 export type ConfigUpdateFailedEvent = RuntimeEventBase<"config.update.failed", ConfigUpdateFailedPayload>;
 
-export interface ConfigRolledBackPayload {
+interface ConfigRolledBackPayload {
   attemptedHash: string | null;
   restoredHash: string | null;
   message: string;
 }
 export type ConfigRolledBackEvent = RuntimeEventBase<"config.update.rolled_back", ConfigRolledBackPayload>;
 
-export interface SkillsCatalogUpdatedPayload {
+interface SkillsCatalogUpdatedPayload {
   revision: string;
 }
 export type SkillsCatalogUpdatedEvent = RuntimeEventBase<"skills.catalog.updated", SkillsCatalogUpdatedPayload>;
 
-export interface SignalChannelStatusPayload {
+interface SignalChannelStatusPayload {
   connected: boolean;
   baseUrl: string;
   account: string | null;
@@ -204,7 +204,7 @@ export type SignalChannelStatusUpdatedEvent = RuntimeEventBase<
   SignalChannelStatusPayload
 >;
 
-export interface SignalPairingRequestedPayload {
+interface SignalPairingRequestedPayload {
   senderId: string;
   code: string;
   expiresAt: string;
@@ -214,7 +214,7 @@ export type SignalPairingRequestedEvent = RuntimeEventBase<
   SignalPairingRequestedPayload
 >;
 
-export interface SignalMessageReceivedPayload {
+interface SignalMessageReceivedPayload {
   senderId: string;
   groupId: string | null;
   sessionId: string;
@@ -224,13 +224,13 @@ export type SignalMessageReceivedEvent = RuntimeEventBase<
   SignalMessageReceivedPayload
 >;
 
-export interface SignalMessageSentPayload {
+interface SignalMessageSentPayload {
   target: string;
   sessionId: string;
 }
 export type SignalMessageSentEvent = RuntimeEventBase<"channel.signal.message.sent", SignalMessageSentPayload>;
 
-export interface SignalErrorPayload {
+interface SignalErrorPayload {
   message: string;
   detail?: string;
 }

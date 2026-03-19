@@ -12,7 +12,7 @@ export function getBinaryDir(): string {
   return process.cwd();
 }
 
-export function getProjectRoot(): string {
+function getProjectRoot(): string {
   return process.cwd();
 }
 
@@ -20,7 +20,7 @@ export function resolveDataPath(...segments: string[]): string {
   return path.resolve(getProjectRoot(), "data", ...segments);
 }
 
-export function resolveAgentMockingbirdDataDir(): string {
+function resolveAgentMockingbirdDataDir(): string {
   const configuredPath = env.AGENT_MOCKINGBIRD_CONFIG_PATH?.trim();
   if (!configuredPath) {
     return resolveDataPath();
@@ -28,7 +28,7 @@ export function resolveAgentMockingbirdDataDir(): string {
   return path.dirname(path.resolve(configuredPath));
 }
 
-export function workspaceFingerprint(workspaceDir: string): string {
+function workspaceFingerprint(workspaceDir: string): string {
   return createHash("sha256").update(path.resolve(workspaceDir)).digest("hex").slice(0, 16);
 }
 

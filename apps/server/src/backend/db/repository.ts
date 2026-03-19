@@ -4,8 +4,6 @@ import type {
   DashboardBootstrap,
   HeartbeatSnapshot,
   MessageMemoryTrace,
-  SessionMessageCursor,
-  SessionMessagesWindowResponse,
   SessionSummary,
   StreamdownRenderSnapshot,
   UsageSnapshot,
@@ -86,14 +84,6 @@ interface RuntimeSessionBindingRow {
   updated_at: number;
 }
 
-interface ChannelConversationBindingRow {
-  channel: string;
-  conversation_key: string;
-  session_id: string;
-  last_target: string | null;
-  updated_at: number;
-}
-
 interface ChannelPairingRequestRow {
   channel: string;
   sender_id: string;
@@ -116,22 +106,10 @@ interface ExistingMessageIdRow {
   content: string;
 }
 
-interface MessageCountRow {
-  count: number;
-}
-
-export interface RuntimeSessionBindingRecord {
+interface RuntimeSessionBindingRecord {
   runtime: string;
   sessionId: string;
   externalSessionId: string;
-  updatedAt: string;
-}
-
-export interface ChannelConversationBindingRecord {
-  channel: string;
-  conversationKey: string;
-  sessionId: string;
-  lastTarget: string | null;
   updatedAt: string;
 }
 
@@ -195,7 +173,7 @@ export interface BackgroundRunRecord {
   completedAt: string | null;
 }
 
-export interface UsageDashboardWindowSnapshot {
+interface UsageDashboardWindowSnapshot {
   requestCount: number;
   inputTokens: number;
   outputTokens: number;
@@ -203,12 +181,12 @@ export interface UsageDashboardWindowSnapshot {
   estimatedCostUsd: number;
 }
 
-export interface UsageDashboardGroupRecord extends UsageDashboardWindowSnapshot {
+interface UsageDashboardGroupRecord extends UsageDashboardWindowSnapshot {
   providerId: string;
   modelId?: string;
 }
 
-export interface UsageDashboardRecentRecord extends UsageDashboardWindowSnapshot {
+interface UsageDashboardRecentRecord extends UsageDashboardWindowSnapshot {
   id: string;
   createdAt: string;
   sessionId: string | null;
@@ -217,7 +195,7 @@ export interface UsageDashboardRecentRecord extends UsageDashboardWindowSnapshot
   modelId: string | null;
 }
 
-export interface UsageDashboardSnapshot {
+interface UsageDashboardSnapshot {
   window: "all" | "24h" | "7d" | "30d";
   totals: UsageDashboardWindowSnapshot;
   unattributedTotals: UsageDashboardWindowSnapshot;
@@ -227,7 +205,7 @@ export interface UsageDashboardSnapshot {
   forwardOnlyBreakdown: true;
 }
 
-export interface SessionMessageImportInput {
+interface SessionMessageImportInput {
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -312,18 +290,6 @@ function messageRowToMessage(row: MessageRow): ChatMessage {
     content: row.content,
     at: toIso(row.created_at),
   };
-}
-
-function messageToCursor(message: ChatMessage): SessionMessageCursor {
-  return {
-    at: message.at,
-    role: message.role,
-    id: message.id,
-  };
-}
-
-function roleSortValue(role: "user" | "assistant") {
-  return role === "user" ? 0 : 1;
 }
 
 function hydrateMessagesForSession(sessionId: string, messages: ChatMessage[]): ChatMessage[] {
@@ -428,16 +394,6 @@ function runtimeSessionBindingRowToRecord(row: RuntimeSessionBindingRow): Runtim
     runtime: row.runtime,
     sessionId: row.session_id,
     externalSessionId: row.external_session_id,
-    updatedAt: toIso(row.updated_at),
-  };
-}
-
-function channelConversationBindingRowToRecord(row: ChannelConversationBindingRow): ChannelConversationBindingRecord {
-  return {
-    channel: row.channel,
-    conversationKey: row.conversation_key,
-    sessionId: row.session_id,
-    lastTarget: row.last_target,
     updatedAt: toIso(row.updated_at),
   };
 }
@@ -852,84 +808,6 @@ export function listMessagesForSession(sessionId: string): ChatMessage[] {
   return hydrateMessagesForSession(sessionId, rows.map(messageRowToMessage));
 }
 
-export function listMessageWindowForSession(
-  sessionId: string,
-  input: {
-    limit: number;
-    before?: SessionMessageCursor;
-  },
-): SessionMessagesWindowResponse {
-  const limit = Math.max(1, input.limit);
-  const beforeMillis = toMillisOrNull(input.before?.at ?? null) ?? Number.MAX_SAFE_INTEGER;
-  const beforeRole = input.before ? roleSortValue(input.before.role) : Number.MAX_SAFE_INTEGER;
-  const beforeId = input.before?.id ?? "\uffff";
-
-  const rows = allRows<MessageRow>(
-    `
-      SELECT id, session_id, role, content, created_at
-      FROM (
-        SELECT id, session_id, role, content, created_at
-        FROM messages
-        WHERE session_id = ?1
-          AND (
-            ?2 IS NULL
-            OR created_at < ?2
-            OR (created_at = ?2 AND CASE role WHEN 'user' THEN 0 ELSE 1 END < ?3)
-            OR (
-              created_at = ?2
-              AND CASE role WHEN 'user' THEN 0 ELSE 1 END = ?3
-              AND id < ?4
-            )
-          )
-        ORDER BY
-          created_at DESC,
-          CASE role
-            WHEN 'user' THEN 0
-            ELSE 1
-          END DESC,
-          id DESC
-        LIMIT ?5
-      )
-      ORDER BY
-        created_at ASC,
-        CASE role
-          WHEN 'user' THEN 0
-          ELSE 1
-        END ASC,
-        id ASC
-    `,
-    sessionId,
-    input.before ? beforeMillis : null,
-    beforeRole,
-    beforeId,
-    limit + 1,
-  );
-
-  const hasOlder = rows.length > limit;
-  const windowRows = hasOlder ? rows.slice(1) : rows;
-  const messages = hydrateMessagesForSession(sessionId, windowRows.map(messageRowToMessage));
-  const totalMessages =
-    scalar<MessageCountRow>(
-      `
-        SELECT COUNT(*) as count
-        FROM messages
-        WHERE session_id = ?1
-      `,
-      sessionId,
-    )?.count ?? 0;
-
-  return {
-    messages,
-    meta: {
-      oldestLoaded: messages[0] ? messageToCursor(messages[0]) : null,
-      newestLoaded: messages[messages.length - 1] ? messageToCursor(messages[messages.length - 1]!) : null,
-      hasOlder,
-      totalMessages,
-      isWindowed: true,
-    },
-  };
-}
-
 export function setMessageMemoryTrace(input: {
   sessionId: string;
   messageId: string;
@@ -952,7 +830,7 @@ export function setMessageMemoryTrace(input: {
     .run(input.messageId, input.sessionId, JSON.stringify(input.trace), createdAt);
 }
 
-export function setMessageParts(input: {
+function setMessageParts(input: {
   sessionId: string;
   messageId: string;
   parts: ChatMessagePart[];
@@ -1214,7 +1092,7 @@ export function getHeartbeatSnapshot(): HeartbeatSnapshot {
   };
 }
 
-export function recordHeartbeat(source: RuntimeEventSource, online = true, createdAt = nowMs()): HeartbeatSnapshot {
+function recordHeartbeat(source: RuntimeEventSource, online = true, createdAt = nowMs()): HeartbeatSnapshot {
   sqlite
     .query(
       `
@@ -1230,7 +1108,7 @@ export function recordHeartbeat(source: RuntimeEventSource, online = true, creat
   };
 }
 
-export function getConfig() {
+function getConfig() {
   const managedConfig = getManagedConfig();
   const catalog = listManagedSkillCatalog(managedConfig.runtime.opencode.directory);
   const agents =
@@ -1399,7 +1277,7 @@ function generatePairingCode() {
   return code;
 }
 
-export function getSessionIdByChannelConversationBinding(channel: string, conversationKey: string): string | null {
+function getSessionIdByChannelConversationBinding(channel: string, conversationKey: string): string | null {
   const normalizedChannel = normalizeChannel(channel);
   const normalizedConversationKey = normalizeConversationKey(conversationKey);
   if (!normalizedChannel || !normalizedConversationKey) return null;
@@ -1417,7 +1295,7 @@ export function getSessionIdByChannelConversationBinding(channel: string, conver
   return row?.session_id ?? null;
 }
 
-export function setChannelConversationBinding(input: {
+function setChannelConversationBinding(input: {
   channel: string;
   conversationKey: string;
   sessionId: string;
@@ -1495,24 +1373,6 @@ export function ensureSessionForChannelConversation(input: {
   });
 
   return tx();
-}
-
-export function listChannelConversationBindings(channel: string, limit = 500): Array<ChannelConversationBindingRecord> {
-  const normalizedChannel = normalizeChannel(channel);
-  if (!normalizedChannel) return [];
-  const normalizedLimit = Math.max(1, Math.min(2_000, Math.floor(limit)));
-  const rows = allRows<ChannelConversationBindingRow>(
-    `
-      SELECT channel, conversation_key, session_id, last_target, updated_at
-      FROM channel_conversation_bindings
-      WHERE channel = ?1
-      ORDER BY updated_at DESC
-      LIMIT ?2
-    `,
-    normalizedChannel,
-    normalizedLimit,
-  );
-  return rows.map(channelConversationBindingRowToRecord);
 }
 
 function pruneExpiredChannelPairingRequests(channel: string, now = nowMs()) {
@@ -1762,28 +1622,6 @@ export function listChannelAllowlistEntries(channel: string): Array<ChannelAllow
     normalizedChannel,
   );
   return rows.map(channelAllowlistEntryRowToRecord);
-}
-
-export function upsertChannelAllowlistEntry(input: {
-  channel: string;
-  senderId: string;
-  source?: string;
-  createdAt?: number;
-}) {
-  const normalizedChannel = normalizeChannel(input.channel);
-  const normalizedSenderId = input.senderId.trim();
-  if (!normalizedChannel || !normalizedSenderId) return;
-  const createdAt = input.createdAt ?? nowMs();
-  sqlite
-    .query(
-      `
-      INSERT INTO channel_allowlist_entries (channel, sender_id, source, created_at)
-      VALUES (?1, ?2, ?3, ?4)
-      ON CONFLICT(channel, sender_id) DO UPDATE SET
-        source = excluded.source
-    `,
-    )
-    .run(normalizedChannel, normalizedSenderId, input.source?.trim() || "manual", createdAt);
 }
 
 export function recordChannelInboundEventIfFirstSeen(input: {

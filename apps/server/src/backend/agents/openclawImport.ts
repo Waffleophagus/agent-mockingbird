@@ -93,11 +93,11 @@ type OpenclawLlmMerger = {
   opencodeContext: string;
 };
 
-export type OpenclawImportSource =
+type OpenclawImportSource =
   | { mode: "local"; path: string }
   | { mode: "git"; url: string; ref?: string };
 
-export interface OpenclawMigrationInput {
+interface OpenclawMigrationInput {
   source: OpenclawImportSource;
   targetDirectory?: string;
   config?: AgentMockingbirdConfig;
@@ -121,7 +121,7 @@ interface DiscoveredSourceFile {
   notes?: string[];
 }
 
-export interface OpenclawMigrationResult {
+interface OpenclawMigrationResult {
   source: {
     mode: "local" | "git";
     resolvedDirectory: string;

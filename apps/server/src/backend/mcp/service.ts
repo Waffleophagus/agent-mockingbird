@@ -15,7 +15,7 @@ import {
 } from "../opencode/client";
 import { resolveOpencodeConfigDir } from "../workspace/resolve";
 
-export type RuntimeMcpStatus =
+type RuntimeMcpStatus =
   | "connected"
   | "disabled"
   | "failed"
@@ -23,7 +23,7 @@ export type RuntimeMcpStatus =
   | "needs_client_registration"
   | "unknown";
 
-export interface RuntimeMcp {
+interface RuntimeMcp {
   id: string;
   enabled: boolean;
   status: RuntimeMcpStatus;
@@ -209,7 +209,7 @@ export function resolveConfiguredMcpIds(config: AgentMockingbirdConfig) {
   );
 }
 
-export async function getWorkspaceMcpConfig(config: AgentMockingbirdConfig) {
+async function getWorkspaceMcpConfig(config: AgentMockingbirdConfig) {
   const current = unwrapSdkData<Config>(
     await createConfigClient(config).config.get({
       responseStyle: "data",
@@ -223,31 +223,6 @@ export async function getWorkspaceMcpConfig(config: AgentMockingbirdConfig) {
     servers,
     hash: hashConfiguredMcpServers(servers),
   };
-}
-
-export async function updateWorkspaceMcpConfig(input: {
-  config: AgentMockingbirdConfig;
-  servers: Array<ConfiguredMcpServer>;
-  expectedHash?: string;
-}) {
-  const current = await getWorkspaceMcpConfig(input.config);
-  if (input.expectedHash && input.expectedHash !== current.hash) {
-    throw new Error("MCP config has changed; refresh and retry");
-  }
-  const nextServers = normalizeMcpServerDefinitions(input.servers);
-  const nextConfig = {
-    ...current.config,
-    mcp: Object.fromEntries(
-      nextServers.map((server) => [server.id, toOpencodeMcp(server)]),
-    ),
-  } as Config;
-  await createConfigClient(input.config).config.update({
-    body: nextConfig,
-    responseStyle: "data",
-    throwOnError: true,
-    signal: AbortSignal.timeout(input.config.runtime.opencode.timeoutMs),
-  });
-  return getWorkspaceMcpConfig(input.config);
 }
 
 export async function listRuntimeMcps(

@@ -1,4 +1,4 @@
-export type SignalTarget = { type: "recipient"; recipient: string } | { type: "group"; groupId: string };
+type SignalTarget = { type: "recipient"; recipient: string } | { type: "group"; groupId: string };
 
 export function normalizeSignalId(raw: string): string {
   const trimmed = raw.trim();
@@ -73,4 +73,3 @@ export function splitSignalText(input: { text: string; limit: number; mode: "len
   }
   return chunks;
 }
-

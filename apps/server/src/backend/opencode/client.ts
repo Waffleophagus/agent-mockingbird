@@ -11,13 +11,13 @@ const DEFAULT_OPENCODE_BASE_URL =
   `http://127.0.0.1:${process.env.OPENCODE_PORT?.trim() || "4096"}`;
 const DEFAULT_OPENCODE_TIMEOUT_MS = 120_000;
 
-export interface OpencodeConnectionConfig {
+interface OpencodeConnectionConfig {
   baseUrl: string;
   directory?: string | null;
   timeoutMs: number;
 }
 
-export interface OpencodeConnectionInfo {
+interface OpencodeConnectionInfo {
   baseUrl: string;
   timeoutMs: number;
   directoryConfigured: boolean;

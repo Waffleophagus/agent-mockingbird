@@ -3,11 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-export function workspaceFingerprint(workspaceDir) {
+function workspaceFingerprint(workspaceDir) {
   return createHash("sha256").update(path.resolve(workspaceDir)).digest("hex").slice(0, 16);
 }
 
-export function resolveManagedOpencodeConfigDir({
+function resolveManagedOpencodeConfigDir({
   rootDir,
   dataDir = path.join(rootDir, "data"),
   workspaceDir = path.join(rootDir, "workspace"),

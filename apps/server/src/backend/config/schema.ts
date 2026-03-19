@@ -96,7 +96,7 @@ const configuredMcpServerListSchema = z.array(configuredMcpServerSchema).transfo
   return [...deduped.values()].sort((a, b) => a.id.localeCompare(b.id));
 });
 
-export const runtimeOpencodeSchema = z
+const runtimeOpencodeSchema = z
   .object({
     baseUrl: z.string().url(),
     providerId: z.string().min(1),
@@ -128,21 +128,21 @@ export const runtimeOpencodeSchema = z
   })
   .strict();
 
-export const runtimeSmokeTestSchema = z
+const runtimeSmokeTestSchema = z
   .object({
     prompt: z.string().min(1),
     expectedResponsePattern: z.string().min(1),
   })
   .strict();
 
-export const runtimeRunStreamSchema = z
+const runtimeRunStreamSchema = z
   .object({
     heartbeatMs: z.number().int().min(1_000).default(15_000),
     replayPageSize: z.number().int().positive().max(1_000).default(200),
   })
   .strict();
 
-export const runtimeMemorySchema = z
+const runtimeMemorySchema = z
   .object({
     enabled: z.boolean().default(true),
     workspaceDir: z.string().min(1).default("./data/workspace"),
@@ -207,7 +207,7 @@ export const runtimeMemorySchema = z
   })
   .strict();
 
-export const runtimeCronSchema = z
+const runtimeCronSchema = z
   .object({
     defaultMaxAttempts: z.number().int().min(1).default(3),
     defaultRetryBackoffMs: z.number().int().min(1_000).default(30_000),
@@ -224,7 +224,7 @@ const runtimeHeartbeatActiveHoursSchema = z
   })
   .strict();
 
-export const runtimeHeartbeatSchema = z
+const runtimeHeartbeatSchema = z
   .object({
     enabled: z.boolean().default(true),
     interval: z.string().regex(/^\d+[mhd]$/).default("30m"),
@@ -238,7 +238,7 @@ export const runtimeHeartbeatSchema = z
   })
   .strict();
 
-export const runtimeQueueSchema = z
+const runtimeQueueSchema = z
   .object({
     enabled: z.boolean().default(true),
     defaultMode: queueModeSchema.default("collect"),
@@ -258,7 +258,7 @@ const signalGroupConfigSchema = z
   })
   .strict();
 
-export const runtimeSignalChannelSchema = z
+const runtimeSignalChannelSchema = z
   .object({
     enabled: z.boolean().default(false),
     httpUrl: z.string().url().default("http://127.0.0.1:8080"),
@@ -294,7 +294,7 @@ export const runtimeSignalChannelSchema = z
     }
   });
 
-export const runtimeChannelsSchema = z
+const runtimeChannelsSchema = z
   .object({
     signal: runtimeSignalChannelSchema.default({
       enabled: false,
@@ -337,7 +337,7 @@ export const runtimeChannelsSchema = z
     },
   });
 
-export const runtimeConfigPolicySchema = z
+const runtimeConfigPolicySchema = z
   .object({
     mode: z.enum(["builder", "strict"]).default("builder"),
     denyPaths: stringListSchema.default(["version", "runtime.configPolicy", "runtime.smokeTest"]),

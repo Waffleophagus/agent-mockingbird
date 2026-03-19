@@ -10,7 +10,6 @@ import {
   assertExpectedHashMatches,
   ensureConfigSnapshot,
   getConfig,
-  getConfigPath,
   getConfigSnapshot,
   mergeConfigPatch,
   parseConfig,
@@ -25,13 +24,7 @@ import {
 
 export {
   ConfigApplyError,
-  type ApplyConfigPatchInput,
-  type ApplyConfigReplaceInput,
   type ApplyConfigResult,
-  type ConfigPolicySummary,
-  type ConfigSemanticSummary,
-  type ConfigSmokeTestSummary,
-  type AgentMockingbirdConfigSnapshot,
 } from "./types";
 
 async function applyCandidateConfig(
@@ -97,7 +90,7 @@ async function applyCandidateConfig(
   }
 }
 
-export { ensureConfigSnapshot as ensureConfigFile, getConfigSnapshot, getConfig, getConfigPath };
+export { ensureConfigSnapshot as ensureConfigFile, getConfigSnapshot, getConfig };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

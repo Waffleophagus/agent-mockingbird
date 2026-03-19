@@ -1,7 +1,7 @@
 import type { AgentMockingbirdConfig } from "./schema";
 import { ConfigApplyError } from "./types";
 
-export interface ConfigPolicyDecision {
+interface ConfigPolicyDecision {
   mode: "builder" | "strict";
   changedPaths: string[];
   rejectedPaths: string[];

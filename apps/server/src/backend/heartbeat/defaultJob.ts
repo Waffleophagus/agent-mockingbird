@@ -64,56 +64,6 @@ export function seedDefaultHeartbeatJob(createdAt: number) {
     );
 }
 
-export function migrateLegacyHeartbeatJobs() {
-  ensureCronTables();
-  const legacyRows = sqlite
-    .query(
-      `
-      SELECT id
-      FROM cron_job_definitions
-      WHERE id LIKE 'heartbeat-%'
-        AND id != ?1
-    `,
-    )
-    .all(HEARTBEAT_SYSTEM_JOB_ID) as Array<{ id: string }>;
-  if (legacyRows.length === 0) {
-    return { migrated: false, removedLegacy: 0, createdDefault: false };
-  }
-
-  const tx = sqlite.transaction(() => {
-    const hasDefault =
-      sqlite
-        .query(
-          `
-          SELECT COUNT(*) as count
-          FROM cron_job_definitions
-          WHERE id = ?1
-        `,
-        )
-        .get(HEARTBEAT_SYSTEM_JOB_ID) as { count: number } | null;
-    const createdDefault = (hasDefault?.count ?? 0) < 1;
-    seedDefaultHeartbeatJob(Date.now());
-
-    sqlite
-      .query(
-        `
-        DELETE FROM cron_job_definitions
-        WHERE id LIKE 'heartbeat-%'
-          AND id != ?1
-      `,
-      )
-      .run(HEARTBEAT_SYSTEM_JOB_ID);
-
-    return {
-      migrated: true,
-      removedLegacy: legacyRows.length,
-      createdDefault,
-    };
-  });
-
-  return tx();
-}
-
 export function deleteLegacyHeartbeatJobs() {
   ensureCronTables();
   sqlite

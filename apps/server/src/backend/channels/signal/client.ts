@@ -1,9 +1,9 @@
-export interface SignalRpcOptions {
+interface SignalRpcOptions {
   baseUrl: string;
   timeoutMs?: number;
 }
 
-export interface SignalSseEvent {
+interface SignalSseEvent {
   event?: string;
   data?: string;
   id?: string;

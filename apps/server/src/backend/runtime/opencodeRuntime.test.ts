@@ -266,9 +266,13 @@ beforeAll(async () => {
   repository.ensureSeedData();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   repository.resetDatabaseToDefaults();
   repository.setSessionModel("main", "test-provider/test-model");
+  const { getLaneQueue } = (await import("../queue/service")) as unknown as {
+    getLaneQueue: () => { clearAll: () => void };
+  };
+  getLaneQueue().clearAll();
 });
 
 afterAll(() => {
@@ -2682,21 +2686,9 @@ describe("opencode runtime failover contract", () => {
   });
 
   test("queues parent message when child runs are in flight", async () => {
-    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
-      initLaneQueue: (config: {
-        enabled: boolean;
-        defaultMode: "collect" | "followup" | "replace";
-        maxDepth: number;
-        coalesceDebounceMs: number;
-      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+    const { getLaneQueue } = (await import("../queue/service")) as unknown as {
       getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
     };
-    initLaneQueue({
-      enabled: true,
-      defaultMode: "collect",
-      maxDepth: 10,
-      coalesceDebounceMs: 500,
-    });
 
     let createCount = 0;
     let statusType: "busy" | "idle" = "busy";
@@ -2771,21 +2763,9 @@ describe("opencode runtime failover contract", () => {
   });
 
   test("does not enqueue heartbeat messages when session is busy", async () => {
-    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
-      initLaneQueue: (config: {
-        enabled: boolean;
-        defaultMode: "collect" | "followup" | "replace";
-        maxDepth: number;
-        coalesceDebounceMs: number;
-      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+    const { getLaneQueue } = (await import("../queue/service")) as unknown as {
       getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
     };
-    initLaneQueue({
-      enabled: true,
-      defaultMode: "collect",
-      maxDepth: 10,
-      coalesceDebounceMs: 500,
-    });
 
     let promptResolve: () => void;
     const promptPromise = new Promise<void>((resolve) => {
@@ -2820,21 +2800,9 @@ describe("opencode runtime failover contract", () => {
   });
 
   test("reports queued non-heartbeat messages while session is busy", async () => {
-    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
-      initLaneQueue: (config: {
-        enabled: boolean;
-        defaultMode: "collect" | "followup" | "replace";
-        maxDepth: number;
-        coalesceDebounceMs: number;
-      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+    const { getLaneQueue } = (await import("../queue/service")) as unknown as {
       getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
     };
-    initLaneQueue({
-      enabled: true,
-      defaultMode: "collect",
-      maxDepth: 10,
-      coalesceDebounceMs: 500,
-    });
 
     let promptResolve: () => void;
     const promptPromise = new Promise<void>((resolve) => {

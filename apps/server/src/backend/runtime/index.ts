@@ -7,7 +7,7 @@ import { listManagedSkillCatalog } from "../skills/service";
 
 let runtimeInstance: RuntimeEngine | null = null;
 
-export interface RuntimeStartupInfo {
+interface RuntimeStartupInfo {
   opencode: {
     baseUrl: string;
     providerId: string;
@@ -43,10 +43,6 @@ export function getRuntime(): RuntimeEngine | null {
   return runtimeInstance;
 }
 
-export function setRuntimeForTests(runtime: RuntimeEngine | null) {
-  runtimeInstance = runtime;
-}
-
 export function getRuntimeStartupInfo(): RuntimeStartupInfo {
   const config = getConfigSnapshot().config;
   const connection = getOpencodeConnectionInfo({
@@ -70,10 +66,6 @@ export function getRuntimeStartupInfo(): RuntimeStartupInfo {
 }
 
 export {
-  RuntimeContinuationDetachedError,
-  RuntimeProviderAuthError,
-  RuntimeProviderQuotaError,
-  RuntimeProviderRateLimitError,
   RuntimeSessionBusyError,
   RuntimeSessionQueuedError,
   RuntimeSessionNotFoundError,

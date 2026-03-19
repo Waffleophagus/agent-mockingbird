@@ -23,7 +23,7 @@ import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
 import { getSessionById, setSessionModel, setSessionTitle } from "../db/repository";
 
-export interface CronExecutorAdapter {
+interface CronExecutorAdapter {
   getJob(jobId: string): Promise<CronJobDefinition | null>;
   loadDefinitionRow(jobId: string): {
     id: string;

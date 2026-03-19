@@ -1,6 +1,6 @@
 type LogLevel = "info" | "warn" | "error";
 
-export interface LogFields {
+interface LogFields {
   [key: string]: unknown;
 }
 
