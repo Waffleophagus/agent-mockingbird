@@ -80,7 +80,7 @@ function usagePageHtml() {
       }
 
       .usage-content {
-        max-width: 1200px;
+        max-width: min(1680px, calc(100vw - 2rem));
         margin: 0 auto;
         display: flex;
         flex-direction: column;
@@ -238,7 +238,7 @@ function usagePageHtml() {
         width: 100%;
         min-width: 42rem;
         border-collapse: collapse;
-        table-layout: fixed;
+        table-layout: auto;
       }
 
       .usage-table th,
@@ -246,9 +246,7 @@ function usagePageHtml() {
         padding: 0.7rem 0.75rem;
         border-bottom: 1px solid var(--border-weak-base);
         text-align: left;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        vertical-align: top;
       }
 
       .usage-table th:last-child,
@@ -256,28 +254,63 @@ function usagePageHtml() {
         text-align: right;
       }
 
-      .usage-table th:first-child,
-      .usage-table td:first-child {
-        width: 40%;
+      .usage-table th {
+        white-space: nowrap;
+      }
+
+      .usage-table td {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .usage-table__cell--numeric,
+      .usage-table__cell--compact {
+        white-space: nowrap;
+      }
+
+      .usage-table__cell--numeric {
+        text-align: right;
+      }
+
+      .usage-table__cell--session {
+        min-width: 20rem;
+      }
+
+      .usage-table__cell--model {
+        min-width: 24rem;
+      }
+
+      .usage-table__cell--when {
+        min-width: 12rem;
+      }
+
+      .usage-table--provider th:first-child,
+      .usage-table--provider td:first-child {
+        width: 100%;
       }
 
       .usage-table--model th:first-child,
       .usage-table--model td:first-child {
-        width: 50%;
+        width: 100%;
       }
 
       .usage-table--recent {
-        min-width: 70rem;
+        min-width: 78rem;
       }
 
       .usage-table--recent th:first-child,
       .usage-table--recent td:first-child {
-        width: 24%;
+        width: 30%;
       }
 
       .usage-table--recent th:nth-child(2),
       .usage-table--recent td:nth-child(2) {
-        width: 20%;
+        width: 32%;
+      }
+
+      .usage-table--recent th:nth-child(3),
+      .usage-table--recent td:nth-child(3) {
+        width: 18%;
       }
 
       .usage-table tbody tr:hover {
@@ -298,6 +331,10 @@ function usagePageHtml() {
       @media (max-width: 720px) {
         .usage-main {
           padding: 0.75rem;
+        }
+
+        .usage-content {
+          max-width: none;
         }
 
         .usage-header {
@@ -571,7 +608,7 @@ function usagePageHtml() {
         }
 
         const head = columns
-          .map(column => \`<th class="text-12-medium text-text-weak">\${escapeHtml(column.label)}</th>\`)
+          .map(column => \`<th class="text-12-medium text-text-weak \${escapeHtml(column.headerClassName || "")}">\${escapeHtml(column.label)}</th>\`)
           .join("");
         const body = rows
           .map(row => \`<tr>\${columns.map(column => \`<td class="text-13-regular \${escapeHtml(column.className || "")}">\${escapeHtml(column.render(row))}</td>\`).join("")}</tr>\`)
@@ -588,26 +625,26 @@ function usagePageHtml() {
             {
               label: "Session",
               render: row => row.sessionTitle || row.sessionId || "Unbound usage event",
-              className: "text-text-strong",
+              className: "text-text-strong usage-table__cell--session",
             },
             {
               label: "Model",
               render: row => (row.providerId || "unknown") + "/" + (row.modelId || "unknown"),
-              className: "font-mono text-text-weak",
+              className: "font-mono text-text-weak usage-table__cell--model",
             },
             {
               label: "When",
               render: row => new Date(row.createdAt).toLocaleString(),
-              className: "text-text-weak",
+              className: "text-text-weak usage-table__cell--when",
             },
-            { label: "Req", render: row => formatNumber(row.requestCount) },
-            { label: "In", render: row => formatNumber(row.inputTokens) },
-            { label: "Out", render: row => formatNumber(row.outputTokens) },
-            { label: "Total", render: row => formatNumber(row.totalTokens) },
+            { label: "Req", render: row => formatNumber(row.requestCount), className: "usage-table__cell--numeric" },
+            { label: "In", render: row => formatNumber(row.inputTokens), className: "usage-table__cell--numeric" },
+            { label: "Out", render: row => formatNumber(row.outputTokens), className: "usage-table__cell--numeric" },
+            { label: "Total", render: row => formatNumber(row.totalTokens), className: "usage-table__cell--numeric" },
             {
               label: "Cost",
               render: row => formatUsd(row.estimatedCostUsd),
-              className: "text-text-strong",
+              className: "text-text-strong usage-table__cell--numeric",
             },
           ],
           "usage-table--recent",
@@ -625,19 +662,19 @@ function usagePageHtml() {
         renderMetrics(payload);
         renderTable(providersEl, payload.providers, [
           { label: "Provider", render: row => row.providerId, className: "font-mono text-text-strong" },
-          { label: "Req", render: row => formatNumber(row.requestCount) },
-          { label: "In", render: row => formatNumber(row.inputTokens) },
-          { label: "Out", render: row => formatNumber(row.outputTokens) },
-          { label: "Total", render: row => formatNumber(row.totalTokens) },
-          { label: "Cost", render: row => formatUsd(row.estimatedCostUsd), className: "text-text-strong" },
-        ]);
+          { label: "Req", render: row => formatNumber(row.requestCount), className: "usage-table__cell--numeric" },
+          { label: "In", render: row => formatNumber(row.inputTokens), className: "usage-table__cell--numeric" },
+          { label: "Out", render: row => formatNumber(row.outputTokens), className: "usage-table__cell--numeric" },
+          { label: "Total", render: row => formatNumber(row.totalTokens), className: "usage-table__cell--numeric" },
+          { label: "Cost", render: row => formatUsd(row.estimatedCostUsd), className: "text-text-strong usage-table__cell--numeric" },
+        ], "usage-table--provider");
         renderTable(modelsEl, payload.models, [
-          { label: "Model", render: row => row.providerId + "/" + row.modelId, className: "font-mono text-text-strong" },
-          { label: "Req", render: row => formatNumber(row.requestCount) },
-          { label: "In", render: row => formatNumber(row.inputTokens) },
-          { label: "Out", render: row => formatNumber(row.outputTokens) },
-          { label: "Total", render: row => formatNumber(row.totalTokens) },
-          { label: "Cost", render: row => formatUsd(row.estimatedCostUsd), className: "text-text-strong" },
+          { label: "Model", render: row => row.providerId + "/" + row.modelId, className: "font-mono text-text-strong usage-table__cell--model" },
+          { label: "Req", render: row => formatNumber(row.requestCount), className: "usage-table__cell--numeric" },
+          { label: "In", render: row => formatNumber(row.inputTokens), className: "usage-table__cell--numeric" },
+          { label: "Out", render: row => formatNumber(row.outputTokens), className: "usage-table__cell--numeric" },
+          { label: "Total", render: row => formatNumber(row.totalTokens), className: "usage-table__cell--numeric" },
+          { label: "Cost", render: row => formatUsd(row.estimatedCostUsd), className: "text-text-strong usage-table__cell--numeric" },
         ], "usage-table--model");
         renderRecent(payload.recent);
       }
