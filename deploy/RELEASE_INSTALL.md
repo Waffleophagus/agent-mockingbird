@@ -45,10 +45,13 @@ AGENT_MOCKINGBIRD_TAG="${VERSION}" \
 
 ## Maintainer flow (build + publish)
 
-1. Add `NPM_TOKEN` as a GitHub Actions repository secret with publish access for the `@waffleophagus` scope.
-2. Push a tag like `v0.1.0` from `main` to publish the release pair to npm tag `latest`.
-3. Push a non-`main` branch as `waffleophagus` to publish a preview pair to npm tag `next`.
-4. Plain pushes to `main` run checks only; they do not publish.
+1. Configure npm trusted publishing for:
+   - `agent-mockingbird`
+   - `@waffleophagus/agent-mockingbird-installer`
+2. Point both trusted publisher entries at `waffleophagus/agent-mockingbird` and workflow file `ci.yml`.
+3. Push a tag like `v0.1.0` from `main` to publish the release pair to npm tag `latest`.
+4. Push a non-`main` branch to publish a preview pair to npm tag `next`.
+5. Plain pushes to `main` run checks only; they do not publish.
 
 For branch previews, pin `AGENT_MOCKINGBIRD_TAG` to the exact published `next` version so the bootstrap script and package version match.
 

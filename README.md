@@ -431,9 +431,14 @@ agent-mockingbird
 
 ## Publish To Package Registry
 
-`ci.yml` publish steps expect this repository secret:
+`ci.yml` publish steps use npm trusted publishing via GitHub OIDC.
 
-- `NPM_TOKEN` with publish permission for `agent-mockingbird` and `@waffleophagus/agent-mockingbird-installer` on npmjs
+You need trusted publisher entries configured in npm for:
+
+- `agent-mockingbird`
+- `@waffleophagus/agent-mockingbird-installer`
+
+and the GitHub workflow file must remain `.github/workflows/ci.yml`.
 
 On a tag push like `v0.1.0`, CI publishes `agent-mockingbird@0.1.0` and `@waffleophagus/agent-mockingbird-installer@0.1.0` to npm with the `latest` tag.
 

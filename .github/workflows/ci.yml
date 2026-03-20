@@ -11,13 +11,13 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   pipeline:
     runs-on: ubuntu-latest
     env:
       NPM_REGISTRY_URL: https://registry.npmjs.org/
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     steps:
       - name: Checkout
@@ -83,16 +83,6 @@ jobs:
           echo "branch_slug=${branch_slug}" >> "${GITHUB_OUTPUT}"
           echo "bootstrap_ref=${bootstrap_ref}" >> "${GITHUB_OUTPUT}"
           echo "bootstrap_tag=${bootstrap_tag}" >> "${GITHUB_OUTPUT}"
-
-      - name: Validate publish secrets
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          token="${NPM_TOKEN:-}"
-          : "${token:?Missing NPM_TOKEN}"
-          token="$(printf '%s' "${token}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          echo "::add-mask::${token}"
-          echo "NODE_AUTH_TOKEN=${token}" >> "${GITHUB_ENV}"
 
       - name: Build package metadata for publish
         if: steps.meta.outputs.should_publish == 'true'
@@ -246,15 +236,6 @@ jobs:
           echo "AGENT_MOCKINGBIRD_INSTALLER_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
-      - name: Configure npm auth
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          {
-            printf "registry=%s\n" "${NPM_REGISTRY_URL}"
-            printf "//registry.npmjs.org/:_authToken=%s\n" "${NODE_AUTH_TOKEN}"
-          } > "${HOME}/.npmrc"
-
       - name: Publish package tarball
         if: steps.meta.outputs.should_publish == 'true'
         run: |
@@ -265,7 +246,7 @@ jobs:
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          bunx npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${NPM_REGISTRY_URL}" --access public --tag "${{ steps.meta.outputs.npm_tag }}"
+          npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
 
       - name: Publish installer package tarball
         if: steps.meta.outputs.should_publish == 'true'
@@ -277,7 +258,7 @@ jobs:
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          bunx npm publish "${AGENT_MOCKINGBIRD_INSTALLER_TARBALL}" --registry "${NPM_REGISTRY_URL}" --access public --tag "${{ steps.meta.outputs.npm_tag }}"
+          npm publish "${AGENT_MOCKINGBIRD_INSTALLER_TARBALL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
 
       - name: Verify published dist-tags
         if: steps.meta.outputs.should_publish == 'true'
