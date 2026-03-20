@@ -12,7 +12,7 @@ curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/ma
 
 This installs:
 
-- `@waffleophagus/agent-mockingbird` from npmjs
+- `agent-mockingbird` from npmjs
 - `opencode-ai` from npmjs
 - user services (`opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
 - automatic service start and health verification

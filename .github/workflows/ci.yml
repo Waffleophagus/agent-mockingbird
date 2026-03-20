@@ -16,7 +16,6 @@ jobs:
   pipeline:
     runs-on: ubuntu-latest
     env:
-      PACKAGE_SCOPE: waffleophagus
       NPM_REGISTRY_URL: https://registry.npmjs.org/
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       RELEASE_NEXT_ACTOR: waffleophagus
@@ -105,7 +104,7 @@ jobs:
             const fs = require("fs");
             const version = process.env.PKG_VERSION;
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.name = "@waffleophagus/agent-mockingbird";
+            pkg.name = "agent-mockingbird";
             pkg.private = false;
             pkg.version = version;
             delete pkg.module;
@@ -262,7 +261,7 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          package_name="@${PACKAGE_SCOPE}/agent-mockingbird"
+          package_name="agent-mockingbird"
           package_version="${{ steps.meta.outputs.package_version }}"
           if bunx npm view "${package_name}@${package_version}" version --registry "${NPM_REGISTRY_URL}" >/dev/null 2>&1; then
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
@@ -274,7 +273,7 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          package_name="@${PACKAGE_SCOPE}/agent-mockingbird-installer"
+          package_name="@waffleophagus/agent-mockingbird-installer"
           package_version="${{ steps.meta.outputs.package_version }}"
           if bunx npm view "${package_name}@${package_version}" version --registry "${NPM_REGISTRY_URL}" >/dev/null 2>&1; then
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
@@ -286,8 +285,8 @@ jobs:
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          package_name="@${PACKAGE_SCOPE}/agent-mockingbird"
-          installer_name="@${PACKAGE_SCOPE}/agent-mockingbird-installer"
+          package_name="agent-mockingbird"
+          installer_name="@waffleophagus/agent-mockingbird-installer"
           expected_version="${{ steps.meta.outputs.package_version }}"
           npm_tag="${{ steps.meta.outputs.npm_tag }}"
           bunx npm view "${package_name}" dist-tags version --registry "${NPM_REGISTRY_URL}" --json

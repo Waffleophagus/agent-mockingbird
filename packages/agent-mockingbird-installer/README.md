@@ -1,6 +1,6 @@
 # @waffleophagus/agent-mockingbird-installer
 
-Compatibility wrapper for `@waffleophagus/agent-mockingbird`.
+Compatibility wrapper for `agent-mockingbird`.
 
 Canonical usage:
 
@@ -13,7 +13,7 @@ npx --yes \
 It forwards all arguments to:
 
 ```bash
-npm exec --yes --package @waffleophagus/agent-mockingbird@latest agent-mockingbird -- <args>
+npm exec --yes --package agent-mockingbird@latest agent-mockingbird -- <args>
 ```
 
 By default it installs from npmjs. If you need a different registry for the `@waffleophagus` scope, set `AGENT_MOCKINGBIRD_REGISTRY_URL`.

@@ -26,7 +26,7 @@ npx --yes \
   agent-mockingbird-installer install
 ```
 
-That command installs the packaged CLI from npm, installs and starts the `opencode` and `agent-mockingbird` user services, and then launches the interactive onboarding wizard on TTY installs.
+That command installs the packaged CLI `agent-mockingbird` from npm, installs and starts the `opencode` and `agent-mockingbird` user services, and then launches the interactive onboarding wizard on TTY installs.
 
 Local development installs a git `pre-commit` hook automatically via `core.hooksPath=.githooks`. The hook runs:
 
@@ -352,7 +352,7 @@ This repo uses one CI/CD workflow:
 
 Published package artifact:
 
-- `@waffleophagus/agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after `bun run check:ship`.
+- `agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after `bun run check:ship`.
 - `@waffleophagus/agent-mockingbird-installer@<version>` published alongside it.
 
 Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
@@ -455,9 +455,9 @@ agent-mockingbird
 
 `ci.yml` publish steps expect this repository secret:
 
-- `NPM_TOKEN` with publish permission for the `@waffleophagus` scope on npmjs
+- `NPM_TOKEN` with publish permission for `agent-mockingbird` and `@waffleophagus/agent-mockingbird-installer` on npmjs
 
-On a tag push like `v0.1.0`, CI publishes `@waffleophagus/agent-mockingbird@0.1.0` and `@waffleophagus/agent-mockingbird-installer@0.1.0` to npm with the `latest` tag.
+On a tag push like `v0.1.0`, CI publishes `agent-mockingbird@0.1.0` and `@waffleophagus/agent-mockingbird-installer@0.1.0` to npm with the `latest` tag.
 
 `main` pushes do not publish. To update `latest`, tag a version from `main`.
 
@@ -466,7 +466,7 @@ Non-`main` branch pushes by `waffleophagus` publish preview builds like `0.0.1-n
 Install from npm with Bun:
 
 ```bash
-bun add -g @waffleophagus/agent-mockingbird
+bun add -g agent-mockingbird
 agent-mockingbird
 ```
 
