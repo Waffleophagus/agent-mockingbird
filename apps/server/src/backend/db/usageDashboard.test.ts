@@ -34,7 +34,7 @@ afterAll(() => {
 });
 
 describe("usage dashboard repository", () => {
-  test("groups attributed usage by provider and model for the selected window", () => {
+  test("groups attributed usage by provider and model for the selected date range", () => {
     const now = Date.now();
     const session = repository.createSession({
       title: "Usage Session",
@@ -69,26 +69,32 @@ describe("usage dashboard repository", () => {
       createdAt: now - 10 * 24 * 60 * 60 * 1000,
     });
 
-    const daily = repository.getUsageDashboardSnapshot("24h");
-    expect(daily.totals.requestCount).toBe(2);
-    expect(daily.totals.totalTokens).toBe(250);
-    expect(daily.unattributedTotals.totalTokens).toBe(50);
-    expect(daily.providers).toHaveLength(1);
-    expect(daily.providers[0]).toMatchObject({
+    const recentRange = repository.getUsageDashboardSnapshot({
+      startAt: now - 24 * 60 * 60 * 1000,
+      endAtExclusive: now + 1,
+    });
+    expect(recentRange.totals.requestCount).toBe(2);
+    expect(recentRange.totals.totalTokens).toBe(250);
+    expect(recentRange.unattributedTotals.totalTokens).toBe(50);
+    expect(recentRange.providers).toHaveLength(1);
+    expect(recentRange.providers[0]).toMatchObject({
       providerId: "anthropic",
       totalTokens: 200,
     });
-    expect(daily.models).toHaveLength(1);
-    expect(daily.models[0]).toMatchObject({
+    expect(recentRange.models).toHaveLength(1);
+    expect(recentRange.models[0]).toMatchObject({
       providerId: "anthropic",
       modelId: "claude-sonnet-4.5",
       totalTokens: 200,
     });
 
-    const monthly = repository.getUsageDashboardSnapshot("30d");
-    expect(monthly.totals.requestCount).toBe(3);
-    expect(monthly.providers.map(row => row.providerId)).toEqual(["openai", "anthropic"]);
-    expect(monthly.models.map(row => `${row.providerId}/${row.modelId}`)).toEqual([
+    const fullRange = repository.getUsageDashboardSnapshot({
+      startAt: now - 30 * 24 * 60 * 60 * 1000,
+      endAtExclusive: now + 1,
+    });
+    expect(fullRange.totals.requestCount).toBe(3);
+    expect(fullRange.providers.map(row => row.providerId)).toEqual(["openai", "anthropic"]);
+    expect(fullRange.models.map(row => `${row.providerId}/${row.modelId}`)).toEqual([
       "openai/gpt-5.4",
       "anthropic/claude-sonnet-4.5",
     ]);

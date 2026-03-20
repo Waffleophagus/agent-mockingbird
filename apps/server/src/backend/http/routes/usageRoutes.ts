@@ -4,11 +4,30 @@ import path from "node:path";
 import { getUsageDashboardSnapshot } from "../../db/repository";
 import { resolveAppDistDir } from "../../paths";
 
-type UsageWindow = "all" | "24h" | "7d" | "30d";
+interface UsageDashboardRangeQuery {
+  startAt: number | null;
+  endAtExclusive: number | null;
+}
 
-function parseWindow(value: string | null): UsageWindow {
-  if (value === "24h" || value === "7d" || value === "30d") return value;
-  return "all";
+function parseOptionalMillis(value: string | null): number | null {
+  if (value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+function parseRangeQuery(url: URL): UsageDashboardRangeQuery | Response {
+  const startAt = parseOptionalMillis(url.searchParams.get("startAt"));
+  const endAtExclusive = parseOptionalMillis(url.searchParams.get("endAtExclusive"));
+
+  if (startAt !== null && endAtExclusive !== null && startAt >= endAtExclusive) {
+    return Response.json(
+      { error: "startAt must be earlier than endAtExclusive" },
+      { status: 400 },
+    );
+  }
+
+  return { startAt, endAtExclusive };
 }
 
 function getOpenCodeStylesheetLinks() {
@@ -53,35 +72,6 @@ function usagePageHtml() {
         background:
           linear-gradient(180deg, color-mix(in srgb, var(--background-base) 82%, transparent), var(--background-base)),
           radial-gradient(circle at top left, color-mix(in srgb, var(--surface-interactive-base) 70%, transparent), transparent 32rem);
-      }
-
-      .usage-window-list {
-        display: flex;
-        gap: 0.4rem;
-        flex-wrap: wrap;
-      }
-
-      .usage-window-button {
-        border: 1px solid transparent;
-        border-radius: 0.625rem;
-        background: transparent;
-        color: var(--text-base);
-        text-align: center;
-        padding: 0.75rem 0.85rem;
-        cursor: pointer;
-        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
-      }
-
-      .usage-window-button:hover {
-        background: var(--surface-raised-base-hover);
-        border-color: var(--border-weak-base);
-        color: var(--text-strong);
-      }
-
-      .usage-window-button[data-active="true"] {
-        background: var(--surface-base-active);
-        border-color: var(--border-weak-selected);
-        color: var(--text-strong);
       }
 
       .usage-main {
@@ -134,8 +124,89 @@ function usagePageHtml() {
         border-color: var(--border-weak-base);
       }
 
-      .usage-toolbar {
-        padding-top: 0.1rem;
+      .usage-toolbar-card {
+        padding: 1rem 1.1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+      }
+
+      .usage-filter-form {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .usage-filter-fields {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .usage-filter-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        min-width: min(100%, 13rem);
+      }
+
+      .usage-date-input {
+        appearance: none;
+        min-height: 2.75rem;
+        border: 1px solid var(--border-weak-base);
+        border-radius: 0.75rem;
+        background: var(--surface-base);
+        color: var(--text-strong);
+        padding: 0.7rem 0.8rem;
+      }
+
+      .usage-date-input:focus {
+        outline: 2px solid color-mix(in srgb, var(--border-weak-selected) 45%, transparent);
+        outline-offset: 1px;
+        border-color: var(--border-weak-selected);
+      }
+
+      .usage-filter-actions {
+        display: flex;
+        gap: 0.55rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .usage-filter-button {
+        border: 1px solid var(--border-weak-base);
+        border-radius: 999px;
+        background: var(--surface-base);
+        color: var(--text-base);
+        padding: 0.7rem 0.95rem;
+        cursor: pointer;
+        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+      }
+
+      .usage-filter-button:hover {
+        background: var(--surface-raised-base-hover);
+        border-color: var(--border-weak-selected);
+        color: var(--text-strong);
+      }
+
+      .usage-filter-button--primary {
+        background: var(--surface-base-active);
+        border-color: var(--border-weak-selected);
+        color: var(--text-strong);
+      }
+
+      .usage-filter-summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      .usage-filter-status {
+        min-height: 1rem;
       }
 
       .usage-metrics {
@@ -159,8 +230,13 @@ function usagePageHtml() {
         padding: 1rem 1.1rem;
       }
 
+      .usage-table-wrap {
+        overflow-x: auto;
+      }
+
       .usage-table {
         width: 100%;
+        min-width: 42rem;
         border-collapse: collapse;
         table-layout: fixed;
       }
@@ -190,22 +266,22 @@ function usagePageHtml() {
         width: 50%;
       }
 
+      .usage-table--recent {
+        min-width: 70rem;
+      }
+
+      .usage-table--recent th:first-child,
+      .usage-table--recent td:first-child {
+        width: 24%;
+      }
+
+      .usage-table--recent th:nth-child(2),
+      .usage-table--recent td:nth-child(2) {
+        width: 20%;
+      }
+
       .usage-table tbody tr:hover {
         background: var(--surface-raised-base-hover);
-      }
-
-      .usage-recent {
-        display: flex;
-        flex-direction: column;
-      }
-
-      .usage-recent-item {
-        display: grid;
-        grid-template-columns: minmax(0, 2fr) repeat(5, minmax(0, 1fr));
-        gap: 0.75rem;
-        padding: 0.8rem 0;
-        border-bottom: 1px solid var(--border-weak-base);
-        align-items: center;
       }
 
       .usage-empty {
@@ -229,13 +305,23 @@ function usagePageHtml() {
           align-items: flex-start;
         }
 
-        .usage-metrics {
-          grid-template-columns: 1fr;
+        .usage-filter-form {
+          align-items: stretch;
         }
 
-        .usage-recent-item {
+        .usage-filter-fields,
+        .usage-filter-field,
+        .usage-filter-actions {
+          width: 100%;
+        }
+
+        .usage-filter-button {
+          flex: 1 1 10rem;
+          justify-content: center;
+        }
+
+        .usage-metrics {
           grid-template-columns: 1fr;
-          gap: 0.35rem;
         }
       }
     </style>
@@ -247,7 +333,7 @@ function usagePageHtml() {
           <section class="usage-card usage-header">
             <div class="usage-header-copy flex flex-col gap-1.5">
               <div class="text-16-medium text-text-strong">Runtime Usage Dashboard</div>
-              <div class="text-12-regular text-text-weak">Live runtime metrics, grouped snapshots, and the most recent usage deltas.</div>
+              <div class="text-12-regular text-text-weak">Calendar-based usage slices, grouped totals, and the latest deltas in the selected range.</div>
             </div>
             <a class="usage-back-link text-12-medium" href="/" data-action="usage-back-link" aria-label="Back to app">
               <span aria-hidden="true">←</span>
@@ -255,12 +341,32 @@ function usagePageHtml() {
             </a>
           </section>
 
-          <section class="usage-toolbar">
-            <div class="usage-window-list" role="tablist" aria-label="Usage period">
-              <button class="usage-window-button text-13-regular" data-window="all" data-active="true">All time</button>
-              <button class="usage-window-button text-13-regular" data-window="24h">Last 24 hours</button>
-              <button class="usage-window-button text-13-regular" data-window="7d">Last 7 days</button>
-              <button class="usage-window-button text-13-regular" data-window="30d">Last 30 days</button>
+          <section class="usage-card usage-toolbar-card">
+            <form class="usage-filter-form" id="usage-filter-form">
+              <div class="usage-filter-fields">
+                <label class="usage-filter-field">
+                  <span class="text-12-medium text-text-weak">Start date</span>
+                  <input class="usage-date-input text-13-regular" id="usage-start-date" type="date" />
+                </label>
+                <label class="usage-filter-field">
+                  <span class="text-12-medium text-text-weak">End date</span>
+                  <input class="usage-date-input text-13-regular" id="usage-end-date" type="date" />
+                </label>
+              </div>
+
+              <div class="usage-filter-actions">
+                <button class="usage-filter-button usage-filter-button--primary text-13-medium" type="submit">Apply range</button>
+                <button class="usage-filter-button text-13-medium" type="button" id="usage-month-to-date">Month to date</button>
+                <button class="usage-filter-button text-13-medium" type="button" id="usage-all-time">All time</button>
+              </div>
+            </form>
+
+            <div class="usage-filter-summary">
+              <div>
+                <div class="text-12-medium text-text-weak">Selection</div>
+                <div class="text-13-regular text-text-strong" id="usage-range-summary"></div>
+              </div>
+              <div class="usage-filter-status text-12-regular text-text-danger" id="usage-filter-status" role="status" aria-live="polite"></div>
             </div>
           </section>
 
@@ -290,7 +396,7 @@ function usagePageHtml() {
             <div class="flex items-center justify-between gap-3 mb-3">
               <div>
                 <div class="text-14-medium text-text-strong">Recent Activity</div>
-                <div class="text-12-regular text-text-weak">The 50 latest usage deltas for the selected window.</div>
+                <div class="text-12-regular text-text-weak">The 50 latest usage deltas for the selected date range.</div>
               </div>
             </div>
             <div id="recent"></div>
@@ -305,8 +411,13 @@ function usagePageHtml() {
       const modelsEl = document.getElementById("models");
       const recentEl = document.getElementById("recent");
       const backLink = document.querySelector("[data-action='usage-back-link']");
-      const buttons = Array.from(document.querySelectorAll("[data-window]"));
-      let currentWindow = "all";
+      const filterForm = document.getElementById("usage-filter-form");
+      const startDateInput = document.getElementById("usage-start-date");
+      const endDateInput = document.getElementById("usage-end-date");
+      const monthToDateButton = document.getElementById("usage-month-to-date");
+      const allTimeButton = document.getElementById("usage-all-time");
+      const rangeSummaryEl = document.getElementById("usage-range-summary");
+      const filterStatusEl = document.getElementById("usage-filter-status");
 
       function formatNumber(value) {
         return new Intl.NumberFormat("en-US").format(Number(value || 0));
@@ -321,10 +432,120 @@ function usagePageHtml() {
         }).format(Number(value || 0));
       }
 
-      function setButtons() {
-        for (const button of buttons) {
-          button.dataset.active = button.dataset.window === currentWindow ? "true" : "false";
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function formatDateInput(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return year + "-" + month + "-" + day;
+      }
+
+      function parseDateValue(value) {
+        if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value || "")) return null;
+        const [year, month, day] = value.split("-").map(Number);
+        const start = new Date(year, month - 1, day);
+        if (
+          start.getFullYear() !== year ||
+          start.getMonth() !== month - 1 ||
+          start.getDate() !== day
+        ) {
+          return null;
         }
+
+        return {
+          startAt: start.getTime(),
+          endAtExclusive: new Date(year, month - 1, day + 1).getTime(),
+        };
+      }
+
+      function getMonthToDateSelection() {
+        const now = new Date();
+        return {
+          startDate: formatDateInput(new Date(now.getFullYear(), now.getMonth(), 1)),
+          endDate: formatDateInput(now),
+        };
+      }
+
+      function readSelectionFromUrl() {
+        const url = new URL(window.location.href);
+        const startDate = url.searchParams.get("start");
+        const endDate = url.searchParams.get("end");
+
+        if (!startDate && !endDate) return getMonthToDateSelection();
+        if (!startDate || !endDate) return getMonthToDateSelection();
+        if (!parseDateValue(startDate) || !parseDateValue(endDate) || startDate > endDate) {
+          return getMonthToDateSelection();
+        }
+
+        return { startDate, endDate };
+      }
+
+      let currentSelection = readSelectionFromUrl();
+
+      function syncInputsFromSelection() {
+        startDateInput.value = currentSelection.startDate || "";
+        endDateInput.value = currentSelection.endDate || "";
+      }
+
+      function syncUrlFromSelection() {
+        const url = new URL(window.location.href);
+        if (currentSelection.startDate && currentSelection.endDate) {
+          url.searchParams.set("start", currentSelection.startDate);
+          url.searchParams.set("end", currentSelection.endDate);
+        } else {
+          url.searchParams.delete("start");
+          url.searchParams.delete("end");
+        }
+        window.history.replaceState({}, "", url);
+      }
+
+      function formatHumanDate(value) {
+        const parsed = parseDateValue(value);
+        if (!parsed) return value;
+        return new Date(parsed.startAt).toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
+      }
+
+      function renderSelectionSummary() {
+        if (!currentSelection.startDate || !currentSelection.endDate) {
+          rangeSummaryEl.textContent = "All recorded usage";
+          return;
+        }
+
+        if (currentSelection.startDate === currentSelection.endDate) {
+          rangeSummaryEl.textContent = formatHumanDate(currentSelection.startDate);
+          return;
+        }
+
+        rangeSummaryEl.textContent = formatHumanDate(currentSelection.startDate) + " to " + formatHumanDate(currentSelection.endDate);
+      }
+
+      function setFilterStatus(message) {
+        filterStatusEl.textContent = message || "";
+      }
+
+      function buildRequestUrl() {
+        const url = new URL("/api/usage/dashboard", window.location.origin);
+        if (currentSelection.startDate && currentSelection.endDate) {
+          const start = parseDateValue(currentSelection.startDate);
+          const end = parseDateValue(currentSelection.endDate);
+          if (start && end) {
+            url.searchParams.set("startAt", String(start.startAt));
+            url.searchParams.set("endAtExclusive", String(end.endAtExclusive));
+          }
+        }
+        return url.toString();
       }
 
       function renderMetrics(payload) {
@@ -337,75 +558,139 @@ function usagePageHtml() {
         ];
         metricsEl.innerHTML = metrics.map(([label, value]) => \`
           <article class="usage-card usage-metric">
-            <div class="text-12-medium text-text-weak">\${label}</div>
-            <div class="usage-metric-value text-20-medium">\${value}</div>
+            <div class="text-12-medium text-text-weak">\${escapeHtml(label)}</div>
+            <div class="usage-metric-value text-20-medium">\${escapeHtml(value)}</div>
           </article>
         \`).join("");
       }
 
       function renderTable(target, rows, columns, className = "") {
         if (!rows.length) {
-          target.innerHTML = '<div class="usage-empty text-13-regular">No usage recorded for this period.</div>';
+          target.innerHTML = '<div class="usage-empty text-13-regular">No usage recorded for this range.</div>';
           return;
         }
-        const head = columns.map(column => \`<th class="text-12-medium text-text-weak">\${column.label}</th>\`).join("");
-        const body = rows.map(row => \`<tr>\${columns.map(column => \`<td class="text-13-regular \${column.className || ""}">\${column.render(row)}</td>\`).join("")}</tr>\`).join("");
-        target.innerHTML = \`<table class="usage-table \${className}"><thead><tr>\${head}</tr></thead><tbody>\${body}</tbody></table>\`;
+
+        const head = columns
+          .map(column => \`<th class="text-12-medium text-text-weak">\${escapeHtml(column.label)}</th>\`)
+          .join("");
+        const body = rows
+          .map(row => \`<tr>\${columns.map(column => \`<td class="text-13-regular \${escapeHtml(column.className || "")}">\${escapeHtml(column.render(row))}</td>\`).join("")}</tr>\`)
+          .join("");
+
+        target.innerHTML = \`<div class="usage-table-wrap"><table class="usage-table \${escapeHtml(className)}"><thead><tr>\${head}</tr></thead><tbody>\${body}</tbody></table></div>\`;
       }
 
       function renderRecent(rows) {
-        if (!rows.length) {
-          recentEl.innerHTML = '<div class="usage-empty text-13-regular">No recent activity in this period.</div>';
-          return;
-        }
-        recentEl.innerHTML = \`<div class="usage-recent">\${rows.map(row => \`
-          <article class="usage-recent-item">
-            <div class="min-w-0">
-              <div class="text-13-regular text-text-strong truncate">\${row.sessionTitle || row.sessionId || "Unbound usage event"}</div>
-              <div class="text-12-regular text-text-weak font-mono truncate">\${row.providerId || "unknown"}/\${row.modelId || "unknown"}</div>
-              <div class="text-12-regular text-text-weak">\${new Date(row.createdAt).toLocaleString()}</div>
-            </div>
-            <div class="text-13-regular text-text-base">\${formatNumber(row.requestCount)}</div>
-            <div class="text-13-regular text-text-base">\${formatNumber(row.inputTokens)}</div>
-            <div class="text-13-regular text-text-base">\${formatNumber(row.outputTokens)}</div>
-            <div class="text-13-regular text-text-base">\${formatNumber(row.totalTokens)}</div>
-            <div class="text-13-regular text-text-strong">\${formatUsd(row.estimatedCostUsd)}</div>
-          </article>
-        \`).join("")}</div>\`;
+        renderTable(
+          recentEl,
+          rows,
+          [
+            {
+              label: "Session",
+              render: row => row.sessionTitle || row.sessionId || "Unbound usage event",
+              className: "text-text-strong",
+            },
+            {
+              label: "Model",
+              render: row => (row.providerId || "unknown") + "/" + (row.modelId || "unknown"),
+              className: "font-mono text-text-weak",
+            },
+            {
+              label: "When",
+              render: row => new Date(row.createdAt).toLocaleString(),
+              className: "text-text-weak",
+            },
+            { label: "Req", render: row => formatNumber(row.requestCount) },
+            { label: "In", render: row => formatNumber(row.inputTokens) },
+            { label: "Out", render: row => formatNumber(row.outputTokens) },
+            { label: "Total", render: row => formatNumber(row.totalTokens) },
+            {
+              label: "Cost",
+              render: row => formatUsd(row.estimatedCostUsd),
+              className: "text-text-strong",
+            },
+          ],
+          "usage-table--recent",
+        );
       }
 
       async function loadUsage() {
-        const response = await fetch(\`/api/usage/dashboard?window=\${encodeURIComponent(currentWindow)}\`);
+        const response = await fetch(buildRequestUrl());
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || "Failed to load usage.");
+        }
+
         const payload = await response.json();
         renderMetrics(payload);
         renderTable(providersEl, payload.providers, [
-          { label: 'Provider', render: row => row.providerId, className: 'font-mono text-text-strong' },
-          { label: 'Req', render: row => formatNumber(row.requestCount) },
-          { label: 'In', render: row => formatNumber(row.inputTokens) },
-          { label: 'Out', render: row => formatNumber(row.outputTokens) },
-          { label: 'Total', render: row => formatNumber(row.totalTokens) },
-          { label: 'Cost', render: row => formatUsd(row.estimatedCostUsd), className: 'text-text-strong' },
+          { label: "Provider", render: row => row.providerId, className: "font-mono text-text-strong" },
+          { label: "Req", render: row => formatNumber(row.requestCount) },
+          { label: "In", render: row => formatNumber(row.inputTokens) },
+          { label: "Out", render: row => formatNumber(row.outputTokens) },
+          { label: "Total", render: row => formatNumber(row.totalTokens) },
+          { label: "Cost", render: row => formatUsd(row.estimatedCostUsd), className: "text-text-strong" },
         ]);
         renderTable(modelsEl, payload.models, [
-          { label: 'Model', render: row => \`\${row.providerId}/\${row.modelId}\`, className: 'font-mono text-text-strong' },
-          { label: 'Req', render: row => formatNumber(row.requestCount) },
-          { label: 'In', render: row => formatNumber(row.inputTokens) },
-          { label: 'Out', render: row => formatNumber(row.outputTokens) },
-          { label: 'Total', render: row => formatNumber(row.totalTokens) },
-          { label: 'Cost', render: row => formatUsd(row.estimatedCostUsd), className: 'text-text-strong' },
+          { label: "Model", render: row => row.providerId + "/" + row.modelId, className: "font-mono text-text-strong" },
+          { label: "Req", render: row => formatNumber(row.requestCount) },
+          { label: "In", render: row => formatNumber(row.inputTokens) },
+          { label: "Out", render: row => formatNumber(row.outputTokens) },
+          { label: "Total", render: row => formatNumber(row.totalTokens) },
+          { label: "Cost", render: row => formatUsd(row.estimatedCostUsd), className: "text-text-strong" },
         ], "usage-table--model");
         renderRecent(payload.recent);
       }
 
-      for (const button of buttons) {
-        button.addEventListener("click", () => {
-          currentWindow = button.dataset.window || "all";
-          setButtons();
-          void loadUsage();
-        });
+      async function refreshUsage() {
+        setFilterStatus("");
+        renderSelectionSummary();
+        syncUrlFromSelection();
+
+        try {
+          await loadUsage();
+        } catch (error) {
+          setFilterStatus(error instanceof Error ? error.message : "Failed to load usage.");
+        }
       }
 
-      backLink?.addEventListener("click", (event) => {
+      filterForm?.addEventListener("submit", event => {
+        event.preventDefault();
+        const startDate = startDateInput.value;
+        const endDate = endDateInput.value;
+
+        if (!startDate || !endDate) {
+          setFilterStatus("Choose both a start date and an end date.");
+          return;
+        }
+
+        if (!parseDateValue(startDate) || !parseDateValue(endDate)) {
+          setFilterStatus("Enter valid calendar dates.");
+          return;
+        }
+
+        if (startDate > endDate) {
+          setFilterStatus("Start date must be on or before the end date.");
+          return;
+        }
+
+        currentSelection = { startDate, endDate };
+        void refreshUsage();
+      });
+
+      monthToDateButton?.addEventListener("click", () => {
+        currentSelection = getMonthToDateSelection();
+        syncInputsFromSelection();
+        void refreshUsage();
+      });
+
+      allTimeButton?.addEventListener("click", () => {
+        currentSelection = { startDate: null, endDate: null };
+        syncInputsFromSelection();
+        void refreshUsage();
+      });
+
+      backLink?.addEventListener("click", event => {
         const referrer = document.referrer ? new URL(document.referrer) : null;
         const sameOriginReferrer = referrer && referrer.origin === window.location.origin;
         if (sameOriginReferrer && window.history.length > 1) {
@@ -414,9 +699,9 @@ function usagePageHtml() {
         }
       });
 
-      setButtons();
-      void loadUsage();
-      window.setInterval(() => { void loadUsage(); }, 15000);
+      syncInputsFromSelection();
+      void refreshUsage();
+      window.setInterval(() => { void loadUsage().catch(error => setFilterStatus(error instanceof Error ? error.message : "Failed to load usage.")); }, 15000);
     </script>
   </body>
 </html>`;
@@ -427,8 +712,9 @@ export function createUsageRoutes() {
     "/api/usage/dashboard": {
       GET: (req: Request) => {
         const url = new URL(req.url);
-        const window = parseWindow(url.searchParams.get("window"));
-        return Response.json(getUsageDashboardSnapshot(window));
+        const query = parseRangeQuery(url);
+        if (query instanceof Response) return query;
+        return Response.json(getUsageDashboardSnapshot(query));
       },
     },
 

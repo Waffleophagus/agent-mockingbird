@@ -38,11 +38,12 @@ afterAll(() => {
 });
 
 describe("usage routes", () => {
-  test("GET /api/usage/dashboard returns grouped windowed usage data", async () => {
+  test("GET /api/usage/dashboard returns grouped range-filtered usage data", async () => {
     const session = repository.createSession({
       title: "Usage Route Session",
       model: "anthropic/claude-sonnet-4.5",
     });
+    const createdAt = Date.now();
     repository.recordUsageDelta({
       sessionId: session.id,
       requestCountDelta: 1,
@@ -50,24 +51,27 @@ describe("usage routes", () => {
       outputTokensDelta: 34,
       estimatedCostUsdDelta: 0.1234,
       source: "runtime",
+      createdAt,
     });
 
     const routes = createUsageRoutes();
     const handler = routes["/api/usage/dashboard"]?.GET;
     expect(handler).toBeDefined();
 
-    const response = await handler!(new Request("http://localhost/api/usage/dashboard?window=24h"));
+    const response = await handler!(new Request(`http://localhost/api/usage/dashboard?startAt=${createdAt - 1}&endAtExclusive=${createdAt + 1}`));
     expect(response.status).toBe(200);
 
     const payload = await response.json() as {
-      window: string;
+      rangeStartAt: string | null;
+      rangeEndAtExclusive: string | null;
       totals: { totalTokens: number };
       providers: Array<{ providerId: string }>;
       models: Array<{ providerId: string; modelId: string }>;
       forwardOnlyBreakdown: boolean;
     };
 
-    expect(payload.window).toBe("24h");
+    expect(payload.rangeStartAt).not.toBeNull();
+    expect(payload.rangeEndAtExclusive).not.toBeNull();
     expect(payload.totals.totalTokens).toBe(46);
     expect(payload.providers).toHaveLength(1);
     expect(payload.providers[0]).toMatchObject({ providerId: "anthropic" });
@@ -92,8 +96,9 @@ describe("usage routes", () => {
     expect(html).toContain("window.history.back()");
     expect(html).toContain("window.location.origin");
     expect(html).toContain("All time");
-    expect(html).toContain("24h");
-    expect(html).toContain("7d");
-    expect(html).toContain("30d");
+    expect(html).toContain("Apply range");
+    expect(html).toContain("Month to date");
+    expect(html).toContain("usage-start-date");
+    expect(html).toContain("usage-end-date");
   });
 });

@@ -196,7 +196,8 @@ interface UsageDashboardRecentRecord extends UsageDashboardWindowSnapshot {
 }
 
 interface UsageDashboardSnapshot {
-  window: "all" | "24h" | "7d" | "30d";
+  rangeStartAt: string | null;
+  rangeEndAtExclusive: string | null;
   totals: UsageDashboardWindowSnapshot;
   unattributedTotals: UsageDashboardWindowSnapshot;
   providers: UsageDashboardGroupRecord[];
@@ -221,8 +222,6 @@ const toMillisOrNull = (isoTimestamp: string | null) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 const sessionIdPrefix = "session";
-const usageWindows = ["all", "24h", "7d", "30d"] as const;
-
 function parseQualifiedModelRef(rawModel: string | null | undefined) {
   const trimmed = rawModel?.trim() ?? "";
   if (!trimmed) return { providerId: null, modelId: null };
@@ -248,19 +247,41 @@ function usageSnapshotFromAggregate(row: UsageAggregateRow): UsageDashboardWindo
   };
 }
 
-function usageWindowLowerBound(window: UsageDashboardSnapshot["window"]): number | null {
-  const now = nowMs();
-  switch (window) {
-    case "24h":
-      return now - 24 * 60 * 60 * 1000;
-    case "7d":
-      return now - 7 * 24 * 60 * 60 * 1000;
-    case "30d":
-      return now - 30 * 24 * 60 * 60 * 1000;
-    case "all":
-    default:
-      return null;
+interface UsageDashboardRange {
+  startAt: number | null;
+  endAtExclusive: number | null;
+}
+
+function normalizeUsageDashboardRange(input?: Partial<UsageDashboardRange> | null): UsageDashboardRange {
+  const startAt = Number.isFinite(input?.startAt) ? Math.trunc(input!.startAt as number) : null;
+  const endAtExclusive = Number.isFinite(input?.endAtExclusive)
+    ? Math.trunc(input!.endAtExclusive as number)
+    : null;
+
+  return {
+    startAt: startAt !== null && startAt >= 0 ? startAt : null,
+    endAtExclusive: endAtExclusive !== null && endAtExclusive >= 0 ? endAtExclusive : null,
+  };
+}
+
+function usageRangeFilter(range: UsageDashboardRange) {
+  const clauses: string[] = [];
+  const bindings: number[] = [];
+
+  if (range.startAt !== null) {
+    clauses.push(`usage_events.created_at >= ?${bindings.length + 1}`);
+    bindings.push(range.startAt);
   }
+
+  if (range.endAtExclusive !== null) {
+    clauses.push(`usage_events.created_at < ?${bindings.length + 1}`);
+    bindings.push(range.endAtExclusive);
+  }
+
+  return {
+    whereClause: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
+    bindings,
+  };
 }
 
 function scalar<T>(query: string, ...bindings: SQLQueryBindings[]): T {
@@ -962,11 +983,9 @@ export function recordUsageDelta(input: {
     );
 }
 
-export function getUsageDashboardSnapshot(window: UsageDashboardSnapshot["window"] = "all"): UsageDashboardSnapshot {
-  const normalizedWindow = usageWindows.includes(window) ? window : "all";
-  const lowerBound = usageWindowLowerBound(normalizedWindow);
-  const usageEventsWhereClause = lowerBound === null ? "" : "WHERE usage_events.created_at >= ?1";
-  const bindings = lowerBound === null ? [] : [lowerBound];
+export function getUsageDashboardSnapshot(input?: Partial<UsageDashboardRange> | null): UsageDashboardSnapshot {
+  const range = normalizeUsageDashboardRange(input);
+  const { whereClause: usageEventsWhereClause, bindings } = usageRangeFilter(range);
 
   const totals = scalar<UsageAggregateRow>(
     `
@@ -988,7 +1007,7 @@ export function getUsageDashboardSnapshot(window: UsageDashboardSnapshot["window
         COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
         COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
       FROM usage_events
-      ${lowerBound === null ? "WHERE" : `${usageEventsWhereClause} AND`} (provider_id IS NULL OR model_id IS NULL)
+      ${usageEventsWhereClause ? `${usageEventsWhereClause} AND` : "WHERE"} (provider_id IS NULL OR model_id IS NULL)
     `,
     ...bindings,
   );
@@ -1002,7 +1021,7 @@ export function getUsageDashboardSnapshot(window: UsageDashboardSnapshot["window
         COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
         COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
       FROM usage_events
-      ${lowerBound === null ? "WHERE provider_id IS NOT NULL" : `${usageEventsWhereClause} AND provider_id IS NOT NULL`}
+      ${usageEventsWhereClause ? `${usageEventsWhereClause} AND provider_id IS NOT NULL` : "WHERE provider_id IS NOT NULL"}
       GROUP BY provider_id
       ORDER BY cost_micros DESC, output_tokens DESC, provider_id ASC
     `,
@@ -1021,7 +1040,9 @@ export function getUsageDashboardSnapshot(window: UsageDashboardSnapshot["window
         COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
         COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
       FROM usage_events
-      ${lowerBound === null ? "WHERE provider_id IS NOT NULL AND model_id IS NOT NULL" : `${usageEventsWhereClause} AND provider_id IS NOT NULL AND model_id IS NOT NULL`}
+      ${usageEventsWhereClause
+        ? `${usageEventsWhereClause} AND provider_id IS NOT NULL AND model_id IS NOT NULL`
+        : "WHERE provider_id IS NOT NULL AND model_id IS NOT NULL"}
       GROUP BY provider_id, model_id
       ORDER BY cost_micros DESC, output_tokens DESC, provider_id ASC, model_id ASC
     `,
@@ -1062,7 +1083,8 @@ export function getUsageDashboardSnapshot(window: UsageDashboardSnapshot["window
   }));
 
   return {
-    window: normalizedWindow,
+    rangeStartAt: range.startAt === null ? null : toIso(range.startAt),
+    rangeEndAtExclusive: range.endAtExclusive === null ? null : toIso(range.endAtExclusive),
     totals: usageSnapshotFromAggregate(totals),
     unattributedTotals: usageSnapshotFromAggregate(unattributedTotals),
     providers,
