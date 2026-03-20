@@ -1,7 +1,7 @@
-From 8c043aa862ae7e0a757736e05fab05261b5fac98 Mon Sep 17 00:00:00 2001
+From c96dd61ea8cfefe92ab911a881be4385713b3a31 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Wed, 18 Mar 2026 16:12:22 -0500
-Subject: [PATCH 5/9] Use chart icon for usage nav
+Subject: [PATCH 05/10] Use chart icon for usage nav
 
 ---
  packages/app/src/pages/layout/sidebar-shell.tsx | 2 +-

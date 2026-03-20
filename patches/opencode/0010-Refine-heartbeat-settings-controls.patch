@@ -1,0 +1,208 @@
+From 13ca62af83f42bbb18c20ada138d3e4a084322a1 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Thu, 19 Mar 2026 21:54:09 -0500
+Subject: [PATCH 10/10] Refine heartbeat settings controls
+
+---
+ .../src/components/dialog-select-model.tsx    |  7 +-
+ .../app/src/components/settings-heartbeat.tsx | 93 ++++++++++++++++---
+ 2 files changed, 85 insertions(+), 15 deletions(-)
+
+diff --git a/packages/app/src/components/dialog-select-model.tsx b/packages/app/src/components/dialog-select-model.tsx
+index 3654aab85..8a4a88a36 100644
+--- a/packages/app/src/components/dialog-select-model.tsx
++++ b/packages/app/src/components/dialog-select-model.tsx
+@@ -19,13 +19,14 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
+   provider === "opencode" && (!cost || cost.input === 0)
+ 
+ type ModelState = ReturnType<typeof useLocal>["model"]
++export type ModelSelectorState = Pick<ModelState, "list" | "visible" | "current" | "set">
+ 
+ const ModelList: Component<{
+   provider?: string
+   class?: string
+   onSelect: () => void
+   action?: JSX.Element
+-  model?: ModelState
++  model?: ModelSelectorState
+ }> = (props) => {
+   const model = props.model ?? useLocal().model
+   const language = useLanguage()
+@@ -91,7 +92,7 @@ type ModelSelectorTriggerProps = Omit<ComponentProps<typeof Kobalte.Trigger>, "a
+ 
+ export function ModelSelectorPopover(props: {
+   provider?: string
+-  model?: ModelState
++  model?: ModelSelectorState
+   children?: JSX.Element
+   triggerAs?: ValidComponent
+   triggerProps?: ModelSelectorTriggerProps
+@@ -189,7 +190,7 @@ export function ModelSelectorPopover(props: {
+   )
+ }
+ 
+-export const DialogSelectModel: Component<{ provider?: string; model?: ModelState }> = (props) => {
++export const DialogSelectModel: Component<{ provider?: string; model?: ModelSelectorState }> = (props) => {
+   const dialog = useDialog()
+   const language = useLanguage()
+ 
+diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
+index 628fda355..770e0ccbd 100644
+--- a/packages/app/src/components/settings-heartbeat.tsx
++++ b/packages/app/src/components/settings-heartbeat.tsx
+@@ -1,9 +1,13 @@
+ import { Button } from "@opencode-ai/ui/button"
++import { Select } from "@opencode-ai/ui/select"
+ import { Switch } from "@opencode-ai/ui/switch"
+ import { showToast } from "@opencode-ai/ui/toast"
+-import { onMount, Show, type Component } from "solid-js"
++import { createMemo, onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+-import { mockingbirdJson } from "@/utils/mockingbird"
++import { useModels } from "@/context/models"
++import { useGlobalSDK } from "@/context/global-sdk"
++import { mockingbirdJson, readPinnedWorkspace } from "@/utils/mockingbird"
++import { ModelSelectorPopover, type ModelSelectorState } from "./dialog-select-model"
+ import {
+   MockingbirdCard,
+   MockingbirdInput,
+@@ -54,6 +58,12 @@ type RuntimePayload = {
+   path: string
+ }
+ 
++type LiveAgent = {
++  name: string
++  mode?: string
++  hidden?: boolean
++}
++
+ type HeartbeatFormState = {
+   enabled: boolean
+   interval: string
+@@ -141,6 +151,8 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
+ }
+ 
+ export const SettingsHeartbeat: Component = () => {
++  const globalSDK = useGlobalSDK()
++  const models = useModels()
+   const [state, setState] = createStore({
+     loading: true,
+     saving: false,
+@@ -148,6 +160,7 @@ export const SettingsHeartbeat: Component = () => {
+     error: "",
+     runtimeHash: "",
+     runtimePath: "",
++    agentOptions: [] as string[],
+     status: null as HeartbeatStatus | null,
+     form: {
+       enabled: true,
+@@ -163,17 +176,60 @@ export const SettingsHeartbeat: Component = () => {
+     } as HeartbeatFormState,
+   })
+ 
++  const agentOptions = createMemo(() => {
++    const options = state.agentOptions
++    if (options.includes(state.form.agentId)) return options
++    return state.form.agentId ? [state.form.agentId, ...options] : options
++  })
++
++  const currentModel = createMemo(() => {
++    const value = state.form.model.trim()
++    if (!value) return
++    const slash = value.indexOf("/")
++    if (slash === -1) return
++    const providerID = value.slice(0, slash)
++    const modelID = value.slice(slash + 1)
++    if (!providerID || !modelID) return
++    return models.find({ providerID, modelID })
++  })
++
++  const heartbeatModelSelector: ModelSelectorState = {
++    list: models.list,
++    current: currentModel,
++    visible: models.visible,
++    set(item, options) {
++      if (!item) return
++      models.setVisibility(item, true)
++      if (options?.recent) models.recent.push(item)
++      setState("form", "model", `${item.providerID}/${item.modelID}`)
++    },
++  }
++
+   async function load() {
+     setState("loading", true)
+     setState("error", "")
+     try {
+-      const [heartbeat, runtime] = await Promise.all([
++      const [heartbeat, runtime, agents] = await Promise.all([
+         mockingbirdJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
+         mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config"),
++        readPinnedWorkspace().then(async (workspace) => {
++          const client = globalSDK.createClient({
++            directory: workspace.directory,
++            throwOnError: true,
++          })
++          const payload = await client.app.agents()
++          return payload.data ?? []
++        }),
+       ])
+       setState("status", heartbeat.heartbeat)
+       setState("runtimeHash", runtime.hash)
+       setState("runtimePath", runtime.path)
++      setState(
++        "agentOptions",
++        agents
++          .filter((item: LiveAgent) => item.mode !== "subagent" && !item.hidden)
++          .map((item: LiveAgent) => item.name),
++      )
+       setState("form", toForm(heartbeat.heartbeat.config))
+     } catch (error) {
+       setState("error", error instanceof Error ? error.message : "Failed to load heartbeat settings")
+@@ -313,11 +369,18 @@ export const SettingsHeartbeat: Component = () => {
+           <div class="grid gap-4 sm:grid-cols-2">
+             <div class="flex flex-col gap-2">
+               <span class="text-12-medium text-text-weak">Model</span>
+-              <MockingbirdInput
+-                value={state.form.model}
+-                placeholder="openai/gpt-5.4"
+-                onInput={(event) => setState("form", "model", event.currentTarget.value)}
+-              />
++              <ModelSelectorPopover model={heartbeatModelSelector}>
++                <Button
++                  as="div"
++                  variant="ghost"
++                  size="normal"
++                  class="w-full min-w-0 justify-between rounded-lg border border-border-weak-base bg-surface-base px-3 py-2 text-13-regular text-text-strong hover:bg-surface-base"
++                >
++                  <span class="truncate text-left">
++                    {(currentModel()?.name ?? state.form.model) || "Select model"}
++                  </span>
++                </Button>
++              </ModelSelectorPopover>
+             </div>
+             <div class="flex flex-col gap-2">
+               <span class="text-12-medium text-text-weak">Interval</span>
+@@ -329,10 +392,16 @@ export const SettingsHeartbeat: Component = () => {
+             </div>
+             <div class="flex flex-col gap-2">
+               <span class="text-12-medium text-text-weak">Agent id</span>
+-              <MockingbirdInput
+-                value={state.form.agentId}
+-                placeholder="build"
+-                onInput={(event) => setState("form", "agentId", event.currentTarget.value)}
++              <Select
++                options={agentOptions()}
++                current={state.form.agentId}
++                onSelect={(value) => value && setState("form", "agentId", value)}
++                placeholder="Select agent"
++                variant="ghost"
++                size="normal"
++                class="w-full capitalize text-text-base"
++                valueClass="truncate text-13-regular text-text-base"
++                triggerProps={{ "data-action": "heartbeat-agent" }}
+               />
+             </div>
+             <div class="flex flex-col gap-2">
+-- 
+2.53.0
+
