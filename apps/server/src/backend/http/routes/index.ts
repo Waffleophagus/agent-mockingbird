@@ -89,7 +89,7 @@ export function createApiRoutes(input: {
     ...createBackgroundRoutes(input.runtime),
     ...createDashboardRoutes(input.runtime),
     ...createConfigRoutes(input.eventStream),
-    ...createUiRoutes(input.runtime, input.eventStream),
+    ...createUiRoutes(input.runtime),
     ...createUsageRoutes(),
     ...createEventRoutes(input.eventStream),
     ...createAgentRoutes(),

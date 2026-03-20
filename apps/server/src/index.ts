@@ -1,5 +1,4 @@
 import { serve } from "bun";
-import { websocket } from "hono/bun";
 
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { CronService } from "./backend/cron/service";
@@ -9,7 +8,7 @@ import { env } from "./backend/env";
 import { HeartbeatRuntimeService } from "./backend/heartbeat/runtimeService";
 import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
-import { createRuntimeEventStream, type MobileRealtimeSocketData } from "./backend/http/sse";
+import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
 import { resolveAppDistDir } from "./backend/paths";
 import { RunService } from "./backend/run/service";
@@ -118,10 +117,7 @@ heartbeatService.start();
 
 const server = serve({
   idleTimeout: 120,
-  fetch: async (req, server) => {
-    if (new URL(req.url).pathname === "/api/mobile/events/ws") {
-      return eventStream.websocketRoute(req, server as unknown as Bun.Server<MobileRealtimeSocketData>);
-    }
+  fetch: async (req) => {
     const apiResponse = await dispatchRoute(apiRoutes, req);
     if (apiResponse) {
       return apiResponse;
@@ -132,7 +128,6 @@ const server = serve({
     hmr: true,
     console: true,
   },
-  websocket,
 });
 
 const shutdown = () => {

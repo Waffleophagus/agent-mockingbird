@@ -63,12 +63,6 @@ function buildRuntimeStub(): RuntimeStub {
   };
 }
 
-function buildEventStreamStub() {
-  return {
-    getLatestSeq: () => 42,
-  };
-}
-
 describe("uiRoutes contracts", () => {
   test("GET /api/ui/session-screen/bootstrap returns screen bootstrap payload", async () => {
     const session = repository.createSession({ title: "UI Routes Test" });
@@ -85,7 +79,7 @@ describe("uiRoutes contracts", () => {
       },
     });
 
-    const routes = createUiRoutes(buildRuntimeStub() as never, buildEventStreamStub() as never);
+    const routes = createUiRoutes(buildRuntimeStub() as never);
     const handler = routes["/api/ui/session-screen/bootstrap"]?.GET;
     expect(handler).toBeDefined();
 
@@ -102,7 +96,6 @@ describe("uiRoutes contracts", () => {
     expect(payload.heartbeat).not.toBeNull();
     expect(typeof payload.featureFlags).toBe("object");
     expect(payload.featureFlags).not.toBeNull();
-    expect((payload.realtime as { latestSeq?: number } | undefined)?.latestSeq).toBe(42);
   });
 
   test("GET /api/ui/sessions/:id/context returns context payload", async () => {
@@ -120,7 +113,7 @@ describe("uiRoutes contracts", () => {
       },
     });
 
-    const routes = createUiRoutes(buildRuntimeStub() as never, buildEventStreamStub() as never);
+    const routes = createUiRoutes(buildRuntimeStub() as never);
     const handler = routes["/api/ui/sessions/:id/context"]?.GET;
     expect(handler).toBeDefined();
 
@@ -145,7 +138,7 @@ describe("uiRoutes contracts", () => {
 
   test("GET /api/ui/sessions/:id/review returns placeholder review contract", async () => {
     const session = repository.createSession({ title: "Review Placeholder" });
-    const routes = createUiRoutes(buildRuntimeStub() as never, buildEventStreamStub() as never);
+    const routes = createUiRoutes(buildRuntimeStub() as never);
     const handler = routes["/api/ui/sessions/:id/review"]?.GET;
     expect(handler).toBeDefined();
 
