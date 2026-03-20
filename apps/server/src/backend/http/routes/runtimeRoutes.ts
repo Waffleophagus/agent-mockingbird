@@ -23,7 +23,6 @@ const runtimePatchSchema = z
         memory: z.record(z.string(), z.unknown()).optional(),
         heartbeat: z.record(z.string(), z.unknown()).optional(),
         cron: z.record(z.string(), z.unknown()).optional(),
-        channels: z.record(z.string(), z.unknown()).optional(),
       })
       .partial()
       .optional(),
@@ -41,7 +40,6 @@ function buildRuntimePayload() {
         memory: snapshot.config.runtime.memory,
         heartbeat: snapshot.config.runtime.heartbeat,
         cron: snapshot.config.runtime.cron,
-        channels: snapshot.config.runtime.channels,
       },
     },
   };

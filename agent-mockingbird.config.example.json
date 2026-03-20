@@ -85,26 +85,6 @@
       "retryBackoffCapMs": 3600000,
       "conditionalModuleTimeoutMs": 30000
     },
-    "channels": {
-      "signal": {
-        "enabled": false,
-        "httpUrl": "http://127.0.0.1:8080",
-        "account": null,
-        "dmPolicy": "pairing",
-        "allowFrom": [],
-        "groupPolicy": "allowlist",
-        "groupAllowFrom": [],
-        "groups": {},
-        "mentionPatterns": [],
-        "groupActivationDefault": "mention",
-        "textChunkLimit": 4000,
-        "chunkMode": "length",
-        "pairing": {
-          "ttlMs": 3600000,
-          "maxPending": 3
-        }
-      }
-    },
     "configPolicy": {
       "mode": "builder",
       "denyPaths": [
@@ -120,7 +100,6 @@
         "runtime.memory",
         "runtime.heartbeat",
         "runtime.cron",
-        "runtime.channels",
         "ui.skills",
         "ui.mcps",
         "ui.mcpServers",

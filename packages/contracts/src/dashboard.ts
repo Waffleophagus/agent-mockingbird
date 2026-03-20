@@ -356,17 +356,6 @@ export interface SessionScreenBootstrapResponse {
   realtime: RealtimeCursorSnapshot;
 }
 
-export interface NotificationDeviceRecord {
-  installationId: string;
-  expoPushToken: string;
-  platform: "ios" | "android";
-  enabled: boolean;
-  label: string | null;
-  lastSeenAt: string;
-  updatedAt: string;
-  createdAt: string;
-}
-
 export type DashboardEvent =
   | { event: "heartbeat"; payload: HeartbeatSnapshot }
   | { event: "usage"; payload: UsageSnapshot }

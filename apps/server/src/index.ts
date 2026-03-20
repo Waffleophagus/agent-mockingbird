@@ -1,7 +1,6 @@
 import { serve } from "bun";
 import { websocket } from "hono/bun";
 
-import { SignalChannelService } from "./backend/channels/signal/service";
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { CronService } from "./backend/cron/service";
 import "./backend/db/migrate";
@@ -54,7 +53,6 @@ const configSnapshot = getConfigSnapshot();
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
 const heartbeatService = new HeartbeatRuntimeService();
-const signalService = new SignalChannelService(runtime);
 const runService = new RunService(runtime);
 const eventStream = createRuntimeEventStream({
   getHeartbeatSnapshot,
@@ -66,7 +64,6 @@ const apiRoutes = createApiRoutes({
   runtime,
   cronService,
   heartbeatService,
-  signalService,
   eventStream,
   runService,
 });
@@ -118,7 +115,6 @@ void initializeMemory().catch(() => {
 runService.start();
 cronService.start();
 heartbeatService.start();
-signalService.start();
 
 const server = serve({
   idleTimeout: 120,
@@ -144,7 +140,6 @@ const shutdown = () => {
   runService.stop();
   cronService.stop();
   heartbeatService.stop();
-  signalService.stop();
 };
 
 let shuttingDown = false;

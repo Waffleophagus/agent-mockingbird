@@ -175,21 +175,6 @@ Cron environment variables:
 - `AGENT_MOCKINGBIRD_CRON_LEASE_MS` (default `30000`)
 - `AGENT_MOCKINGBIRD_CRON_MAX_ENQUEUE_PER_JOB_TICK` (default `25`)
 
-Signal channel runtime config (JSON config file: `runtime.channels.signal`):
-
-- `enabled` (default `false`)
-- `httpUrl` (default `http://127.0.0.1:8080`)
-- `account` (optional E.164 or UUID account identity)
-- `dmPolicy` (`pairing`, `allowlist`, `open`, `disabled`; default `pairing`)
-- `allowFrom` (sender allowlist; include `"*"` for open DM mode)
-- `groupPolicy` (`open`, `allowlist`, `disabled`; default `allowlist`)
-- `groupAllowFrom` (group sender allowlist; falls back to `allowFrom`)
-- `groups` (per-group overrides; supports `"*"` default)
-- `mentionPatterns` (regex list for mention detection)
-- `groupActivationDefault` (`mention` or `always`; default `mention`)
-- `textChunkLimit` / `chunkMode` (`length` or `newline`)
-- `pairing.ttlMs` / `pairing.maxPending`
-
 Memory mode environment variables:
 
 - `AGENT_MOCKINGBIRD_MEMORY_ENABLED` (default `true`)
@@ -229,13 +214,6 @@ Memory API endpoints used by tools:
 - `POST /api/memory/remember`
 - `POST /api/memory/remember/validate`
 - `GET /api/memory/activity`
-
-Signal channel API endpoints:
-
-- `GET /api/channels/signal/status`
-- `GET /api/channels/signal/pairing`
-- `POST /api/channels/signal/pairing/approve`
-- `POST /api/channels/signal/pairing/reject`
 
 Run API endpoints:
 

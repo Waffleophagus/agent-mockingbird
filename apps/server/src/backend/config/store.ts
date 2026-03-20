@@ -325,26 +325,6 @@ function buildLegacyBootstrappedConfig() {
         maxDepth: 10,
         coalesceDebounceMs: 500,
       },
-      channels: {
-        signal: {
-          enabled: false,
-          httpUrl: "http://127.0.0.1:8080",
-          account: null,
-          dmPolicy: "pairing",
-          allowFrom: [],
-          groupPolicy: "allowlist",
-          groupAllowFrom: [],
-          groups: {},
-          mentionPatterns: [],
-          groupActivationDefault: "mention",
-          textChunkLimit: 4_000,
-          chunkMode: "length",
-          pairing: {
-            ttlMs: 3_600_000,
-            maxPending: 3,
-          },
-        },
-      },
       configPolicy: {
         mode: "builder",
         denyPaths: ["version", "runtime.configPolicy", "runtime.smokeTest"],
@@ -357,7 +337,6 @@ function buildLegacyBootstrappedConfig() {
           "runtime.heartbeat",
           "runtime.cron",
           "runtime.queue",
-          "runtime.channels",
           "ui.skills",
           "ui.mcps",
           "ui.mcpServers",
@@ -565,10 +544,6 @@ export function getConfigSnapshot() {
 
 export function getConfig() {
   return getConfigSnapshot().config;
-}
-
-export function getConfigPath() {
-  return getConfigSnapshot().path;
 }
 
 export function mergeConfigPatch(baseConfig: AgentMockingbirdConfig, patch: unknown): unknown {

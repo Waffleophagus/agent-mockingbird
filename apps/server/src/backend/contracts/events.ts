@@ -168,50 +168,6 @@ interface SkillsCatalogUpdatedPayload {
 }
 export type SkillsCatalogUpdatedEvent = RuntimeEventBase<"skills.catalog.updated", SkillsCatalogUpdatedPayload>;
 
-interface SignalChannelStatusPayload {
-  connected: boolean;
-  baseUrl: string;
-  account: string | null;
-  lastEventAt: string | null;
-  lastError: string | null;
-}
-export type SignalChannelStatusUpdatedEvent = RuntimeEventBase<
-  "channel.signal.status.updated",
-  SignalChannelStatusPayload
->;
-
-interface SignalPairingRequestedPayload {
-  senderId: string;
-  code: string;
-  expiresAt: string;
-}
-export type SignalPairingRequestedEvent = RuntimeEventBase<
-  "channel.signal.pairing.requested",
-  SignalPairingRequestedPayload
->;
-
-interface SignalMessageReceivedPayload {
-  senderId: string;
-  groupId: string | null;
-  sessionId: string;
-}
-export type SignalMessageReceivedEvent = RuntimeEventBase<
-  "channel.signal.message.received",
-  SignalMessageReceivedPayload
->;
-
-interface SignalMessageSentPayload {
-  target: string;
-  sessionId: string;
-}
-export type SignalMessageSentEvent = RuntimeEventBase<"channel.signal.message.sent", SignalMessageSentPayload>;
-
-interface SignalErrorPayload {
-  message: string;
-  detail?: string;
-}
-export type SignalErrorEvent = RuntimeEventBase<"channel.signal.error", SignalErrorPayload>;
-
 export type RuntimeEvent =
   | HeartbeatUpdatedEvent
   | UsageUpdatedEvent
@@ -230,12 +186,7 @@ export type RuntimeEvent =
   | ConfigUpdatedEvent
   | ConfigUpdateFailedEvent
   | ConfigRolledBackEvent
-  | SkillsCatalogUpdatedEvent
-  | SignalChannelStatusUpdatedEvent
-  | SignalPairingRequestedEvent
-  | SignalMessageReceivedEvent
-  | SignalMessageSentEvent
-  | SignalErrorEvent;
+  | SkillsCatalogUpdatedEvent;
 
 function baseRuntimeEvent<TType extends RuntimeEvent["type"], TPayload>(
   type: TType,
@@ -366,39 +317,4 @@ export function createSkillsCatalogUpdatedEvent(
   source: RuntimeEventSource,
 ): SkillsCatalogUpdatedEvent {
   return baseRuntimeEvent("skills.catalog.updated", payload, source);
-}
-
-export function createSignalChannelStatusUpdatedEvent(
-  payload: SignalChannelStatusPayload,
-  source: RuntimeEventSource,
-): SignalChannelStatusUpdatedEvent {
-  return baseRuntimeEvent("channel.signal.status.updated", payload, source);
-}
-
-export function createSignalPairingRequestedEvent(
-  payload: SignalPairingRequestedPayload,
-  source: RuntimeEventSource,
-): SignalPairingRequestedEvent {
-  return baseRuntimeEvent("channel.signal.pairing.requested", payload, source);
-}
-
-export function createSignalMessageReceivedEvent(
-  payload: SignalMessageReceivedPayload,
-  source: RuntimeEventSource,
-): SignalMessageReceivedEvent {
-  return baseRuntimeEvent("channel.signal.message.received", payload, source);
-}
-
-export function createSignalMessageSentEvent(
-  payload: SignalMessageSentPayload,
-  source: RuntimeEventSource,
-): SignalMessageSentEvent {
-  return baseRuntimeEvent("channel.signal.message.sent", payload, source);
-}
-
-export function createSignalErrorEvent(
-  payload: SignalErrorPayload,
-  source: RuntimeEventSource,
-): SignalErrorEvent {
-  return baseRuntimeEvent("channel.signal.error", payload, source);
 }

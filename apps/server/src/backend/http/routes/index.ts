@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import { migrateOpenclawWorkspace } from "../../agents/openclawImport";
-import type { SignalChannelService } from "../../channels/signal/service";
 import type { RuntimeEngine } from "../../contracts/runtime";
 import type { CronService } from "../../cron/service";
 import type { HeartbeatRuntimeService } from "../../heartbeat/runtimeService";
@@ -21,7 +20,6 @@ import { createMcpRoutes } from "./mcpRoutes";
 import { createMemoryRoutes } from "./memoryRoutes";
 import { createRunRoutes } from "./runRoutes";
 import { createRuntimeRoutes } from "./runtimeRoutes";
-import { createSignalRoutes } from "./signalRoutes";
 import { createSkillRoutes } from "./skillRoutes";
 import { createUiRoutes } from "./uiRoutes";
 import { createUsageRoutes } from "./usageRoutes";
@@ -77,7 +75,6 @@ export function createApiRoutes(input: {
   runtime: RuntimeEngine;
   cronService: CronService;
   heartbeatService: HeartbeatRuntimeService;
-  signalService: SignalChannelService;
   eventStream: RuntimeEventStream;
   runService: RunService;
 }): RouteTable {
@@ -100,6 +97,5 @@ export function createApiRoutes(input: {
     ...createSkillRoutes(),
     ...createCronRoutes(input.cronService),
     ...createMemoryRoutes(),
-    ...createSignalRoutes(input.signalService),
   };
 }

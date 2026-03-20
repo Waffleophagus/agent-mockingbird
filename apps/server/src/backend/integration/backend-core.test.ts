@@ -250,13 +250,6 @@ type CreateApiRoutesFn = (input: {
   cronService: CronServiceInstance;
   eventStream: RuntimeEventStreamApi;
   runService: RunServiceInstance;
-  signalService: {
-    getStatus: () => unknown;
-    listPairingRequests: () => unknown[];
-    listStoredAllowlist: () => unknown[];
-    approvePairing: (input: { code?: string; senderId?: string }) => unknown;
-    rejectPairing: (input: { code?: string; senderId?: string }) => boolean;
-  };
 }) => RouteTable;
 
 type CreateRuntimeEventStreamFn = (input: {
@@ -408,21 +401,6 @@ function createRouteHarness(
     cronService,
     eventStream,
     runService,
-    signalService: {
-      getStatus: () => ({
-        running: false,
-        enabled: false,
-        connected: false,
-        baseUrl: "http://127.0.0.1:8080",
-        account: null,
-        lastEventAt: null,
-        lastError: null,
-      }),
-      listPairingRequests: () => [],
-      listStoredAllowlist: () => [],
-      approvePairing: () => null,
-      rejectPairing: () => false,
-    } as never,
   });
   return { routes, cronService, eventStream, runService };
 }
@@ -1340,21 +1318,6 @@ describe("background routes", () => {
       cronService,
       eventStream,
       runService,
-      signalService: {
-        getStatus: () => ({
-          running: false,
-          enabled: false,
-          connected: false,
-          baseUrl: "http://127.0.0.1:8080",
-          account: null,
-          lastEventAt: null,
-          lastError: null,
-        }),
-        listPairingRequests: () => [],
-        listStoredAllowlist: () => [],
-        approvePairing: () => null,
-        rejectPairing: () => false,
-      } as never,
     });
 
     const spawnRoute = routes["/api/background"] as { POST: (req: Request) => Promise<Response> };

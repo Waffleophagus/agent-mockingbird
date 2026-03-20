@@ -67,7 +67,6 @@ export function getRuntimeStartupInfo(): RuntimeStartupInfo {
 
 export {
   RuntimeSessionBusyError,
-  RuntimeSessionQueuedError,
   RuntimeSessionNotFoundError,
   RuntimeTurnTimeoutError,
 } from "./errors";
