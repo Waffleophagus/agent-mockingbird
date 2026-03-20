@@ -47,10 +47,9 @@ AGENT_MOCKINGBIRD_TAG="${VERSION}" \
 
 1. Configure npm trusted publishing for:
    - `agent-mockingbird`
-   - `@waffleophagus/agent-mockingbird-installer`
-2. Point both trusted publisher entries at `waffleophagus/agent-mockingbird` and workflow file `ci.yml`.
-3. Push a tag like `v0.1.0` from `main` to publish the release pair to npm tag `latest`.
-4. Push a non-`main` branch to publish a preview pair to npm tag `next`.
+2. Point the trusted publisher entry at `waffleophagus/agent-mockingbird` and workflow file `ci.yml`.
+3. Push a tag like `v0.1.0` from `main` to publish the package to npm tag `latest`.
+4. Push a non-`main` branch to publish a preview build to npm tag `next`.
 5. Plain pushes to `main` run checks only; they do not publish.
 
 For branch previews, pin `AGENT_MOCKINGBIRD_TAG` to the exact published `next` version so the bootstrap script and package version match.

@@ -27,6 +27,6 @@ trap cleanup EXIT
 exec npm exec \
   --yes \
   --userconfig "${tmp_npmrc}" \
-  --package "@waffleophagus/agent-mockingbird-installer@${AGENT_MOCKINGBIRD_TAG}" \
-  agent-mockingbird-installer \
+  --package "agent-mockingbird@${AGENT_MOCKINGBIRD_TAG}" \
+  agent-mockingbird \
   -- "$@"

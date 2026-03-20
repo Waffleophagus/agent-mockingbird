@@ -21,9 +21,7 @@ bun run build:cli
 Canonical install flow for end users on Linux:
 
 ```bash
-npx --yes \
-  --package "@waffleophagus/agent-mockingbird-installer@latest" \
-  agent-mockingbird-installer install
+npx --yes --package agent-mockingbird@latest agent-mockingbird -- install
 ```
 
 That command installs the packaged CLI `agent-mockingbird` from npm, installs and starts the `opencode` and `agent-mockingbird` user services, and then launches the interactive onboarding wizard on TTY installs.
@@ -331,7 +329,6 @@ This repo uses one CI/CD workflow:
 Published package artifact:
 
 - `agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after `bun run check:ship`.
-- `@waffleophagus/agent-mockingbird-installer@<version>` published alongside it.
 
 Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
 
@@ -363,15 +360,13 @@ Branch preview installs should pin `AGENT_MOCKINGBIRD_TAG` to the exact publishe
 Direct package execution from npm:
 
 ```bash
-npx --yes \
-  --package "@waffleophagus/agent-mockingbird-installer@latest" \
-  agent-mockingbird-installer install
+npx --yes --package agent-mockingbird@latest agent-mockingbird -- install
 ```
 
 ```bash
 bunx --bun npm exec --yes \
-  --package "@waffleophagus/agent-mockingbird-installer@latest" \
-  agent-mockingbird-installer -- install
+  --package agent-mockingbird@latest \
+  agent-mockingbird -- install
 ```
 
 Agent Mockingbird commands:
@@ -398,12 +393,6 @@ agent-mockingbird uninstall
 - During onboarding, provider-auth changes trigger a transparent `opencode.service` refresh before model selection, so newly added providers/models show up immediately.
 - Onboarding can now configure memory embeddings for Ollama: set the Ollama URL, discover `/api/tags` models live, then select an embedding model with searchable pagination.
 - `agent-mockingbird onboard` supports `memory-only` and `openclaw-only` paths for focused setup.
-
-Compatibility alias remains available:
-
-```bash
-agent-mockingbird-installer install
-```
 
 Default install root is `~/.agent-mockingbird`, with systemd **user** services:
 
@@ -436,11 +425,10 @@ agent-mockingbird
 You need trusted publisher entries configured in npm for:
 
 - `agent-mockingbird`
-- `@waffleophagus/agent-mockingbird-installer`
 
 and the GitHub workflow file must remain `.github/workflows/ci.yml`.
 
-On a tag push like `v0.1.0`, CI publishes `agent-mockingbird@0.1.0` and `@waffleophagus/agent-mockingbird-installer@0.1.0` to npm with the `latest` tag.
+On a tag push like `v0.1.0`, CI publishes `agent-mockingbird@0.1.0` to npm with the `latest` tag.
 
 `main` pushes do not publish. To update `latest`, tag a version from `main`.
 

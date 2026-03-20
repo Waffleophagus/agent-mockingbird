@@ -126,26 +126,6 @@ jobs:
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           '
 
-      - name: Build installer package metadata for publish
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          PKG_VERSION="${{ steps.meta.outputs.package_version }}" bun -e '
-            const fs = require("fs");
-            const path = require("path");
-            const version = process.env.PKG_VERSION;
-            const pkgPath = path.join("packages", "agent-mockingbird-installer", "package.json");
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-            pkg.name = "@waffleophagus/agent-mockingbird-installer";
-            pkg.private = false;
-            pkg.version = version;
-            pkg.publishConfig = {
-              access: "public",
-              registry: process.env.NPM_REGISTRY_URL,
-            };
-            fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-          '
-
       - name: Pack agent-mockingbird artifact
         if: steps.meta.outputs.should_publish == 'true'
         run: |
@@ -232,22 +212,6 @@ jobs:
             console.log("Packaged runtime prefers compiled bundle.");
           '
 
-      - name: Pack agent-mockingbird-installer artifact
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          tarball="agent-mockingbird-installer-${{ steps.meta.outputs.package_version }}.tgz"
-          packed_tarball="$(
-            cd packages/agent-mockingbird-installer
-            bun pm pack --destination ../.. --quiet
-          )"
-          packed_tarball="$(printf '%s' "${packed_tarball}" | tail -n 1)"
-          test -f "${packed_tarball}"
-          mv -- "${packed_tarball}" "${tarball}"
-          test -f "${tarball}"
-          echo "AGENT_MOCKINGBIRD_INSTALLER_TARBALL=${tarball}" >> "${GITHUB_ENV}"
-          ls -lh -- "${tarball}"
-
       - name: Publish package tarball
         if: steps.meta.outputs.should_publish == 'true'
         run: |
@@ -260,32 +224,16 @@ jobs:
           fi
           npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${NPM_REGISTRY_URL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
 
-      - name: Publish installer package tarball
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          package_name="@waffleophagus/agent-mockingbird-installer"
-          package_version="${{ steps.meta.outputs.package_version }}"
-          if bunx npm view "${package_name}@${package_version}" version --registry "${NPM_REGISTRY_URL}" >/dev/null 2>&1; then
-            echo "Version ${package_name}@${package_version} already exists; skipping publish."
-            exit 0
-          fi
-          npm publish "${AGENT_MOCKINGBIRD_INSTALLER_TARBALL}" --registry "${NPM_REGISTRY_URL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
-
       - name: Verify published dist-tags
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
           package_name="agent-mockingbird"
-          installer_name="@waffleophagus/agent-mockingbird-installer"
           expected_version="${{ steps.meta.outputs.package_version }}"
           npm_tag="${{ steps.meta.outputs.npm_tag }}"
           bunx npm view "${package_name}" dist-tags version --registry "${NPM_REGISTRY_URL}" --json
-          bunx npm view "${installer_name}" dist-tags version --registry "${NPM_REGISTRY_URL}" --json
           actual_pkg_tag="$(bunx npm view "${package_name}" "dist-tags.${npm_tag}" --registry "${NPM_REGISTRY_URL}")"
-          actual_installer_tag="$(bunx npm view "${installer_name}" "dist-tags.${npm_tag}" --registry "${NPM_REGISTRY_URL}")"
           test "${actual_pkg_tag}" = "${expected_version}"
-          test "${actual_installer_tag}" = "${expected_version}"
 
       - name: Publish install command summary
         if: steps.meta.outputs.should_publish == 'true'
