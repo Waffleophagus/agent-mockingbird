@@ -49,6 +49,8 @@ ${config.prompt?.trim() || DEFAULT_HEARTBEAT_PROMPT}`);
 
   parts.push(`## Heartbeat Context
 - Agent: ${context.agentId}
+- Main session: main
+- Thread kind: heartbeat
 - Current time: ${context.now}
 - Scheduled for: ${context.scheduledFor}
 ${context.lastHeartbeat ? `- Last heartbeat: ${context.lastHeartbeat}` : ""}

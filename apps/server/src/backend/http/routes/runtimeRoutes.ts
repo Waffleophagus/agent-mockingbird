@@ -3,14 +3,12 @@ import { z } from "zod";
 import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
 import { applyConfigPatch, getConfigSnapshot, replaceConfig } from "../../config/service";
 import type { CronService } from "../../cron/service";
-import { getLocalSessionIdByRuntimeBinding } from "../../db/repository";
 import {
   buildAgentMockingbirdCompactionPrompt,
   buildAgentMockingbirdCompactionContext,
   buildAgentMockingbirdSystemPrompt,
 } from "../../opencode/systemPrompt";
-
-const OPENCODE_RUNTIME_ID = "opencode";
+import { resolveRuntimeSessionScope } from "../../runtime/sessionScope";
 
 const runtimePatchSchema = z
   .object({
@@ -155,17 +153,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
           return Response.json({ error: "sessionId is required" }, { status: 400 });
         }
 
-        const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, sessionId);
-        const cronJob = localSessionId ? input.cronService.getJobByThreadSessionId(localSessionId) : null;
-        const kind = localSessionId === "main" ? "main" : cronJob ? "cron" : "other";
-        return Response.json({
-          sessionId,
-          localSessionId,
-          isMain: localSessionId === "main",
-          kind,
-          cronJobId: cronJob?.id ?? null,
-          cronJobName: cronJob?.name ?? null,
-        });
+        return Response.json(resolveRuntimeSessionScope(sessionId, input.cronService));
       },
     },
 
@@ -199,7 +187,8 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to notify main thread";
           const status =
-            message === "Unknown runtime session" || message === "notify_main_thread is only available from cron threads"
+            message === "Unknown runtime session" ||
+            message === "notify_main_thread is only available from cron or heartbeat threads"
               ? 403
               : 400;
           return Response.json({ error: message }, { status });

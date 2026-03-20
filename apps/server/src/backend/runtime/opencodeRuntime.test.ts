@@ -21,6 +21,8 @@ process.env.AGENT_MOCKINGBIRD_CRON_ENABLED = "false";
 interface RepositoryApi {
   ensureSeedData: () => void;
   resetDatabaseToDefaults: () => unknown;
+  createSession: (input?: { title?: string; model?: string }) => { id: string; title: string; model: string };
+  getSessionById: (sessionId: string) => { id: string; title: string; model: string } | null;
   setSessionModel: (sessionId: string, model: string) => { id: string; model: string } | null;
   listMessagesForSession: (sessionId: string) => Array<{ id: string; role: string; content: string; at: string }>;
   upsertSessionMessages: (input: {
@@ -2797,6 +2799,48 @@ describe("opencode runtime failover contract", () => {
     promptResolve!();
     await firstCall;
     getLaneQueue().clearAll();
+  });
+
+  test("keeps the active heartbeat session title pinned", async () => {
+    const { patchHeartbeatRuntimeState } = (await import("../heartbeat/state")) as unknown as {
+      patchHeartbeatRuntimeState: (patch: {
+        sessionId?: string | null;
+        backgroundRunId?: string | null;
+        parentSessionId?: string | null;
+        externalSessionId?: string | null;
+      }) => void;
+    };
+
+    const session = repository.createSession({
+      title: "Heartbeat",
+      model: "test-provider/test-model",
+    });
+    patchHeartbeatRuntimeState({
+      sessionId: session.id,
+      backgroundRunId: "bg-heartbeat-1",
+      parentSessionId: "main",
+      externalSessionId: "ses-heartbeat",
+    });
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        get: async (request) => ({
+          data: {
+            id: (request as { path: { id: string } }).path.id,
+            title: "Heartbeat prompt overview and action check",
+          },
+        }),
+        prompt: async (request) => assistantResponse(request.path.id, "HEARTBEAT_OK"),
+      }),
+    );
+
+    await runtime.sendUserMessage({
+      sessionId: session.id,
+      content: "heartbeat",
+      metadata: { heartbeat: true },
+    });
+
+    expect(repository.getSessionById(session.id)?.title).toBe("Heartbeat");
   });
 
   test("reports queued non-heartbeat messages while session is busy", async () => {

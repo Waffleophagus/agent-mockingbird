@@ -29,6 +29,7 @@ import {
 import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
 import { env } from "../env";
+import { resolveRuntimeSessionScope } from "../runtime/sessionScope";
 
 export class CronService {
   private schedulerTimer: Timer | null = null;
@@ -407,47 +408,55 @@ export class CronService {
     runtimeSessionId: string;
     prompt: string;
     severity?: "info" | "warn" | "critical";
-  }): Promise<{ delivered: true; cronJobId: string; threadSessionId: string }> {
+  }): Promise<{
+    delivered: true;
+    threadSessionId: string;
+    sourceKind: "cron" | "heartbeat";
+    cronJobId?: string;
+  }> {
     const runtimeSessionId = input.runtimeSessionId.trim();
     const prompt = input.prompt.trim();
     if (!runtimeSessionId) throw new Error("runtimeSessionId is required");
     if (!prompt) throw new Error("prompt is required");
 
-    const threadSessionId =
-      selectOne<{ session_id: string } | null>(
-        `
-        SELECT session_id
-        FROM runtime_session_bindings
-        WHERE runtime = 'opencode'
-          AND external_session_id = ?1
-        LIMIT 1
-      `,
-        runtimeSessionId,
-      )?.session_id ?? null;
+    const scope = resolveRuntimeSessionScope(runtimeSessionId, this);
+    const threadSessionId = scope.localSessionId;
     if (!threadSessionId) throw new Error("Unknown runtime session");
-
-    const job = this.getJobByThreadSessionId(threadSessionId);
-    if (!job) {
-      throw new Error("notify_main_thread is only available from cron threads");
+    if (!scope.mayNotifyMain) {
+      throw new Error("notify_main_thread is only available from cron or heartbeat threads");
     }
 
     const severity = input.severity ?? "info";
+    const heading =
+      scope.kind === "cron"
+        ? `Cron escalation from ${scope.cronJobName ?? scope.cronJobId ?? "cron"} (${scope.cronJobId ?? "cron"})`
+        : "Heartbeat escalation";
     await this.runtime.sendUserMessage({
       sessionId: "main",
-      content: [`Cron escalation from ${job.name} (${job.id})`, `Severity: ${severity}`, "", prompt].join("\n"),
+      content: [heading, `Severity: ${severity}`, "", prompt].join("\n"),
       metadata: {
-        source: "cron",
-        cronJobId: job.id,
-        cronThreadSessionId: threadSessionId,
+        source: scope.kind,
+        cronJobId: scope.cronJobId,
+        cronThreadSessionId: scope.kind === "cron" ? threadSessionId : undefined,
+        heartbeatThreadSessionId: scope.kind === "heartbeat" ? threadSessionId : undefined,
         severity,
       },
     });
 
-    return {
+    const result: {
       delivered: true,
-      cronJobId: job.id,
+      threadSessionId: string;
+      sourceKind: "cron" | "heartbeat";
+      cronJobId?: string;
+    } = {
+      delivered: true,
       threadSessionId,
+      sourceKind: scope.kind === "heartbeat" ? "heartbeat" : "cron",
     };
+    if (scope.cronJobId) {
+      result.cronJobId = scope.cronJobId;
+    }
+    return result;
   }
 
   private async schedulerTick() {

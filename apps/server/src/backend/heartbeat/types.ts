@@ -35,6 +35,9 @@ export type HeartbeatLastResult = "idle" | "acknowledged" | "attention" | "skipp
 
 export interface HeartbeatRuntimeState {
   sessionId: string | null;
+  backgroundRunId: string | null;
+  parentSessionId: string | null;
+  externalSessionId: string | null;
   running: boolean;
   lastRunAt: string | null;
   lastResult: HeartbeatLastResult;
@@ -46,5 +49,6 @@ export interface HeartbeatRuntimeState {
 export interface HeartbeatStatus {
   config: HeartbeatRuntimeConfig;
   state: HeartbeatRuntimeState;
+  sessionTitle: string | null;
   nextDueAt: string | null;
 }

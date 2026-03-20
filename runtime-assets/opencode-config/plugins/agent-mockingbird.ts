@@ -54,7 +54,8 @@ type CompactionPayload = {
 type SessionScope = {
   localSessionId: string | null
   isMain: boolean
-  kind: "main" | "cron" | "other"
+  kind: "main" | "cron" | "heartbeat" | "other"
+  heartbeat: boolean
   cronJobId: string | null
   cronJobName: string | null
 }
@@ -191,7 +192,14 @@ async function fetchCompactionContext(sessionID?: string): Promise<CompactionPay
 
 async function fetchSessionScope(sessionID?: string) {
   if (!sessionID?.trim()) {
-    return { localSessionId: null, isMain: false, kind: "other" as const, cronJobId: null, cronJobName: null }
+    return {
+      localSessionId: null,
+      isMain: false,
+      kind: "other" as const,
+      heartbeat: false,
+      cronJobId: null,
+      cronJobName: null,
+    }
   }
 
   const cacheKey = sessionID.trim()
@@ -203,13 +211,16 @@ async function fetchSessionScope(sessionID?: string) {
 
   const payload = await requestJson(`/api/mockingbird/runtime/session-scope?sessionId=${encodeURIComponent(cacheKey)}`)
   const kind: SessionScope["kind"] =
-    payload.kind === "main" || payload.kind === "cron" || payload.kind === "other" ? payload.kind : "other"
+    payload.kind === "main" || payload.kind === "cron" || payload.kind === "heartbeat" || payload.kind === "other"
+      ? payload.kind
+      : "other"
   const value = {
     localSessionId: typeof payload.localSessionId === "string" && payload.localSessionId.trim()
       ? payload.localSessionId
       : null,
     isMain: payload.isMain === true,
     kind,
+    heartbeat: payload.heartbeat === true,
     cronJobId: typeof payload.cronJobId === "string" && payload.cronJobId.trim() ? payload.cronJobId : null,
     cronJobName: typeof payload.cronJobName === "string" && payload.cronJobName.trim() ? payload.cronJobName : null,
   }
@@ -237,6 +248,18 @@ function buildCronThreadNote(sessionScope: SessionScope) {
     "Thread policy:",
     `- This thread belongs to cron job ${jobLabel}.`,
     "- Keep work focused on this cron job's ongoing context and prior runs.",
+    "- Do not act like this is the main user-facing conversation thread.",
+    "- If user attention or a decision is needed, call notify_main_thread with a concise prompt for main.",
+  ].join("\n")
+}
+
+function buildHeartbeatThreadNote() {
+  return [
+    "Thread policy:",
+    "- This thread belongs to heartbeat.",
+    "- Treat the main/root conversation as the durable source of user context.",
+    "- The standard tool surface remains available in this thread.",
+    "- Use any available tool when it materially helps the heartbeat do useful work.",
     "- Do not act like this is the main user-facing conversation thread.",
     "- If user attention or a decision is needed, call notify_main_thread with a concise prompt for main.",
   ].join("\n")
@@ -447,12 +470,13 @@ const memoryRememberTool = tool({
     entities?: string[]
     supersedes?: string[]
     topic?: string
-  }) {
+  }, context: ToolContext) {
     const response = await postJson(
       "/api/mockingbird/memory/remember",
       {
         ...args,
         source: args.source ?? "assistant",
+        sessionId: context.sessionID,
       },
       ["AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL"],
     )
@@ -641,6 +665,8 @@ const AgentMockingbirdPlugin: Plugin = async () => {
         output.system.push(buildMainThreadNote())
       } else if (sessionScope.kind === "cron") {
         output.system.push(buildCronThreadNote(sessionScope))
+      } else if (sessionScope.kind === "heartbeat") {
+        output.system.push(buildHeartbeatThreadNote())
       }
     },
     "experimental.session.compacting": async (_input, output) => {

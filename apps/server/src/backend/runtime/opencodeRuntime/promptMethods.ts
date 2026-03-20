@@ -31,6 +31,7 @@ import {
   setRuntimeSessionBinding,
   setSessionTitle,
 } from "../../db/repository";
+import { isActiveHeartbeatSession } from "../../heartbeat/state";
 import { getOpencodeErrorStatus, unwrapSdkData } from "../../opencode/client";
 import {
   buildManagedSkillPaths,
@@ -672,6 +673,7 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
     emitUpdateEvent = false,
   ) {
     if (localSessionId === "main") return;
+    if (isActiveHeartbeatSession(localSessionId)) return false;
     try {
       const opencodeSession = unwrapSdkData<Session>(
         await this.getClient().session.get({

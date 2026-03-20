@@ -201,7 +201,7 @@ interface CronServiceInstance {
     runtimeSessionId: string;
     prompt: string;
     severity?: "info" | "warn" | "critical";
-  }) => Promise<{ delivered: true; cronJobId: string; threadSessionId: string }>;
+  }) => Promise<{ delivered: true; threadSessionId: string; sourceKind: "cron" | "heartbeat"; cronJobId?: string }>;
 }
 
 type CronServiceCtor = new (runtime: RuntimeStub) => CronServiceInstance;
@@ -2060,6 +2060,7 @@ describe("cron validation and retries", () => {
       delivered: true,
       cronJobId: job.id,
       threadSessionId: cronThread.id,
+      sourceKind: "cron",
     });
     expect(captured.at(-1)?.sessionId).toBe("main");
     expect(captured.at(-1)?.content).toContain("Cron escalation from needs-attention");
@@ -2069,6 +2070,65 @@ describe("cron validation and retries", () => {
       cronJobId: job.id,
       cronThreadSessionId: cronThread.id,
       severity: "warn",
+    });
+  });
+
+  test("heartbeat threads can explicitly notify the main thread", async () => {
+    const { patchHeartbeatRuntimeState } = (await import("../heartbeat/state")) as unknown as {
+      patchHeartbeatRuntimeState: (patch: {
+        sessionId?: string | null;
+        backgroundRunId?: string | null;
+        parentSessionId?: string | null;
+        externalSessionId?: string | null;
+      }) => void;
+    };
+    const captured: Array<{ sessionId: string; content: string; metadata?: Record<string, unknown> }> = [];
+    const heartbeatThread = repository.createSession({ title: "Heartbeat" });
+    patchHeartbeatRuntimeState({
+      sessionId: heartbeatThread.id,
+      backgroundRunId: "bg-heartbeat-1",
+      parentSessionId: "main",
+      externalSessionId: "ext-heartbeat-thread",
+    });
+    sqlite
+      .query(
+        `
+        INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+        VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(runtime, session_id) DO UPDATE SET
+          external_session_id = excluded.external_session_id,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run("opencode", heartbeatThread.id, "ext-heartbeat-thread", Date.now());
+
+    const runtime = createRuntimeStub(async input => {
+      captured.push(input);
+      return {
+        sessionId: input.sessionId,
+        messages: [{ id: "assistant-1", role: "assistant", content: "done", at: new Date().toISOString() }],
+      };
+    });
+    const cronService = new CronService(runtime);
+
+    const result = await cronService.notifyMainThread({
+      runtimeSessionId: "ext-heartbeat-thread",
+      prompt: "User attention is needed.",
+      severity: "critical",
+    });
+
+    expect(result).toEqual({
+      delivered: true,
+      threadSessionId: heartbeatThread.id,
+      sourceKind: "heartbeat",
+    });
+    expect(captured.at(-1)?.sessionId).toBe("main");
+    expect(captured.at(-1)?.content).toContain("Heartbeat escalation");
+    expect(captured.at(-1)?.content).toContain("User attention is needed.");
+    expect(captured.at(-1)?.metadata).toMatchObject({
+      source: "heartbeat",
+      heartbeatThreadSessionId: heartbeatThread.id,
+      severity: "critical",
     });
   });
 
