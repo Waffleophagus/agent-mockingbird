@@ -1,6 +1,6 @@
 # agent-mockingbird
 
-Bun-native orchestration dashboard scaffold for a long-running agent stack.
+Think Openclaw but with Opencode, that's the goal at least.
 
 ## Stack
 
