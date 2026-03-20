@@ -5,7 +5,6 @@ export const realtimeEventTypeSchema = z.enum([
   "session.state.updated",
   "session.message.created",
   "session.message.delta",
-  "session.message.render_snapshot",
   "session.run.status.updated",
   "session.run.error",
   "session.permission.requested",

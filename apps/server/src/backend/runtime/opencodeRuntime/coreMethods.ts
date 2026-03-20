@@ -16,7 +16,6 @@ import {
   getSessionById,
   setBackgroundRunStatus,
   setMessageMemoryTrace,
-  setMessageRenderSnapshot,
   listBackgroundRunsForParentSession,
   listInFlightBackgroundRuns,
   listRecentBackgroundRuns,
@@ -32,7 +31,6 @@ import {
   unwrapSdkData,
 } from "../../opencode/client";
 import { getLaneQueue } from "../../queue/service";
-import { buildStreamdownRenderSnapshot } from "../../render/streamdownSnapshots";
 import { normalizeSkillIds } from "../../skills/service";
 import {
   RuntimeContinuationDetachedError,
@@ -321,7 +319,6 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
         this.extractText(assistantMessage.parts) ||
         this.mapOpencodeMessageContent(assistantMessage.info, assistantMessage.parts) ||
         "[assistant response pending; check streamed parts or wait for session sync]";
-      this.rememberStreamedAssistantContent(session.id, assistantMessage.info.id, assistantText);
 
       const createdAt =
         assistantMessage.info.time?.completed ??
@@ -369,22 +366,6 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
         for (const message of result.messages) {
           if (message.id === assistantMessage.info.id && message.role === "assistant") {
             message.parts = assistantParts;
-          }
-        }
-      }
-
-      const renderSnapshot = await buildStreamdownRenderSnapshot(assistantText);
-      if (renderSnapshot) {
-        setMessageRenderSnapshot({
-          sessionId: session.id,
-          messageId: assistantMessage.info.id,
-          renderSnapshot,
-          createdAt,
-          updatedAt: createdAt,
-        });
-        for (const message of result.messages) {
-          if (message.id === assistantMessage.info.id && message.role === "assistant") {
-            message.renderSnapshot = renderSnapshot;
           }
         }
       }

@@ -45,19 +45,6 @@ class OpencodeRuntimeImpl {
   private imageCapabilityFetchedAtMs = 0;
   private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
   private partTypeByScopedPartId = new Map<string, Part["type"]>();
-  private renderSnapshotTimerByScopedMessageId = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
-  private liveCodeHighlightTimerByScopedMessageId = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >();
-  private streamedAssistantContentByScopedMessageId = new Map<string, string>();
-  private emittedCodeHighlightLinesByScopedMessageId = new Map<
-    string,
-    Map<string, string>
-  >();
   private memoryInjectionStateBySessionId = new Map<
     string,
     MemoryInjectionStateEntry
@@ -120,11 +107,7 @@ class OpencodeRuntimeImpl {
     this.drainingSessions.clear();
     this.messageRoleByScopedMessageId.clear();
     this.partTypeByScopedPartId.clear();
-    this.streamedAssistantContentByScopedMessageId.clear();
-    this.emittedCodeHighlightLinesByScopedMessageId.clear();
     this.memoryInjectionStateBySessionId.clear();
-    this.clearAllTimers(this.renderSnapshotTimerByScopedMessageId);
-    this.clearAllTimers(this.liveCodeHighlightTimerByScopedMessageId);
     if (this.backgroundSyncInFlight) {
       await this.backgroundSyncInFlight.catch(() => {});
     }

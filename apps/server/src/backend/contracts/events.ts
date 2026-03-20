@@ -2,8 +2,6 @@ import type {
   ChatMessage,
   ChatMessagePart,
   HeartbeatSnapshot,
-  StreamdownCodeLineHighlight,
-  StreamdownRenderSnapshot,
   SessionMessagePartPhase,
   SessionSummary,
   UsageSnapshot,
@@ -46,28 +44,6 @@ interface SessionMessageDeltaPayload {
   observedAt: string;
 }
 export type SessionMessageDeltaEvent = RuntimeEventBase<"session.message.delta", SessionMessageDeltaPayload>;
-
-interface SessionMessageRenderSnapshotPayload {
-  sessionId: string;
-  messageId: string;
-  renderSnapshot: StreamdownRenderSnapshot;
-  observedAt: string;
-}
-export type SessionMessageRenderSnapshotEvent = RuntimeEventBase<
-  "session.message.render_snapshot",
-  SessionMessageRenderSnapshotPayload
->;
-
-interface SessionMessageCodeHighlightPayload {
-  sessionId: string;
-  messageId: string;
-  highlight: StreamdownCodeLineHighlight;
-  observedAt: string;
-}
-export type SessionMessageCodeHighlightEvent = RuntimeEventBase<
-  "session.message.code_highlight",
-  SessionMessageCodeHighlightPayload
->;
 
 interface SessionRunStatusPayload {
   sessionId: string;
@@ -243,8 +219,6 @@ export type RuntimeEvent =
   | SessionMessageCreatedEvent
   | SessionMessagePartUpdatedEvent
   | SessionMessageDeltaEvent
-  | SessionMessageCodeHighlightEvent
-  | SessionMessageRenderSnapshotEvent
   | SessionRunStatusUpdatedEvent
   | SessionCompactedEvent
   | SessionRunErrorEvent
@@ -308,20 +282,6 @@ export function createSessionMessageDeltaEvent(
   source: RuntimeEventSource,
 ): SessionMessageDeltaEvent {
   return baseRuntimeEvent("session.message.delta", payload, source);
-}
-
-export function createSessionMessageRenderSnapshotEvent(
-  payload: SessionMessageRenderSnapshotPayload,
-  source: RuntimeEventSource,
-): SessionMessageRenderSnapshotEvent {
-  return baseRuntimeEvent("session.message.render_snapshot", payload, source);
-}
-
-export function createSessionMessageCodeHighlightEvent(
-  payload: SessionMessageCodeHighlightPayload,
-  source: RuntimeEventSource,
-): SessionMessageCodeHighlightEvent {
-  return baseRuntimeEvent("session.message.code_highlight", payload, source);
 }
 
 export function createSessionRunStatusUpdatedEvent(

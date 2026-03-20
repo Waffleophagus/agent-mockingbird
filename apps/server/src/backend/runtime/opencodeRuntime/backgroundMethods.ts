@@ -37,7 +37,6 @@ import {
   listRuntimeSessionBindings,
   recordUsageDelta,
   setBackgroundRunStatus,
-  setMessageRenderSnapshot,
   setRuntimeSessionBinding,
   setSessionTitle,
   upsertSessionMessages,
@@ -45,7 +44,6 @@ import {
 } from "../../db/repository";
 import { unwrapSdkData } from "../../opencode/client";
 import { getLaneQueue } from "../../queue/service";
-import { buildStreamdownRenderSnapshot } from "../../render/streamdownSnapshots";
 import type { OpencodeRuntime } from "../opencodeRuntime";
 
 export interface OpencodeRuntimeBackgroundMethods {
@@ -386,17 +384,7 @@ export const opencodeRuntimeBackgroundMethods: OpencodeRuntimeBackgroundMethods 
           entry.parts,
         ).trim();
         if (!content) return [];
-        if (entry.info.role === "assistant") {
-          this.rememberStreamedAssistantContent(
-            localSessionId,
-            entry.info.id,
-            content,
-          );
-        }
-        const parts =
-          entry.info.role === "assistant"
-            ? this.buildChatMessageParts(entry.parts)
-            : [];
+        const parts = entry.info.role === "assistant" ? this.buildChatMessageParts(entry.parts) : [];
         return [
           {
             id: entry.info.id,
@@ -416,34 +404,6 @@ export const opencodeRuntimeBackgroundMethods: OpencodeRuntimeBackgroundMethods 
       const entriesById = new Map(
         messages.map((entry) => [entry.info.id, entry] as const),
       );
-      const importedAssistants = imported.filter(
-        (message): message is typeof message & { role: "assistant" } =>
-          message.role === "assistant",
-      );
-      for (const assistantMessage of importedAssistants) {
-        const entry = entriesById.get(assistantMessage.id);
-        const renderSnapshot = await buildStreamdownRenderSnapshot(
-          assistantMessage.content,
-        );
-        if (!renderSnapshot) continue;
-        const entryTime = entry?.info.time;
-        const entryUpdatedAt =
-          entryTime && "completed" in entryTime
-            ? entryTime.completed
-            : undefined;
-        setMessageRenderSnapshot({
-          sessionId: localSessionId,
-          messageId: assistantMessage.id,
-          renderSnapshot,
-          createdAt: entry?.info.time?.created ?? now,
-          updatedAt: entryUpdatedAt ?? entry?.info.time?.created ?? now,
-        });
-        const insertedMessage = synced.inserted.find(
-          (message) =>
-            message.id === assistantMessage.id && message.role === "assistant",
-        );
-        if (insertedMessage) insertedMessage.renderSnapshot = renderSnapshot;
-      }
       for (const message of synced.inserted) {
         if (message.role !== "assistant") continue;
         const entry = entriesById.get(message.id);

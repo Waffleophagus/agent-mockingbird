@@ -1,8 +1,6 @@
 import {
   BACKGROUND_SYNC_INTERVAL_MS,
   OPENCODE_RUNTIME_ID,
-  STREAMDOWN_LIVE_HIGHLIGHT_DEBOUNCE_MS,
-  STREAMDOWN_RENDER_DEBOUNCE_MS,
   STREAMED_METADATA_CACHE_LIMIT,
   logger,
   type Message,
@@ -20,10 +18,8 @@ import {
 } from "./shared";
 import {
   createSessionCompactedEvent,
-  createSessionMessageCodeHighlightEvent,
   createSessionMessageDeltaEvent,
   createSessionMessagePartUpdatedEvent,
-  createSessionMessageRenderSnapshotEvent,
   createSessionPermissionRequestedEvent,
   createSessionPermissionResolvedEvent,
   createSessionQuestionRequestedEvent,
@@ -33,7 +29,6 @@ import {
   createSessionStateUpdatedEvent,
 } from "../../contracts/events";
 import { getLocalSessionIdByRuntimeBinding, getSessionById, setSessionTitle } from "../../db/repository";
-import { buildStreamdownCodeLineHighlights, buildStreamdownRenderSnapshot } from "../../render/streamdownSnapshots";
 import type { OpencodeRuntime } from "../opencodeRuntime";
 
 export interface OpencodeRuntimeEventMethods {
@@ -64,23 +59,6 @@ export interface OpencodeRuntimeEventMethods {
   isAssistantOnlyPartType(partType: Part["type"]): boolean;
   setBoundedMapEntry<Key, Value>(map: Map<Key, Value>, key: Key, value: Value): void;
   rememberMessageRole(sessionId: string, messageId: string, role: Message["role"]): void;
-  rememberStreamedAssistantContent(sessionId: string, messageId: string, content: string): void;
-  updateStreamedAssistantContent(
-    sessionId: string,
-    messageId: string,
-    text: string,
-    mode: "append" | "replace",
-  ): void;
-  rememberEmittedCodeHighlightLine(
-    sessionId: string,
-    messageId: string,
-    lineKey: string,
-    lineText: string,
-  ): void;
-  emitCodeHighlightLines(sessionId: string, messageId: string, content: string): Promise<void>;
-  scheduleLiveCodeHighlightEmit(sessionId: string, messageId: string, content: string): void;
-  scheduleRenderSnapshotEmit(sessionId: string, messageId: string, content: string): void;
-  emitRenderSnapshot(sessionId: string, messageId: string, content: string): Promise<void>;
   rememberPartMetadata(part: Part): void;
 }
 
@@ -217,7 +195,6 @@ export const opencodeRuntimeEventMethods: OpencodeRuntimeEventMethods = {
       return;
     }
     if (deltaFromPartUpdate.length > 0) {
-      this.updateStreamedAssistantContent(localSessionId, event.properties.part.messageID, deltaFromPartUpdate, "append");
       this.emit(
         createSessionMessageDeltaEvent(
           {
@@ -233,7 +210,6 @@ export const opencodeRuntimeEventMethods: OpencodeRuntimeEventMethods = {
       return;
     }
     if (event.properties.part.text.length > 0) {
-      this.updateStreamedAssistantContent(localSessionId, event.properties.part.messageID, event.properties.part.text, "replace");
       this.emit(
         createSessionMessageDeltaEvent(
           {
@@ -266,7 +242,6 @@ export const opencodeRuntimeEventMethods: OpencodeRuntimeEventMethods = {
     const messageRole = this["messageRoleByScopedMessageId"].get(this.scopedMessageId(sessionId, messageId));
     const canTreatAsAssistant = messageRole === "assistant" || (messageRole !== "user" && partType === "reasoning");
     if (!canTreatAsAssistant) return;
-    this.updateStreamedAssistantContent(localSessionId, messageId, delta, "append");
     this.emit(
       createSessionMessageDeltaEvent(
         { sessionId: localSessionId, messageId, text: delta, mode: "append", observedAt: new Date().toISOString() },
@@ -506,111 +481,6 @@ export const opencodeRuntimeEventMethods: OpencodeRuntimeEventMethods = {
       this["messageRoleByScopedMessageId"],
       this.scopedMessageId(normalizedSessionId, normalizedMessageId),
       role,
-    );
-  },
-
-  rememberStreamedAssistantContent(this: OpencodeRuntime, sessionId, messageId, content) {
-    const normalizedSessionId = sessionId.trim();
-    const normalizedMessageId = messageId.trim();
-    if (!normalizedSessionId || !normalizedMessageId) return;
-    this.setBoundedMapEntry(
-      this["streamedAssistantContentByScopedMessageId"],
-      this.scopedMessageId(normalizedSessionId, normalizedMessageId),
-      content,
-    );
-  },
-
-  updateStreamedAssistantContent(this: OpencodeRuntime, sessionId, messageId, text, mode) {
-    const normalizedSessionId = sessionId.trim();
-    const normalizedMessageId = messageId.trim();
-    if (!normalizedSessionId || !normalizedMessageId || !text) return;
-    const scopedMessageId = this.scopedMessageId(normalizedSessionId, normalizedMessageId);
-    const current = this["streamedAssistantContentByScopedMessageId"].get(scopedMessageId) ?? "";
-    const next = mode === "replace" ? text : `${current}${text}`;
-    if (mode === "replace") {
-      this["emittedCodeHighlightLinesByScopedMessageId"].delete(scopedMessageId);
-    }
-    this.rememberStreamedAssistantContent(normalizedSessionId, normalizedMessageId, next);
-    this.scheduleLiveCodeHighlightEmit(normalizedSessionId, normalizedMessageId, next);
-    this.scheduleRenderSnapshotEmit(normalizedSessionId, normalizedMessageId, next);
-  },
-
-  rememberEmittedCodeHighlightLine(this: OpencodeRuntime, sessionId, messageId, lineKey, lineText) {
-    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
-    const current =
-      this["emittedCodeHighlightLinesByScopedMessageId"].get(scopedMessageId) ??
-      new Map<string, string>();
-    current.set(lineKey, lineText);
-    this.setBoundedMapEntry(this["emittedCodeHighlightLinesByScopedMessageId"], scopedMessageId, current);
-  },
-
-  async emitCodeHighlightLines(this: OpencodeRuntime, sessionId, messageId, content) {
-    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
-    const latestContent = this["streamedAssistantContentByScopedMessageId"].get(scopedMessageId);
-    if (latestContent !== content) return;
-    const liveHighlights = await buildStreamdownCodeLineHighlights(content);
-    if (liveHighlights.length === 0) return;
-    const emittedLineMap =
-      this["emittedCodeHighlightLinesByScopedMessageId"].get(scopedMessageId) ??
-      new Map<string, string>();
-    const nextHighlight = liveHighlights.find((highlight) => {
-      const lineKey = `${highlight.blockIndex}:${highlight.lineIndex}`;
-      return emittedLineMap.get(lineKey) !== highlight.lineText;
-    });
-    if (!nextHighlight) return;
-    const lineKey = `${nextHighlight.blockIndex}:${nextHighlight.lineIndex}`;
-    this.emit(
-      createSessionMessageCodeHighlightEvent(
-        { sessionId, messageId, highlight: nextHighlight, observedAt: new Date().toISOString() },
-        "runtime",
-      ),
-    );
-    this.rememberEmittedCodeHighlightLine(sessionId, messageId, lineKey, nextHighlight.lineText);
-    const hasMorePendingHighlights = liveHighlights.some((highlight) => {
-      const pendingLineKey = `${highlight.blockIndex}:${highlight.lineIndex}`;
-      if (pendingLineKey === lineKey) return false;
-      return emittedLineMap.get(pendingLineKey) !== highlight.lineText;
-    });
-    if (hasMorePendingHighlights) {
-      this.scheduleLiveCodeHighlightEmit(sessionId, messageId, content);
-    }
-  },
-
-  scheduleLiveCodeHighlightEmit(this: OpencodeRuntime, sessionId, messageId, content) {
-    if (!content.trim()) return;
-    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
-    const existingTimer = this["liveCodeHighlightTimerByScopedMessageId"].get(scopedMessageId);
-    if (existingTimer) clearTimeout(existingTimer);
-    const timer = setTimeout(() => {
-      this["liveCodeHighlightTimerByScopedMessageId"].delete(scopedMessageId);
-      void this.emitCodeHighlightLines(sessionId, messageId, content);
-    }, STREAMDOWN_LIVE_HIGHLIGHT_DEBOUNCE_MS);
-    this["liveCodeHighlightTimerByScopedMessageId"].set(scopedMessageId, timer);
-  },
-
-  scheduleRenderSnapshotEmit(this: OpencodeRuntime, sessionId, messageId, content) {
-    if (!content.trim()) return;
-    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
-    const existingTimer = this["renderSnapshotTimerByScopedMessageId"].get(scopedMessageId);
-    if (existingTimer) clearTimeout(existingTimer);
-    const timer = setTimeout(() => {
-      this["renderSnapshotTimerByScopedMessageId"].delete(scopedMessageId);
-      void this.emitRenderSnapshot(sessionId, messageId, content);
-    }, STREAMDOWN_RENDER_DEBOUNCE_MS);
-    this["renderSnapshotTimerByScopedMessageId"].set(scopedMessageId, timer);
-  },
-
-  async emitRenderSnapshot(this: OpencodeRuntime, sessionId, messageId, content) {
-    const scopedMessageId = this.scopedMessageId(sessionId, messageId);
-    const latestContent = this["streamedAssistantContentByScopedMessageId"].get(scopedMessageId);
-    if (latestContent !== content) return;
-    const renderSnapshot = await buildStreamdownRenderSnapshot(content);
-    if (!renderSnapshot) return;
-    this.emit(
-      createSessionMessageRenderSnapshotEvent(
-        { sessionId, messageId, renderSnapshot, observedAt: new Date().toISOString() },
-        "runtime",
-      ),
     );
   },
 

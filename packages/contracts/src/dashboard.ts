@@ -44,36 +44,6 @@ export interface ChatToolCallPart {
 
 export type ChatMessagePart = ChatThinkingPart | ChatToolCallPart;
 
-export interface StreamdownCodeTokenSnapshot {
-  bgColor?: string;
-  content: string;
-  color?: string;
-}
-
-export interface StreamdownCodeBlockSnapshot {
-  blockIndex: number;
-  codeHash: string;
-  language: string;
-  tokens: StreamdownCodeTokenSnapshot[][];
-}
-
-export interface StreamdownCodeLineHighlight {
-  blockIndex: number;
-  codeHash: string;
-  isClosed: boolean;
-  lineIndex: number;
-  language: string;
-  lineText: string;
-  tokens: StreamdownCodeTokenSnapshot[];
-}
-
-export interface StreamdownRenderSnapshot {
-  codeBlocks: StreamdownCodeBlockSnapshot[];
-  contentHash: string;
-  themeId: string;
-  version: 1;
-}
-
 export interface ChatMessage {
   id: string;
   role: ChatRole;
@@ -81,7 +51,6 @@ export interface ChatMessage {
   at: string;
   memoryTrace?: MessageMemoryTrace;
   parts?: ChatMessagePart[];
-  renderSnapshot?: StreamdownRenderSnapshot;
 }
 
 export interface SessionMessageCheckpoint {
@@ -289,20 +258,6 @@ export interface SessionMessageDeltaSnapshot {
   observedAt: string;
 }
 
-export interface SessionMessageRenderSnapshotEvent {
-  sessionId: string;
-  messageId: string;
-  renderSnapshot: StreamdownRenderSnapshot;
-  observedAt: string;
-}
-
-export interface SessionMessageCodeHighlightEvent {
-  sessionId: string;
-  messageId: string;
-  highlight: StreamdownCodeLineHighlight;
-  observedAt: string;
-}
-
 export interface BackgroundRunSnapshot {
   runId: string;
   parentSessionId: string;
@@ -428,14 +383,6 @@ export type DashboardEvent =
       };
     }
   | { event: "session-message-delta"; payload: SessionMessageDeltaSnapshot }
-  | {
-      event: "session-message-code-highlight";
-      payload: SessionMessageCodeHighlightEvent;
-    }
-  | {
-      event: "session-message-render-snapshot";
-      payload: SessionMessageRenderSnapshotEvent;
-    }
   | { event: "session-status"; payload: SessionRunStatusSnapshot }
   | { event: "session-compacted"; payload: SessionCompactedSnapshot }
   | { event: "session-error"; payload: SessionRunErrorSnapshot }

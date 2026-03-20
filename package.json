@@ -48,12 +48,6 @@
     "config:migrate-opencode-env": "bun run ./scripts/migrate-opencode-env.ts"
   },
   "overrides": {
-    "@streamdown/cjk": "1.0.3",
-    "@streamdown/code": "1.1.1",
-    "@streamdown/core": "0.1.5",
-    "@streamdown/math": "1.0.3",
-    "@streamdown/mermaid": "1.0.3",
-    "@streamdown/react-native": "0.1.5",
     "remend": "1.2.2"
   },
   "devDependencies": {
