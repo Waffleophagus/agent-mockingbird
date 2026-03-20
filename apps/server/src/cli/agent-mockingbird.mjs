@@ -16,7 +16,7 @@ import { syncRuntimeWorkspaceAssets } from "./runtime-assets.mjs";
 const { console, fetch } = globalThis;
 
 const DEFAULT_SCOPE = "waffleophagus";
-const DEFAULT_REGISTRY_URL = "https://git.waffleophagus.com/api/packages/waffleophagus/npm/";
+const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org/";
 const PUBLIC_NPM_REGISTRY = "https://registry.npmjs.org/";
 const DEFAULT_TAG = "latest";
 const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".agent-mockingbird");

@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 
 const scope = (process.env.AGENT_MOCKINGBIRD_INSTALLER_SCOPE || "waffleophagus").replace(/^@/, "");
 const tag = process.env.AGENT_MOCKINGBIRD_INSTALLER_TAG || "latest";
-const registry = process.env.AGENT_MOCKINGBIRD_REGISTRY_URL || "https://git.waffleophagus.com/api/packages/waffleophagus/npm/";
+const registry = process.env.AGENT_MOCKINGBIRD_REGISTRY_URL || "https://registry.npmjs.org/";
 const publicRegistry = process.env.AGENT_MOCKINGBIRD_PUBLIC_REGISTRY_URL || "https://registry.npmjs.org/";
 const pkg = `@${scope}/agent-mockingbird@${tag}`;
 const installerDir = path.dirname(new URL(import.meta.url).pathname);
@@ -20,7 +20,7 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-installe
 const npmrcPath = path.join(tmpDir, ".npmrc");
 fs.writeFileSync(
   npmrcPath,
-  `registry=${publicRegistry}\n@${scope}:registry=${registry}\n`,
+  `registry=${publicRegistry}\n${registry !== publicRegistry ? `@${scope}:registry=${registry}\n` : ""}`,
   "utf8",
 );
 

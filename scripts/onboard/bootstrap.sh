@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REGISTRY_URL="${AGENT_MOCKINGBIRD_REGISTRY_URL:-https://git.waffleophagus.com/api/packages/waffleophagus/npm/}"
+REGISTRY_URL="${AGENT_MOCKINGBIRD_REGISTRY_URL:-https://registry.npmjs.org/}"
 AGENT_MOCKINGBIRD_SCOPE="${AGENT_MOCKINGBIRD_SCOPE:-waffleophagus}"
 AGENT_MOCKINGBIRD_TAG="${AGENT_MOCKINGBIRD_TAG:-latest}"
 PUBLIC_NPM_REGISTRY_URL="${AGENT_MOCKINGBIRD_PUBLIC_REGISTRY_URL:-https://registry.npmjs.org/}"
@@ -22,10 +22,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf "registry=%s\n@%s:registry=%s\n" \
-  "${PUBLIC_NPM_REGISTRY_URL}" \
-  "${AGENT_MOCKINGBIRD_SCOPE}" \
-  "${REGISTRY_URL}" > "${tmp_npmrc}"
+{
+  printf "registry=%s\n" "${PUBLIC_NPM_REGISTRY_URL}"
+  if [[ "${REGISTRY_URL}" != "${PUBLIC_NPM_REGISTRY_URL}" ]]; then
+    printf "@%s:registry=%s\n" "${AGENT_MOCKINGBIRD_SCOPE}" "${REGISTRY_URL}"
+  fi
+} > "${tmp_npmrc}"
 
 exec npm exec \
   --yes \

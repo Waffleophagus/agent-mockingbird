@@ -1,20 +1,18 @@
 # Release + Install
 
-Primary install channel is the private Gitea npm registry, using the compatibility wrapper package.
+This project is published to npm and source-hosted on GitHub.
 
-## Canonical first-run flow (Gitea npm + systemd user services)
+## User onboarding flow (npm + systemd user services)
 
 Recommended first-run flow on Linux:
 
 ```bash
-npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  --package "@waffleophagus/agent-mockingbird-installer@latest" \
-  agent-mockingbird-installer install
+curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
 This installs:
 
-- `@waffleophagus/agent-mockingbird` from `https://git.waffleophagus.com/api/packages/waffleophagus/npm/`
+- `@waffleophagus/agent-mockingbird` from npmjs
 - `opencode-ai` from npmjs
 - user services (`opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
 - automatic service start and health verification
@@ -33,26 +31,26 @@ agent-mockingbird update
 Fallback bootstrap wrapper:
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
 Feature branch preview install:
 
 ```bash
 BRANCH="<branch-name>"
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${BRANCH}/scripts/onboard/bootstrap.sh" | bash
+VERSION="<published-preview-version>"
+AGENT_MOCKINGBIRD_TAG="${VERSION}" \
+  curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/${BRANCH}/scripts/onboard/bootstrap.sh" | bash
 ```
 
 ## Maintainer flow (build + publish)
 
-1. Push a branch, push to `main`, or push a tag (for example `v0.1.0`).
-2. CI builds the compiled distributable (`dist/agent-mockingbird` + `dist/app`) and publishes:
-   - `@<scope>/agent-mockingbird`
-   - `@<scope>/agent-mockingbird-installer`
-   - all publishable builds update dist-tag `latest`
-3. The published package is the source of truth for the end-user install flow above.
+1. Add `NPM_TOKEN` as a GitHub Actions repository secret with publish access for the `@waffleophagus` scope.
+2. Push a tag like `v0.1.0` from `main` to publish the release pair to npm tag `latest`.
+3. Push a non-`main` branch as `waffleophagus` to publish a preview pair to npm tag `next`.
+4. Plain pushes to `main` run checks only; they do not publish.
 
-Current solo-dev policy: `latest` is intentionally the newest successful publish regardless of branch.
+For branch previews, pin `AGENT_MOCKINGBIRD_TAG` to the exact published `next` version so the bootstrap script and package version match.
 
 Repository build policy:
 
@@ -62,15 +60,12 @@ Repository build policy:
 
 ## Manual host install flow
 
-Run as root on your target Linux host:
+Clone a tagged revision on your target Linux host, then run the bundled install script:
 
 ```bash
-VERSION=v0.1.0
-curl -LO "https://github.com/<owner>/<repo>/releases/download/${VERSION}/agent-mockingbird-${VERSION}.tar.gz"
-curl -LO "https://github.com/<owner>/<repo>/releases/download/${VERSION}/agent-mockingbird-${VERSION}.tar.gz.sha256"
-sha256sum -c "agent-mockingbird-${VERSION}.tar.gz.sha256"
-tar -xzf "agent-mockingbird-${VERSION}.tar.gz"
-cd "agent-mockingbird-${VERSION}"
+git clone https://github.com/waffleophagus/agent-mockingbird.git
+cd agent-mockingbird
+git checkout v0.1.0
 sudo bash scripts/install-systemd.sh
 ```
 

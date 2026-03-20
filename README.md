@@ -21,12 +21,12 @@ bun run build:cli
 Canonical install flow for end users on Linux:
 
 ```bash
-npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
+npx --yes \
   --package "@waffleophagus/agent-mockingbird-installer@latest" \
   agent-mockingbird-installer install
 ```
 
-That command installs the packaged CLI from the private Gitea registry, installs and starts the `opencode` and `agent-mockingbird` user services, and then launches the interactive onboarding wizard on TTY installs.
+That command installs the packaged CLI from npm, installs and starts the `opencode` and `agent-mockingbird` user services, and then launches the interactive onboarding wizard on TTY installs.
 
 Local development installs a git `pre-commit` hook automatically via `core.hooksPath=.githooks`. The hook runs:
 
@@ -342,53 +342,56 @@ Deployment artifacts:
 
 This repo uses one CI/CD workflow:
 
-- `.github/workflows/ci.yml` runs `bun run check:ship`, then publishes the same packed artifact to your npm-compatible package registry.
-- `.github/workflows/ci.yml` rebuilds `dist/app` and the standalone binary in CI, then publishes the packed artifact to your npm-compatible package registry.
+- `.github/workflows/ci.yml` runs `bun run check:ship`, verifies the committed ship artifacts, and publishes the same packed artifact to npm from GitHub Actions.
 - Pull requests run checks only (no publish).
-- Any publishable push updates npm tag `latest`. For now, `latest` simply means "most recent successful publish," regardless of branch.
+- Pushes to `main` run checks only. `latest` is reserved for versioned releases.
 - Pushes to matching `v*` tags publish the exact `package.json` version with npm tag `latest`.
-- Manual dispatch publishes `package.json` version with npm tag `latest`.
+- Pushes to non-`main` branches by `waffleophagus` publish preview builds to npm tag `next`.
+- Manual dispatch runs the workflow but does not publish by itself.
 - Tag pushes must match `v<package.json version>` or CI fails.
 
 Published package artifact:
 
-- `@<scope>/agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after `bun run check:ship`.
+- `@waffleophagus/agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after `bun run check:ship`.
+- `@waffleophagus/agent-mockingbird-installer@<version>` published alongside it.
 
 Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
 
-## Linux Onboarding (Private Gitea)
+## Linux Onboarding (GitHub + npm)
 
 Primary path (interactive by default):
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
 Run a different lifecycle command:
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash -s -- status
+curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash -s -- status
 ```
 
 Install from a feature branch preview:
 
 ```bash
 BRANCH="<branch-name>"
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/${BRANCH}/scripts/onboard/bootstrap.sh" | bash
+VERSION="<published-preview-version>"
+AGENT_MOCKINGBIRD_TAG="${VERSION}" \
+  curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/${BRANCH}/scripts/onboard/bootstrap.sh" | bash
 ```
 
-Current solo-dev policy: `latest` is always the newest successful publish, even if it came from a feature branch. The branch-specific bootstrap script above is only to fetch the script contents from that branch; package install still resolves `@latest`.
+Branch preview installs should pin `AGENT_MOCKINGBIRD_TAG` to the exact published `next` version so the bootstrap script and installed package stay aligned.
 
-Direct package execution from private registry:
+Direct package execution from npm:
 
 ```bash
-npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
+npx --yes \
   --package "@waffleophagus/agent-mockingbird-installer@latest" \
   agent-mockingbird-installer install
 ```
 
 ```bash
-bunx --bun npm exec --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
+bunx --bun npm exec --yes \
   --package "@waffleophagus/agent-mockingbird-installer@latest" \
   agent-mockingbird-installer -- install
 ```
@@ -450,25 +453,21 @@ agent-mockingbird
 
 ## Publish To Package Registry
 
-`ci.yml` publish steps expect these repository secrets:
+`ci.yml` publish steps expect this repository secret:
 
-- `PACKAGE_REGISTRY_URL` example: `https://gitea.example.com/api/packages/matt/npm/`
-- `PACKAGE_REGISTRY_TOKEN` token with package write permission
-- `PACKAGE_REGISTRY_SCOPE` scope/user/org, example: `matt`
+- `NPM_TOKEN` with publish permission for the `@waffleophagus` scope on npmjs
 
-On tag push like `v0.1.0`, CI publishes `@<scope>/agent-mockingbird@0.1.0` to that registry.
+On a tag push like `v0.1.0`, CI publishes `@waffleophagus/agent-mockingbird@0.1.0` and `@waffleophagus/agent-mockingbird-installer@0.1.0` to npm with the `latest` tag.
 
-Install from that registry with Bun:
+`main` pushes do not publish. To update `latest`, tag a version from `main`.
+
+Non-`main` branch pushes by `waffleophagus` publish preview builds like `0.0.1-next.<branch>.<run-number>` with the `next` tag.
+
+Install from npm with Bun:
 
 ```bash
-SCOPE="<scope>"
-REGISTRY_URL="https://gitea.example.com/api/packages/${SCOPE}/npm/"
-TOKEN="<gitea-token>"
-
-registry_no_proto="${REGISTRY_URL#https://}"
-registry_no_proto="${registry_no_proto#http://}"
-printf "@%s:registry=%s\n//%s:_authToken=%s\n" "$SCOPE" "$REGISTRY_URL" "$registry_no_proto" "$TOKEN" >> ~/.npmrc
-
-bun add -g "@${SCOPE}/agent-mockingbird"
+bun add -g @waffleophagus/agent-mockingbird
 agent-mockingbird
 ```
+
+If you need to publish or consume the package from a non-default registry later, `AGENT_MOCKINGBIRD_REGISTRY_URL` and `--registry-url` still exist, but the repo now assumes npmjs by default.

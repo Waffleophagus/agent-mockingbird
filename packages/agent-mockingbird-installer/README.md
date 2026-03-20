@@ -5,7 +5,7 @@ Compatibility wrapper for `@waffleophagus/agent-mockingbird`.
 Canonical usage:
 
 ```bash
-npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
+npx --yes \
   --package "@waffleophagus/agent-mockingbird-installer@latest" \
   agent-mockingbird-installer install
 ```
@@ -16,7 +16,7 @@ It forwards all arguments to:
 npm exec --yes --package @waffleophagus/agent-mockingbird@latest agent-mockingbird -- <args>
 ```
 
-with a temporary scoped npmrc so public deps resolve from npmjs and `@waffleophagus/*` resolves from your Gitea registry.
+By default it installs from npmjs. If you need a different registry for the `@waffleophagus` scope, set `AGENT_MOCKINGBIRD_REGISTRY_URL`.
 
 Primary CLI is now:
 
