@@ -28,8 +28,20 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Print Publish Tooling
+        run: |
+          node -v
+          npm -v
+          npm config get registry
 
       - name: Ship Check
         run: bun run check:ship
@@ -246,7 +258,7 @@ jobs:
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
+          npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${NPM_REGISTRY_URL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
 
       - name: Publish installer package tarball
         if: steps.meta.outputs.should_publish == 'true'
@@ -258,7 +270,7 @@ jobs:
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          npm publish "${AGENT_MOCKINGBIRD_INSTALLER_TARBALL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
+          npm publish "${AGENT_MOCKINGBIRD_INSTALLER_TARBALL}" --registry "${NPM_REGISTRY_URL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
 
       - name: Verify published dist-tags
         if: steps.meta.outputs.should_publish == 'true'
