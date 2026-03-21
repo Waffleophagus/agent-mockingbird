@@ -1,9 +1,10 @@
+import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
-import { getResolvedDbPath, sqlite } from "./client";
+import { getResolvedDbPath } from "./client";
 import * as schema from "./schema";
 import { getBinaryDir } from "../paths";
 
@@ -30,29 +31,43 @@ function resolveMigrationsFolder() {
 }
 
 function tableExists(tableName: string) {
-  const row = sqlite
-    .query(
-      `
-      SELECT name
-      FROM sqlite_master
-      WHERE type = 'table' AND name = ?1
-      LIMIT 1
-    `,
-    )
-    .get(tableName) as { name?: string } | null;
-  return row?.name === tableName;
+  const resolvedDbPath = getResolvedDbPath();
+  mkdirSync(path.dirname(resolvedDbPath), { recursive: true });
+  const db = new Database(resolvedDbPath);
+  try {
+    const row = db
+      .query(
+        `
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?1
+        LIMIT 1
+      `,
+      )
+      .get(tableName) as { name?: string } | null;
+    return row?.name === tableName;
+  } finally {
+    db.close(false);
+  }
 }
 
 const migrationsFolder = resolveMigrationsFolder();
-const migrationDb = drizzle({ client: sqlite, schema });
+const resolvedDbPath = getResolvedDbPath();
+mkdirSync(path.dirname(resolvedDbPath), { recursive: true });
+const migrationSqlite = new Database(resolvedDbPath);
+const migrationDb = drizzle({ client: migrationSqlite, schema });
 
 console.log(`Running SQLite migrations from ${migrationsFolder}`);
-console.log(`Target database: ${getResolvedDbPath()}`);
+console.log(`Target database: ${resolvedDbPath}`);
 
 if (!tableExists("__drizzle_migrations") && tableExists("sessions")) {
   console.log("Bootstrap schema detected; running migrations");
 }
 
-migrate(migrationDb, { migrationsFolder });
+try {
+  migrate(migrationDb, { migrationsFolder });
+} finally {
+  migrationSqlite.close(false);
+}
 
 console.log("Migrations complete");
