@@ -2,7 +2,7 @@
 
 # Agent Mockingbird
 
-Agent Mockingbird is a personal personal assistant built around OpenCode. It gives you a long-running local agent with persistent memory, scheduled jobs, workspace bootstrap context, and a web API/UI layer for managing runs and configuration.
+Agent Mockingbird is a personal assistant built around OpenCode. It gives you a long-running local agent with persistent memory, scheduled jobs, workspace bootstrap context, and a web API/UI layer for managing runs and configuration.
 
 As OpenClaw is to Pi, the goal is that Agent Mockingbird will be to OpenCode.
 
@@ -20,7 +20,7 @@ The result is a personal agent stack you can keep running locally instead of a o
 
 ## Why this over OpenClaw?
 
-In short, control by the human. Openclaw gives the machine everything, which has pros and cons. The pros are it can do anything you can on the machine. The cons means that often times it makes the same mistakes and can break things. The goal of Agent Mockingbird is to tighten the scope using Opencode's first in class agent management, limiting it to a specific workspace, and limiting what commands it can call out of the gate to limit blast radius of mistakes.
+In short, control by the human. Openclaw gives the machine everything, which has pros and cons. The pros are it can do anything you can on the machine. The cons means that often times it makes the same mistakes and can break things. The goal of Agent Mockingbird is to tighten the scope using Opencode's first-in-class agent management, limiting it to a specific workspace, and limiting what commands it can call out of the gate to limit blast radius of mistakes.
 
 ## Highlights
 
@@ -53,23 +53,32 @@ bun run dev:stack
 
 ## How It Works
 
-```text
-Your workspace
-  |
-  +-- bootstrap files (AGENTS.md, TOOLS.md, IDENTITY.md, ...)
-  |
-  v
-Agent Mockingbird
-  |- config + API + UI routes
-  |- memory service
-  |- cron scheduler / workers
-  |- run storage + event streaming
-  |
-  v
-OpenCode runtime
-```
+Agent Mockingbird is structured in three layers:
 
-Agent Mockingbird owns the local orchestration layer. OpenCode handles the underlying agent runtime. Mockingbird adds local state, managed config, workspace context injection, memory, and automation on top.
+**1. OpenCode Plugin Layer**
+An OpenCode plugin (`agent-mockingbird.ts`) that extends the runtime with local orchestration capabilities:
+
+- Memory tools (search, get, remember) for persistent context across sessions
+- Cron manager for scheduling and inspecting recurring agent work
+- Agent type manager for OpenCode agent definitions
+- Config manager for runtime configuration
+- Hooks that inject workspace context and thread policies into system prompts
+- Shell environment setup for tool communication
+
+**2. UI Patch Layer**
+A series of patches applied to the OpenCode UI that add management interfaces:
+
+- Settings panels for Agents, MCP, Skills, Runtime, Cron, and Heartbeat
+- Navigation enhancements for the Agent Mockingbird dashboard
+- These patches are tracked in `patches/opencode/` and applied via the vendor workflow
+
+**3. Local Server**
+A Bun-native server that bridges the plugin and UI layers:
+
+- Provides HTTP APIs for plugin tool execution
+- Proxies OpenCode runtime requests to the sidecar
+- Serves the patched OpenCode web interface
+- Manages local state, memory indexing, cron scheduling, and run tracking
 
 ## Core Concepts
 
