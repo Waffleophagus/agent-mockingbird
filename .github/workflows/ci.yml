@@ -169,6 +169,12 @@ jobs:
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           '
 
+      - name: Rebuild published CLI artifacts
+        if: steps.meta.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          bun run build:cli
+
       - name: Pack agent-mockingbird artifact
         if: steps.meta.outputs.should_publish == 'true'
         run: |
