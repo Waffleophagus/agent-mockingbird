@@ -124,7 +124,7 @@ export function createMcpRoutes() {
               },
             ),
           );
-          return Response.json({ connected, status: await loadStatuses() });
+          return Response.json({ connected, status: await loadStatuses().catch(() => ({})) });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to connect MCP server";
           return Response.json({ error: message }, { status: 502 });
@@ -147,7 +147,7 @@ export function createMcpRoutes() {
               },
             ),
           );
-          return Response.json({ disconnected, status: await loadStatuses() });
+          return Response.json({ disconnected, status: await loadStatuses().catch(() => ({})) });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to disconnect MCP server";
           return Response.json({ error: message }, { status: 502 });

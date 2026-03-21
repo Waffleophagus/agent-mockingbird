@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 
 import { createLogger } from "./logger";
 
@@ -10,6 +10,12 @@ afterEach(() => {
   consoleLogSpy.mockClear();
   consoleWarnSpy.mockClear();
   consoleErrorSpy.mockClear();
+});
+
+afterAll(() => {
+  consoleLogSpy.mockRestore();
+  consoleWarnSpy.mockRestore();
+  consoleErrorSpy.mockRestore();
 });
 
 describe("createLogger", () => {
@@ -71,6 +77,39 @@ describe("createLogger", () => {
     expect(payload.data?.requestId).toBe("req-456");
     expect(payload.data?.error?.name).toBe("Error");
     expect(payload.data?.error?.message).toBe("boom");
+  });
+
+  test("writes warn logs and includes warn causes", () => {
+    const logger = createLogger("test-scope");
+
+    logger.warn("heads up", { requestId: "req-warn" });
+    logger.warnWithCause("warn failed", new Error("warn boom"), { requestId: "req-warn-cause" });
+
+    expect(consoleWarnSpy).toHaveBeenCalledTimes(2);
+
+    const [warnLine] = consoleWarnSpy.mock.calls[0] as [string];
+    const warnPayload = JSON.parse(warnLine) as {
+      level: string;
+      message: string;
+      data?: { requestId?: string };
+    };
+    expect(warnPayload.level).toBe("warn");
+    expect(warnPayload.message).toBe("heads up");
+    expect(warnPayload.data?.requestId).toBe("req-warn");
+
+    const [warnCauseLine] = consoleWarnSpy.mock.calls[1] as [string];
+    const warnCausePayload = JSON.parse(warnCauseLine) as {
+      message: string;
+      data?: {
+        requestId?: string;
+        error?: {
+          message?: string;
+        };
+      };
+    };
+    expect(warnCausePayload.message).toBe("warn failed");
+    expect(warnCausePayload.data?.requestId).toBe("req-warn-cause");
+    expect(warnCausePayload.data?.error?.message).toBe("warn boom");
   });
 
   test("does not throw when fields are circular and emits a safe fallback payload", () => {

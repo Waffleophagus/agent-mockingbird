@@ -9,6 +9,7 @@ interface BoundedQueueOptions<T> {
 export interface BoundedQueue<T> {
   enqueue: (value: T) => boolean;
   close: () => void;
+  drain: () => void;
   size: () => number;
 }
 
@@ -85,6 +86,7 @@ export function createBoundedQueue<T>(options: BoundedQueueOptions<T>): BoundedQ
       queue.length = 0;
       clearDrainTimer();
     },
+    drain,
     size() {
       return queue.length;
     },

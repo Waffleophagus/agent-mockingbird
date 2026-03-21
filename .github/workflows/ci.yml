@@ -284,6 +284,6 @@ jobs:
             echo "## Install command"
             echo
             echo '```bash'
-            echo "AGENT_MOCKINGBIRD_TAG=${bootstrap_tag} curl -fsSL \"https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/${bootstrap_ref}/scripts/onboard/bootstrap.sh\" | bash"
+            echo "AGENT_MOCKINGBIRD_TAG=${bootstrap_tag} curl -fsSL \"https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/onboard/bootstrap.sh\" | bash"
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"

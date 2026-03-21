@@ -8,7 +8,6 @@ dist/
 cleanroom/opencode
 vendor/opencode
 data/*
-data/*
 bin/*
 !bin/agent-mockingbird
 !bin/runtime-layout.mjs

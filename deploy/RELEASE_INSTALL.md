@@ -16,7 +16,7 @@ That is the main public install path. `agent-mockingbird install` handles servic
 Optional curl bootstrap wrapper:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
+AGENT_MOCKINGBIRD_TAG=latest curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
 This installs:
@@ -50,9 +50,9 @@ agent-mockingbird install
 1. Configure npm trusted publishing for:
    - `agent-mockingbird`
 2. Point the trusted publisher entry at `waffleophagus/agent-mockingbird` and workflow file `ci.yml`.
-3. Push a tag like `v0.1.0` from `main` to publish the package to npm tag `latest`.
+3. Push to `main` to publish the package to npm tag `latest`.
 4. Push a non-`main` branch to publish a preview build to npm tag `next`.
-5. Plain pushes to `main` run checks only; they do not publish.
+5. Pull requests run checks only and do not publish.
 
 For branch previews, pin `AGENT_MOCKINGBIRD_TAG` to the exact published `next` version so the bootstrap script and package version match.
 

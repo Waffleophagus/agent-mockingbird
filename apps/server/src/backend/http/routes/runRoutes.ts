@@ -189,8 +189,8 @@ export function createRunRoutes(runService: RunService) {
         let outboundQueue: BoundedQueue<string> | null = null;
         let closed = false;
         let cursor = initialAfterSeq;
-        let closeAfterDrainPromise: Promise<void> | null = null;
         let replayPollInFlight = false;
+        let terminalDrainRequested = false;
 
         const isTerminalType = (event: AgentRunEvent) => event.type === "run.completed" || event.type === "run.failed";
 
@@ -221,24 +221,13 @@ export function createRunRoutes(runService: RunService) {
           }
         };
 
-        const closeAfterDrain = () => {
-          if (closeAfterDrainPromise) {
-            return closeAfterDrainPromise;
-          }
-          closeAfterDrainPromise = (async () => {
-            const deadlineAt = Date.now() + RUN_STREAM_DRAIN_DELAY_MS;
-            while (!closed) {
-              if (!outboundQueue || outboundQueue.size() === 0) {
-                break;
-              }
-              if (Date.now() >= deadlineAt) {
-                break;
-              }
-              await new Promise(resolve => setTimeout(resolve, Math.max(1, RUN_STREAM_DRAIN_DELAY_MS / 5)));
-            }
+        const requestTerminalClose = () => {
+          if (closed) return;
+          terminalDrainRequested = true;
+          outboundQueue?.drain();
+          if (!outboundQueue || outboundQueue.size() === 0) {
             close();
-          })();
-          return closeAfterDrainPromise;
+          }
         };
 
         const emit = (event: AgentRunEvent) => {
@@ -247,11 +236,7 @@ export function createRunRoutes(runService: RunService) {
           cursor = event.seq;
           outboundQueue.enqueue(toRunEventFrame(event));
           if (isTerminalType(event)) {
-            if (outboundQueue.size() === 0) {
-              close();
-              return;
-            }
-            void closeAfterDrain();
+            requestTerminalClose();
           }
         };
 
@@ -266,7 +251,7 @@ export function createRunRoutes(runService: RunService) {
               emit(event);
               if (closed) return true;
               if (isTerminalType(event)) {
-                await closeAfterDrain();
+                requestTerminalClose();
                 return true;
               }
             }
@@ -276,7 +261,7 @@ export function createRunRoutes(runService: RunService) {
             const latestRun = runService.getRunById(runId);
             if (latestRun?.state === "completed" || latestRun?.state === "failed") {
               if (Date.now() >= deadlineAt) {
-                await closeAfterDrain();
+                requestTerminalClose();
                 return true;
               }
               await new Promise(resolve => setTimeout(resolve, RUN_STREAM_DRAIN_DELAY_MS));
@@ -341,6 +326,12 @@ export function createRunRoutes(runService: RunService) {
               if (closed || !outboundQueue) return;
               outboundQueue.enqueue(toRunHeartbeatFrame(runId));
             }, runStreamConfig().heartbeatMs);
+          },
+          pull() {
+            outboundQueue?.drain();
+            if (terminalDrainRequested && (!outboundQueue || outboundQueue.size() === 0)) {
+              close();
+            }
           },
           cancel() {
             close();
