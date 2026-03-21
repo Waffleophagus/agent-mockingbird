@@ -103,9 +103,28 @@ export function createSkillRoutes() {
           return Response.json({ error: "enabled must be a boolean" }, { status: 400 });
         }
         const snapshot = getConfigSnapshot();
-        setManagedSkillEnabled(req.params.id, parsedBody.enabled, snapshot.config.workspace.pinnedDirectory);
-        await disposeOpencodeSkillInstance(snapshot.config);
+        try {
+          setManagedSkillEnabled(req.params.id, parsedBody.enabled, snapshot.config.workspace.pinnedDirectory);
+          await disposeOpencodeSkillInstance(snapshot.config);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to update skill";
+          const code = typeof error === "object" && error !== null && "code" in error ? error.code : "";
+          if (code === "ENOENT") {
+            return Response.json({ error: `managed skill "${req.params.id}" was not found` }, { status: 404 });
+          }
+          if (
+            message === "skill id is required" ||
+            message === "skill id may only include letters, numbers, dot, underscore, or dash"
+          ) {
+            return Response.json({ error: message }, { status: 400 });
+          }
+          return Response.json({ error: message }, { status: 400 });
+        }
         const catalog = listManagedSkillCatalog(snapshot.config.workspace.pinnedDirectory);
+        const skillExists = catalog.skills.some(skill => skill.id === req.params.id);
+        if (!skillExists) {
+          return Response.json({ error: `managed skill "${req.params.id}" was not found` }, { status: 404 });
+        }
         return Response.json({
           skills: catalog.skills,
           enabled: catalog.enabled,
@@ -119,20 +138,35 @@ export function createSkillRoutes() {
       },
       DELETE: async (req: Request & { params: { id: string } }) => {
         const snapshot = getConfigSnapshot();
-        removeManagedSkill(req.params.id, snapshot.config.workspace.pinnedDirectory);
-        await disposeOpencodeSkillInstance(snapshot.config);
-        const catalog = listManagedSkillCatalog(snapshot.config.workspace.pinnedDirectory);
-        return Response.json({
-          removed: true,
-          skills: catalog.skills,
-          enabled: catalog.enabled,
-          disabled: catalog.disabled,
-          invalid: catalog.invalid,
-          hash: catalog.revision,
-          revision: catalog.revision,
-          managedPath: getManagedSkillsRootPath(snapshot.config.workspace.pinnedDirectory),
-          disabledPath: getDisabledSkillsRootPath(snapshot.config.workspace.pinnedDirectory),
-        });
+        try {
+          removeManagedSkill(req.params.id, snapshot.config.workspace.pinnedDirectory);
+          await disposeOpencodeSkillInstance(snapshot.config);
+          const catalog = listManagedSkillCatalog(snapshot.config.workspace.pinnedDirectory);
+          return Response.json({
+            removed: true,
+            skills: catalog.skills,
+            enabled: catalog.enabled,
+            disabled: catalog.disabled,
+            invalid: catalog.invalid,
+            hash: catalog.revision,
+            revision: catalog.revision,
+            managedPath: getManagedSkillsRootPath(snapshot.config.workspace.pinnedDirectory),
+            disabledPath: getDisabledSkillsRootPath(snapshot.config.workspace.pinnedDirectory),
+          });
+        } catch (error) {
+          console.error("Failed to delete managed skill", {
+            skillId: req.params.id,
+            error,
+          });
+          const message = error instanceof Error ? error.message : "Failed to delete skill";
+          return Response.json(
+            {
+              removed: false,
+              error: message,
+            },
+            { status: 500 },
+          );
+        }
       },
     },
   };

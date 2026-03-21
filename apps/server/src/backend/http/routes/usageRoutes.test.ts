@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { createUsageRoutes as CreateUsageRoutesType } from "./usageRoutes";
+import type * as ClientModuleType from "../../db/client";
 import type * as RepositoryModuleType from "../../db/repository";
 
 const originalNodeEnv = process.env.NODE_ENV;
@@ -33,14 +34,17 @@ process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR = testWorkspacePath;
 process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER = "none";
 
 type CreateUsageRoutesFn = typeof CreateUsageRoutesType;
+type ClientModule = typeof ClientModuleType;
 type RepositoryModule = typeof RepositoryModuleType;
 
 let createUsageRoutes: CreateUsageRoutesFn;
+let client: ClientModule;
 let repository: RepositoryModule;
 
 beforeAll(async () => {
   await import("../../db/migrate");
   ({ createUsageRoutes } = await import("./usageRoutes"));
+  client = await import("../../db/client");
   repository = await import("../../db/repository");
 });
 
@@ -49,6 +53,7 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  client.sqlite.close(false);
   restoreEnv("NODE_ENV", originalNodeEnv);
   restoreEnv("AGENT_MOCKINGBIRD_DB_PATH", originalDbPath);
   restoreEnv("AGENT_MOCKINGBIRD_CONFIG_PATH", originalConfigPath);
@@ -122,15 +127,20 @@ describe("usage routes", () => {
     });
   });
 
-  test("GET /api/usage/dashboard treats omitted and empty timestamp parameters as null", async () => {
+  test("GET /api/usage/dashboard treats omitted, empty, and whitespace-only timestamp parameters as null", async () => {
     const routes = createUsageRoutes();
     const handler = routes["/api/usage/dashboard"]?.GET;
     expect(handler).toBeDefined();
 
-    const response = await handler!(
+    const emptyResponse = await handler!(
       new Request("http://localhost/api/usage/dashboard?startAt=&endAtExclusive="),
     );
-    expect(response.status).toBe(200);
+    expect(emptyResponse.status).toBe(200);
+
+    const whitespaceResponse = await handler!(
+      new Request("http://localhost/api/usage/dashboard?startAt=%20%20&endAtExclusive=%20%20"),
+    );
+    expect(whitespaceResponse.status).toBe(200);
   });
 
   test("GET /usage returns standalone usage html", async () => {

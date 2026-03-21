@@ -4,6 +4,14 @@ interface LogFields {
   [key: string]: unknown;
 }
 
+interface LogPayload {
+  level: LogLevel;
+  scope: string;
+  message: string;
+  at: string;
+  data?: LogFields;
+}
+
 function normalizeError(error: unknown) {
   if (error instanceof Error) {
     return {
@@ -18,13 +26,15 @@ function normalizeError(error: unknown) {
 }
 
 function writeLog(level: LogLevel, scope: string, message: string, fields?: LogFields) {
-  const payload = {
-    ...(fields ?? {}),
+  const payload: LogPayload = {
     level,
     scope,
     message,
     at: new Date().toISOString(),
   };
+  if (fields) {
+    payload.data = fields;
+  }
   const line = JSON.stringify(payload);
   if (level === "error") {
     console.error(line);

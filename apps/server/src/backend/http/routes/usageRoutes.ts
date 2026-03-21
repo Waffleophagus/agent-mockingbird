@@ -12,11 +12,13 @@ interface UsageDashboardRangeQuery {
 function parseRangeQuery(url: URL): UsageDashboardRangeQuery | Response {
   const rawStartAt = url.searchParams.get("startAt");
   const rawEndAtExclusive = url.searchParams.get("endAtExclusive");
+  const trimmedStartAt = rawStartAt?.trim() ?? null;
+  const trimmedEndAtExclusive = rawEndAtExclusive?.trim() ?? null;
 
   const startAt =
-    rawStartAt === null || rawStartAt === ""
+    trimmedStartAt === null || trimmedStartAt === ""
       ? null
-      : Number(rawStartAt);
+      : Number(trimmedStartAt);
   if (startAt !== null && (!Number.isFinite(startAt) || !Number.isInteger(startAt) || startAt < 0)) {
     return Response.json(
       { error: "startAt must be a non-negative integer timestamp" },
@@ -25,9 +27,9 @@ function parseRangeQuery(url: URL): UsageDashboardRangeQuery | Response {
   }
 
   const endAtExclusive =
-    rawEndAtExclusive === null || rawEndAtExclusive === ""
+    trimmedEndAtExclusive === null || trimmedEndAtExclusive === ""
       ? null
-      : Number(rawEndAtExclusive);
+      : Number(trimmedEndAtExclusive);
   if (
     endAtExclusive !== null &&
     (!Number.isFinite(endAtExclusive) || !Number.isInteger(endAtExclusive) || endAtExclusive < 0)
@@ -529,14 +531,23 @@ function usagePageHtml() {
         };
       }
 
+      function getAllTimeSelection() {
+        return {
+          startDate: null,
+          endDate: null,
+        };
+      }
+
       function readSelectionFromUrl() {
         const url = new URL(window.location.href);
         const startDate = url.searchParams.get("start");
         const endDate = url.searchParams.get("end");
 
-        if (!startDate && !endDate) return getMonthToDateSelection();
+        if (!startDate && !endDate) return getAllTimeSelection();
         if (!startDate || !endDate) return getMonthToDateSelection();
-        if (!parseDateValue(startDate) || !parseDateValue(endDate) || startDate > endDate) {
+        const parsedStartDate = parseDateValue(startDate);
+        const parsedEndDate = parseDateValue(endDate);
+        if (!parsedStartDate || !parsedEndDate || startDate > endDate) {
           return getMonthToDateSelection();
         }
 
@@ -740,7 +751,7 @@ function usagePageHtml() {
       });
 
       allTimeButton?.addEventListener("click", () => {
-        currentSelection = { startDate: null, endDate: null };
+        currentSelection = getAllTimeSelection();
         syncInputsFromSelection();
         void refreshUsage();
       });
