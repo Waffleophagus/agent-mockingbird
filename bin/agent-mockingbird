@@ -52,6 +52,8 @@ function parseArgs(argv) {
     scope: DEFAULT_SCOPE,
     tag: DEFAULT_TAG,
     version: undefined,
+    tagExplicit: false,
+    versionExplicit: false,
     rootDir: DEFAULT_ROOT_DIR,
     legacyImportFlags: [],
   };
@@ -108,11 +110,13 @@ function parseArgs(argv) {
     }
     if (arg === "--tag" && next) {
       args.tag = next;
+      args.tagExplicit = true;
       i += 1;
       continue;
     }
     if (arg === "--version" && next) {
       args.version = next;
+      args.versionExplicit = true;
       i += 1;
       continue;
     }
@@ -181,7 +185,7 @@ function normalizeRegistryUrl(url) {
 }
 
 function printHelp() {
-  console.log(`agent-mockingbird\n\nUsage:\n  agent-mockingbird <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: ${DEFAULT_TAG})\n  --version <version>    Exact agent-mockingbird version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+  console.log(`agent-mockingbird\n\nUsage:\n  agent-mockingbird <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: installed package version, otherwise ${DEFAULT_TAG})\n  --version <version>    Exact agent-mockingbird version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
 }
 
 function colorEnabled() {
@@ -262,6 +266,42 @@ function writeFile(file, content) {
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function readRunningPackageVersion(moduleDir = MODULE_DIR) {
+  const candidatePaths = [
+    path.resolve(moduleDir, "../package.json"),
+    path.resolve(moduleDir, "../../../../package.json"),
+  ];
+
+  for (const candidatePath of candidatePaths) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    try {
+      const parsed = readJson(candidatePath);
+      if (typeof parsed.version === "string" && parsed.version.trim()) {
+        return parsed.version.trim();
+      }
+    } catch {
+      // Ignore unreadable package metadata and continue searching.
+    }
+  }
+
+  return "";
+}
+
+function applyDefaultInstallTarget(args, moduleDir = MODULE_DIR) {
+  if (args.versionExplicit || args.tagExplicit) {
+    return args;
+  }
+
+  const runningVersion = readRunningPackageVersion(moduleDir);
+  if (runningVersion) {
+    args.version = runningVersion;
+  }
+
+  return args;
 }
 
 async function promptRuntimeAssetConflictDecision(conflict) {
@@ -1865,7 +1905,9 @@ async function runInteractiveProviderOnboarding(input) {
 }
 
 export const testing = {
+  applyDefaultInstallTarget,
   buildEmptyModelDiscoveryDiagnostics,
+  readRunningPackageVersion,
   readOpenCodePackageVersion,
 }
 
@@ -2476,7 +2518,7 @@ function evaluateResult(result) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const args = applyDefaultInstallTarget(parseArgs(process.argv.slice(2)));
   if (!args.command || args.command === "help") {
     printHelp();
     if (!args.command) {
