@@ -24,6 +24,10 @@ if [[ "${should_build}" != "true" ]]; then
 fi
 
 echo "[pre-commit] Running lint, typecheck, and artifact builds..."
+if ! git diff --quiet --ignore-submodules --; then
+  echo "[pre-commit] Please stage or stash unstaged changes before rebuilding tracked artifacts."
+  exit 1
+fi
 bun run build:cli
 bun run lint
 bun run typecheck
