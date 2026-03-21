@@ -209,13 +209,21 @@ export class CronExecutor {
       );
     }
 
-    const worker = new Worker(new URL("./conditionalModuleWorker.ts", import.meta.url), {
-      workerData: {
-        absoluteModulePath,
-        moduleUrl: pathToFileURL(absoluteModulePath).href,
-        ctx: workerCtx,
-      },
-    });
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./conditionalModuleWorker.ts", import.meta.url), {
+        workerData: {
+          absoluteModulePath,
+          moduleUrl: pathToFileURL(absoluteModulePath).href,
+          ctx: workerCtx,
+        },
+      });
+    } catch (error) {
+      if (shouldFallbackConditionalModuleWorker(error)) {
+        return await this.runConditionalModuleInline(absoluteModulePath, workerCtx);
+      }
+      throw error;
+    }
 
     return await new Promise<CronHandlerResult>((resolve, reject) => {
       let settled = false;
@@ -246,6 +254,12 @@ export class CronExecutor {
       };
 
       const handleError = (error: Error) => {
+        if (shouldFallbackConditionalModuleWorker(error)) {
+          finish(() => {
+            void this.runConditionalModuleInline(absoluteModulePath, workerCtx).then(resolve, reject);
+          });
+          return;
+        }
         finish(() => reject(error));
       };
 
@@ -258,6 +272,19 @@ export class CronExecutor {
       worker.on("error", handleError);
       worker.on("exit", handleExit);
     });
+  }
+
+  private async runConditionalModuleInline(
+    absoluteModulePath: string,
+    ctx: CronConditionalModuleContext,
+  ): Promise<CronHandlerResult> {
+    const loaded = (await import(`${pathToFileURL(absoluteModulePath).href}?cronRun=${Date.now()}`)) as {
+      default?: (ctx: CronConditionalModuleContext) => Promise<unknown> | unknown;
+    };
+    if (typeof loaded.default !== "function") {
+      throw new Error("conditional module must export a default function");
+    }
+    return normalizeConditionalModuleResult(await loaded.default(ctx));
   }
 
   async executeInstance(
@@ -479,4 +506,9 @@ export class CronExecutor {
     this.adapter.markAgentInvoked(instanceId);
     return `${finalSummary}; ${agentResult.summary}`;
   }
+}
+
+function shouldFallbackConditionalModuleWorker(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("ModuleNotFound") && message.includes("conditionalModuleWorker");
 }

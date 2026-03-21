@@ -459,28 +459,34 @@ function migrateLegacyHeartbeatConfig(raw: unknown): unknown {
 
   const existingAgentHeartbeats = isPlainObject(runtime.agentHeartbeats) ? { ...runtime.agentHeartbeats } : null;
   const derivedAgentHeartbeats = existingAgentHeartbeats ?? {};
-  const migratedAgentTypes: Record<string, unknown>[] = [];
+  const normalizedAgentTypes: unknown[] = [];
   const usedKeys = new Set(Object.keys(derivedAgentHeartbeats));
 
   for (const [index, rawAgentType] of agentTypes.entries()) {
-    if (!isPlainObject(rawAgentType)) continue;
+    if (!isPlainObject(rawAgentType)) {
+      normalizedAgentTypes.push(rawAgentType);
+      continue;
+    }
     const normalizedHeartbeat = normalizeLegacyAgentHeartbeat(rawAgentType);
-    if (!normalizedHeartbeat) continue;
-    const agentKey = buildLegacyHeartbeatAgentKey(rawAgentType, index, usedKeys);
-    derivedAgentHeartbeats[agentKey] = normalizedHeartbeat;
-    migratedAgentTypes.push(rawAgentType);
+    if (normalizedHeartbeat) {
+      const agentKey = buildLegacyHeartbeatAgentKey(rawAgentType, index, usedKeys);
+      derivedAgentHeartbeats[agentKey] = normalizedHeartbeat;
+      delete rawAgentType.heartbeat;
+    }
+
+    const hasValidId = typeof rawAgentType.id === "string" && rawAgentType.id.trim().length > 0;
+    if (hasValidId || !normalizedHeartbeat) {
+      normalizedAgentTypes.push(rawAgentType);
+    }
   }
 
   if (Object.keys(derivedAgentHeartbeats).length > 0) {
     runtime.agentHeartbeats = derivedAgentHeartbeats;
   }
-  for (const rawAgentType of migratedAgentTypes) {
-    delete rawAgentType.heartbeat;
-  }
 
   root.runtime = runtime;
-  if (agentTypes.length > 0) {
-    ui.agentTypes = agentTypes;
+  if (normalizedAgentTypes.length > 0) {
+    ui.agentTypes = normalizedAgentTypes;
   }
   root.ui = ui;
   return root;

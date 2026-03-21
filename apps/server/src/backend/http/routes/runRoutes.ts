@@ -11,6 +11,7 @@ import { parseJsonWithSchema } from "../parsers";
 
 const RUN_STREAM_MAX_QUEUED_FRAMES = 256;
 const RUN_STREAM_DRAIN_DELAY_MS = 25;
+const RUN_STREAM_TERMINAL_REPLAY_WAIT_MS = 1_000;
 const logger = createLogger("run-event-stream");
 
 function runStreamConfig() {
@@ -296,7 +297,7 @@ export function createRunRoutes(runService: RunService) {
             if (closed) return;
             const latestRun = runService.getRunById(runId);
             if (latestRun?.state === "completed" || latestRun?.state === "failed") {
-              const deadlineAt = Date.now() + RUN_STREAM_DRAIN_DELAY_MS;
+              const deadlineAt = Date.now() + RUN_STREAM_TERMINAL_REPLAY_WAIT_MS;
               while (!closed) {
                 if (Date.now() >= deadlineAt) {
                   break;
@@ -315,6 +316,12 @@ export function createRunRoutes(runService: RunService) {
                   if (finalReplay.hasMore) {
                     continue;
                   }
+                  if (finalReplay.events.some(event => event.type === "run.completed" || event.type === "run.failed")) {
+                    break;
+                  }
+                }
+                const latestReplayRun = runService.getRunById(runId);
+                if (latestReplayRun?.state !== "completed" && latestReplayRun?.state !== "failed") {
                   break;
                 }
                 await new Promise(resolve => setTimeout(resolve, RUN_STREAM_DRAIN_DELAY_MS));

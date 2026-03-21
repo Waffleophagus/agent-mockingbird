@@ -21,6 +21,7 @@ import {
   type Message,
   type Session,
 } from "./shared";
+import type { AgentMockingbirdConfig } from "../../config/schema";
 import {
   createSessionRunStatusUpdatedEvent,
   createSessionStateUpdatedEvent,
@@ -33,6 +34,7 @@ import {
 } from "../../db/repository";
 import { isActiveHeartbeatSession } from "../../heartbeat/state";
 import { getOpencodeErrorStatus, unwrapSdkData } from "../../opencode/client";
+import { patchManagedOpencodeConfig } from "../../opencode/managedConfig";
 import {
   buildManagedSkillPaths,
   getManagedSkillsRootPath,
@@ -1115,6 +1117,7 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
 
   async applyRuntimeConfigSync(this: OpencodeRuntime, targetKey) {
     try {
+      const runtimeConfig = this.currentRuntimeConfig();
       const current = unwrapSdkData<Config>(
         await this.getClient().config.get({
           responseStyle: "data",
@@ -1148,12 +1151,27 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
         changed = true;
       }
       if (changed) {
-        await this.getClient().config.update({
-          body: nextConfig,
-          responseStyle: "data",
-          throwOnError: true,
-          signal: this.defaultRequestSignal(),
-        });
+        if (!runtimeConfig?.directory) {
+          throw new Error(
+            "Runtime config directory is required for managed OpenCode config sync.",
+          );
+        }
+        await patchManagedOpencodeConfig(
+          {
+            workspace: {
+              pinnedDirectory: runtimeConfig.directory,
+            },
+            runtime: {
+              opencode: runtimeConfig,
+            },
+          } as AgentMockingbirdConfig,
+          {
+            skills: (nextConfig as Record<string, unknown>).skills as Record<
+              string,
+              unknown
+            >,
+          },
+        );
       }
       this["runtimeConfigSyncKey"] = targetKey;
       this["availableAgentNamesCache"] = null;

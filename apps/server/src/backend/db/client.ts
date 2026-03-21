@@ -11,10 +11,45 @@ const resolvedDbPath = env.AGENT_MOCKINGBIRD_DB_PATH
 
 mkdirSync(path.dirname(resolvedDbPath), { recursive: true });
 
-export const sqlite = new Database(resolvedDbPath);
-sqlite.exec("PRAGMA journal_mode=WAL;");
-sqlite.exec("PRAGMA synchronous=NORMAL;");
-sqlite.exec("PRAGMA busy_timeout=5000;");
-sqlite.exec("PRAGMA foreign_keys=ON;");
+let sqliteHandle: Database | null = null;
+
+function configureDatabase(db: Database) {
+  db.exec("PRAGMA journal_mode=WAL;");
+  db.exec("PRAGMA synchronous=NORMAL;");
+  db.exec("PRAGMA busy_timeout=5000;");
+  db.exec("PRAGMA foreign_keys=ON;");
+}
+
+function getSqliteHandle() {
+  if (!sqliteHandle) {
+    sqliteHandle = new Database(resolvedDbPath);
+    configureDatabase(sqliteHandle);
+  }
+  return sqliteHandle;
+}
+
+export const sqlite = new Proxy({} as Database, {
+  get(_target, prop) {
+    const db = getSqliteHandle();
+    const value = Reflect.get(db as object, prop);
+    if (prop === "close" && typeof value === "function") {
+      return (...args: unknown[]) => {
+        try {
+          return (value as (...closeArgs: unknown[]) => unknown).apply(db, args);
+        } finally {
+          sqliteHandle = null;
+        }
+      };
+    }
+    if (typeof value === "function") {
+      return value.bind(db);
+    }
+    return value;
+  },
+  set(_target, prop, value) {
+    Reflect.set(getSqliteHandle() as object, prop, value);
+    return true;
+  },
+});
 
 export { resolvedDbPath };

@@ -1969,10 +1969,18 @@ function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv
   }
 
   if (paths) {
-    add(path.join(paths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
-    add(path.join(paths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
-    add(path.join(paths.agentMockingbirdAppDirScopedGlobal, "opencode.lock.json"));
-    add(path.join(paths.agentMockingbirdAppDirScopedLocal, "opencode.lock.json"));
+    if (typeof paths.agentMockingbirdAppDirGlobal === "string") {
+      add(path.join(paths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
+    }
+    if (typeof paths.agentMockingbirdAppDirLocal === "string") {
+      add(path.join(paths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
+    }
+    if (typeof paths.agentMockingbirdAppDirScopedGlobal === "string") {
+      add(path.join(paths.agentMockingbirdAppDirScopedGlobal, "opencode.lock.json"));
+    }
+    if (typeof paths.agentMockingbirdAppDirScopedLocal === "string") {
+      add(path.join(paths.agentMockingbirdAppDirScopedLocal, "opencode.lock.json"));
+    }
   }
 
   const explicitRoot = env.AGENT_MOCKINGBIRD_ROOT_DIR?.trim();

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +10,13 @@ const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-runtime-test
 const testDbPath = path.join(testRoot, "agent-mockingbird.runtime.test.db");
 const testWorkspacePath = path.join(testRoot, "workspace");
 const testConfigPath = path.join(testRoot, "agent-mockingbird.runtime.config.json");
+const testWorkspaceConfigPath = path.join(testWorkspacePath, "config.json");
+const testManagedConfigDir = path.join(
+  testRoot,
+  "opencode-config",
+  createHash("sha256").update(path.resolve(testWorkspacePath)).digest("hex").slice(0, 16),
+);
+const testManagedConfigPath = path.join(testManagedConfigDir, "opencode.jsonc");
 
 process.env.NODE_ENV = "test";
 process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
@@ -271,6 +279,8 @@ beforeAll(async () => {
 beforeEach(async () => {
   repository.resetDatabaseToDefaults();
   repository.setSessionModel("main", "test-provider/test-model");
+  rmSync(testWorkspaceConfigPath, { force: true });
+  rmSync(testManagedConfigDir, { recursive: true, force: true });
   const { getLaneQueue } = (await import("../queue/service")) as unknown as {
     getLaneQueue: () => { clearAll: () => void };
   };
@@ -1262,8 +1272,7 @@ describe("opencode runtime failover contract", () => {
     expect(retryEvent?.payload?.message).toContain("Retrying with backup-provider/backup-model.");
   });
 
-  test("syncs runtime skill paths into OpenCode config without permission skill writes", async () => {
-    const updates: Array<Record<string, unknown>> = [];
+  test("syncs runtime skill paths into managed OpenCode config without writing workspace config", async () => {
     let configGetCount = 0;
     const client = createMockClient({
       prompt: async (request) => assistantResponse(request.path.id, "OK"),
@@ -1290,11 +1299,6 @@ describe("opencode runtime failover contract", () => {
         },
       };
     };
-    client.config.update = async (input: unknown) => {
-      const body = (input as { body?: Record<string, unknown> }).body ?? {};
-      updates.push(body);
-      return { data: body };
-    };
 
     const runtime = createRuntimeWithClient(client, {
       enableSmallModelSync: true,
@@ -1320,26 +1324,42 @@ describe("opencode runtime failover contract", () => {
 
     expect(ack.messages.at(-1)?.content).toBe("OK");
     expect(configGetCount).toBeGreaterThan(0);
-    const updated = updates.at(-1) as
-      | {
-          skills?: { paths?: Array<string> };
-          agent?: Record<
-            string,
-            {
-              model?: string;
-              description?: string;
-              prompt?: string;
-              disable?: boolean;
-              options?: Record<string, unknown>;
-            }
-          >;
-          permission?: Record<string, unknown>;
-        }
-      | undefined;
-    expect(updated).toBeTruthy();
-    expect(updated?.skills?.paths).toContain(path.resolve(testWorkspacePath, ".agents", "skills"));
-    expect(updated?.permission).toEqual({});
-    expect(updated?.agent).toBeUndefined();
+    expect(existsSync(testWorkspaceConfigPath)).toBe(false);
+    expect(existsSync(testManagedConfigPath)).toBe(true);
+
+    const managedConfig = JSON.parse(
+      JSON.stringify((await import("../opencode/managedConfig")).readManagedOpencodeConfig({
+        workspace: { pinnedDirectory: testWorkspacePath },
+        runtime: {
+          opencode: {
+            baseUrl: "http://127.0.0.1:4096",
+            providerId: "test-provider",
+            modelId: "test-model",
+            fallbackModels: [],
+            imageModel: null,
+            smallModel: "test-provider/test-small",
+            timeoutMs: 120_000,
+            promptTimeoutMs: 120_000,
+            runWaitTimeoutMs: 180_000,
+            childSessionHideAfterDays: 3,
+            directory: testWorkspacePath,
+            bootstrap: {
+              enabled: true,
+              maxCharsPerFile: 20_000,
+              maxCharsTotal: 150_000,
+              subagentMinimal: true,
+              includeAgentPrompt: true,
+            },
+          },
+        },
+      } as never)),
+    ) as { skills?: { paths?: string[] }; permission?: Record<string, unknown>; agent?: Record<string, unknown> };
+
+    expect(managedConfig.skills?.paths).toContain(path.resolve(testWorkspacePath, ".agents", "skills"));
+    expect(managedConfig.permission).toBeUndefined();
+    expect(managedConfig.agent).toBeUndefined();
+    expect(readFileSync(testManagedConfigPath, "utf8")).not.toContain('"default_agent"');
+    expect(readFileSync(testManagedConfigPath, "utf8")).not.toContain('"agent-mockingbird"');
   });
 
   test("maps authentication errors to RuntimeProviderAuthError", async () => {

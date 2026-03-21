@@ -12,6 +12,7 @@ import {
   createOpencodeV2ClientFromConnection,
   unwrapSdkData,
 } from "../../opencode/client";
+import { patchManagedOpencodeConfig } from "../../opencode/managedConfig";
 import { parseJsonWithSchema } from "../parsers";
 
 const mcpServersBodySchema = z
@@ -43,26 +44,11 @@ async function loadOpencodeConfig() {
   );
 }
 
-async function persistMcpServers(servers: Array<ReturnType<typeof configuredMcpServerSchema.parse>>) {
-  const connection = getConnectionConfig();
-  const client = createOpencodeClientFromConnection(connection);
-  const current = await loadOpencodeConfig();
-  const nextConfig = {
-    ...(current as Record<string, unknown>),
+export async function persistMcpServers(servers: Array<ReturnType<typeof configuredMcpServerSchema.parse>>) {
+  const snapshot = getConfigSnapshot();
+  await patchManagedOpencodeConfig(snapshot.config, {
     mcp: serializeConfiguredMcpServersToOpencodeConfig(servers),
-  } as OpencodeConfig;
-
-  await client.config.update({
-    body: nextConfig,
-    responseStyle: "data",
-    throwOnError: true,
-    signal: AbortSignal.timeout(connection.timeoutMs),
   });
-  await client.instance.dispose({
-    responseStyle: "data",
-    throwOnError: false,
-    signal: AbortSignal.timeout(connection.timeoutMs),
-  }).catch(() => undefined);
 }
 
 function normalizeServers(config: OpencodeConfig) {
