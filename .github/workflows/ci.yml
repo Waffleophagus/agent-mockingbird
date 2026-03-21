@@ -52,43 +52,90 @@ jobs:
           ref="${GITHUB_REF:-}"
           ref_name="${GITHUB_REF_NAME:-}"
           actor="${GITHUB_ACTOR:-}"
-          package_version="$(bun -e 'const p=require("./package.json"); if(!p.version){process.exit(2)}; console.log(p.version)')"
-          base_version="${package_version}"
-          build_number="${GITHUB_RUN_NUMBER:-}"
-          branch_slug="$(printf '%s' "${ref_name}" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9-]#-#g; s#--*#-#g; s#^-##; s#-$##')"
-          branch_slug="${branch_slug:0:48}"
-          if [[ -z "${branch_slug}" ]]; then
-            branch_slug="preview"
-          fi
 
           should_publish="false"
           npm_tag="latest"
           bootstrap_ref="main"
-          bootstrap_tag="${package_version}"
+          bootstrap_tag="latest"
+          package_version=""
+          latest_version=""
+          next_version=""
 
           if [[ "${event}" == "pull_request" ]]; then
             should_publish="false"
           elif [[ "${event}" == "push" && "${ref}" == "refs/heads/main" ]]; then
             should_publish="true"
-            bootstrap_tag="${package_version}"
           elif [[ "${event}" == "push" && "${ref}" == refs/heads/* && "${ref}" != "refs/heads/main" && "${actor}" == "waffleophagus" ]]; then
             should_publish="true"
             npm_tag="next"
             bootstrap_ref="${ref_name}"
-            if [[ -z "${build_number}" ]]; then
-              build_number="$(date +%s)"
+            bootstrap_tag="next"
+          fi
+
+          if [[ "${should_publish}" == "true" ]]; then
+            registry_json="$(curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true)"
+            version_info="$(REGISTRY_JSON="${registry_json}" node <<'EOF'
+            const raw = process.env.REGISTRY_JSON || "";
+            let latest = "";
+            let next = "";
+
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              latest = parsed?.["dist-tags"]?.latest ?? "";
+              next = parsed?.["dist-tags"]?.next ?? "";
+            }
+
+            const stablePattern = /^(\d+)\.(\d+)\.(\d+)$/;
+            const nextPattern = /^(\d+)\.(\d+)\.(\d+)-next\.(\d+)$/;
+            const parseStable = (value) => {
+              const match = value.match(stablePattern);
+              return match ? match.slice(1).map(Number) : null;
+            };
+            const parseNext = (value) => {
+              const match = value.match(nextPattern);
+              return match
+                ? {
+                    major: Number(match[1]),
+                    minor: Number(match[2]),
+                    patch: Number(match[3]),
+                    prerelease: Number(match[4]),
+                  }
+                : null;
+            };
+
+            const stable = parseStable(latest) ?? [0, 0, 0];
+            const [major, minor, patch] = stable;
+            const nextBase = `${major}.${minor}.${patch + 1}`;
+            const currentNext = parseNext(next);
+            const nextCounter =
+              currentNext && `${currentNext.major}.${currentNext.minor}.${currentNext.patch}` === nextBase
+                ? currentNext.prerelease + 1
+                : 1;
+
+            console.log(`LATEST_VERSION=${latest}`);
+            console.log(`NEXT_VERSION=${next}`);
+            console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
+            console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
+            EOF
+            )"
+            eval "${version_info}"
+            latest_version="${LATEST_VERSION}"
+            next_version="${NEXT_VERSION}"
+
+            if [[ "${npm_tag}" == "latest" ]]; then
+              package_version="${MAIN_PACKAGE_VERSION}"
+            else
+              package_version="${NEXT_PACKAGE_VERSION}"
             fi
-            package_version="${base_version}-next.${branch_slug}.${build_number}"
-            bootstrap_tag="${package_version}"
           fi
 
           echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
           echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
-          echo "build_number=${build_number}" >> "${GITHUB_OUTPUT}"
           echo "npm_tag=${npm_tag}" >> "${GITHUB_OUTPUT}"
-          echo "branch_slug=${branch_slug}" >> "${GITHUB_OUTPUT}"
           echo "bootstrap_ref=${bootstrap_ref}" >> "${GITHUB_OUTPUT}"
           echo "bootstrap_tag=${bootstrap_tag}" >> "${GITHUB_OUTPUT}"
+          echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
+          echo "next_version=${next_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build package metadata for publish
         if: steps.meta.outputs.should_publish == 'true'
