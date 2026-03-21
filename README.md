@@ -2,22 +2,6 @@
 
 Think Openclaw but with Opencode, that's the goal at least.
 
-## Stack
-
-- Runtime: `bun`
-- Frontend: `react` + `typescript`
-- Styling: `tailwindcss v4`
-- UI primitives: `@base-ui-components/react` with shadcn-style component structure
-- Linting: `eslint` (flat config) + `typescript-eslint` + `react-hooks` + `jsx-a11y`
-
-## Commands
-
-```bash
-bun install
-bun run dev
-bun run build:cli
-```
-
 Recommended install flow for end users on Linux:
 
 ```bash
