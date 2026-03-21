@@ -58,12 +58,12 @@ export default tool({
     const args = argsSchema.parse(rawArgs);
 
     if (args.action === "get_config") {
-      const payload = await requestJson("/api/waffle/runtime/config");
+      const payload = await requestJson("/api/mockingbird/runtime/config");
       return JSON.stringify({ ok: true, ...payload });
     }
 
     if (args.action === "patch_config") {
-      const payload = await requestJson("/api/waffle/runtime/config", {
+      const payload = await requestJson("/api/mockingbird/runtime/config", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -74,7 +74,7 @@ export default tool({
       return JSON.stringify({ ok: true, ...payload });
     }
 
-    const payload = await requestJson("/api/waffle/runtime/config/replace", {
+    const payload = await requestJson("/api/mockingbird/runtime/config/replace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

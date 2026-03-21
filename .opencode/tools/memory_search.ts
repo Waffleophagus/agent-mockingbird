@@ -3,7 +3,10 @@ import { tool } from "@opencode-ai/plugin";
 function resolveApiBaseUrl() {
   const explicit = process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001";
+  const port =
+    process.env.AGENT_MOCKINGBIRD_PORT?.trim() ||
+    process.env.PORT?.trim() ||
+    "3001";
   return `http://127.0.0.1:${port}`;
 }
 
@@ -15,7 +18,10 @@ async function postJson(pathname: string, body: unknown) {
   });
   const payload = (await response.json()) as Record<string, unknown>;
   if (!response.ok) {
-    const error = typeof payload.error === "string" ? payload.error : `Request failed (${response.status})`;
+    const error =
+      typeof payload.error === "string"
+        ? payload.error
+        : `Request failed (${response.status})`;
     throw new Error(error);
   }
   return payload;
@@ -24,13 +30,24 @@ async function postJson(pathname: string, body: unknown) {
 export default tool({
   description: "Search memory for relevant prior context.",
   args: {
-    query: tool.schema.string().min(1).describe("Natural language memory query"),
+    query: tool.schema
+      .string()
+      .min(1)
+      .describe("Natural language memory query"),
     maxResults: tool.schema.number().int().min(1).max(20).optional(),
     minScore: tool.schema.number().min(0).max(1).optional(),
-    debug: tool.schema.boolean().optional().describe("Include retrieval debug details."),
+    debug: tool.schema
+      .boolean()
+      .optional()
+      .describe("Include retrieval debug details."),
   },
-  async execute(args: { query: string; maxResults?: number; minScore?: number; debug?: boolean }) {
-    const payload = await postJson("/api/waffle/memory/retrieve", {
+  async execute(args: {
+    query: string;
+    maxResults?: number;
+    minScore?: number;
+    debug?: boolean;
+  }) {
+    const payload = await postJson("/api/mockingbird/memory/retrieve", {
       query: args.query,
       maxResults: args.maxResults,
       minScore: args.minScore,

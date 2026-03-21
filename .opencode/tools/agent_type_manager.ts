@@ -4,7 +4,10 @@ import { z } from "zod";
 function resolveApiBaseUrl() {
   const explicit = process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001";
+  const port =
+    process.env.AGENT_MOCKINGBIRD_PORT?.trim() ||
+    process.env.PORT?.trim() ||
+    "3001";
   return `http://127.0.0.1:${port}`;
 }
 
@@ -12,7 +15,10 @@ async function requestJson(pathname: string, init?: RequestInit) {
   const response = await fetch(`${resolveApiBaseUrl()}${pathname}`, init);
   const payload = (await response.json()) as Record<string, unknown>;
   if (!response.ok) {
-    const error = typeof payload.error === "string" ? payload.error : `Request failed (${response.status})`;
+    const error =
+      typeof payload.error === "string"
+        ? payload.error
+        : `Request failed (${response.status})`;
     throw new Error(error);
   }
   return payload;
@@ -70,12 +76,12 @@ export default tool({
     const args = argsSchema.parse(rawArgs);
 
     if (args.action === "list") {
-      const payload = await requestJson("/api/waffle/agents");
+      const payload = await requestJson("/api/mockingbird/agents");
       return JSON.stringify({ ok: true, ...payload });
     }
 
     if (args.action === "validate_patch") {
-      const payload = await requestJson("/api/waffle/agents/validate", {
+      const payload = await requestJson("/api/mockingbird/agents/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -86,7 +92,7 @@ export default tool({
       return JSON.stringify({ ok: true, ...payload });
     }
 
-    const payload = await requestJson("/api/waffle/agents", {
+    const payload = await requestJson("/api/mockingbird/agents", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
