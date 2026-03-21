@@ -13,6 +13,7 @@ import {
   unwrapSdkData,
 } from "../../opencode/client";
 import { patchManagedOpencodeConfig } from "../../opencode/managedConfig";
+import { resolveOpencodeConfigDir } from "../../workspace/resolve";
 import { parseJsonWithSchema } from "../parsers";
 
 const mcpServersBodySchema = z
@@ -23,8 +24,13 @@ const mcpServersBodySchema = z
 
 function getConnectionConfig() {
   const snapshot = getConfigSnapshot();
-  const directory =
-    snapshot.config.runtime.opencode.directory || snapshot.config.workspace.pinnedDirectory;
+  let directory: string | undefined;
+  try {
+    directory = resolveOpencodeConfigDir(snapshot.config);
+  } catch {
+    directory =
+      snapshot.config.runtime.opencode.directory || snapshot.config.workspace.pinnedDirectory;
+  }
   return {
     baseUrl: snapshot.config.runtime.opencode.baseUrl,
     directory,

@@ -1,4 +1,5 @@
 export type AgentTypeMode = "subagent" | "primary" | "all";
+export type AgentQueueMode = "collect" | "followup" | "replace";
 export type LegacySpecialistStatus = "available" | "busy" | "offline";
 
 export interface LegacySpecialistAgentLike {
@@ -25,6 +26,7 @@ export interface AgentTypeDefinitionLike {
   steps?: number;
   permission?: Record<string, unknown>;
   options: Record<string, unknown>;
+  queueMode?: AgentQueueMode;
 }
 
 const LEGACY_DEFAULT_SPECIALTY = "General";
@@ -39,6 +41,13 @@ export function normalizeAgentTypeMode(value: unknown): AgentTypeMode {
     return value;
   }
   return "subagent";
+}
+
+export function normalizeAgentQueueMode(value: unknown): AgentQueueMode | undefined {
+  if (value === "collect" || value === "followup" || value === "replace") {
+    return value;
+  }
+  return undefined;
 }
 
 export function normalizeLegacySpecialistStatus(value: unknown): LegacySpecialistStatus {
@@ -61,6 +70,7 @@ export function normalizeAgentTypeDraft(agentType: AgentTypeDefinitionLike): Age
     hidden: agentType.hidden === true,
     disable: agentType.disable === true,
     options: isPlainObject(agentType.options) ? { ...agentType.options } : {},
+    queueMode: normalizeAgentQueueMode(agentType.queueMode),
   };
 }
 

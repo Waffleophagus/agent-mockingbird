@@ -340,6 +340,7 @@ const agentTypeSchema = z.object({
   steps: z.number().int().positive().optional(),
   permission: z.unknown().optional(),
   options: z.record(z.string(), z.unknown()).optional(),
+  queueMode: z.enum(["collect", "followup", "replace"]).optional(),
 })
 
 const agentArgsSchema = z.discriminatedUnion("action", [
@@ -626,28 +627,30 @@ const configManagerTool = tool({
     const args = configArgsSchema.parse(rawArgs)
 
     if (args.action === "get_config") {
-      const payload = await requestJson("/api/mockingbird/runtime/config")
+      const payload = await requestJson("/api/config")
       return JSON.stringify({ ok: true, ...payload })
     }
 
     if (args.action === "patch_config") {
-      const payload = await requestJson("/api/mockingbird/runtime/config", {
-        method: "PATCH",
+      const payload = await requestJson("/api/config/patch-safe", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patch: args.patch,
           expectedHash: args.expectedHash,
+          runSmokeTest: args.runSmokeTest,
         }),
       })
       return JSON.stringify({ ok: true, ...payload })
     }
 
-    const payload = await requestJson("/api/mockingbird/runtime/config/replace", {
+    const payload = await requestJson("/api/config/replace-safe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         config: args.config,
         expectedHash: args.expectedHash,
+        runSmokeTest: args.runSmokeTest,
       }),
     })
     return JSON.stringify({ ok: true, ...payload })

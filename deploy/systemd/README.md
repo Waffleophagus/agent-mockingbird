@@ -27,7 +27,7 @@ sudo systemctl enable --now opencode.service agent-mockingbird.service
 systemctl status opencode.service --no-pager
 systemctl status agent-mockingbird.service --no-pager
 curl -sS http://127.0.0.1:3001/api/health
-curl -sS http://127.0.0.1:3001/api/runtime/info
+curl -sS http://127.0.0.1:3001/api/mockingbird/runtime/info
 ```
 
 ## 4. Logs

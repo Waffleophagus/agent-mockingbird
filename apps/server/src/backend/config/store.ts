@@ -174,6 +174,13 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
     return {};
   }
   return {
+    ...(opencodeDirectory
+      ? {
+          workspace: {
+            pinnedDirectory: opencodeDirectory,
+          },
+        }
+      : {}),
     runtime: {
       ...(Object.keys(opencodePatch).length ? { opencode: opencodePatch } : {}),
       ...(Object.keys(memoryPatch).length ? { memory: memoryPatch } : {}),

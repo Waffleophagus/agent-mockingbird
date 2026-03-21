@@ -39,6 +39,7 @@ const agentTypeSchema = z.object({
   steps: z.number().int().positive().optional(),
   permission: z.unknown().optional(),
   options: z.record(z.string(), z.unknown()).optional(),
+  queueMode: z.enum(["collect", "followup", "replace"]).optional(),
 });
 
 const argsSchema = z.discriminatedUnion("action", [

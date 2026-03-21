@@ -58,17 +58,25 @@ function hashConfiguredMcpServers(servers: Array<ConfiguredMcpServer>) {
   return createHash("sha256").update(stableSerialize(servers)).digest("hex");
 }
 
+function resolveMcpConnectionDirectory(config: AgentMockingbirdConfig) {
+  try {
+    return resolveOpencodeConfigDir(config);
+  } catch {
+    return config.runtime.opencode.directory || config.workspace.pinnedDirectory;
+  }
+}
+
 function createMcpClient(config: AgentMockingbirdConfig) {
   return createOpencodeV2ClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
-    directory: config.workspace.pinnedDirectory,
+    directory: resolveMcpConnectionDirectory(config),
   });
 }
 
 function createConfigClient(config: AgentMockingbirdConfig) {
   return createOpencodeClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
-    directory: config.workspace.pinnedDirectory,
+    directory: resolveMcpConnectionDirectory(config),
   });
 }
 

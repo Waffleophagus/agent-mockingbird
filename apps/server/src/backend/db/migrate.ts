@@ -29,32 +29,30 @@ function resolveMigrationsFolder() {
   );
 }
 
-const migrationsFolder = resolveMigrationsFolder();
-const migrationDb = drizzle({ client: sqlite, schema });
-
 function tableExists(tableName: string) {
   const row = sqlite
     .query(
       `
-        SELECT name
-        FROM sqlite_master
-        WHERE type = 'table' AND name = ?1
-        LIMIT 1
-      `,
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = ?1
+      LIMIT 1
+    `,
     )
     .get(tableName) as { name?: string } | null;
   return row?.name === tableName;
 }
 
-function hasBootstrappedSchema() {
-  return tableExists("sessions") && tableExists("runtime_config") && tableExists("heartbeat_events");
-}
+const migrationsFolder = resolveMigrationsFolder();
+const migrationDb = drizzle({ client: sqlite, schema });
 
 console.log(`Running SQLite migrations from ${migrationsFolder}`);
 console.log(`Target database: ${getResolvedDbPath()}`);
 
-if (hasBootstrappedSchema()) {
-  console.log("Schema already present; skipping migration replay.");
+if (tableExists("__drizzle_migrations")) {
+  migrate(migrationDb, { migrationsFolder });
+} else if (tableExists("sessions")) {
+  console.log("Bootstrap schema detected; skipping Drizzle migrations");
 } else {
   migrate(migrationDb, { migrationsFolder });
 }

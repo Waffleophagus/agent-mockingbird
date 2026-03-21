@@ -1,4 +1,8 @@
-import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft, normalizeAgentTypeMode } from "@agent-mockingbird/contracts/agentTypes";
+import {
+  normalizeAgentQueueMode,
+  normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft,
+  normalizeAgentTypeMode,
+} from "@agent-mockingbird/contracts/agentTypes";
 import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
@@ -79,6 +83,7 @@ function toAgentTypeDefinition(id: string, config: OpenCodeAgentConfigRecord): A
     steps: typeof config.steps === "number" ? config.steps : undefined,
     permission,
     options: isPlainObject(config.options) ? (config.options as Record<string, unknown>) : {},
+    queueMode: normalizeAgentQueueMode(config.queueMode),
   });
 }
 
@@ -101,6 +106,7 @@ function toOpenCodeAgentConfig(
     steps: agentType.steps,
     permission: agentType.permission,
     options: isPlainObject(agentType.options) ? { ...agentType.options } : {},
+    queueMode: normalizeAgentQueueMode(agentType.queueMode),
   };
 }
 

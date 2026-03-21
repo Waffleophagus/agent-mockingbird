@@ -22,7 +22,6 @@ type RepositoryModule = typeof RepositoryModuleType;
 let repository: RepositoryModule;
 
 beforeAll(async () => {
-  await import("./migrate");
   repository = await import("./repository");
 });
 

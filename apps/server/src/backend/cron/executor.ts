@@ -237,15 +237,60 @@ export class CronExecutor {
       throw error;
     }
 
+    return await this.awaitConditionalModuleWorker(worker, timeoutMs, () =>
+      this.runConditionalModuleInline(absoluteModulePath, workerCtx),
+    );
+  }
+
+  private async runConditionalModuleInline(
+    absoluteModulePath: string,
+    ctx: CronConditionalModuleContext,
+  ): Promise<CronHandlerResult> {
+    const timeoutMs = getConfigSnapshot().config.runtime.cron.conditionalModuleTimeoutMs;
+    const worker = new Worker(
+      `
+        const { parentPort, workerData } = require("node:worker_threads");
+
+        (async () => {
+          if (!parentPort) {
+            throw new Error("conditional module worker requires parentPort");
+          }
+
+          const { moduleUrl, ctx } = workerData ?? {};
+          if (!moduleUrl || !ctx) {
+            throw new Error("conditional module worker missing required workerData");
+          }
+
+          const loaded = await import(\`\${moduleUrl}?cronRun=\${Date.now()}\`);
+          if (typeof loaded.default !== "function") {
+            throw new Error("conditional module must export a default function");
+          }
+
+          parentPort.postMessage(await loaded.default(ctx));
+        })().catch((error) => {
+          throw error;
+        });
+      `,
+      {
+        eval: true,
+        workerData: {
+          absoluteModulePath,
+          moduleUrl: pathToFileURL(absoluteModulePath).href,
+          ctx,
+        },
+      },
+    );
+
+    return await this.awaitConditionalModuleWorker(worker, timeoutMs);
+  }
+
+  private async awaitConditionalModuleWorker(
+    worker: Worker,
+    timeoutMs: number,
+    fallback?: () => Promise<CronHandlerResult>,
+  ): Promise<CronHandlerResult> {
     return await new Promise<CronHandlerResult>((resolve, reject) => {
       let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        void worker.terminate().catch(() => {});
-        reject(new Error(`conditional module timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
 
       const cleanup = () => {
         clearTimeout(timer);
@@ -254,21 +299,32 @@ export class CronExecutor {
         worker.removeListener("exit", handleExit);
       };
 
-      const finish = (cb: () => void) => {
+      const terminateWorker = () => {
+        void worker.terminate().catch(() => {});
+      };
+
+      const finish = (cb: () => void, terminate = true) => {
         if (settled) return;
         settled = true;
         cleanup();
+        if (terminate) {
+          terminateWorker();
+        }
         cb();
       };
+
+      const timer = setTimeout(() => {
+        finish(() => reject(new Error(`conditional module timed out after ${timeoutMs}ms`)));
+      }, timeoutMs);
 
       const handleMessage = (message: unknown) => {
         finish(() => resolve(normalizeConditionalModuleResult(message)));
       };
 
       const handleError = (error: Error) => {
-        if (shouldFallbackConditionalModuleWorker(error)) {
+        if (fallback && shouldFallbackConditionalModuleWorker(error)) {
           finish(() => {
-            void this.runConditionalModuleInline(absoluteModulePath, workerCtx).then(resolve, reject);
+            void fallback().then(resolve, reject);
           });
           return;
         }
@@ -277,26 +333,13 @@ export class CronExecutor {
 
       const handleExit = (code: number) => {
         if (code === 0 || settled) return;
-        finish(() => reject(new Error(`conditional module worker exited with code ${code}`)));
+        finish(() => reject(new Error(`conditional module worker exited with code ${code}`)), false);
       };
 
       worker.on("message", handleMessage);
       worker.on("error", handleError);
       worker.on("exit", handleExit);
     });
-  }
-
-  private async runConditionalModuleInline(
-    absoluteModulePath: string,
-    ctx: CronConditionalModuleContext,
-  ): Promise<CronHandlerResult> {
-    const loaded = (await import(`${pathToFileURL(absoluteModulePath).href}?cronRun=${Date.now()}`)) as {
-      default?: (ctx: CronConditionalModuleContext) => Promise<unknown> | unknown;
-    };
-    if (typeof loaded.default !== "function") {
-      throw new Error("conditional module must export a default function");
-    }
-    return normalizeConditionalModuleResult(await loaded.default(ctx));
   }
 
   async executeInstance(

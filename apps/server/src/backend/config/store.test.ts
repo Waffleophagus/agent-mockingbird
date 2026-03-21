@@ -42,6 +42,36 @@ test("parseConfig uses AGENT_MOCKINGBIRD_OPENCODE_* env vars as runtime fallback
   }
 });
 
+test("parseConfig aligns AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY through workspace.pinnedDirectory", () => {
+  const previousOpencodeDirectory = process.env.AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY;
+  process.env.AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY = "./env-opencode-workspace";
+  try {
+    const filePath = resolveExampleConfigPath();
+    const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+      workspace?: Record<string, unknown>;
+      runtime?: { opencode?: Record<string, unknown>; memory?: Record<string, unknown> };
+    };
+    if (!raw.workspace || !raw.runtime?.opencode || !raw.runtime.memory) {
+      throw new Error("Test fixture missing runtime workspace settings");
+    }
+    delete raw.workspace.pinnedDirectory;
+    delete raw.runtime.opencode.directory;
+    delete raw.runtime.memory.workspaceDir;
+
+    const parsed = parseConfig(raw);
+    const expected = path.resolve(process.cwd(), "env-opencode-workspace");
+    expect(parsed.workspace.pinnedDirectory).toBe(expected);
+    expect(parsed.runtime.opencode.directory).toBe(expected);
+    expect(parsed.runtime.memory.workspaceDir).toBe(expected);
+  } finally {
+    if (previousOpencodeDirectory === undefined) {
+      delete process.env.AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY;
+    } else {
+      process.env.AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY = previousOpencodeDirectory;
+    }
+  }
+});
+
 test("parseConfig aligns runtime workspace paths to workspace.pinnedDirectory", () => {
   const filePath = resolveExampleConfigPath();
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
