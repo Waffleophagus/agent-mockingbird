@@ -322,6 +322,8 @@ beforeAll(async () => {
 beforeEach(async () => {
   repository.resetDatabaseToDefaults();
   rmSync(testWorkspacePath, { recursive: true, force: true });
+  rmSync(testConfigPath, { force: true });
+  rmSync(`${testConfigPath}.bak`, { force: true });
   await memoryService.initializeMemory();
 });
 
@@ -784,9 +786,9 @@ describe("runtime health route", () => {
         workspaceDirectory?: string;
       };
     };
-    expect(payload.pinnedWorkspace).toBe("./relative-pinned-workspace");
-    expect(snapshot.config.runtime.opencode.directory).toBe("/tmp/stale-opencode-workspace");
-    expect(storage.workspaceDirectory).not.toBe(snapshot.config.runtime.opencode.directory);
+    expect(payload.pinnedWorkspace).toBe(snapshot.config.workspace.pinnedDirectory);
+    expect(snapshot.config.runtime.opencode.directory).toBe(snapshot.config.workspace.pinnedDirectory);
+    expect(storage.workspaceDirectory).toBe(snapshot.config.runtime.opencode.directory);
     expect(payload.opencode?.workspaceDirectory).toBe(storage.workspaceDirectory);
   });
 });

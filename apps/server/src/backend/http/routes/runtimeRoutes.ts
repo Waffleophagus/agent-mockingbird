@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
-import { applyConfigPatchSafe, getConfigSnapshot, replaceConfigSafe } from "../../config/service";
+import { applyConfigPatchSafe, getConfigSnapshot, replaceConfig } from "../../config/service";
 import type { CronService } from "../../cron/service";
 import {
   buildAgentMockingbirdCompactionPrompt,
@@ -117,7 +117,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
         }
         const body = parsedBody.body;
         try {
-          const result = await replaceConfigSafe({
+          const result = await replaceConfig({
             config: body.config,
             expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
             runSmokeTest: false,

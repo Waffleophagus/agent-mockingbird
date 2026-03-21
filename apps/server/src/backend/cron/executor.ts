@@ -95,7 +95,8 @@ export class CronExecutor {
     } catch (error) {
       if (
         error instanceof Error &&
-        error.message.includes("cron_job_definitions_thread_session_id_idx")
+        (error.message.includes("cron_job_definitions_thread_session_id_idx") ||
+          error.message.includes("UNIQUE constraint failed: cron_job_definitions.thread_session_id"))
       ) {
         throw new Error(
           `Cron thread session ${threadSessionId} is already assigned to another cron job`,

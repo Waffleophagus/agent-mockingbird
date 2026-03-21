@@ -1,5 +1,5 @@
 import type { Config } from "@opencode-ai/sdk/client";
-import { parse as parseJsonc } from "jsonc-parser";
+import { parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -193,7 +193,11 @@ export function readConfiguredMcpServersFromWorkspaceConfig(
   let parsed: unknown;
   try {
     const raw = readFileSync(opencodeConfigFilePath(config), "utf8");
-    parsed = parseJsonc(raw);
+    const errors: ParseError[] = [];
+    parsed = parseJsonc(raw, errors);
+    if (errors.length > 0) {
+      throw new Error(`Invalid JSONC: ${printParseErrorCode(errors[0]!.error)}`);
+    }
   } catch (error) {
     if (
       typeof error === "object" &&

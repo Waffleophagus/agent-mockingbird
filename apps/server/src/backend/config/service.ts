@@ -96,8 +96,34 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function stableSerialize(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(item => stableSerialize(item)).join(",")}]`;
+  if (!isPlainObject(value)) return JSON.stringify(value);
+  const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`).join(",")}}`;
+}
+
 function shouldRunSemanticValidation(current: AgentMockingbirdConfig, candidate: AgentMockingbirdConfig) {
-  return JSON.stringify(current.runtime.opencode) !== JSON.stringify(candidate.runtime.opencode);
+  const currentSemanticInputs = {
+    baseUrl: current.runtime.opencode.baseUrl,
+    providerId: current.runtime.opencode.providerId,
+    modelId: current.runtime.opencode.modelId,
+    fallbackModels: current.runtime.opencode.fallbackModels,
+    imageModel: current.runtime.opencode.imageModel,
+    smallModel: current.runtime.opencode.smallModel,
+  };
+  const candidateSemanticInputs = {
+    baseUrl: candidate.runtime.opencode.baseUrl,
+    providerId: candidate.runtime.opencode.providerId,
+    modelId: candidate.runtime.opencode.modelId,
+    fallbackModels: candidate.runtime.opencode.fallbackModels,
+    imageModel: candidate.runtime.opencode.imageModel,
+    smallModel: candidate.runtime.opencode.smallModel,
+  };
+  return stableSerialize(currentSemanticInputs) !== stableSerialize(candidateSemanticInputs);
 }
 
 export async function applyConfigPatch(input: {

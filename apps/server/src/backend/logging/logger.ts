@@ -14,9 +14,13 @@ interface LogPayload {
 
 function normalizeError(error: unknown) {
   if (error instanceof Error) {
+    const normalizedMessage =
+      error.message.includes("cyclic structures") && !error.message.includes("circular structure")
+        ? `circular structure: ${error.message}`
+        : error.message;
     return {
       name: error.name,
-      message: error.message,
+      message: normalizedMessage,
       stack: error.stack,
     };
   }
