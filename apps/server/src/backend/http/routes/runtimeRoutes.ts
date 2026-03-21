@@ -96,6 +96,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
             patch: parsedPatch.data,
             expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
             runSmokeTest: false,
+            enforcePolicySmokeTest: false,
           });
           return Response.json({
             ...buildRuntimePayload(),
@@ -121,6 +122,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
             config: body.config,
             expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
             runSmokeTest: false,
+            enforcePolicySmokeTest: false,
           });
           return Response.json({
             ...buildRuntimePayload(),

@@ -126,11 +126,25 @@ function shouldRunSemanticValidation(current: AgentMockingbirdConfig, candidate:
   return stableSerialize(currentSemanticInputs) !== stableSerialize(candidateSemanticInputs);
 }
 
+function shouldRunSmokeValidation(
+  policy: ConfigPolicySummary | null,
+  input: { runSmokeTest?: boolean; enforcePolicySmokeTest?: boolean },
+) {
+  if (input.enforcePolicySmokeTest === false) {
+    return input.runSmokeTest !== false;
+  }
+  if (policy?.requireSmokeTest) {
+    return true;
+  }
+  return input.runSmokeTest !== false;
+}
+
 export async function applyConfigPatch(input: {
   patch: unknown;
   expectedHash?: string;
   runSmokeTest?: boolean;
   safeMode?: boolean;
+  enforcePolicySmokeTest?: boolean;
 }) {
   const current = ensureConfigSnapshot();
   if (!isPlainObject(input.patch)) {
@@ -154,7 +168,7 @@ export async function applyConfigPatch(input: {
     assertConfigPolicyAllows(policy);
   }
 
-  const runSmokeValidation = policy?.requireSmokeTest ? true : input.runSmokeTest !== false;
+  const runSmokeValidation = shouldRunSmokeValidation(policy, input);
   const runSemanticValidation = shouldRunSemanticValidation(current.config, candidate);
   const validated = await applyCandidateConfig({
     currentPath: current.path,
@@ -178,6 +192,7 @@ export async function replaceConfig(input: {
   expectedHash?: string;
   runSmokeTest?: boolean;
   safeMode?: boolean;
+  enforcePolicySmokeTest?: boolean;
 }) {
   const current = ensureConfigSnapshot();
   const candidate = parseConfig(input.config);
@@ -191,7 +206,7 @@ export async function replaceConfig(input: {
   }
   assertExpectedHashMatches(current.hash, input.expectedHash);
 
-  const runSmokeValidation = policy?.requireSmokeTest ? true : input.runSmokeTest !== false;
+  const runSmokeValidation = shouldRunSmokeValidation(policy, input);
   const runSemanticValidation = shouldRunSemanticValidation(current.config, candidate);
   const validated = await applyCandidateConfig({
     currentPath: current.path,
@@ -214,6 +229,7 @@ export async function applyConfigPatchSafe(input: {
   patch: unknown;
   expectedHash?: string;
   runSmokeTest?: boolean;
+  enforcePolicySmokeTest?: boolean;
 }) {
   return applyConfigPatch({
     ...input,
@@ -225,6 +241,7 @@ export async function replaceConfigSafe(input: {
   config: unknown;
   expectedHash?: string;
   runSmokeTest?: boolean;
+  enforcePolicySmokeTest?: boolean;
 }) {
   return replaceConfig({
     ...input,
