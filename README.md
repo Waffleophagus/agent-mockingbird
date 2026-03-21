@@ -113,7 +113,7 @@ If you still have legacy `AGENT_MOCKINGBIRD_OPENCODE_*` runtime vars, run `bun r
 Skill deployment behavior (install/update):
 
 - Runtime bundle source files live in `runtime-assets/workspace` and `runtime-assets/opencode-config`.
-- Install/update syncs workspace files into the active workspace root, and syncs OpenCode managed config into an external config dir under `data/opencode-config/...`.
+- Install/update syncs workspace files into the active workspace root, and syncs OpenCode-managed config into an external config dir under `data/opencode-config/...`.
 - Sync state is tracked separately in `data/runtime-assets-workspace-state.json` and `data/runtime-assets-opencode-config-state.json`.
 - On update, interactive installs prompt only when both:
   - local file changed since last sync
