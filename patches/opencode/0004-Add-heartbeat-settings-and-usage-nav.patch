@@ -1,7 +1,7 @@
 From d0ccb6f44aaff458f67afa3bde01cf7fd0ddf3ab Mon Sep 17 00:00:00 2001
-From: Matt Campbell <matt@battleshopper.com>
+From: Matt Campbell <npm@d6software.com>
 Date: Wed, 18 Mar 2026 15:36:33 -0500
-Subject: [PATCH 04/10] Add heartbeat settings and usage nav
+Subject: [PATCH 04/11] Add heartbeat settings and usage nav
 
 ---
  .../app/src/components/dialog-settings.tsx    |   8 +
@@ -220,8 +220,8 @@ index 000000000..95a1770cc
 +    setState("error", "")
 +    try {
 +      const [heartbeat, runtime] = await Promise.all([
-+        waffleJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
-+        waffleJson<RuntimePayload>("/api/mockingbird/runtime/config"),
++        waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat"),
++        waffleJson<RuntimePayload>("/api/waffle/runtime/config"),
 +      ])
 +      setState("status", heartbeat.heartbeat)
 +      setState("runtimeHash", runtime.hash)
@@ -246,7 +246,7 @@ index 000000000..95a1770cc
 +    setState("saving", true)
 +    setState("error", "")
 +    try {
-+      const runtime = await waffleJson<RuntimePayload>("/api/mockingbird/runtime/config", {
++      const runtime = await waffleJson<RuntimePayload>("/api/waffle/runtime/config", {
 +        method: "PATCH",
 +        body: JSON.stringify({
 +          patch: {
@@ -276,7 +276,7 @@ index 000000000..95a1770cc
 +    setState("running", true)
 +    setState("error", "")
 +    try {
-+      const payload = await waffleJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat/run", {
++      const payload = await waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat/run", {
 +        method: "POST",
 +      })
 +      setState("status", payload.heartbeat)
@@ -503,3 +503,4 @@ index 924828c2f..7ed209697 100644
                icon="settings-gear"
 -- 
 2.53.0
+

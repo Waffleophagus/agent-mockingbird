@@ -1,7 +1,7 @@
 From aa99a5bc6827bc92d46194cf9b1fd0b8c05f3181 Mon Sep 17 00:00:00 2001
-From: Matt Campbell <matt@battleshopper.com>
+From: Matt Campbell <npm@d6software.com>
 Date: Thu, 19 Mar 2026 15:30:30 -0500
-Subject: [PATCH 07/10] Rename waffle namespaces to mockingbird
+Subject: [PATCH 07/11] Rename waffle namespaces to mockingbird
 
 ---
  .../app/src/components/settings-agents.tsx    |  38 +++---
@@ -41,7 +41,7 @@ index dda48a075..81b547fb4 100644
      setState("loading", true)
      setState("error", "")
      try {
--      const payload = await waffleJson<AgentsPayload>("/api/mockingbird/agents")
+-      const payload = await waffleJson<AgentsPayload>("/api/waffle/agents")
 +      const payload = await mockingbirdJson<AgentsPayload>("/api/mockingbird/agents")
        setState("payload", payload)
        setState("text", prettyJson(payload.agentTypes))
@@ -50,7 +50,7 @@ index dda48a075..81b547fb4 100644
      setState("saving", true)
      setState("error", "")
      try {
--      const payload = await waffleJson<AgentsPayload>("/api/mockingbird/agents", {
+-      const payload = await waffleJson<AgentsPayload>("/api/waffle/agents", {
 +      const payload = await mockingbirdJson<AgentsPayload>("/api/mockingbird/agents", {
          method: "PATCH",
          body: JSON.stringify({
@@ -123,15 +123,15 @@ index faf702691..c1ec8fcd3 100644
      const calls: Array<{ path: string; init?: RequestInit }> = []
      const requestJson = async <T>(path: string, init?: RequestInit) => {
        calls.push({ path, init })
--      if (path === "/api/mockingbird/cron/jobs") {
+-      if (path === "/api/waffle/cron/jobs") {
 +      if (path === "/api/mockingbird/cron/jobs") {
          return { jobs: [] } as T
        }
--      if (path === "/api/mockingbird/cron/health") {
+-      if (path === "/api/waffle/cron/health") {
 +      if (path === "/api/mockingbird/cron/health") {
          return { health: { enabled: true, jobs: { total: 0, enabled: 0 } } } as T
        }
--      if (path === "/api/mockingbird/cron/manage") {
+-      if (path === "/api/waffle/cron/manage") {
 +      if (path === "/api/mockingbird/cron/manage") {
          return {
            contract: {
@@ -140,12 +140,12 @@ index faf702691..c1ec8fcd3 100644
        },
      })
      expect(calls).toEqual([
--      { path: "/api/mockingbird/cron/jobs", init: undefined },
--      { path: "/api/mockingbird/cron/health", init: undefined },
+-      { path: "/api/waffle/cron/jobs", init: undefined },
+-      { path: "/api/waffle/cron/health", init: undefined },
 +      { path: "/api/mockingbird/cron/jobs", init: undefined },
 +      { path: "/api/mockingbird/cron/health", init: undefined },
        {
--        path: "/api/mockingbird/cron/manage",
+-        path: "/api/waffle/cron/manage",
 +        path: "/api/mockingbird/cron/manage",
          init: {
            method: "POST",
@@ -176,9 +176,9 @@ index c747ce06f..2eeab5f94 100644
 -export async function loadCronSettings(requestJson: WaffleJson = waffleJson) {
 +export async function loadCronSettings(requestJson: MockingbirdJson = mockingbirdJson) {
    const [jobs, health, contract] = await Promise.all([
--    requestJson<CronJobsResponse>("/api/mockingbird/cron/jobs"),
--    requestJson<CronHealthResponse>("/api/mockingbird/cron/health"),
--    requestJson<CronContractResponse>("/api/mockingbird/cron/manage", {
+-    requestJson<CronJobsResponse>("/api/waffle/cron/jobs"),
+-    requestJson<CronHealthResponse>("/api/waffle/cron/health"),
+-    requestJson<CronContractResponse>("/api/waffle/cron/manage", {
 +    requestJson<CronJobsResponse>("/api/mockingbird/cron/jobs"),
 +    requestJson<CronHealthResponse>("/api/mockingbird/cron/health"),
 +    requestJson<CronContractResponse>("/api/mockingbird/cron/manage", {
@@ -205,7 +205,7 @@ index a5b15cb11..67f282245 100644
      setState("saving", true)
      setState("error", "")
      try {
--      await waffleJson("/api/mockingbird/cron/jobs", {
+-      await waffleJson("/api/waffle/cron/jobs", {
 +      await mockingbirdJson("/api/mockingbird/cron/jobs", {
          method: "POST",
          body: JSON.stringify(payload),
@@ -214,7 +214,7 @@ index a5b15cb11..67f282245 100644
      setState("busyId", state.editingId)
      setState("error", "")
      try {
--      await waffleJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(state.editingId)}`, {
+-      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(state.editingId)}`, {
 +      await mockingbirdJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(state.editingId)}`, {
          method: "PATCH",
          body: JSON.stringify(payload),
@@ -223,7 +223,7 @@ index a5b15cb11..67f282245 100644
    async function runNow(id: string) {
      setState("busyId", id)
      try {
--      await waffleJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(id)}/run`, {
+-      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(id)}/run`, {
 +      await mockingbirdJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(id)}/run`, {
          method: "POST",
        })
@@ -232,7 +232,7 @@ index a5b15cb11..67f282245 100644
    async function remove(id: string) {
      setState("busyId", id)
      try {
--      await waffleJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(id)}`, {
+-      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(id)}`, {
 +      await mockingbirdJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(id)}`, {
          method: "DELETE",
        })
@@ -369,8 +369,8 @@ index 95a1770cc..628fda355 100644
      setState("error", "")
      try {
        const [heartbeat, runtime] = await Promise.all([
--        waffleJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
--        waffleJson<RuntimePayload>("/api/mockingbird/runtime/config"),
+-        waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat"),
+-        waffleJson<RuntimePayload>("/api/waffle/runtime/config"),
 +        mockingbirdJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
 +        mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config"),
        ])
@@ -380,7 +380,7 @@ index 95a1770cc..628fda355 100644
      setState("saving", true)
      setState("error", "")
      try {
--      const runtime = await waffleJson<RuntimePayload>("/api/mockingbird/runtime/config", {
+-      const runtime = await waffleJson<RuntimePayload>("/api/waffle/runtime/config", {
 +      const runtime = await mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config", {
          method: "PATCH",
          body: JSON.stringify({
@@ -389,7 +389,7 @@ index 95a1770cc..628fda355 100644
      setState("running", true)
      setState("error", "")
      try {
--      const payload = await waffleJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat/run", {
+-      const payload = await waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat/run", {
 +      const payload = await mockingbirdJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat/run", {
          method: "POST",
        })
@@ -599,7 +599,7 @@ index 88abc0a06..26bc59c19 100644
      setState("loading", true)
      setState("error", "")
      try {
--      const payload = await waffleJson<McpPayload>("/api/mockingbird/mcp")
+-      const payload = await waffleJson<McpPayload>("/api/waffle/mcp")
 +      const payload = await mockingbirdJson<McpPayload>("/api/mockingbird/mcp")
        setState("payload", payload)
        setState("text", prettyJson(payload.servers))
@@ -608,7 +608,7 @@ index 88abc0a06..26bc59c19 100644
      setState("saving", true)
      setState("error", "")
      try {
--      const payload = await waffleJson<McpPayload>("/api/mockingbird/mcp", {
+-      const payload = await waffleJson<McpPayload>("/api/waffle/mcp", {
 +      const payload = await mockingbirdJson<McpPayload>("/api/mockingbird/mcp", {
          method: "PUT",
          body: JSON.stringify({ servers: parsed }),
@@ -618,7 +618,7 @@ index 88abc0a06..26bc59c19 100644
      setState("busyId", id)
      try {
 -      const payload = await waffleJson<{ status: McpStatusMap; authorizationUrl?: string }>(
--        `/api/mockingbird/mcp/${encodeURIComponent(id)}/${action}`,
+-        `/api/waffle/mcp/${encodeURIComponent(id)}/${action}`,
 +      const payload = await mockingbirdJson<{ status: McpStatusMap; authorizationUrl?: string }>(
 +        `/api/mockingbird/mcp/${encodeURIComponent(id)}/${action}`,
          {
@@ -774,7 +774,7 @@ index fd091697e..808430278 100644
      setState("loading", true)
      setState("error", "")
      try {
--      const payload = await waffleJson<RuntimePayload>("/api/mockingbird/runtime/config")
+-      const payload = await waffleJson<RuntimePayload>("/api/waffle/runtime/config")
 +      const payload = await mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config")
        setState("payload", payload)
        setState("text", prettyJson(payload.config))
@@ -783,7 +783,7 @@ index fd091697e..808430278 100644
      setState("saving", true)
      setState("error", "")
      try {
--      const payload = await waffleJson<RuntimePayload>("/api/mockingbird/runtime/config/replace", {
+-      const payload = await waffleJson<RuntimePayload>("/api/waffle/runtime/config/replace", {
 +      const payload = await mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config/replace", {
          method: "POST",
          body: JSON.stringify({
@@ -867,7 +867,7 @@ index 2254d384c..ca7c7b3cf 100644
      setState("loading", true)
      setState("error", "")
      try {
--      const catalog = await waffleJson<SkillsPayload>("/api/mockingbird/skills")
+-      const catalog = await waffleJson<SkillsPayload>("/api/waffle/skills")
 +      const catalog = await mockingbirdJson<SkillsPayload>("/api/mockingbird/skills")
        setState("catalog", catalog)
      } catch (error) {
@@ -876,7 +876,7 @@ index 2254d384c..ca7c7b3cf 100644
    async function toggleSkill(id: string, enabled: boolean) {
      setState("busyId", id)
      try {
--      const next = await waffleJson<SkillsPayload>(`/api/mockingbird/skills/${encodeURIComponent(id)}`, {
+-      const next = await waffleJson<SkillsPayload>(`/api/waffle/skills/${encodeURIComponent(id)}`, {
 +      const next = await mockingbirdJson<SkillsPayload>(`/api/mockingbird/skills/${encodeURIComponent(id)}`, {
          method: "PATCH",
          body: JSON.stringify({ enabled }),
@@ -885,7 +885,7 @@ index 2254d384c..ca7c7b3cf 100644
    async function removeSkill(id: string) {
      setState("busyId", id)
      try {
--      const next = await waffleJson<SkillsPayload>(`/api/mockingbird/skills/${encodeURIComponent(id)}`, {
+-      const next = await waffleJson<SkillsPayload>(`/api/waffle/skills/${encodeURIComponent(id)}`, {
 +      const next = await mockingbirdJson<SkillsPayload>(`/api/mockingbird/skills/${encodeURIComponent(id)}`, {
          method: "DELETE",
        })
@@ -894,7 +894,7 @@ index 2254d384c..ca7c7b3cf 100644
      setState("error", "")
      setState("busyId", "import")
      try {
--      await waffleJson("/api/mockingbird/skills/import", {
+-      await waffleJson("/api/waffle/skills/import", {
 +      await mockingbirdJson("/api/mockingbird/skills/import", {
          method: "POST",
          body: JSON.stringify({
@@ -1102,8 +1102,9 @@ index 79286f66b..c30e7aac8 100644
  }
  
  export function readPinnedWorkspace() {
--  return waffleJson<PinnedWorkspacePayload>("/api/mockingbird/runtime/pinned-workspace")
+-  return waffleJson<PinnedWorkspacePayload>("/api/waffle/runtime/pinned-workspace")
 +  return mockingbirdJson<PinnedWorkspacePayload>("/api/mockingbird/runtime/pinned-workspace")
  }
 -- 
 2.53.0
+
