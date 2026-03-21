@@ -161,6 +161,7 @@ jobs:
               "dist",
               "deploy",
               "scripts",
+              "opencode.lock.json",
               "README.md",
               "bun.lock",
               "agent-mockingbird.config.example.json"
@@ -180,6 +181,7 @@ jobs:
           grep -Fqx -- "package/bin/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-assets.mjs" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-layout.mjs" <<<"${tar_contents}"
+          grep -Fqx -- "package/opencode.lock.json" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/app/index.html" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/drizzle/meta/_journal.json" <<<"${tar_contents}"

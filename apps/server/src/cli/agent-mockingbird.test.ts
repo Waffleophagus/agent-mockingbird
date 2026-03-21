@@ -65,4 +65,30 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  test("resolves version from packaged bin sibling lockfile", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-cli-packaged-test-"));
+    const appDir = path.join(tempRoot, "package");
+    const binDir = path.join(appDir, "bin");
+    const cliPath = path.join(binDir, "agent-mockingbird");
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "opencode.lock.json"),
+      JSON.stringify({ packageVersion: "1.2.28" }),
+      "utf8",
+    );
+    fs.writeFileSync(cliPath, "#!/usr/bin/env node\n", "utf8");
+
+    try {
+      const version = testing.readOpenCodePackageVersion({
+        env: {},
+        argv: ["node", cliPath],
+        moduleDir: binDir,
+      });
+
+      expect(version).toBe("1.2.28");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
