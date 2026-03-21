@@ -1,4 +1,5 @@
 import type { AgentMockingbirdConfig } from "./schema";
+import { isPlainObject, stableSerialize } from "./serialization";
 import { ConfigApplyError } from "./types";
 
 interface ConfigPolicyDecision {
@@ -8,20 +9,6 @@ interface ConfigPolicyDecision {
   requireExpectedHash: boolean;
   requireSmokeTest: boolean;
   autoRollbackOnFailure: boolean;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function stableSerialize(value: unknown): string {
-  if (value === null) return "null";
-  if (typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
-  if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(item => stableSerialize(item)).join(",")}]`;
-  if (!isPlainObject(value)) return JSON.stringify(value);
-  const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`).join(",")}}`;
 }
 
 function normalizePath(path: string) {

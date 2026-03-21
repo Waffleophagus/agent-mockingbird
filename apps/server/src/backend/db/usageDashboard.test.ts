@@ -10,6 +10,21 @@ const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-usage-db-tes
 const testDbPath = path.join(testRoot, "agent-mockingbird.usage-dashboard.test.db");
 const testConfigPath = path.join(testRoot, "agent-mockingbird.usage-dashboard.config.json");
 const testWorkspacePath = path.join(testRoot, "workspace");
+const originalEnv = {
+  AGENT_MOCKINGBIRD_DB_PATH: process.env.AGENT_MOCKINGBIRD_DB_PATH,
+  AGENT_MOCKINGBIRD_CONFIG_PATH: process.env.AGENT_MOCKINGBIRD_CONFIG_PATH,
+  AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR: process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+  AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER: process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER,
+  NODE_ENV: process.env.NODE_ENV,
+};
+
+function restoreEnvValue(key: keyof typeof originalEnv, value: string | undefined) {
+  if (typeof value === "undefined") {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}
 
 process.env.NODE_ENV = "test";
 process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
@@ -30,6 +45,18 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  sqlite.close(false);
+  restoreEnvValue("AGENT_MOCKINGBIRD_DB_PATH", originalEnv.AGENT_MOCKINGBIRD_DB_PATH);
+  restoreEnvValue("AGENT_MOCKINGBIRD_CONFIG_PATH", originalEnv.AGENT_MOCKINGBIRD_CONFIG_PATH);
+  restoreEnvValue(
+    "AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR",
+    originalEnv.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+  );
+  restoreEnvValue(
+    "AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER",
+    originalEnv.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER,
+  );
+  restoreEnvValue("NODE_ENV", originalEnv.NODE_ENV);
   rmSync(testRoot, { recursive: true, force: true });
 });
 

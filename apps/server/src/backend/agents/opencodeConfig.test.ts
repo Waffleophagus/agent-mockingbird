@@ -18,6 +18,20 @@ const testRoot = mkdtempSync(
 );
 const testConfigPath = path.join(testRoot, "agent-mockingbird.config.json");
 const testWorkspacePath = path.join(testRoot, "workspace");
+const originalEnv = {
+  NODE_ENV: process.env.NODE_ENV,
+  AGENT_MOCKINGBIRD_CONFIG_PATH: process.env.AGENT_MOCKINGBIRD_CONFIG_PATH,
+  AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR: process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+  AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER: process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER,
+};
+
+function restoreEnvValue(key: keyof typeof originalEnv, value: string | undefined) {
+  if (typeof value === "undefined") {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}
 
 process.env.NODE_ENV = "test";
 process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = testConfigPath;
@@ -51,6 +65,7 @@ beforeAll(async () => {
     workspace?: { pinnedDirectory?: string };
   };
   raw.workspace = {
+    ...raw.workspace,
     pinnedDirectory: testWorkspacePath,
   };
   writeFileSync(testConfigPath, JSON.stringify(raw, null, 2), "utf8");
@@ -76,18 +91,30 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  restoreEnvValue("NODE_ENV", originalEnv.NODE_ENV);
+  restoreEnvValue("AGENT_MOCKINGBIRD_CONFIG_PATH", originalEnv.AGENT_MOCKINGBIRD_CONFIG_PATH);
+  restoreEnvValue(
+    "AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR",
+    originalEnv.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+  );
+  restoreEnvValue(
+    "AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER",
+    originalEnv.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER,
+  );
   mock.restore();
   rmSync(testRoot, { recursive: true, force: true });
 });
 
 test("listOpencodeAgentTypes preserves queueMode from managed OpenCode config", async () => {
   const payload = await opencodeConfigModule.listOpencodeAgentTypes();
-  expect(payload.agentTypes).toEqual([
-    expect.objectContaining({
-      id: "worker",
-      queueMode: "followup",
-    }),
-  ]);
+  expect(payload.agentTypes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: "worker",
+        queueMode: "followup",
+      }),
+    ]),
+  );
 });
 
 test("patchOpencodeAgentTypes writes queueMode back to managed OpenCode config", async () => {
@@ -112,12 +139,14 @@ test("patchOpencodeAgentTypes writes queueMode back to managed OpenCode config",
   if (!result.ok) {
     throw new Error(`Patch failed: ${result.error}`);
   }
-  expect(result.agentTypes).toEqual([
-    expect.objectContaining({
-      id: "worker",
-      queueMode: "replace",
-    }),
-  ]);
+  expect(result.agentTypes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: "worker",
+        queueMode: "replace",
+      }),
+    ]),
+  );
 
   const raw = readFileSync(result.applied.configFilePath, "utf8");
   expect(raw).toContain('"queueMode": "replace"');

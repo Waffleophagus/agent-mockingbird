@@ -250,10 +250,6 @@ export function createRunRoutes(runService: RunService) {
             for (const event of replay.events) {
               emit(event);
               if (closed) return true;
-              if (isTerminalType(event)) {
-                requestTerminalClose();
-                return true;
-              }
             }
             if (replay.hasMore) {
               continue;

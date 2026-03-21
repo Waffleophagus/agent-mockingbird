@@ -11,6 +11,8 @@ afterEach(() => {
 
 test("agent_type_manager validate_patch accepts and forwards queueMode", async () => {
   const fetchMock = mock(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const requestUrl = typeof _input === "string" ? _input : _input.url;
+    expect(requestUrl).toContain("/validate");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(
       JSON.stringify({

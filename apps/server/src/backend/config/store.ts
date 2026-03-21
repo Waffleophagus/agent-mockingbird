@@ -15,6 +15,7 @@ import {
   type AgentTypeDefinition,
   type AgentMockingbirdConfig,
 } from "./schema";
+import { isPlainObject, stableSerialize as stableStringify } from "./serialization";
 import { ConfigApplyError, type AgentMockingbirdConfigSnapshot } from "./types";
 import { resolveWorkspaceAlignment } from "../workspace/resolve";
 
@@ -60,10 +61,6 @@ function backupPathFor(configPath: string) {
   return `${configPath}${BACKUP_SUFFIX}`;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
 function appearsToBeOpencodeConfig(raw: unknown) {
   if (!isPlainObject(raw)) return false;
   const schema = raw.$schema;
@@ -72,17 +69,6 @@ function appearsToBeOpencodeConfig(raw: unknown) {
 
 function normalizeStringList(values: string[]) {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))];
-}
-
-function stableStringify(value: unknown): string {
-  if (value === null) return "null";
-  if (typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
-  if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(item => stableStringify(item)).join(",")}]`;
-  if (!isPlainObject(value)) return JSON.stringify(value);
-  const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-  const serializedEntries = entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`);
-  return `{${serializedEntries.join(",")}}`;
 }
 
 function computeConfigHash(config: AgentMockingbirdConfig) {

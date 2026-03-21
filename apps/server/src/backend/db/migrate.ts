@@ -49,12 +49,10 @@ const migrationDb = drizzle({ client: sqlite, schema });
 console.log(`Running SQLite migrations from ${migrationsFolder}`);
 console.log(`Target database: ${getResolvedDbPath()}`);
 
-if (tableExists("__drizzle_migrations")) {
-  migrate(migrationDb, { migrationsFolder });
-} else if (tableExists("sessions")) {
-  console.log("Bootstrap schema detected; skipping Drizzle migrations");
-} else {
-  migrate(migrationDb, { migrationsFolder });
+if (!tableExists("__drizzle_migrations") && tableExists("sessions")) {
+  console.log("Bootstrap schema detected; running migrations");
 }
+
+migrate(migrationDb, { migrationsFolder });
 
 console.log("Migrations complete");

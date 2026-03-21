@@ -5,6 +5,7 @@ import {
 } from "./policy";
 import type { AgentMockingbirdConfig } from "./schema";
 import { runSemanticValidation } from "./semantic";
+import { isPlainObject, stableSerialize } from "./serialization";
 import { runSmokeTest } from "./smoke";
 import {
   assertExpectedHashMatches,
@@ -22,21 +23,16 @@ import {
   type ConfigSmokeTestSummary,
 } from "./types";
 
-export {
-  ConfigApplyError,
-  type ApplyConfigResult,
-} from "./types";
+export { ConfigApplyError, type ApplyConfigResult } from "./types";
 
-async function applyCandidateConfig(
-  input: {
-    currentPath: string;
-    currentConfig: AgentMockingbirdConfig;
-    candidate: AgentMockingbirdConfig;
-    runSemanticValidation: boolean;
-    runSmokeValidation: boolean;
-    autoRollbackOnFailure: boolean;
-  },
-): Promise<{
+async function applyCandidateConfig(input: {
+  currentPath: string;
+  currentConfig: AgentMockingbirdConfig;
+  candidate: AgentMockingbirdConfig;
+  runSemanticValidation: boolean;
+  runSmokeValidation: boolean;
+  autoRollbackOnFailure: boolean;
+}): Promise<{
   snapshot: ReturnType<typeof persistConfigSnapshot>;
   semantic: ConfigSemanticSummary;
   smokeTest: ConfigSmokeTestSummary | null;
@@ -55,20 +51,30 @@ async function applyCandidateConfig(
     return { snapshot, semantic, smokeTest };
   }
 
-  const attemptedSnapshot = persistConfigSnapshot(input.currentPath, input.candidate);
+  const attemptedSnapshot = persistConfigSnapshot(
+    input.currentPath,
+    input.candidate,
+  );
   try {
     const smokeTest = await runSmokeTest(input.candidate);
     return { snapshot: attemptedSnapshot, semantic, smokeTest };
   } catch (error) {
-    let rollbackSnapshot: ReturnType<typeof persistConfigSnapshot> | null = null;
+    let rollbackSnapshot: ReturnType<typeof persistConfigSnapshot> | null =
+      null;
     try {
-      rollbackSnapshot = persistConfigSnapshot(input.currentPath, input.currentConfig);
+      rollbackSnapshot = persistConfigSnapshot(
+        input.currentPath,
+        input.currentConfig,
+      );
     } catch (rollbackError) {
       const rollbackMessage =
-        rollbackError instanceof Error ? rollbackError.message : "Failed to rollback config";
+        rollbackError instanceof Error
+          ? rollbackError.message
+          : "Failed to rollback config";
       throw new ConfigApplyError("rollback", rollbackMessage, {
         attemptedHash: attemptedSnapshot.hash,
-        originalError: error instanceof Error ? error.message : "Smoke test failed",
+        originalError:
+          error instanceof Error ? error.message : "Smoke test failed",
       });
     }
 
@@ -81,7 +87,8 @@ async function applyCandidateConfig(
       });
     }
 
-    const message = error instanceof Error ? error.message : "Smoke test failed";
+    const message =
+      error instanceof Error ? error.message : "Smoke test failed";
     throw new ConfigApplyError("smoke", message, {
       rolledBack: true,
       attemptedHash: attemptedSnapshot.hash,
@@ -90,23 +97,16 @@ async function applyCandidateConfig(
   }
 }
 
-export { ensureConfigSnapshot as ensureConfigFile, getConfigSnapshot, getConfig };
+export {
+  ensureConfigSnapshot as ensureConfigFile,
+  getConfigSnapshot,
+  getConfig,
+};
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function stableSerialize(value: unknown): string {
-  if (value === null) return "null";
-  if (typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
-  if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(item => stableSerialize(item)).join(",")}]`;
-  if (!isPlainObject(value)) return JSON.stringify(value);
-  const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
-  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`).join(",")}}`;
-}
-
-function shouldRunSemanticValidation(current: AgentMockingbirdConfig, candidate: AgentMockingbirdConfig) {
+function shouldRunSemanticValidation(
+  current: AgentMockingbirdConfig,
+  candidate: AgentMockingbirdConfig,
+) {
   const currentSemanticInputs = {
     baseUrl: current.runtime.opencode.baseUrl,
     providerId: current.runtime.opencode.providerId,
@@ -123,7 +123,10 @@ function shouldRunSemanticValidation(current: AgentMockingbirdConfig, candidate:
     imageModel: candidate.runtime.opencode.imageModel,
     smallModel: candidate.runtime.opencode.smallModel,
   };
-  return stableSerialize(currentSemanticInputs) !== stableSerialize(candidateSemanticInputs);
+  return (
+    stableSerialize(currentSemanticInputs) !==
+    stableSerialize(candidateSemanticInputs)
+  );
 }
 
 function shouldRunSmokeValidation(
@@ -156,7 +159,10 @@ export async function applyConfigPatch(input: {
     policy = evaluateConfigPolicyForPatch(current.config, input.patch);
     assertConfigPolicyAllows(policy);
     if (policy.requireExpectedHash && !input.expectedHash) {
-      throw new ConfigApplyError("request", "expectedHash is required in safe mode");
+      throw new ConfigApplyError(
+        "request",
+        "expectedHash is required in safe mode",
+      );
     }
   }
   assertExpectedHashMatches(current.hash, input.expectedHash);
@@ -169,7 +175,10 @@ export async function applyConfigPatch(input: {
   }
 
   const runSmokeValidation = shouldRunSmokeValidation(policy, input);
-  const runSemanticValidation = shouldRunSemanticValidation(current.config, candidate);
+  const runSemanticValidation = shouldRunSemanticValidation(
+    current.config,
+    candidate,
+  );
   const validated = await applyCandidateConfig({
     currentPath: current.path,
     currentConfig: current.config,
@@ -201,13 +210,19 @@ export async function replaceConfig(input: {
     policy = evaluateConfigPolicyForReplace(current.config, candidate);
     assertConfigPolicyAllows(policy);
     if (policy.requireExpectedHash && !input.expectedHash) {
-      throw new ConfigApplyError("request", "expectedHash is required in safe mode");
+      throw new ConfigApplyError(
+        "request",
+        "expectedHash is required in safe mode",
+      );
     }
   }
   assertExpectedHashMatches(current.hash, input.expectedHash);
 
   const runSmokeValidation = shouldRunSmokeValidation(policy, input);
-  const runSemanticValidation = shouldRunSemanticValidation(current.config, candidate);
+  const runSemanticValidation = shouldRunSemanticValidation(
+    current.config,
+    candidate,
+  );
   const validated = await applyCandidateConfig({
     currentPath: current.path,
     currentConfig: current.config,
