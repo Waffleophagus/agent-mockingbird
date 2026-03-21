@@ -19,6 +19,7 @@ const DEFAULT_SCOPE = "waffleophagus";
 const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org/";
 const PUBLIC_NPM_REGISTRY = "https://registry.npmjs.org/";
 const DEFAULT_TAG = "latest";
+const PACKAGE_NAME = "agent-mockingbird";
 const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".agent-mockingbird");
 const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
 const UNIT_OPENCODE = "opencode.service";
@@ -396,7 +397,12 @@ function firstExistingPath(candidates) {
 }
 
 function resolveAgentMockingbirdAppDir(paths) {
-  return firstExistingPath([paths.agentMockingbirdAppDirGlobal, paths.agentMockingbirdAppDirLocal]);
+  return firstExistingPath([
+    paths.agentMockingbirdAppDirGlobal,
+    paths.agentMockingbirdAppDirLocal,
+    paths.agentMockingbirdAppDirScopedGlobal,
+    paths.agentMockingbirdAppDirScopedLocal,
+  ]);
 }
 
 function resolveAgentMockingbirdBin(paths) {
@@ -872,7 +878,7 @@ function buildInstallSummary({ args, paths }) {
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
   return summarizeActionPlan("Install plan", [
-    `- Target package: @${args.scope.replace(/^@/, "")}/agent-mockingbird (${target})`,
+    `- Target package: ${PACKAGE_NAME} (${target})`,
     `- Private registry scope: @${args.scope.replace(/^@/, "")} -> ${args.registryUrl}`,
     `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, opencode-ai)`,
     `- Install root: ${paths.rootDir}`,
@@ -886,7 +892,7 @@ function buildInstallSummary({ args, paths }) {
       ? `   - bun: ${success(`found at ${resolveBunBinary(paths)}`)}`
       : `   - bun: ${warn(`not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`)}`,
     `3. Install/refresh OpenCode CLI dependency (\`opencode-ai@${opencodePackageVersion}\`) from npmjs.`,
-    `4. Install Agent Mockingbird package (@${args.scope.replace(/^@/, "")}/agent-mockingbird) from your scoped registry.`,
+    `4. Install Agent Mockingbird package (${PACKAGE_NAME}) from npm.`,
     "5. Create/refresh runtime directories under the install root.",
     `6. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
     `7. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
@@ -908,7 +914,7 @@ function buildUpdateSummary({ args, paths }) {
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
   return summarizeActionPlan("Update plan", [
-    `- Update target: @${args.scope.replace(/^@/, "")}/agent-mockingbird (${target})`,
+    `- Update target: ${PACKAGE_NAME} (${target})`,
     `- Install root: ${paths.rootDir}`,
     "",
     "What this update does:",
@@ -940,7 +946,7 @@ function buildUpdateDryRun({ args, paths }) {
   const hasLoginctl = commandExists("loginctl");
 
   const actions = [
-    `Refresh package @${args.scope.replace(/^@/, "")}/agent-mockingbird (${target})`,
+    `Refresh package ${PACKAGE_NAME} (${target})`,
     "Refresh opencode-ai dependency",
     hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
     "Reseed workspace skills from bundled package",
@@ -1062,10 +1068,9 @@ async function confirmInstall(args, paths, mode) {
   }
 }
 
-function packageSpec(scope, version, tag) {
-  const normalizedScope = scope.replace(/^@/, "");
+function packageSpec(_scope, version, tag) {
   const target = version || tag;
-  return `@${normalizedScope}/agent-mockingbird@${target}`;
+  return `${PACKAGE_NAME}@${target}`;
 }
 
 function readInstalledVersion(paths) {
@@ -1868,6 +1873,8 @@ export const testing = {
  * @typedef {{
  *   agentMockingbirdAppDirGlobal?: string,
  *   agentMockingbirdAppDirLocal?: string,
+ *   agentMockingbirdAppDirScopedGlobal?: string,
+ *   agentMockingbirdAppDirScopedLocal?: string,
  * }} ReadOpenCodePackageVersionPaths
  */
 
@@ -1912,6 +1919,8 @@ function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv
   if (paths) {
     add(path.join(paths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
     add(path.join(paths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
+    add(path.join(paths.agentMockingbirdAppDirScopedGlobal, "opencode.lock.json"));
+    add(path.join(paths.agentMockingbirdAppDirScopedLocal, "opencode.lock.json"));
   }
 
   const explicitRoot = env.AGENT_MOCKINGBIRD_ROOT_DIR?.trim();
@@ -1924,6 +1933,8 @@ function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv
     });
     add(path.join(derivedPaths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
     add(path.join(derivedPaths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
+    add(path.join(derivedPaths.agentMockingbirdAppDirScopedGlobal, "opencode.lock.json"));
+    add(path.join(derivedPaths.agentMockingbirdAppDirScopedLocal, "opencode.lock.json"));
   }
 
   return candidates;
@@ -2005,7 +2016,7 @@ async function installOrUpdate(args, mode) {
   const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
   if (!agentMockingbirdAppDir) {
     throw new Error(
-      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal} and ${paths.agentMockingbirdAppDirLocal}`,
+      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal}, ${paths.agentMockingbirdAppDirLocal}, ${paths.agentMockingbirdAppDirScopedGlobal}, and ${paths.agentMockingbirdAppDirScopedLocal}`,
     );
   }
   const runtimeAssetsSource = prepareRuntimeAssetSources(agentMockingbirdAppDir);

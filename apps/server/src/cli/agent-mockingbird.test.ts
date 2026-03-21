@@ -39,9 +39,9 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
     expect(version).toBe("1.2.99");
   });
 
-  test("resolves version from installed package root", () => {
+  test("resolves version from unscoped installed package root", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-cli-test-"));
-    const appDir = path.join(tempRoot, "npm", "lib", "node_modules", "@waffleophagus", "agent-mockingbird");
+    const appDir = path.join(tempRoot, "npm", "lib", "node_modules", "agent-mockingbird");
     fs.mkdirSync(appDir, { recursive: true });
     fs.writeFileSync(
       path.join(appDir, "opencode.lock.json"),
@@ -61,6 +61,35 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
       });
 
       expect(version).toBe("1.2.27");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("resolves version from scoped installed package root for compatibility", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-cli-scoped-test-"));
+    const appDir = path.join(tempRoot, "npm", "lib", "node_modules", "@waffleophagus", "agent-mockingbird");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "opencode.lock.json"),
+      JSON.stringify({ packageVersion: "1.2.29" }),
+      "utf8",
+    );
+
+    try {
+      const version = testing.readOpenCodePackageVersion({
+        paths: {
+          agentMockingbirdAppDirGlobal: path.join(tempRoot, "missing-unscoped-global"),
+          agentMockingbirdAppDirLocal: path.join(tempRoot, "missing-unscoped-local"),
+          agentMockingbirdAppDirScopedGlobal: appDir,
+          agentMockingbirdAppDirScopedLocal: path.join(tempRoot, "missing-scoped-local"),
+        },
+        env: {},
+        argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+        moduleDir: "/tmp/fake-module",
+      });
+
+      expect(version).toBe("1.2.29");
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

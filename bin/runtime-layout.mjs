@@ -33,6 +33,10 @@ export function pathsFor({ rootDir, scope, userUnitDir }) {
   const workspaceDir = path.join(rootDir, "workspace");
   const dataDir = path.join(rootDir, "data");
   const localBinDir = path.join(process.env.HOME || "", ".local", "bin");
+  const scopedAppDirGlobal = path.join(npmPrefix, "lib", "node_modules", `@${normalizedScope}`, "agent-mockingbird");
+  const scopedAppDirLocal = path.join(npmPrefix, "node_modules", `@${normalizedScope}`, "agent-mockingbird");
+  const unscopedAppDirGlobal = path.join(npmPrefix, "lib", "node_modules", "agent-mockingbird");
+  const unscopedAppDirLocal = path.join(npmPrefix, "node_modules", "agent-mockingbird");
 
   return {
     rootDir,
@@ -46,8 +50,10 @@ export function pathsFor({ rootDir, scope, userUnitDir }) {
     logsDir: path.join(rootDir, "logs"),
     etcDir: path.join(rootDir, "etc"),
     npmrcPath: path.join(rootDir, "etc", "npmrc"),
-    agentMockingbirdAppDirGlobal: path.join(npmPrefix, "lib", "node_modules", `@${normalizedScope}`, "agent-mockingbird"),
-    agentMockingbirdAppDirLocal: path.join(npmPrefix, "node_modules", `@${normalizedScope}`, "agent-mockingbird"),
+    agentMockingbirdAppDirGlobal: unscopedAppDirGlobal,
+    agentMockingbirdAppDirLocal: unscopedAppDirLocal,
+    agentMockingbirdAppDirScopedGlobal: scopedAppDirGlobal,
+    agentMockingbirdAppDirScopedLocal: scopedAppDirLocal,
     agentMockingbirdBinGlobal: path.join(npmPrefix, "bin", "agent-mockingbird"),
     agentMockingbirdBinLocal: path.join(npmPrefix, "node_modules", ".bin", "agent-mockingbird"),
     opencodeBinGlobal: path.join(npmPrefix, "bin", "opencode"),
