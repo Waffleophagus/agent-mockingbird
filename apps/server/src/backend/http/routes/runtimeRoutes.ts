@@ -9,6 +9,7 @@ import {
   buildAgentMockingbirdSystemPrompt,
 } from "../../opencode/systemPrompt";
 import { resolveRuntimeSessionScope } from "../../runtime/sessionScope";
+import { parseJsonWithSchema } from "../parsers";
 
 const runtimePatchSchema = z
   .object({
@@ -27,6 +28,28 @@ const runtimePatchSchema = z
       })
       .partial()
       .optional(),
+  })
+  .strict();
+
+const runtimeConfigPatchRequestSchema = z
+  .object({
+    patch: runtimePatchSchema.optional(),
+    expectedHash: z.unknown().optional(),
+  })
+  .passthrough();
+
+const runtimeReplaceBodySchema = z
+  .object({
+    config: z.unknown().optional(),
+    expectedHash: z.unknown().optional(),
+  })
+  .strict();
+
+const notifyMainThreadBodySchema = z
+  .object({
+    sessionId: z.unknown().optional(),
+    prompt: z.unknown().optional(),
+    severity: z.unknown().optional(),
   })
   .strict();
 
@@ -62,18 +85,23 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
     "/api/mockingbird/runtime/config": {
       GET: () => Response.json(buildRuntimePayload()),
       PATCH: async (req: Request) => {
-        const body = (await req.json()) as Record<string, unknown>;
-        const parsed = runtimePatchSchema.safeParse(body.patch ?? body);
-        if (!parsed.success) {
+        const parsedBody = await parseJsonWithSchema(req, runtimeConfigPatchRequestSchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
+        const patchCandidate = body.patch ?? body;
+        const parsedPatch = runtimePatchSchema.safeParse(patchCandidate);
+        if (!parsedPatch.success) {
           return Response.json(
-            { error: parsed.error.issues[0]?.message ?? "Invalid runtime config patch" },
+            { error: parsedPatch.error.issues[0]?.message ?? "Invalid runtime config patch" },
             { status: 400 },
           );
         }
 
         try {
           const result = await applyConfigPatchSafe({
-            patch: parsed.data,
+            patch: parsedPatch.data,
             expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
             runSmokeTest: false,
           });
@@ -91,7 +119,11 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
 
     "/api/mockingbird/runtime/config/replace": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as { config?: unknown; expectedHash?: unknown };
+        const parsedBody = await parseJsonWithSchema(req, runtimeReplaceBodySchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
         try {
           const result = await replaceConfigSafe({
             config: body.config,
@@ -159,11 +191,11 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
 
     "/api/mockingbird/runtime/notify-main-thread": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as {
-          sessionId?: unknown;
-          prompt?: unknown;
-          severity?: unknown;
-        };
+        const parsedBody = await parseJsonWithSchema(req, notifyMainThreadBodySchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
         const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
         const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
         const severity =

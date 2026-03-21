@@ -1,6 +1,14 @@
+import { z } from "zod";
+
 import type { RuntimeEngine } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
 import { RuntimeSessionBusyError, RuntimeSessionNotFoundError, RuntimeTurnTimeoutError } from "../../runtime";
+import { parseJsonWithSchema } from "../parsers";
+
+const chatRequestSchema = z.object({
+  sessionId: z.string(),
+  content: z.string(),
+});
 
 function preflightFailureStatusCode(name: string | undefined, message: string | undefined) {
   if (
@@ -20,9 +28,13 @@ export function createChatRoutes(runtime: RuntimeEngine) {
   return {
     "/api/chat": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as { sessionId?: string; content?: string };
-        const content = body.content?.trim();
-        if (!body.sessionId || !content) {
+        const parsed = await parseJsonWithSchema(req, chatRequestSchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const sessionId = parsed.body.sessionId.trim();
+        const content = parsed.body.content.trim();
+        if (!sessionId || !content) {
           return Response.json({ error: "sessionId and content are required" }, { status: 400 });
         }
 
@@ -49,7 +61,7 @@ export function createChatRoutes(runtime: RuntimeEngine) {
         let ack;
         try {
           ack = await runtime.sendUserMessage({
-            sessionId: body.sessionId,
+            sessionId,
             content,
           });
         } catch (error) {

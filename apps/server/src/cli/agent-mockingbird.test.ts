@@ -68,6 +68,46 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
     }
   });
 
+  test("keeps explicit next tag instead of replacing it with installed version", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-cli-next-test-"));
+    const binDir = path.join(tempRoot, "package", "bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, "package", "package.json"),
+      JSON.stringify({ version: "0.0.1" }),
+      "utf8",
+    );
+
+    try {
+      const args = testing.applyDefaultInstallTarget(
+        {
+          command: "update",
+          positionals: ["update"],
+          yes: false,
+          json: false,
+          dryRun: false,
+          skipLinger: false,
+          purgeData: false,
+          keepData: false,
+          registryUrl: "https://registry.npmjs.org/",
+          scope: "waffleophagus",
+          tag: "next",
+          version: undefined,
+          tagExplicit: true,
+          versionExplicit: false,
+          rootDir: "/tmp/agent-mockingbird",
+          legacyImportFlags: [],
+        },
+        binDir,
+      );
+
+      expect(args.version).toBeUndefined();
+      expect(args.tag).toBe("next");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test("prefers explicit env version", () => {
     const version = testing.readOpenCodePackageVersion({
       env: { AGENT_MOCKINGBIRD_OPENCODE_VERSION: "1.2.99" },

@@ -37,8 +37,56 @@ import {
   resolveConfiguredMcpServers,
 } from "../../mcp/service";
 import { syncMemoryIndex } from "../../memory/service";
-import { parseStringListBody } from "../parsers";
+import { parseJsonWithSchema, parseStringListBody } from "../parsers";
 import type { RuntimeEventStream } from "../sse";
+
+const configPatchRequestSchema = z
+  .object({
+    patch: z.unknown().optional(),
+    expectedHash: z.unknown().optional(),
+    runSmokeTest: z.boolean().optional(),
+  })
+  .strict();
+
+const configReplaceRequestSchema = z
+  .object({
+    config: z.unknown().optional(),
+    expectedHash: z.unknown().optional(),
+    runSmokeTest: z.boolean().optional(),
+  })
+  .passthrough();
+
+const configSkillsBodySchema = z
+  .object({
+    skills: z.array(z.string()),
+    expectedHash: z.unknown().optional(),
+  })
+  .strict();
+
+const configManagedSkillImportBodySchema = z
+  .object({
+    id: z.string().optional(),
+    content: z.string().optional(),
+    enable: z.boolean().optional(),
+    expectedHash: z.unknown().optional(),
+  })
+  .strict();
+
+const configOpenCodeAgentsBodySchema = z
+  .object({
+    upserts: z.unknown().optional(),
+    deletes: z.unknown().optional(),
+    expectedHash: z.unknown().optional(),
+  })
+  .strict();
+
+const configMcpsBodySchema = z
+  .object({
+    servers: z.array(z.unknown()).optional(),
+    mcps: z.array(z.string()).optional(),
+    expectedHash: z.unknown().optional(),
+  })
+  .strict();
 
 function toErrorResponse(error: unknown) {
   if (error instanceof ConfigApplyError) {
@@ -161,7 +209,11 @@ function publishSkillsCatalogUpdated(eventStream: RuntimeEventStream, revision: 
 }
 
 async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Request) {
-  const body = (await req.json()) as Record<string, unknown>;
+  const parsedBody = await parseJsonWithSchema(req, configMcpsBodySchema);
+  if (!parsedBody.ok) {
+    return parsedBody.response;
+  }
+  const body = parsedBody.body;
   const parsedServers = z.array(configuredMcpServerSchema).safeParse(body.servers);
   if (parsedServers.success) {
     const servers = parsedServers.data;
@@ -259,7 +311,11 @@ async function runMcpAction(
 }
 
 async function importManagedSkill(eventStream: RuntimeEventStream, req: Request) {
-  const body = (await req.json()) as Record<string, unknown>;
+  const parsedBody = await parseJsonWithSchema(req, configManagedSkillImportBodySchema);
+  if (!parsedBody.ok) {
+    return parsedBody.response;
+  }
+  const body = parsedBody.body;
   const rawId = typeof body.id === "string" ? body.id : "";
   const content = typeof body.content === "string" ? body.content : "";
   const enable = typeof body.enable === "boolean" ? body.enable : true;
@@ -311,7 +367,11 @@ const openclawImportSchema = z.object({
 });
 
 async function importOpenclawBootstrap(req: Request) {
-  const body = (await req.json()) as Record<string, unknown>;
+  const parsedBody = await parseJsonWithSchema(req, z.record(z.string(), z.unknown()));
+  if (!parsedBody.ok) {
+    return parsedBody.response;
+  }
+  const body = parsedBody.body;
   let source: { mode: "local"; path: string } | { mode: "git"; url: string; ref?: string };
   let targetDirectory: string | undefined;
 
@@ -377,11 +437,11 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
         return Response.json(snapshot);
       },
       PATCH: async (req: Request) => {
-        const body = (await req.json()) as {
-          patch?: unknown;
-          expectedHash?: unknown;
-          runSmokeTest?: unknown;
-        };
+        const parsedBody = await parseJsonWithSchema(req, configPatchRequestSchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
         return respondWithConfigMutation(
           eventStream,
           () =>
@@ -394,11 +454,11 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
         );
       },
       PUT: async (req: Request) => {
-        const body = (await req.json()) as {
-          config?: unknown;
-          expectedHash?: unknown;
-          runSmokeTest?: unknown;
-        };
+        const parsedBody = await parseJsonWithSchema(req, configReplaceRequestSchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
         return respondWithConfigMutation(
           eventStream,
           () =>
@@ -414,11 +474,11 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
 
     "/api/config/patch-safe": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as {
-          patch?: unknown;
-          expectedHash?: unknown;
-          runSmokeTest?: unknown;
-        };
+        const parsedBody = await parseJsonWithSchema(req, configPatchRequestSchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
         return respondWithConfigMutation(
           eventStream,
           () =>
@@ -434,11 +494,11 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
 
     "/api/config/replace-safe": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as {
-          config?: unknown;
-          expectedHash?: unknown;
-          runSmokeTest?: unknown;
-        };
+        const parsedBody = await parseJsonWithSchema(req, configReplaceRequestSchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
         return respondWithConfigMutation(
           eventStream,
           () =>
@@ -463,14 +523,14 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
         });
       },
       PUT: async (req: Request) => {
-        const body = (await req.json()) as Record<string, unknown>;
-        const values = parseStringListBody(body, "skills");
-        if (!values) {
-          return Response.json({ error: "skills must be a string array" }, { status: 400 });
+        const parsedBody = await parseJsonWithSchema(req, configSkillsBodySchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
         }
+        const body = parsedBody.body;
         try {
           const result = await setEnabledSkillsFromCatalog({
-            skills: values,
+            skills: body.skills,
             expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
           });
           publishSkillsCatalogUpdated(eventStream, result.hash);
@@ -537,7 +597,11 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
     "/api/opencode/agents": {
       GET: async () => getOpencodeAgents(),
       PATCH: async (req: Request) => {
-        const body = (await req.json()) as Record<string, unknown>;
+        const parsedBody = await parseJsonWithSchema(req, configOpenCodeAgentsBodySchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
         const expectedHash = typeof body.expectedHash === "string" ? body.expectedHash.trim() : "";
         if (!expectedHash) {
           return Response.json({ error: "expectedHash is required" }, { status: 400 });
@@ -590,7 +654,11 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
 
     "/api/opencode/agents/validate": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as Record<string, unknown>;
+        const parsedBody = await parseJsonWithSchema(req, configOpenCodeAgentsBodySchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const body = parsedBody.body;
         const validation = await validateOpencodeAgentPatch({
           upserts: body.upserts,
           deletes: body.deletes,

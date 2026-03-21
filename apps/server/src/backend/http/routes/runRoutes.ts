@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { getConfigSnapshot } from "../../config/service";
 import type { RuntimeInputPart } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
@@ -5,6 +7,7 @@ import { createLogger } from "../../logging/logger";
 import type { RunService } from "../../run/service";
 import type { AgentRunEvent } from "../../run/types";
 import { createBoundedQueue, type BoundedQueue } from "../boundedQueue";
+import { parseJsonWithSchema } from "../parsers";
 
 const RUN_STREAM_MAX_QUEUED_FRAMES = 256;
 const RUN_STREAM_DRAIN_DELAY_MS = 25;
@@ -64,20 +67,27 @@ function normalizeRuntimeInputParts(value: unknown): RuntimeInputPart[] {
   return parts;
 }
 
+const runCreateBodySchema = z
+  .object({
+    sessionId: z.string(),
+    content: z.string().optional(),
+    parts: z.array(z.unknown()).optional(),
+    agent: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    idempotencyKey: z.string().optional(),
+  })
+  .strict();
+
 export function createRunRoutes(runService: RunService) {
   return {
     "/api/runs": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as {
-          sessionId?: string;
-          content?: string;
-          parts?: RuntimeInputPart[];
-          agent?: string;
-          metadata?: Record<string, unknown>;
-          idempotencyKey?: string;
-        };
-
-        const sessionId = body.sessionId?.trim();
+        const parsed = await parseJsonWithSchema(req, runCreateBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const body = parsed.body;
+        const sessionId = body.sessionId.trim();
         const content = body.content?.trim();
         const parts = normalizeRuntimeInputParts(body.parts);
         if (!sessionId || (!content && parts.length === 0)) {

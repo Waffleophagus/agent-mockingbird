@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import {
   getMemoryStatus,
   listMemoryWriteEvents,
@@ -8,7 +10,37 @@ import {
   syncMemoryIndex,
   validateMemoryRememberInput,
 } from "../../memory/service";
-import { parseMemoryRememberBody } from "../parsers";
+import { parseJsonWithSchema, parseMemoryRememberBody } from "../parsers";
+
+const memoryRetrieveBodySchema = z
+  .object({
+    query: z.string(),
+    maxResults: z.number().optional(),
+    minScore: z.number().optional(),
+    debug: z.boolean().optional(),
+  })
+  .strict();
+
+const memoryReadBodySchema = z
+  .object({
+    path: z.string(),
+    from: z.number().optional(),
+    lines: z.number().optional(),
+  })
+  .strict();
+
+const memoryRememberBodySchema = z
+  .object({
+    source: z.string().optional(),
+    content: z.string(),
+    sessionId: z.string().optional(),
+    topic: z.string().optional(),
+    ttl: z.number().optional(),
+    entities: z.array(z.string()).optional(),
+    supersedes: z.array(z.string()).optional(),
+    confidence: z.number().optional(),
+  })
+  .strict();
 
 export function createMemoryRoutes() {
   return {
@@ -63,8 +95,12 @@ export function createMemoryRoutes() {
 
     "/api/mockingbird/memory/retrieve": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as { query?: string; maxResults?: number; minScore?: number; debug?: boolean };
-        const query = body.query?.trim();
+        const parsed = await parseJsonWithSchema(req, memoryRetrieveBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const body = parsed.body;
+        const query = body.query.trim();
         if (!query) {
           return Response.json({ error: "query is required" }, { status: 400 });
         }
@@ -88,8 +124,12 @@ export function createMemoryRoutes() {
 
     "/api/mockingbird/memory/read": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as { path?: string; from?: number; lines?: number };
-        const relPath = body.path?.trim();
+        const parsed = await parseJsonWithSchema(req, memoryReadBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const body = parsed.body;
+        const relPath = body.path.trim();
         if (!relPath) {
           return Response.json({ error: "path is required" }, { status: 400 });
         }
@@ -109,7 +149,11 @@ export function createMemoryRoutes() {
 
     "/api/mockingbird/memory/remember": {
       POST: async (req: Request) => {
-        const body = parseMemoryRememberBody(await req.json());
+        const parsed = await parseJsonWithSchema(req, memoryRememberBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const body = parseMemoryRememberBody(parsed.body);
         if (!body) {
           return Response.json(
             {
@@ -131,7 +175,11 @@ export function createMemoryRoutes() {
 
     "/api/mockingbird/memory/remember/validate": {
       POST: async (req: Request) => {
-        const body = parseMemoryRememberBody(await req.json());
+        const parsed = await parseJsonWithSchema(req, memoryRememberBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const body = parseMemoryRememberBody(parsed.body);
         if (!body) {
           return Response.json(
             {

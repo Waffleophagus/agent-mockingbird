@@ -1,4 +1,5 @@
 import type { CronService } from "../../cron/service";
+import { parseJsonWithSchema } from "../parsers";
 import { cronJobCreateSchema, cronJobPatchSchema, cronManageSchema } from "../schemas";
 
 export function createCronRoutes(cronService: CronService) {
@@ -24,15 +25,12 @@ export function createCronRoutes(cronService: CronService) {
         }
       },
       POST: async (req: Request) => {
-        const parsed = cronJobCreateSchema.safeParse(await req.json());
-        if (!parsed.success) {
-          return Response.json(
-            { error: parsed.error.issues[0]?.message ?? "Invalid cron job payload" },
-            { status: 400 },
-          );
+        const body = await parseJsonWithSchema(req, cronJobCreateSchema);
+        if (!body.ok) {
+          return body.response;
         }
         try {
-          const job = await cronService.createJob(parsed.data);
+          const job = await cronService.createJob(body.body);
           return Response.json({ job }, { status: 201 });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to create cron job";
@@ -50,15 +48,12 @@ export function createCronRoutes(cronService: CronService) {
         return Response.json({ job });
       },
       PATCH: async (req: Request & { params: { id: string } }) => {
-        const parsed = cronJobPatchSchema.safeParse(await req.json());
-        if (!parsed.success) {
-          return Response.json(
-            { error: parsed.error.issues[0]?.message ?? "Invalid cron job patch payload" },
-            { status: 400 },
-          );
+        const body = await parseJsonWithSchema(req, cronJobPatchSchema);
+        if (!body.ok) {
+          return body.response;
         }
         try {
-          const job = await cronService.updateJob(req.params.id, parsed.data);
+          const job = await cronService.updateJob(req.params.id, body.body);
           return Response.json({ job });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to update cron job";
@@ -121,15 +116,12 @@ export function createCronRoutes(cronService: CronService) {
 
     "/api/mockingbird/cron/manage": {
       POST: async (req: Request) => {
-        const parsed = cronManageSchema.safeParse(await req.json());
-        if (!parsed.success) {
-          return Response.json(
-            { error: parsed.error.issues[0]?.message ?? "Invalid cron manage request" },
-            { status: 400 },
-          );
+        const body = await parseJsonWithSchema(req, cronManageSchema);
+        if (!body.ok) {
+          return body.response;
         }
         try {
-          const command = parsed.data;
+          const command = body.body;
           switch (command.action) {
             case "list_jobs":
               return Response.json({ ok: true, action: command.action, jobs: await cronService.listJobs() });

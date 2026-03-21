@@ -93,6 +93,16 @@ function parseArgs(argv) {
       args.command = "help";
       continue;
     }
+    if (arg === "--next") {
+      args.tag = "next";
+      args.tagExplicit = true;
+      continue;
+    }
+    if (arg === "--latest") {
+      args.tag = "latest";
+      args.tagExplicit = true;
+      continue;
+    }
     if (arg === "--skip-memory-sync") {
       args.legacyImportFlags.push(arg);
       continue;
@@ -185,7 +195,7 @@ function normalizeRegistryUrl(url) {
 }
 
 function printHelp() {
-  console.log(`agent-mockingbird\n\nUsage:\n  agent-mockingbird <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: installed package version, otherwise ${DEFAULT_TAG})\n  --version <version>    Exact agent-mockingbird version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+  console.log(`agent-mockingbird\n\nUsage:\n  agent-mockingbird <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: installed package version, otherwise ${DEFAULT_TAG})\n  --next                 Shortcut for --tag next\n  --latest               Shortcut for --tag latest\n  --version <version>    Exact agent-mockingbird version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
 }
 
 function colorEnabled() {

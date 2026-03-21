@@ -1,4 +1,5 @@
 import type { Config as OpencodeConfig } from "@opencode-ai/sdk/client";
+import { z } from "zod";
 
 import { configuredMcpServerSchema } from "../../config/schema";
 import { getConfigSnapshot } from "../../config/service";
@@ -11,6 +12,13 @@ import {
   createOpencodeV2ClientFromConnection,
   unwrapSdkData,
 } from "../../opencode/client";
+import { parseJsonWithSchema } from "../parsers";
+
+const mcpServersBodySchema = z
+  .object({
+    servers: z.array(z.unknown()),
+  })
+  .strict();
 
 function getConnectionConfig() {
   const snapshot = getConfigSnapshot();
@@ -88,10 +96,11 @@ export function createMcpRoutes() {
         }
       },
       PUT: async (req: Request) => {
-        const body = (await req.json()) as { servers?: unknown };
-        if (!Array.isArray(body.servers)) {
-          return Response.json({ error: "servers must be an array" }, { status: 400 });
+        const parsedBody = await parseJsonWithSchema(req, mcpServersBodySchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
         }
+        const body = parsedBody.body;
         const parsedServers = [];
         for (const server of body.servers) {
           const parsed = configuredMcpServerSchema.safeParse(server);
@@ -103,81 +112,106 @@ export function createMcpRoutes() {
           }
           parsedServers.push(parsed.data);
         }
-        await persistMcpServers(parsedServers);
-        const config = await loadOpencodeConfig();
-        return Response.json({ servers: normalizeServers(config), status: await loadStatuses().catch(() => ({})) });
+        try {
+          await persistMcpServers(parsedServers);
+          const config = await loadOpencodeConfig();
+          return Response.json({ servers: normalizeServers(config), status: await loadStatuses().catch(() => ({})) });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to persist MCP config";
+          return Response.json({ error: message }, { status: 502 });
+        }
       },
     },
 
     "/api/mockingbird/mcp/:id/connect": {
       POST: async (req: Request & { params: { id: string } }) => {
-        const connection = getConnectionConfig();
-        const client = createOpencodeV2ClientFromConnection(connection);
-        const connected = unwrapSdkData<boolean>(
-          await client.mcp.connect(
-            { name: req.params.id },
-            {
-              responseStyle: "data",
-              throwOnError: true,
-              signal: AbortSignal.timeout(connection.timeoutMs),
-            },
-          ),
-        );
-        return Response.json({ connected, status: await loadStatuses() });
+        try {
+          const connection = getConnectionConfig();
+          const client = createOpencodeV2ClientFromConnection(connection);
+          const connected = unwrapSdkData<boolean>(
+            await client.mcp.connect(
+              { name: req.params.id },
+              {
+                responseStyle: "data",
+                throwOnError: true,
+                signal: AbortSignal.timeout(connection.timeoutMs),
+              },
+            ),
+          );
+          return Response.json({ connected, status: await loadStatuses() });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to connect MCP server";
+          return Response.json({ error: message }, { status: 502 });
+        }
       },
     },
 
     "/api/mockingbird/mcp/:id/disconnect": {
       POST: async (req: Request & { params: { id: string } }) => {
-        const connection = getConnectionConfig();
-        const client = createOpencodeV2ClientFromConnection(connection);
-        const disconnected = unwrapSdkData<boolean>(
-          await client.mcp.disconnect(
-            { name: req.params.id },
-            {
-              responseStyle: "data",
-              throwOnError: true,
-              signal: AbortSignal.timeout(connection.timeoutMs),
-            },
-          ),
-        );
-        return Response.json({ disconnected, status: await loadStatuses() });
+        try {
+          const connection = getConnectionConfig();
+          const client = createOpencodeV2ClientFromConnection(connection);
+          const disconnected = unwrapSdkData<boolean>(
+            await client.mcp.disconnect(
+              { name: req.params.id },
+              {
+                responseStyle: "data",
+                throwOnError: true,
+                signal: AbortSignal.timeout(connection.timeoutMs),
+              },
+            ),
+          );
+          return Response.json({ disconnected, status: await loadStatuses() });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to disconnect MCP server";
+          return Response.json({ error: message }, { status: 502 });
+        }
       },
     },
 
     "/api/mockingbird/mcp/:id/auth/start": {
       POST: async (req: Request & { params: { id: string } }) => {
-        const connection = getConnectionConfig();
-        const client = createOpencodeV2ClientFromConnection(connection);
-        const authorization = unwrapSdkData<{ authorizationUrl: string }>(
-          await client.mcp.auth.start(
-            { name: req.params.id },
-            {
-              responseStyle: "data",
-              throwOnError: true,
-              signal: AbortSignal.timeout(connection.timeoutMs),
-            },
-          ),
-        );
-        return Response.json(authorization);
+        try {
+          const connection = getConnectionConfig();
+          const client = createOpencodeV2ClientFromConnection(connection);
+          const authorization = unwrapSdkData<{ authorizationUrl: string }>(
+            await client.mcp.auth.start(
+              { name: req.params.id },
+              {
+                responseStyle: "data",
+                throwOnError: true,
+                signal: AbortSignal.timeout(connection.timeoutMs),
+              },
+            ),
+          );
+          return Response.json(authorization);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to start MCP auth";
+          return Response.json({ error: message }, { status: 502 });
+        }
       },
     },
 
     "/api/mockingbird/mcp/:id/auth/remove": {
       POST: async (req: Request & { params: { id: string } }) => {
-        const connection = getConnectionConfig();
-        const client = createOpencodeV2ClientFromConnection(connection);
-        const result = unwrapSdkData<{ success: true }>(
-          await client.mcp.auth.remove(
-            { name: req.params.id },
-            {
-              responseStyle: "data",
-              throwOnError: true,
-              signal: AbortSignal.timeout(connection.timeoutMs),
-            },
-          ),
-        );
-        return Response.json(result);
+        try {
+          const connection = getConnectionConfig();
+          const client = createOpencodeV2ClientFromConnection(connection);
+          const result = unwrapSdkData<{ success: true }>(
+            await client.mcp.auth.remove(
+              { name: req.params.id },
+              {
+                responseStyle: "data",
+                throwOnError: true,
+                signal: AbortSignal.timeout(connection.timeoutMs),
+              },
+            ),
+          );
+          return Response.json(result);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to remove MCP auth";
+          return Response.json({ error: message }, { status: 502 });
+        }
       },
     },
   };
