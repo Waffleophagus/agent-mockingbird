@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -29,9 +29,9 @@ jobs:
           bun-version: latest
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org/
 
       - name: Install dependencies
@@ -222,7 +222,7 @@ jobs:
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${NPM_REGISTRY_URL}" --provenance --access public --tag "${{ steps.meta.outputs.npm_tag }}"
+          npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${NPM_REGISTRY_URL}" --access public --tag "${{ steps.meta.outputs.npm_tag }}"
 
       - name: Verify published dist-tags
         if: steps.meta.outputs.should_publish == 'true'
