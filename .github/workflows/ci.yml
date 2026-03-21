@@ -74,50 +74,49 @@ jobs:
 
           if [[ "${should_publish}" == "true" ]]; then
             registry_json="$(curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true)"
-            version_info="$(REGISTRY_JSON="${registry_json}" node <<'EOF'
-            const raw = process.env.REGISTRY_JSON || "";
-            let latest = "";
-            let next = "";
+            version_info="$(REGISTRY_JSON="${registry_json}" node -e '
+              const raw = process.env.REGISTRY_JSON || "";
+              let latest = "";
+              let next = "";
 
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              latest = parsed?.["dist-tags"]?.latest ?? "";
-              next = parsed?.["dist-tags"]?.next ?? "";
-            }
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                latest = parsed?.["dist-tags"]?.latest ?? "";
+                next = parsed?.["dist-tags"]?.next ?? "";
+              }
 
-            const stablePattern = /^(\d+)\.(\d+)\.(\d+)$/;
-            const nextPattern = /^(\d+)\.(\d+)\.(\d+)-next\.(\d+)$/;
-            const parseStable = (value) => {
-              const match = value.match(stablePattern);
-              return match ? match.slice(1).map(Number) : null;
-            };
-            const parseNext = (value) => {
-              const match = value.match(nextPattern);
-              return match
-                ? {
-                    major: Number(match[1]),
-                    minor: Number(match[2]),
-                    patch: Number(match[3]),
-                    prerelease: Number(match[4]),
-                  }
-                : null;
-            };
+              const stablePattern = /^(\d+)\.(\d+)\.(\d+)$/;
+              const nextPattern = /^(\d+)\.(\d+)\.(\d+)-next\.(\d+)$/;
+              const parseStable = (value) => {
+                const match = value.match(stablePattern);
+                return match ? match.slice(1).map(Number) : null;
+              };
+              const parseNext = (value) => {
+                const match = value.match(nextPattern);
+                return match
+                  ? {
+                      major: Number(match[1]),
+                      minor: Number(match[2]),
+                      patch: Number(match[3]),
+                      prerelease: Number(match[4]),
+                    }
+                  : null;
+              };
 
-            const stable = parseStable(latest) ?? [0, 0, 0];
-            const [major, minor, patch] = stable;
-            const nextBase = `${major}.${minor}.${patch + 1}`;
-            const currentNext = parseNext(next);
-            const nextCounter =
-              currentNext && `${currentNext.major}.${currentNext.minor}.${currentNext.patch}` === nextBase
-                ? currentNext.prerelease + 1
-                : 1;
+              const stable = parseStable(latest) ?? [0, 0, 0];
+              const [major, minor, patch] = stable;
+              const nextBase = `${major}.${minor}.${patch + 1}`;
+              const currentNext = parseNext(next);
+              const nextCounter =
+                currentNext && `${currentNext.major}.${currentNext.minor}.${currentNext.patch}` === nextBase
+                  ? currentNext.prerelease + 1
+                  : 1;
 
-            console.log(`LATEST_VERSION=${latest}`);
-            console.log(`NEXT_VERSION=${next}`);
-            console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
-            console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
-            EOF
-            )"
+              console.log(`LATEST_VERSION=${latest}`);
+              console.log(`NEXT_VERSION=${next}`);
+              console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
+              console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
+            ')"
             eval "${version_info}"
             latest_version="${LATEST_VERSION}"
             next_version="${NEXT_VERSION}"
