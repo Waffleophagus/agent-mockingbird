@@ -8,6 +8,7 @@ import type {
   AgentMockingbirdConfig,
   ConfiguredMcpServer,
 } from "../config/schema";
+import { configuredMcpServerSchema } from "../config/schema";
 import {
   createOpencodeClientFromConnection,
   createOpencodeV2ClientFromConnection,
@@ -89,7 +90,7 @@ function fromOpencodeMcp(
   if (!isPlainObject(value)) return null;
   const enabled = value.enabled !== false;
   if (value.type === "remote" && typeof value.url === "string") {
-    return {
+    const candidate = {
       id,
       type: "remote",
       enabled,
@@ -98,9 +99,11 @@ function fromOpencodeMcp(
       oauth: value.oauth === false ? "off" : "auto",
       timeoutMs: typeof value.timeout === "number" ? value.timeout : undefined,
     };
+    const parsed = configuredMcpServerSchema.safeParse(candidate);
+    return parsed.success ? parsed.data : null;
   }
   if (value.type === "local" && Array.isArray(value.command)) {
-    return {
+    const candidate = {
       id,
       type: "local",
       enabled,
@@ -111,6 +114,8 @@ function fromOpencodeMcp(
       environment: normalizeRecordStringMap(value.environment),
       timeoutMs: typeof value.timeout === "number" ? value.timeout : undefined,
     };
+    const parsed = configuredMcpServerSchema.safeParse(candidate);
+    return parsed.success ? parsed.data : null;
   }
   return null;
 }
@@ -137,6 +142,28 @@ function toOpencodeMcp(server: ConfiguredMcpServer): Record<string, unknown> {
       ? { timeout: server.timeoutMs }
       : {}),
   };
+}
+
+export function readConfiguredMcpServersFromOpencodeConfig(
+  config: Config,
+): Array<ConfiguredMcpServer> {
+  const raw = (config as Record<string, unknown>).mcp;
+  if (!isPlainObject(raw)) return [];
+  return Object.entries(raw)
+    .map(([id, value]) => fromOpencodeMcp(id.trim(), value))
+    .filter((server): server is ConfiguredMcpServer => Boolean(server))
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export function serializeConfiguredMcpServersToOpencodeConfig(
+  servers: Array<ConfiguredMcpServer>,
+): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(
+    normalizeMcpServerDefinitions(servers).map((server) => [
+      server.id,
+      toOpencodeMcp(server),
+    ]),
+  );
 }
 
 function normalizeMcpStatus(value: unknown): RuntimeMcpStatus {
@@ -166,11 +193,8 @@ export function readConfiguredMcpServersFromWorkspaceConfig(
   try {
     const raw = readFileSync(opencodeConfigFilePath(config), "utf8");
     const parsed = parseJsonc(raw);
-    if (!isPlainObject(parsed) || !isPlainObject(parsed.mcp)) return [];
-    return Object.entries(parsed.mcp)
-      .map(([id, value]) => fromOpencodeMcp(id.trim(), value))
-      .filter((server): server is ConfiguredMcpServer => Boolean(server))
-      .sort((left, right) => left.id.localeCompare(right.id));
+    if (!isPlainObject(parsed)) return [];
+    return readConfiguredMcpServersFromOpencodeConfig(parsed as Config);
   } catch {
     return [];
   }

@@ -26,7 +26,7 @@ export function createBoundedQueue<T>(options: BoundedQueueOptions<T>): BoundedQ
   };
 
   const scheduleDrain = () => {
-    if (closed || draining || drainTimer) return;
+    if (closed || drainTimer) return;
     drainTimer = setTimeout(() => {
       drainTimer = null;
       drain();

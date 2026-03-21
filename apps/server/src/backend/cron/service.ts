@@ -6,7 +6,12 @@ import {
   selectOne,
   stepRowToModel,
 } from "./repository";
-import type { CronDefinitionRow, CronInstanceRow, CronStepRow } from "./repository";
+import type {
+  CronDefinitionRow,
+  CronInstanceRow,
+  CronInstanceWithAgentInvokedRow,
+  CronStepRow,
+} from "./repository";
 import { ensureCronTables } from "./storage";
 import type {
   CronHealthSnapshot,
@@ -43,6 +48,7 @@ export class CronService {
     ensureCronTables();
     this.executor = new CronExecutor(runtime, {
       getJob: (jobId) => this.getJob(jobId),
+      markAgentInvoked: (instanceId) => this.markAgentInvoked(instanceId),
       setInstanceState: (input) => this.setInstanceState(input),
     });
   }
@@ -231,16 +237,10 @@ export class CronService {
     ensureCronTables();
     const limit = Math.max(1, Math.min(500, input?.limit ?? 100));
     const rows = input?.jobId
-      ? selectAll<CronInstanceRow>(
+      ? selectAll<CronInstanceWithAgentInvokedRow>(
           `
           SELECT
-            i.*,
-            EXISTS(
-              SELECT 1
-              FROM cron_job_steps s
-              WHERE s.job_instance_id = i.id
-                AND s.step_kind = 'agent'
-            ) AS agent_invoked
+            i.*
           FROM cron_job_instances i
           WHERE i.job_definition_id = ?1
           ORDER BY i.created_at DESC
@@ -249,16 +249,10 @@ export class CronService {
           input.jobId,
           limit,
         )
-      : selectAll<CronInstanceRow>(
+      : selectAll<CronInstanceWithAgentInvokedRow>(
           `
           SELECT
-            i.*,
-            EXISTS(
-              SELECT 1
-              FROM cron_job_steps s
-              WHERE s.job_instance_id = i.id
-                AND s.step_kind = 'agent'
-            ) AS agent_invoked
+            i.*
           FROM cron_job_instances i
           ORDER BY i.created_at DESC
           LIMIT ?1
@@ -294,11 +288,11 @@ export class CronService {
         .query(
           `
           INSERT INTO cron_job_instances (
-            id, job_definition_id, scheduled_for, state, attempt, next_attempt_at,
+            id, job_definition_id, scheduled_for, state, agent_invoked, attempt, next_attempt_at,
             lease_owner, lease_expires_at, last_heartbeat_at,
             result_summary, error_json, created_at, updated_at
           )
-          VALUES (?1, ?2, ?3, 'queued', 0, NULL, NULL, NULL, NULL, NULL, NULL, ?4, ?4)
+          VALUES (?1, ?2, ?3, 'queued', 0, 0, NULL, NULL, NULL, NULL, NULL, NULL, ?4, ?4)
           ON CONFLICT(job_definition_id, scheduled_for) DO NOTHING
         `,
         )
@@ -486,11 +480,11 @@ export class CronService {
             .query(
               `
               INSERT INTO cron_job_instances (
-                id, job_definition_id, scheduled_for, state, attempt, next_attempt_at,
+                id, job_definition_id, scheduled_for, state, agent_invoked, attempt, next_attempt_at,
                 lease_owner, lease_expires_at, last_heartbeat_at,
                 result_summary, error_json, created_at, updated_at
               )
-              VALUES (?1, ?2, ?3, 'queued', 0, NULL, NULL, NULL, NULL, NULL, NULL, ?4, ?4)
+              VALUES (?1, ?2, ?3, 'queued', 0, 0, NULL, NULL, NULL, NULL, NULL, NULL, ?4, ?4)
               ON CONFLICT(job_definition_id, scheduled_for) DO NOTHING
             `,
             )
@@ -656,5 +650,19 @@ export class CronService {
         input.error === undefined ? null : JSON.stringify(input.error),
         nowMs(),
       );
+  }
+
+  private markAgentInvoked(instanceId: string) {
+    sqlite
+      .query(
+        `
+        UPDATE cron_job_instances
+        SET
+          agent_invoked = 1,
+          updated_at = ?2
+        WHERE id = ?1
+      `,
+      )
+      .run(instanceId, nowMs());
   }
 }

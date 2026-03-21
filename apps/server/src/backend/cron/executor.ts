@@ -1,8 +1,8 @@
 import { pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 
 import { insertStep } from "./repository";
 import type {
-  CronConditionalModule,
   CronConditionalModuleContext,
   CronHandlerResult,
   CronJobDefinition,
@@ -31,6 +31,7 @@ interface CronExecutorAdapter {
     max_attempts: number;
     retry_backoff_ms: number;
   } | null;
+  markAgentInvoked(instanceId: string): void;
   setInstanceState(input: {
     instanceId: string;
     state: "failed" | "completed" | "dead";
@@ -46,6 +47,7 @@ export class CronExecutor {
     private runtime: RuntimeEngine,
     private adapter: {
       getJob(jobId: string): Promise<CronJobDefinition | null>;
+      markAgentInvoked: CronExecutorAdapter["markAgentInvoked"];
       setInstanceState: CronExecutorAdapter["setInstanceState"];
     },
   ) {}
@@ -198,23 +200,64 @@ export class CronExecutor {
     ctx: CronConditionalModuleContext,
   ): Promise<CronHandlerResult> {
     const timeoutMs = getConfigSnapshot().config.runtime.cron.conditionalModuleTimeoutMs;
-    const moduleUrl = pathToFileURL(absoluteModulePath).href;
-    const task = (async () => {
-      const loaded = (await import(`${moduleUrl}?cronRun=${Date.now()}`)) as {
-        default?: CronConditionalModule;
-      };
-      if (typeof loaded.default !== "function") {
-        throw new Error("conditional module must export a default function");
-      }
-      return normalizeConditionalModuleResult(await loaded.default(ctx));
-    })();
+    let workerCtx: CronConditionalModuleContext;
+    try {
+      workerCtx = JSON.parse(JSON.stringify(ctx)) as CronConditionalModuleContext;
+    } catch {
+      throw new Error(
+        "conditional module context must be JSON-serializable before it can be sent to a worker",
+      );
+    }
 
-    return await Promise.race([
-      task,
-      new Promise<CronHandlerResult>((_resolve, reject) => {
-        setTimeout(() => reject(new Error(`conditional module timed out after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
+    const worker = new Worker(new URL("./conditionalModuleWorker.ts", import.meta.url), {
+      workerData: {
+        absoluteModulePath,
+        moduleUrl: pathToFileURL(absoluteModulePath).href,
+        ctx: workerCtx,
+      },
+    });
+
+    return await new Promise<CronHandlerResult>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        void worker.terminate().catch(() => {});
+        reject(new Error(`conditional module timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        worker.removeListener("message", handleMessage);
+        worker.removeListener("error", handleError);
+        worker.removeListener("exit", handleExit);
+      };
+
+      const finish = (cb: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        cb();
+      };
+
+      const handleMessage = (message: unknown) => {
+        finish(() => resolve(normalizeConditionalModuleResult(message)));
+      };
+
+      const handleError = (error: Error) => {
+        finish(() => reject(error));
+      };
+
+      const handleExit = (code: number) => {
+        if (code === 0 || settled) return;
+        finish(() => reject(new Error(`conditional module worker exited with code ${code}`)));
+      };
+
+      worker.on("message", handleMessage);
+      worker.on("error", handleError);
+      worker.on("exit", handleExit);
+    });
   }
 
   async executeInstance(
@@ -313,6 +356,7 @@ export class CronExecutor {
         startedAt,
         finishedAt: nowMs(),
       });
+      this.adapter.markAgentInvoked(instanceId);
       throw new Error(agentResult.error);
     }
     insertStep({
@@ -324,6 +368,7 @@ export class CronExecutor {
       startedAt,
       finishedAt: nowMs(),
     });
+    this.adapter.markAgentInvoked(instanceId);
     return agentResult.summary;
   }
 
@@ -419,6 +464,7 @@ export class CronExecutor {
         startedAt: agentStartedAt,
         finishedAt: nowMs(),
       });
+      this.adapter.markAgentInvoked(instanceId);
       throw new Error(agentResult.error);
     }
     insertStep({
@@ -430,6 +476,7 @@ export class CronExecutor {
       startedAt: agentStartedAt,
       finishedAt: nowMs(),
     });
+    this.adapter.markAgentInvoked(instanceId);
     return `${finalSummary}; ${agentResult.summary}`;
   }
 }

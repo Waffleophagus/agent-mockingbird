@@ -218,8 +218,8 @@ const runtimeCronSchema = z
 
 const runtimeHeartbeatActiveHoursSchema = z
   .object({
-    start: z.string().regex(/^\d{2}:\d{2}$/),
-    end: z.string().regex(/^\d{2}:\d{2}$/),
+    start: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+    end: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
     timezone: z.string().min(1),
   })
   .strict();
@@ -227,7 +227,7 @@ const runtimeHeartbeatActiveHoursSchema = z
 const runtimeHeartbeatSchema = z
   .object({
     enabled: z.boolean().default(true),
-    interval: z.string().regex(/^\d+[mhd]$/).default("30m"),
+    interval: z.string().regex(/^([1-9]\d*)(m|h|d)$/).default("30m"),
     agentId: z.string().min(1).default("build"),
     model: z.string().min(1),
     prompt: z.string().min(1).default(
@@ -237,6 +237,8 @@ const runtimeHeartbeatSchema = z
     activeHours: runtimeHeartbeatActiveHoursSchema.nullable().default(null),
   })
   .strict();
+
+const runtimeAgentHeartbeatsSchema = z.record(z.string(), runtimeHeartbeatSchema).default({});
 
 const runtimeQueueSchema = z
   .object({
@@ -259,6 +261,7 @@ const runtimeConfigPolicySchema = z
       "runtime.runStream",
       "runtime.memory",
       "runtime.heartbeat",
+      "runtime.agentHeartbeats",
       "runtime.cron",
       "runtime.queue",
       "ui.skills",
@@ -337,6 +340,7 @@ export const agentMockingbirdConfigSchema = z
           ackMaxChars: 300,
           activeHours: null,
         }),
+        agentHeartbeats: runtimeAgentHeartbeatsSchema,
         cron: runtimeCronSchema.default({
           defaultMaxAttempts: 3,
           defaultRetryBackoffMs: 30_000,
@@ -360,6 +364,7 @@ export const agentMockingbirdConfigSchema = z
             "runtime.runStream",
             "runtime.memory",
             "runtime.heartbeat",
+            "runtime.agentHeartbeats",
             "runtime.cron",
             "runtime.queue",
             "ui.skills",

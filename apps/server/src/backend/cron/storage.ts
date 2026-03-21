@@ -39,6 +39,7 @@ export function ensureCronTables() {
       job_definition_id TEXT NOT NULL REFERENCES cron_job_definitions(id) ON DELETE CASCADE,
       scheduled_for INTEGER NOT NULL,
       state TEXT NOT NULL CHECK (state IN ('queued', 'leased', 'running', 'completed', 'failed', 'dead')),
+      agent_invoked INTEGER NOT NULL DEFAULT 0,
       attempt INTEGER NOT NULL DEFAULT 0,
       next_attempt_at INTEGER,
       lease_owner TEXT,
@@ -81,6 +82,9 @@ export function ensureCronTables() {
   }
   if (!tableHasColumn("cron_job_definitions", "thread_session_id")) {
     sqlite.exec("ALTER TABLE cron_job_definitions ADD COLUMN thread_session_id TEXT");
+  }
+  if (!tableHasColumn("cron_job_instances", "agent_invoked")) {
+    sqlite.exec("ALTER TABLE cron_job_instances ADD COLUMN agent_invoked INTEGER NOT NULL DEFAULT 0");
   }
 }
 

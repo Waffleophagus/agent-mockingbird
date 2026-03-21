@@ -177,6 +177,7 @@ export function createRunRoutes(runService: RunService) {
         let outboundQueue: BoundedQueue<string> | null = null;
         let closed = false;
         let cursor = initialAfterSeq;
+        let closeAfterDrainPromise: Promise<void> | null = null;
 
         const close = () => {
           if (closed) return;
@@ -201,6 +202,26 @@ export function createRunRoutes(runService: RunService) {
           }
         };
 
+        const closeAfterDrain = () => {
+          if (closeAfterDrainPromise) {
+            return closeAfterDrainPromise;
+          }
+          closeAfterDrainPromise = (async () => {
+            const deadlineAt = Date.now() + RUN_STREAM_DRAIN_DELAY_MS;
+            while (!closed) {
+              if (!outboundQueue || outboundQueue.size() === 0) {
+                break;
+              }
+              if (Date.now() >= deadlineAt) {
+                break;
+              }
+              await new Promise(resolve => setTimeout(resolve, Math.max(1, RUN_STREAM_DRAIN_DELAY_MS / 5)));
+            }
+            close();
+          })();
+          return closeAfterDrainPromise;
+        };
+
         const emit = (event: AgentRunEvent) => {
           if (closed || !outboundQueue) return;
           if (event.seq <= cursor) return;
@@ -211,9 +232,7 @@ export function createRunRoutes(runService: RunService) {
               close();
               return;
             }
-            setTimeout(() => {
-              close();
-            }, RUN_STREAM_DRAIN_DELAY_MS * 2);
+            void closeAfterDrain();
           }
         };
 
@@ -267,8 +286,11 @@ export function createRunRoutes(runService: RunService) {
             if (closed) return;
             const latestRun = runService.getRunById(runId);
             if (latestRun?.state === "completed" || latestRun?.state === "failed") {
-              const deadlineAt = Date.now() + RUN_STREAM_DRAIN_DELAY_MS * 10;
+              const deadlineAt = Date.now() + RUN_STREAM_DRAIN_DELAY_MS;
               while (!closed) {
+                if (Date.now() >= deadlineAt) {
+                  break;
+                }
                 const finalReplay = runService.listRunEvents({
                   runId,
                   afterSeq: cursor,
@@ -278,12 +300,16 @@ export function createRunRoutes(runService: RunService) {
                   emit(event);
                   if (closed) return;
                 }
-                if (finalReplay.events.length > 0 || Date.now() >= deadlineAt) {
+                if (finalReplay.events.length > 0) {
+                  cursor = finalReplay.events[finalReplay.events.length - 1]?.seq ?? cursor;
+                  if (finalReplay.hasMore) {
+                    continue;
+                  }
                   break;
                 }
                 await new Promise(resolve => setTimeout(resolve, RUN_STREAM_DRAIN_DELAY_MS));
               }
-              close();
+              await closeAfterDrain();
               return;
             }
 

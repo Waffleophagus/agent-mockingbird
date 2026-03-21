@@ -89,7 +89,7 @@ test("example config no longer ships heartbeat config on the default build agent
   expect(buildAgent?.heartbeat).toBeUndefined();
 });
 
-test("parseConfig migrates legacy agent heartbeat blocks into runtime.heartbeat", () => {
+test("parseConfig migrates legacy agent heartbeat blocks into runtime.agentHeartbeats", () => {
   const filePath = resolveExampleConfigPath();
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
     runtime?: Record<string, unknown>;
@@ -113,11 +113,72 @@ test("parseConfig migrates legacy agent heartbeat blocks into runtime.heartbeat"
   };
 
   const parsed = parseConfig(raw);
-  expect(parsed.runtime.heartbeat.agentId).toBe("build");
-  expect(parsed.runtime.heartbeat.model).toBe("opencode/legacy-heartbeat-model");
-  expect(parsed.runtime.heartbeat.interval).toBe("45m");
-  expect(parsed.runtime.heartbeat.prompt).toBe("legacy heartbeat prompt");
-  expect(parsed.runtime.heartbeat.ackMaxChars).toBe(123);
+  expect(parsed.runtime.agentHeartbeats.build?.agentId).toBe("build");
+  expect(parsed.runtime.agentHeartbeats.build?.model).toBe("opencode/legacy-heartbeat-model");
+  expect(parsed.runtime.agentHeartbeats.build?.interval).toBe("45m");
+  expect(parsed.runtime.agentHeartbeats.build?.prompt).toBe("legacy heartbeat prompt");
+  expect(parsed.runtime.agentHeartbeats.build?.ackMaxChars).toBe(123);
   expect(parsed.ui.agentTypes[0]?.id).toBe("build");
   expect("heartbeat" in (parsed.ui.agentTypes[0] ?? {})).toBe(false);
+});
+
+test("parseConfig preserves multiple legacy agent heartbeat blocks", () => {
+  const filePath = resolveExampleConfigPath();
+  const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    runtime?: Record<string, unknown>;
+    ui?: { agentTypes?: Array<Record<string, unknown>> };
+  };
+  if (!raw.runtime || !raw.ui?.agentTypes) {
+    throw new Error("Test fixture missing runtime/ui.agentTypes");
+  }
+
+  delete raw.runtime.heartbeat;
+  delete raw.runtime.agentHeartbeats;
+  raw.ui.agentTypes = [
+    {
+      id: "build",
+      model: "opencode/build-heartbeat-model",
+      heartbeat: {
+        interval: "45m",
+      },
+    },
+    {
+      id: "review",
+      model: "opencode/review-heartbeat-model",
+      heartbeat: {
+        enabled: false,
+        interval: "2h",
+        prompt: "review heartbeat prompt",
+        ackMaxChars: 222,
+      },
+    },
+    {
+      model: "opencode/fallback-heartbeat-model",
+      heartbeat: {
+        interval: "1d",
+      },
+    },
+  ];
+
+  const parsed = parseConfig(raw);
+  expect(Object.keys(parsed.runtime.agentHeartbeats).sort()).toEqual(["build", "build-1", "review"]);
+  expect(parsed.runtime.agentHeartbeats.build).toMatchObject({
+    agentId: "build",
+    model: "opencode/build-heartbeat-model",
+    interval: "45m",
+  });
+  expect(parsed.runtime.agentHeartbeats.review).toMatchObject({
+    agentId: "review",
+    model: "opencode/review-heartbeat-model",
+    enabled: false,
+    interval: "2h",
+    prompt: "review heartbeat prompt",
+    ackMaxChars: 222,
+  });
+  expect(parsed.runtime.agentHeartbeats["build-1"]).toMatchObject({
+    agentId: "build",
+    model: "opencode/fallback-heartbeat-model",
+    interval: "1d",
+  });
+  expect(parsed.ui.agentTypes.every(agentType => !("heartbeat" in agentType))).toBe(true);
 });

@@ -313,6 +313,7 @@ function buildLegacyBootstrappedConfig() {
         ackMaxChars: 300,
         activeHours: null,
       },
+      agentHeartbeats: {},
       cron: {
         defaultMaxAttempts: 3,
         defaultRetryBackoffMs: 30_000,
@@ -335,6 +336,7 @@ function buildLegacyBootstrappedConfig() {
           "runtime.runStream",
           "runtime.memory",
           "runtime.heartbeat",
+          "runtime.agentHeartbeats",
           "runtime.cron",
           "runtime.queue",
           "ui.skills",
@@ -406,6 +408,45 @@ function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
   return root;
 }
 
+function normalizeLegacyAgentHeartbeat(rawAgentType: Record<string, unknown>): Record<string, unknown> | null {
+  const heartbeat = isPlainObject(rawAgentType.heartbeat) ? rawAgentType.heartbeat : null;
+  if (!heartbeat) return null;
+
+  const model =
+    typeof rawAgentType.model === "string" && rawAgentType.model.trim()
+      ? rawAgentType.model.trim()
+      : `${DEFAULT_OPENCODE_PROVIDER_ID}/${DEFAULT_OPENCODE_MODEL_ID}`;
+
+  return {
+    enabled: typeof heartbeat.enabled === "boolean" ? heartbeat.enabled : true,
+    interval: typeof heartbeat.interval === "string" && heartbeat.interval.trim() ? heartbeat.interval.trim() : "30m",
+    agentId: typeof rawAgentType.id === "string" && rawAgentType.id.trim() ? rawAgentType.id.trim() : "build",
+    model,
+    prompt:
+      typeof heartbeat.prompt === "string" && heartbeat.prompt.trim()
+        ? heartbeat.prompt.trim()
+        : DEFAULT_HEARTBEAT_PROMPT,
+    ackMaxChars:
+      typeof heartbeat.ackMaxChars === "number" && Number.isFinite(heartbeat.ackMaxChars)
+        ? heartbeat.ackMaxChars
+        : 300,
+    activeHours: isPlainObject(heartbeat.activeHours) ? heartbeat.activeHours : null,
+  };
+}
+
+function buildLegacyHeartbeatAgentKey(rawAgentType: Record<string, unknown>, index: number, usedKeys: Set<string>) {
+  const rawId = typeof rawAgentType.id === "string" ? rawAgentType.id.trim() : "";
+  const baseKey = rawId || "build";
+  let candidate = baseKey;
+  let suffix = rawId ? index + 1 : 1;
+  while (usedKeys.has(candidate)) {
+    candidate = `${baseKey}-${suffix}`;
+    suffix += 1;
+  }
+  usedKeys.add(candidate);
+  return candidate;
+}
+
 function migrateLegacyHeartbeatConfig(raw: unknown): unknown {
   if (!isPlainObject(raw)) return raw;
 
@@ -416,40 +457,27 @@ function migrateLegacyHeartbeatConfig(raw: unknown): unknown {
     ? ui.agentTypes.map(value => (isPlainObject(value) ? { ...value } : value))
     : [];
 
-  let derivedHeartbeat: Record<string, unknown> | null = null;
-  for (const rawAgentType of agentTypes) {
+  const existingAgentHeartbeats = isPlainObject(runtime.agentHeartbeats) ? { ...runtime.agentHeartbeats } : null;
+  const derivedAgentHeartbeats = existingAgentHeartbeats ?? {};
+  const migratedAgentTypes: Record<string, unknown>[] = [];
+  const usedKeys = new Set(Object.keys(derivedAgentHeartbeats));
+
+  for (const [index, rawAgentType] of agentTypes.entries()) {
     if (!isPlainObject(rawAgentType)) continue;
-    const heartbeat = isPlainObject(rawAgentType.heartbeat) ? rawAgentType.heartbeat : null;
-    if (!heartbeat) continue;
+    const normalizedHeartbeat = normalizeLegacyAgentHeartbeat(rawAgentType);
+    if (!normalizedHeartbeat) continue;
+    const agentKey = buildLegacyHeartbeatAgentKey(rawAgentType, index, usedKeys);
+    derivedAgentHeartbeats[agentKey] = normalizedHeartbeat;
+    migratedAgentTypes.push(rawAgentType);
+  }
 
-    if (!derivedHeartbeat) {
-      const model =
-        typeof rawAgentType.model === "string" && rawAgentType.model.trim()
-          ? rawAgentType.model.trim()
-          : `${DEFAULT_OPENCODE_PROVIDER_ID}/${DEFAULT_OPENCODE_MODEL_ID}`;
-      derivedHeartbeat = {
-        enabled: typeof heartbeat.enabled === "boolean" ? heartbeat.enabled : true,
-        interval: typeof heartbeat.interval === "string" && heartbeat.interval.trim() ? heartbeat.interval.trim() : "30m",
-        agentId: typeof rawAgentType.id === "string" && rawAgentType.id.trim() ? rawAgentType.id.trim() : "build",
-        model,
-        prompt:
-          typeof heartbeat.prompt === "string" && heartbeat.prompt.trim()
-            ? heartbeat.prompt.trim()
-            : DEFAULT_HEARTBEAT_PROMPT,
-        ackMaxChars:
-          typeof heartbeat.ackMaxChars === "number" && Number.isFinite(heartbeat.ackMaxChars)
-            ? heartbeat.ackMaxChars
-            : 300,
-        activeHours: isPlainObject(heartbeat.activeHours) ? heartbeat.activeHours : null,
-      };
-    }
-
+  if (Object.keys(derivedAgentHeartbeats).length > 0) {
+    runtime.agentHeartbeats = derivedAgentHeartbeats;
+  }
+  for (const rawAgentType of migratedAgentTypes) {
     delete rawAgentType.heartbeat;
   }
 
-  if (!isPlainObject(runtime.heartbeat) && derivedHeartbeat) {
-    runtime.heartbeat = derivedHeartbeat;
-  }
   root.runtime = runtime;
   if (agentTypes.length > 0) {
     ui.agentTypes = agentTypes;

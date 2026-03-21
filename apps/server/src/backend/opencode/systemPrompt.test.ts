@@ -7,9 +7,11 @@ import type { AgentMockingbirdConfig } from "../config/schema";
 
 const tempDirs: string[] = [];
 const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
+const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
 
 afterEach(() => {
   process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = originalConfigPath;
+  process.env.AGENT_MOCKINGBIRD_DB_PATH = originalDbPath;
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -87,6 +89,8 @@ describe("systemPrompt helpers", () => {
   test("adds session-aware compaction prompt context from the mirrored transcript", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-compaction-session-"));
     tempDirs.push(root);
+    const testDbPath = path.join(root, "agent-mockingbird.compaction-session.test.db");
+    tempDirs.push(testDbPath);
     const workspaceDir = path.join(root, "workspace");
     mkdirSync(workspaceDir, { recursive: true });
     writeFileSync(path.join(workspaceDir, "AGENTS.md"), "# Workspace Guide\n\nUse the workspace guide.\n");
@@ -100,6 +104,7 @@ describe("systemPrompt helpers", () => {
     exampleConfig.runtime.memory.workspaceDir = workspaceDir;
     writeFileSync(path.join(root, "config.json"), JSON.stringify(exampleConfig));
     process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = path.join(root, "config.json");
+    process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
 
     const { appendChatExchange, createSession, resetDatabaseToDefaults, setRuntimeSessionBinding } = await import(
       "../db/repository"

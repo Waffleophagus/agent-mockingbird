@@ -3,6 +3,10 @@ import type { Config as OpencodeConfig } from "@opencode-ai/sdk/client";
 import { configuredMcpServerSchema } from "../../config/schema";
 import { getConfigSnapshot } from "../../config/service";
 import {
+  readConfiguredMcpServersFromOpencodeConfig,
+  serializeConfiguredMcpServersToOpencodeConfig,
+} from "../../mcp/service";
+import {
   createOpencodeClientFromConnection,
   createOpencodeV2ClientFromConnection,
   unwrapSdkData,
@@ -10,15 +14,13 @@ import {
 
 function getConnectionConfig() {
   const snapshot = getConfigSnapshot();
+  const directory =
+    snapshot.config.runtime.opencode.directory || snapshot.config.workspace.pinnedDirectory;
   return {
     baseUrl: snapshot.config.runtime.opencode.baseUrl,
-    directory: snapshot.config.workspace.pinnedDirectory,
+    directory,
     timeoutMs: snapshot.config.runtime.opencode.timeoutMs,
   };
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 async function loadOpencodeConfig() {
@@ -37,30 +39,9 @@ async function persistMcpServers(servers: Array<ReturnType<typeof configuredMcpS
   const connection = getConnectionConfig();
   const client = createOpencodeClientFromConnection(connection);
   const current = await loadOpencodeConfig();
-  const nextMcp = Object.fromEntries(
-    servers.map(server => [
-      server.id,
-      server.type === "remote"
-        ? {
-            type: "remote",
-            url: server.url,
-            enabled: server.enabled,
-            headers: server.headers,
-            ...(server.oauth === "off" ? { oauth: false } : {}),
-            ...(typeof server.timeoutMs === "number" ? { timeout: server.timeoutMs } : {}),
-          }
-        : {
-            type: "local",
-            command: server.command,
-            enabled: server.enabled,
-            environment: server.environment,
-            ...(typeof server.timeoutMs === "number" ? { timeout: server.timeoutMs } : {}),
-          },
-    ]),
-  );
   const nextConfig = {
     ...(current as Record<string, unknown>),
-    mcp: nextMcp,
+    mcp: serializeConfiguredMcpServersToOpencodeConfig(servers),
   } as OpencodeConfig;
 
   await client.config.update({
@@ -77,17 +58,7 @@ async function persistMcpServers(servers: Array<ReturnType<typeof configuredMcpS
 }
 
 function normalizeServers(config: OpencodeConfig) {
-  const raw = (config as Record<string, unknown>).mcp;
-  if (!isPlainObject(raw)) return [];
-  const servers = [];
-  for (const [id, value] of Object.entries(raw)) {
-    if (!isPlainObject(value) || typeof value.type !== "string") continue;
-    const candidate = configuredMcpServerSchema.safeParse({ id, ...value });
-    if (candidate.success) {
-      servers.push(candidate.data);
-    }
-  }
-  return servers.sort((left, right) => left.id.localeCompare(right.id));
+  return readConfiguredMcpServersFromOpencodeConfig(config);
 }
 
 async function loadStatuses() {

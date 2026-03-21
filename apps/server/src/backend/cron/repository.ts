@@ -40,8 +40,8 @@ export interface CronInstanceRow {
   id: string;
   job_definition_id: string;
   scheduled_for: number;
-  agent_invoked: number;
   state: CronJobState;
+  agent_invoked: number;
   attempt: number;
   next_attempt_at: number | null;
   lease_owner: string | null;
@@ -51,6 +51,10 @@ export interface CronInstanceRow {
   error_json: string | null;
   created_at: number;
   updated_at: number;
+}
+
+export interface CronInstanceWithAgentInvokedRow extends CronInstanceRow {
+  agent_invoked: number;
 }
 
 export interface CronStepRow {
@@ -91,7 +95,9 @@ export function definitionRowToModel(row: CronDefinitionRow): CronJobDefinition 
   };
 }
 
-export function instanceRowToModel(row: CronInstanceRow): CronJobInstance {
+export function instanceRowToModel(
+  row: CronInstanceRow | CronInstanceWithAgentInvokedRow,
+): CronJobInstance {
   return {
     id: row.id,
     jobDefinitionId: row.job_definition_id,

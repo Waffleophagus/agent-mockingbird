@@ -19,11 +19,11 @@ function normalizeError(error: unknown) {
 
 function writeLog(level: LogLevel, scope: string, message: string, fields?: LogFields) {
   const payload = {
+    ...(fields ?? {}),
     level,
     scope,
     message,
     at: new Date().toISOString(),
-    ...(fields ?? {}),
   };
   const line = JSON.stringify(payload);
   if (level === "error") {

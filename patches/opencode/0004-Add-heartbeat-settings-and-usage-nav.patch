@@ -220,8 +220,8 @@ index 000000000..95a1770cc
 +    setState("error", "")
 +    try {
 +      const [heartbeat, runtime] = await Promise.all([
-+        waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat"),
-+        waffleJson<RuntimePayload>("/api/waffle/runtime/config"),
++        waffleJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
++        waffleJson<RuntimePayload>("/api/mockingbird/runtime/config"),
 +      ])
 +      setState("status", heartbeat.heartbeat)
 +      setState("runtimeHash", runtime.hash)
@@ -246,7 +246,7 @@ index 000000000..95a1770cc
 +    setState("saving", true)
 +    setState("error", "")
 +    try {
-+      const runtime = await waffleJson<RuntimePayload>("/api/waffle/runtime/config", {
++      const runtime = await waffleJson<RuntimePayload>("/api/mockingbird/runtime/config", {
 +        method: "PATCH",
 +        body: JSON.stringify({
 +          patch: {
@@ -276,7 +276,7 @@ index 000000000..95a1770cc
 +    setState("running", true)
 +    setState("error", "")
 +    try {
-+      const payload = await waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat/run", {
++      const payload = await waffleJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat/run", {
 +        method: "POST",
 +      })
 +      setState("status", payload.heartbeat)
@@ -503,4 +503,3 @@ index 924828c2f..7ed209697 100644
                icon="settings-gear"
 -- 
 2.53.0
-

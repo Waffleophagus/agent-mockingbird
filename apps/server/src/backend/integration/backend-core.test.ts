@@ -1485,6 +1485,7 @@ describe("cron validation and retries", () => {
     let instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
     expect(instances[0]?.state).toBe("failed");
     expect(instances[0]?.attempt).toBe(1);
+    expect(instances[0]?.agentInvoked).toBe(true);
 
     const instanceId = instances[0]?.id;
     expect(instanceId).toBeTruthy();
@@ -1495,6 +1496,7 @@ describe("cron validation and retries", () => {
     instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
     expect(instances[0]?.state).toBe("dead");
     expect(instances[0]?.attempt).toBe(2);
+    expect(instances[0]?.agentInvoked).toBe(true);
   });
 
   test("conditional_agent module can decide to invoke the agent with per-run context", async () => {
@@ -1878,6 +1880,9 @@ describe("cron validation and retries", () => {
 
     expect(spawnCount).toBe(1);
     expect(captured).toEqual([cronThread.id, cronThread.id]);
+    const instances = await cronService.listInstances({ jobId: job.id, limit: 2 });
+    expect(instances).toHaveLength(2);
+    expect(instances.every(instance => instance.agentInvoked)).toBe(true);
     const updatedJob = await cronService.getJob(job.id);
     expect(updatedJob?.threadSessionId).toBe(cronThread.id);
   });

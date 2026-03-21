@@ -6,6 +6,21 @@ import path from "node:path";
 import type { createUsageRoutes as CreateUsageRoutesType } from "./usageRoutes";
 import type * as RepositoryModuleType from "../../db/repository";
 
+const originalNodeEnv = process.env.NODE_ENV;
+const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
+const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
+const originalWorkspaceDir = process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
+const originalEmbedProvider = process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER;
+
+function restoreEnv(key: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}
+
 const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-usage-routes-test-"));
 const testDbPath = path.join(testRoot, "agent-mockingbird.usage-routes.test.db");
 const testConfigPath = path.join(testRoot, "agent-mockingbird.usage-routes.config.json");
@@ -34,6 +49,11 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  restoreEnv("NODE_ENV", originalNodeEnv);
+  restoreEnv("AGENT_MOCKINGBIRD_DB_PATH", originalDbPath);
+  restoreEnv("AGENT_MOCKINGBIRD_CONFIG_PATH", originalConfigPath);
+  restoreEnv("AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR", originalWorkspaceDir);
+  restoreEnv("AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER", originalEmbedProvider);
   rmSync(testRoot, { recursive: true, force: true });
 });
 
@@ -78,6 +98,39 @@ describe("usage routes", () => {
     expect(payload.models).toHaveLength(1);
     expect(payload.models[0]).toMatchObject({ providerId: "anthropic", modelId: "claude-sonnet-4.5" });
     expect(payload.forwardOnlyBreakdown).toBe(true);
+  });
+
+  test("GET /api/usage/dashboard returns 400 for invalid timestamp parameters", async () => {
+    const routes = createUsageRoutes();
+    const handler = routes["/api/usage/dashboard"]?.GET;
+    expect(handler).toBeDefined();
+
+    const startResponse = await handler!(
+      new Request("http://localhost/api/usage/dashboard?startAt=abc"),
+    );
+    expect(startResponse.status).toBe(400);
+    expect(await startResponse.json()).toEqual({
+      error: "startAt must be a non-negative integer timestamp",
+    });
+
+    const endResponse = await handler!(
+      new Request("http://localhost/api/usage/dashboard?endAtExclusive=-1"),
+    );
+    expect(endResponse.status).toBe(400);
+    expect(await endResponse.json()).toEqual({
+      error: "endAtExclusive must be a non-negative integer timestamp",
+    });
+  });
+
+  test("GET /api/usage/dashboard treats omitted and empty timestamp parameters as null", async () => {
+    const routes = createUsageRoutes();
+    const handler = routes["/api/usage/dashboard"]?.GET;
+    expect(handler).toBeDefined();
+
+    const response = await handler!(
+      new Request("http://localhost/api/usage/dashboard?startAt=&endAtExclusive="),
+    );
+    expect(response.status).toBe(200);
   });
 
   test("GET /usage returns standalone usage html", async () => {

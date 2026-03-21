@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
-import { applyConfigPatch, getConfigSnapshot, replaceConfig } from "../../config/service";
+import { applyConfigPatchSafe, getConfigSnapshot, replaceConfigSafe } from "../../config/service";
 import type { CronService } from "../../cron/service";
 import {
   buildAgentMockingbirdCompactionPrompt,
@@ -22,6 +22,7 @@ const runtimePatchSchema = z
       .object({
         memory: z.record(z.string(), z.unknown()).optional(),
         heartbeat: z.record(z.string(), z.unknown()).optional(),
+        agentHeartbeats: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
         cron: z.record(z.string(), z.unknown()).optional(),
       })
       .partial()
@@ -39,6 +40,7 @@ function buildRuntimePayload() {
       runtime: {
         memory: snapshot.config.runtime.memory,
         heartbeat: snapshot.config.runtime.heartbeat,
+        agentHeartbeats: snapshot.config.runtime.agentHeartbeats,
         cron: snapshot.config.runtime.cron,
       },
     },
@@ -70,7 +72,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
         }
 
         try {
-          const result = await applyConfigPatch({
+          const result = await applyConfigPatchSafe({
             patch: parsed.data,
             expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
             runSmokeTest: false,
@@ -91,7 +93,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
       POST: async (req: Request) => {
         const body = (await req.json()) as { config?: unknown; expectedHash?: unknown };
         try {
-          const result = await replaceConfig({
+          const result = await replaceConfigSafe({
             config: body.config,
             expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
             runSmokeTest: false,

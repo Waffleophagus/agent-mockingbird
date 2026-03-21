@@ -1,11 +1,53 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { isActiveHours } from "./activeHours";
-import { deleteLegacyHeartbeatJobs, HEARTBEAT_SYSTEM_JOB_ID, seedDefaultHeartbeatJob } from "./defaultJob";
-import { parseInterval } from "./service";
 import type { HeartbeatConfig } from "./types";
-import { clearCronTables } from "../cron/storage";
-import { sqlite } from "../db/client";
+
+const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
+const originalNodeEnv = process.env.NODE_ENV;
+const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-heartbeat-test-"));
+const testDbPath = path.join(testRoot, "agent-mockingbird.heartbeat.test.db");
+
+process.env.NODE_ENV = "test";
+process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
+
+type SqliteDb = {
+  close?: () => void;
+  query: (sql: string) => {
+    get: (...args: unknown[]) => unknown;
+    all: (...args: unknown[]) => unknown;
+    run: (...args: unknown[]) => { changes: number };
+  };
+};
+
+let parseInterval: (interval: string) => number;
+let clearCronTables: () => void;
+let seedDefaultHeartbeatJob: (createdAt: number) => void;
+let deleteLegacyHeartbeatJobs: () => number;
+let HEARTBEAT_SYSTEM_JOB_ID: string;
+let sqlite: SqliteDb;
+
+beforeAll(async () => {
+  await import("../db/migrate");
+  ({ parseInterval } = await import("./service"));
+  ({ clearCronTables } = await import("../cron/storage"));
+  ({ seedDefaultHeartbeatJob, deleteLegacyHeartbeatJobs, HEARTBEAT_SYSTEM_JOB_ID } = await import("./defaultJob"));
+  ({ sqlite } = await import("../db/client") as unknown as { sqlite: SqliteDb });
+});
+
+beforeEach(() => {
+  clearCronTables();
+});
+
+afterAll(() => {
+  sqlite.close?.();
+  process.env.AGENT_MOCKINGBIRD_DB_PATH = originalDbPath;
+  process.env.NODE_ENV = originalNodeEnv;
+  rmSync(testRoot, { recursive: true, force: true });
+});
 
 describe("parseInterval", () => {
   test("parses minutes", () => {
@@ -62,7 +104,6 @@ describe("isActiveHours", () => {
 
 describe("legacy heartbeat cron cleanup", () => {
   test("removes the reserved heartbeat cron job", () => {
-    clearCronTables();
     const createdAt = Date.now();
     seedDefaultHeartbeatJob(createdAt);
 
@@ -80,7 +121,6 @@ describe("legacy heartbeat cron cleanup", () => {
   });
 
   test("removes legacy heartbeat-prefixed jobs", () => {
-    clearCronTables();
     sqlite
       .query(
         `

@@ -9,16 +9,34 @@ interface UsageDashboardRangeQuery {
   endAtExclusive: number | null;
 }
 
-function parseOptionalMillis(value: string | null): number | null {
-  if (value === null || value === "") return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) return null;
-  return parsed;
-}
-
 function parseRangeQuery(url: URL): UsageDashboardRangeQuery | Response {
-  const startAt = parseOptionalMillis(url.searchParams.get("startAt"));
-  const endAtExclusive = parseOptionalMillis(url.searchParams.get("endAtExclusive"));
+  const rawStartAt = url.searchParams.get("startAt");
+  const rawEndAtExclusive = url.searchParams.get("endAtExclusive");
+
+  const startAt =
+    rawStartAt === null || rawStartAt === ""
+      ? null
+      : Number(rawStartAt);
+  if (startAt !== null && (!Number.isFinite(startAt) || !Number.isInteger(startAt) || startAt < 0)) {
+    return Response.json(
+      { error: "startAt must be a non-negative integer timestamp" },
+      { status: 400 },
+    );
+  }
+
+  const endAtExclusive =
+    rawEndAtExclusive === null || rawEndAtExclusive === ""
+      ? null
+      : Number(rawEndAtExclusive);
+  if (
+    endAtExclusive !== null &&
+    (!Number.isFinite(endAtExclusive) || !Number.isInteger(endAtExclusive) || endAtExclusive < 0)
+  ) {
+    return Response.json(
+      { error: "endAtExclusive must be a non-negative integer timestamp" },
+      { status: 400 },
+    );
+  }
 
   if (startAt !== null && endAtExclusive !== null && startAt >= endAtExclusive) {
     return Response.json(

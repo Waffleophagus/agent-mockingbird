@@ -25,13 +25,13 @@ index 000000000..faf702691
 +    const calls: Array<{ path: string; init?: RequestInit }> = []
 +    const requestJson = async <T>(path: string, init?: RequestInit) => {
 +      calls.push({ path, init })
-+      if (path === "/api/waffle/cron/jobs") {
++      if (path === "/api/mockingbird/cron/jobs") {
 +        return { jobs: [] } as T
 +      }
-+      if (path === "/api/waffle/cron/health") {
++      if (path === "/api/mockingbird/cron/health") {
 +        return { health: { enabled: true, jobs: { total: 0, enabled: 0 } } } as T
 +      }
-+      if (path === "/api/waffle/cron/manage") {
++      if (path === "/api/mockingbird/cron/manage") {
 +        return {
 +          contract: {
 +            runModes: {
@@ -55,10 +55,10 @@ index 000000000..faf702691
 +      },
 +    })
 +    expect(calls).toEqual([
-+      { path: "/api/waffle/cron/jobs", init: undefined },
-+      { path: "/api/waffle/cron/health", init: undefined },
++      { path: "/api/mockingbird/cron/jobs", init: undefined },
++      { path: "/api/mockingbird/cron/health", init: undefined },
 +      {
-+        path: "/api/waffle/cron/manage",
++        path: "/api/mockingbird/cron/manage",
 +        init: {
 +          method: "POST",
 +          body: JSON.stringify({ action: "describe_contract" }),
@@ -186,9 +186,9 @@ index 000000000..c747ce06f
 +
 +export async function loadCronSettings(requestJson: WaffleJson = waffleJson) {
 +  const [jobs, health, contract] = await Promise.all([
-+    requestJson<CronJobsResponse>("/api/waffle/cron/jobs"),
-+    requestJson<CronHealthResponse>("/api/waffle/cron/health"),
-+    requestJson<CronContractResponse>("/api/waffle/cron/manage", {
++    requestJson<CronJobsResponse>("/api/mockingbird/cron/jobs"),
++    requestJson<CronHealthResponse>("/api/mockingbird/cron/health"),
++    requestJson<CronContractResponse>("/api/mockingbird/cron/manage", {
 +      method: "POST",
 +      body: JSON.stringify({ action: "describe_contract" }),
 +    }),
@@ -296,9 +296,9 @@ index 8bda2bf9c..a5b15cb11 100644
      setState("error", "")
      try {
 -      const [jobs, handlers, health] = await Promise.all([
--        waffleJson<{ jobs: CronJobDefinition[] }>("/api/waffle/cron/jobs"),
--        waffleJson<{ handlers: string[] }>("/api/waffle/cron/handlers"),
--        waffleJson<{ health: CronHealthSnapshot }>("/api/waffle/cron/health"),
+-        waffleJson<{ jobs: CronJobDefinition[] }>("/api/mockingbird/cron/jobs"),
+-        waffleJson<{ handlers: string[] }>("/api/mockingbird/cron/handlers"),
+-        waffleJson<{ health: CronHealthSnapshot }>("/api/mockingbird/cron/health"),
 -      ])
 -      setState("jobs", jobs.jobs)
 -      setState("handlers", handlers.handlers)
@@ -396,4 +396,3 @@ index 8bda2bf9c..a5b15cb11 100644
              <div class="flex justify-end">
 -- 
 2.53.0
-

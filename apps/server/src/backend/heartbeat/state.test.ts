@@ -10,7 +10,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { patchHeartbeatRuntimeState, isActiveHeartbeatSession } from "./state";
+import type {
+  isActiveHeartbeatSession as IsActiveHeartbeatSession,
+  patchHeartbeatRuntimeState as PatchHeartbeatRuntimeState,
+} from "./state";
+import type { resetDatabaseToDefaults as ResetDatabaseToDefaults } from "../db/repository";
 
 const testRoot = mkdtempSync(
   path.join(tmpdir(), "agent-mockingbird-heartbeat-state-test-"),
@@ -31,10 +35,16 @@ process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = testConfigPath;
 process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR = testWorkspacePath;
 process.env.AGENT_MOCKINGBIRD_MEMORY_ENABLED = "false";
 
-let resetDatabaseToDefaults: () => unknown;
+let patchHeartbeatRuntimeState: typeof PatchHeartbeatRuntimeState;
+let isActiveHeartbeatSession: typeof IsActiveHeartbeatSession;
+let resetDatabaseToDefaults: typeof ResetDatabaseToDefaults;
 
 beforeAll(async () => {
   await import("../db/migrate");
+  ({
+    patchHeartbeatRuntimeState,
+    isActiveHeartbeatSession,
+  } = await import("./state"));
   ({ resetDatabaseToDefaults } = await import("../db/repository"));
 });
 

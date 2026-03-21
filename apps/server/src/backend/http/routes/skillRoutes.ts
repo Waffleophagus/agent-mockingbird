@@ -24,21 +24,30 @@ export function createSkillRoutes() {
 
     "/api/mockingbird/skills/import": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as {
+        let body: unknown;
+        try {
+          body = await req.json();
+        } catch {
+          return Response.json({ error: "invalid request body" }, { status: 400 });
+        }
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          return Response.json({ error: "invalid request body" }, { status: 400 });
+        }
+        const parsedBody = body as {
           id?: string;
           content?: string;
           enable?: boolean;
           expectedHash?: string;
         };
-        if (!body.id?.trim() || !body.content?.trim()) {
+        if (!parsedBody.id?.trim() || !parsedBody.content?.trim()) {
           return Response.json({ error: "id and content are required" }, { status: 400 });
         }
         try {
           const result = await importManagedSkillWithConfigUpdate({
-            rawId: body.id,
-            content: body.content,
-            enable: body.enable !== false,
-            expectedHash: body.expectedHash,
+            rawId: parsedBody.id,
+            content: parsedBody.content,
+            enable: parsedBody.enable !== false,
+            expectedHash: parsedBody.expectedHash,
           });
           return Response.json(result, { status: 201 });
         } catch (error) {
@@ -51,14 +60,23 @@ export function createSkillRoutes() {
 
     "/api/mockingbird/skills/enabled": {
       PUT: async (req: Request) => {
-        const body = (await req.json()) as { skills?: unknown; expectedHash?: string };
-        if (!Array.isArray(body.skills)) {
+        let body: unknown;
+        try {
+          body = await req.json();
+        } catch {
+          return Response.json({ error: "invalid request body" }, { status: 400 });
+        }
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          return Response.json({ error: "invalid request body" }, { status: 400 });
+        }
+        const parsedBody = body as { skills?: unknown; expectedHash?: string };
+        if (!Array.isArray(parsedBody.skills)) {
           return Response.json({ error: "skills must be an array" }, { status: 400 });
         }
         try {
           const result = await setEnabledSkillsFromCatalog({
-            skills: body.skills.filter((value): value is string => typeof value === "string"),
-            expectedHash: body.expectedHash,
+            skills: parsedBody.skills.filter((value): value is string => typeof value === "string"),
+            expectedHash: parsedBody.expectedHash,
           });
           return Response.json(result);
         } catch (error) {
@@ -71,12 +89,21 @@ export function createSkillRoutes() {
 
     "/api/mockingbird/skills/:id": {
       PATCH: async (req: Request & { params: { id: string } }) => {
-        const body = (await req.json()) as { enabled?: unknown };
-        if (typeof body.enabled !== "boolean") {
+        let body: unknown;
+        try {
+          body = await req.json();
+        } catch {
+          return Response.json({ error: "invalid request body" }, { status: 400 });
+        }
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          return Response.json({ error: "invalid request body" }, { status: 400 });
+        }
+        const parsedBody = body as { enabled?: unknown };
+        if (typeof parsedBody.enabled !== "boolean") {
           return Response.json({ error: "enabled must be a boolean" }, { status: 400 });
         }
         const snapshot = getConfigSnapshot();
-        setManagedSkillEnabled(req.params.id, body.enabled, snapshot.config.workspace.pinnedDirectory);
+        setManagedSkillEnabled(req.params.id, parsedBody.enabled, snapshot.config.workspace.pinnedDirectory);
         await disposeOpencodeSkillInstance(snapshot.config);
         const catalog = listManagedSkillCatalog(snapshot.config.workspace.pinnedDirectory);
         return Response.json({
