@@ -1,6 +1,6 @@
 import type { AgentMockingbirdConfig } from "./schema";
 
-export type ConfigApplyStage =
+type ConfigApplyStage =
   | "request"
   | "conflict"
   | "schema"
@@ -46,20 +46,6 @@ export interface ConfigPolicySummary {
   requireExpectedHash: boolean;
   requireSmokeTest: boolean;
   autoRollbackOnFailure: boolean;
-}
-
-export interface ApplyConfigPatchInput {
-  patch: unknown;
-  expectedHash?: string;
-  runSmokeTest?: boolean;
-  safeMode?: boolean;
-}
-
-export interface ApplyConfigReplaceInput {
-  config: unknown;
-  expectedHash?: string;
-  runSmokeTest?: boolean;
-  safeMode?: boolean;
 }
 
 export interface ApplyConfigResult {

@@ -5,11 +5,50 @@ function tableHasColumn(tableName: string, columnName: string): boolean {
   return columns.some(column => column.name === columnName);
 }
 
+function hasIndex(indexName: string): boolean {
+  const row = sqlite
+    .query(
+      `
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'index' AND name = ?1
+      LIMIT 1
+    `,
+    )
+    .get(indexName) as { name?: string } | null;
+  return row?.name === indexName;
+}
+
+function assertNoDuplicateThreadSessionIds() {
+  const duplicates = sqlite
+    .query(
+      `
+      SELECT thread_session_id, GROUP_CONCAT(id) AS job_ids, COUNT(*) AS count
+      FROM cron_job_definitions
+      WHERE thread_session_id IS NOT NULL AND TRIM(thread_session_id) <> ''
+      GROUP BY thread_session_id
+      HAVING COUNT(*) > 1
+    `,
+    )
+    .all() as Array<{ thread_session_id: string; job_ids: string; count: number }>;
+  if (!duplicates.length) return;
+  const detail = duplicates
+    .map(
+      duplicate =>
+        `${duplicate.thread_session_id} (${duplicate.count} rows: ${duplicate.job_ids})`,
+    )
+    .join("; ");
+  throw new Error(
+    `cron_job_definitions contains duplicate thread_session_id values; resolve before applying uniqueness: ${detail}`,
+  );
+}
+
 export function ensureCronTables() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS cron_job_definitions (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      thread_session_id TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       schedule_kind TEXT NOT NULL CHECK (schedule_kind IN ('at', 'every', 'cron')),
       schedule_expr TEXT,
@@ -38,6 +77,7 @@ export function ensureCronTables() {
       job_definition_id TEXT NOT NULL REFERENCES cron_job_definitions(id) ON DELETE CASCADE,
       scheduled_for INTEGER NOT NULL,
       state TEXT NOT NULL CHECK (state IN ('queued', 'leased', 'running', 'completed', 'failed', 'dead')),
+      agent_invoked INTEGER NOT NULL DEFAULT 0,
       attempt INTEGER NOT NULL DEFAULT 0,
       next_attempt_at INTEGER,
       lease_owner TEXT,
@@ -77,6 +117,20 @@ export function ensureCronTables() {
   }
   if (!tableHasColumn("cron_job_definitions", "condition_description")) {
     sqlite.exec("ALTER TABLE cron_job_definitions ADD COLUMN condition_description TEXT");
+  }
+  if (!tableHasColumn("cron_job_definitions", "thread_session_id")) {
+    sqlite.exec("ALTER TABLE cron_job_definitions ADD COLUMN thread_session_id TEXT");
+  }
+  if (!hasIndex("cron_job_definitions_thread_session_id_idx")) {
+    assertNoDuplicateThreadSessionIds();
+    sqlite.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS cron_job_definitions_thread_session_id_idx
+        ON cron_job_definitions(thread_session_id)
+        WHERE thread_session_id IS NOT NULL AND TRIM(thread_session_id) <> ''
+    `);
+  }
+  if (!tableHasColumn("cron_job_instances", "agent_invoked")) {
+    sqlite.exec("ALTER TABLE cron_job_instances ADD COLUMN agent_invoked INTEGER NOT NULL DEFAULT 0");
   }
 }
 

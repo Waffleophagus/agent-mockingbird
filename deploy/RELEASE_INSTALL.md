@@ -1,20 +1,31 @@
 # Release + Install
 
-This project ships as a tarball from GitHub Releases.
+This project is published to npm and source-hosted on GitHub.
 
-## Private onboarding flow (Gitea npm + systemd user services)
+## User onboarding flow (npm + systemd user services)
 
 Recommended first-run flow on Linux:
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+npm i -g agent-mockingbird
+agent-mockingbird install
+```
+
+That is the main public install path. `agent-mockingbird install` handles service setup and launches interactive onboarding on TTY installs.
+
+Optional curl bootstrap wrapper:
+
+```bash
+AGENT_MOCKINGBIRD_TAG=latest curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
 This installs:
 
-- `@waffleophagus/agent-mockingbird` from `https://git.waffleophagus.com/api/packages/waffleophagus/npm/`
+- `agent-mockingbird` from npmjs
 - `opencode-ai` from npmjs
 - user services (`opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
+- automatic service start and health verification
+- interactive onboarding on TTY installs (`provider auth`, default model, memory/Ollama, optional OpenClaw import)
 
 Install root defaults to `~/.agent-mockingbird`.
 
@@ -26,24 +37,39 @@ agent-mockingbird restart
 agent-mockingbird update
 ```
 
-## Maintainer flow (build + publish)
-
-1. Push a tag (for example `v0.1.0`) or run the `Release Bundle` workflow manually.
-2. GitHub Actions will produce and publish:
-   - `agent-mockingbird-<version>.tar.gz`
-   - `agent-mockingbird-<version>.tar.gz.sha256`
-
-## Host install flow
-
-Run as root on your target Linux host:
+Feature branch preview install:
 
 ```bash
-VERSION=v0.1.0
-curl -LO "https://github.com/<owner>/<repo>/releases/download/${VERSION}/agent-mockingbird-${VERSION}.tar.gz"
-curl -LO "https://github.com/<owner>/<repo>/releases/download/${VERSION}/agent-mockingbird-${VERSION}.tar.gz.sha256"
-sha256sum -c "agent-mockingbird-${VERSION}.tar.gz.sha256"
-tar -xzf "agent-mockingbird-${VERSION}.tar.gz"
-cd "agent-mockingbird-${VERSION}"
+VERSION="<published-preview-version>"
+npm i -g "agent-mockingbird@${VERSION}"
+agent-mockingbird install
+```
+
+## Maintainer flow (build + publish)
+
+1. Configure npm trusted publishing for:
+   - `agent-mockingbird`
+2. Point the trusted publisher entry at `waffleophagus/agent-mockingbird` and workflow file `ci.yml`.
+3. Push to `main` to publish the package to npm tag `latest`.
+4. Push a non-`main` branch to publish a preview build to npm tag `next`.
+5. Pull requests run checks only and do not publish.
+
+For branch previews, pin `AGENT_MOCKINGBIRD_TAG` to the exact published `next` version so the bootstrap script and package version match.
+
+Repository build policy:
+
+- `dist/app` is treated as a committed artifact generated locally before commit.
+- The repo `pre-commit` hook runs lint, typecheck, `build`, and `build:bin`, then stages `dist/app`.
+- CI no longer rebuilds the OpenCode web bundle from vendored dependencies; it verifies the committed `dist/app` bundle and rebuilds only the standalone runtime binary.
+
+## Manual host install flow
+
+Clone a tagged revision on your target Linux host, then run the bundled install script:
+
+```bash
+git clone https://github.com/waffleophagus/agent-mockingbird.git
+cd agent-mockingbird
+git checkout v0.1.0
 sudo bash scripts/install-systemd.sh
 ```
 

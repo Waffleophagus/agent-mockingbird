@@ -1,8 +1,18 @@
+import { z } from "zod";
+
 import { getConfigSnapshot } from "../../config/service";
 import type { RuntimeInputPart } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
+import { createLogger } from "../../logging/logger";
 import type { RunService } from "../../run/service";
 import type { AgentRunEvent } from "../../run/types";
+import { createBoundedQueue, type BoundedQueue } from "../boundedQueue";
+import { parseJsonWithSchema } from "../parsers";
+
+const RUN_STREAM_MAX_QUEUED_FRAMES = 256;
+const RUN_STREAM_DRAIN_DELAY_MS = 25;
+const RUN_STREAM_TERMINAL_REPLAY_WAIT_MS = 1_000;
+const logger = createLogger("run-event-stream");
 
 function runStreamConfig() {
   return getConfigSnapshot().config.runtime.runStream;
@@ -58,20 +68,27 @@ function normalizeRuntimeInputParts(value: unknown): RuntimeInputPart[] {
   return parts;
 }
 
+const runCreateBodySchema = z
+  .object({
+    sessionId: z.string(),
+    content: z.string().optional(),
+    parts: z.array(z.unknown()).optional(),
+    agent: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    idempotencyKey: z.string().optional(),
+  })
+  .strict();
+
 export function createRunRoutes(runService: RunService) {
   return {
     "/api/runs": {
       POST: async (req: Request) => {
-        const body = (await req.json()) as {
-          sessionId?: string;
-          content?: string;
-          parts?: RuntimeInputPart[];
-          agent?: string;
-          metadata?: Record<string, unknown>;
-          idempotencyKey?: string;
-        };
-
-        const sessionId = body.sessionId?.trim();
+        const parsed = await parseJsonWithSchema(req, runCreateBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const body = parsed.body;
+        const sessionId = body.sessionId.trim();
         const content = body.content?.trim();
         const parts = normalizeRuntimeInputParts(body.parts);
         if (!sessionId || (!content && parts.length === 0)) {
@@ -168,15 +185,27 @@ export function createRunRoutes(runService: RunService) {
         let streamController: ReadableStreamDefaultController<string> | null = null;
         let unsubscribe: (() => void) | null = null;
         let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+        let replayTimer: ReturnType<typeof setInterval> | null = null;
+        let outboundQueue: BoundedQueue<string> | null = null;
         let closed = false;
         let cursor = initialAfterSeq;
+        let replayPollInFlight = false;
+        let terminalDrainRequested = false;
+
+        const isTerminalType = (event: AgentRunEvent) => event.type === "run.completed" || event.type === "run.failed";
 
         const close = () => {
           if (closed) return;
           closed = true;
+          outboundQueue?.close();
+          outboundQueue = null;
           if (heartbeatTimer) {
             clearInterval(heartbeatTimer);
             heartbeatTimer = null;
+          }
+          if (replayTimer) {
+            clearInterval(replayTimer);
+            replayTimer = null;
           }
           if (unsubscribe) {
             unsubscribe();
@@ -192,58 +221,113 @@ export function createRunRoutes(runService: RunService) {
           }
         };
 
-        const emit = (event: AgentRunEvent) => {
-          if (closed || !streamController) return;
-          if (event.seq <= cursor) return;
-          cursor = event.seq;
-          try {
-            streamController.enqueue(toRunEventFrame(event));
-          } catch {
-            close();
-            return;
-          }
-          if (event.type === "run.completed" || event.type === "run.failed") {
+        const requestTerminalClose = () => {
+          if (closed) return;
+          terminalDrainRequested = true;
+          outboundQueue?.drain();
+          if (!outboundQueue || outboundQueue.size() === 0) {
             close();
           }
         };
 
+        const emit = (event: AgentRunEvent) => {
+          if (closed || !outboundQueue) return;
+          if (event.seq <= cursor) return;
+          cursor = event.seq;
+          outboundQueue.enqueue(toRunEventFrame(event));
+          if (isTerminalType(event)) {
+            requestTerminalClose();
+          }
+        };
+
+        const pumpReplay = async (deadlineAt: number) => {
+          while (!closed) {
+            const replay = runService.listRunEvents({
+              runId,
+              afterSeq: cursor,
+              limit: runStreamConfig().replayPageSize,
+            });
+            for (const event of replay.events) {
+              emit(event);
+              if (closed) return true;
+            }
+            if (replay.hasMore) {
+              continue;
+            }
+            const latestRun = runService.getRunById(runId);
+            if (latestRun?.state === "completed" || latestRun?.state === "failed") {
+              if (Date.now() >= deadlineAt) {
+                requestTerminalClose();
+                return true;
+              }
+              await new Promise(resolve => setTimeout(resolve, RUN_STREAM_DRAIN_DELAY_MS));
+              continue;
+            }
+            return false;
+          }
+          return true;
+        };
+
+        const pollReplay = (deadlineAt: number) => {
+          if (replayPollInFlight || closed) return;
+          replayPollInFlight = true;
+          void pumpReplay(deadlineAt).finally(() => {
+            replayPollInFlight = false;
+          });
+        };
+
         const stream = new ReadableStream<string>({
-          start(controller) {
+          async start(controller) {
             streamController = controller;
+            outboundQueue = createBoundedQueue<string>({
+              maxSize: RUN_STREAM_MAX_QUEUED_FRAMES,
+              drainDelayMs: RUN_STREAM_DRAIN_DELAY_MS,
+              tryWrite: (value) => {
+                if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+                  return false;
+                }
+                controller.enqueue(value);
+                return true;
+              },
+              onOverflow: () => {
+                logger.warn("Closing run SSE consumer", {
+                  runId,
+                  reason: "outbound queue overflow",
+                });
+                close();
+              },
+              onWriteError: (error) => {
+                logger.warnWithCause("Closing run SSE consumer", error, {
+                  runId,
+                  reason: "write failure",
+                });
+                close();
+              },
+            });
             unsubscribe = runService.subscribe(event => {
               if (event.runId !== runId) return;
               emit(event);
             });
 
-            while (!closed) {
-              const replay = runService.listRunEvents({
-                runId,
-                afterSeq: cursor,
-                limit: runStreamConfig().replayPageSize,
-              });
-              if (!replay.events.length) break;
-              for (const event of replay.events) {
-                emit(event);
-                if (closed) return;
-              }
-              if (!replay.hasMore) break;
-            }
-
-            if (closed) return;
-            const latestRun = runService.getRunById(runId);
-            if (latestRun?.state === "completed" || latestRun?.state === "failed") {
-              close();
+            const settledDuringStartup = await pumpReplay(Date.now() + RUN_STREAM_TERMINAL_REPLAY_WAIT_MS);
+            if (closed || settledDuringStartup) {
               return;
             }
 
+            replayTimer = setInterval(() => {
+              pollReplay(Date.now() + RUN_STREAM_TERMINAL_REPLAY_WAIT_MS);
+            }, RUN_STREAM_DRAIN_DELAY_MS);
+
             heartbeatTimer = setInterval(() => {
-              if (closed || !streamController) return;
-              try {
-                streamController.enqueue(toRunHeartbeatFrame(runId));
-              } catch {
-                close();
-              }
+              if (closed || !outboundQueue) return;
+              outboundQueue.enqueue(toRunHeartbeatFrame(runId));
             }, runStreamConfig().heartbeatMs);
+          },
+          pull() {
+            outboundQueue?.drain();
+            if (terminalDrainRequested && (!outboundQueue || outboundQueue.size() === 0)) {
+              close();
+            }
           },
           cancel() {
             close();

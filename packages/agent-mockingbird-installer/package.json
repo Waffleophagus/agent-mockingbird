@@ -3,12 +3,21 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Private installer for Agent Mockingbird + OpenCode Linux user services",
+  "description": "Compatibility wrapper for installing and running Agent Mockingbird from npm.",
+  "homepage": "https://github.com/waffleophagus/agent-mockingbird",
+  "bugs": {
+    "url": "https://github.com/waffleophagus/agent-mockingbird/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/waffleophagus/agent-mockingbird.git"
+  },
   "bin": {
     "agent-mockingbird-installer": "bin/agent-mockingbird-installer.mjs"
   },
   "files": [
     "bin",
+    "opencode.lock.json",
     "README.md"
   ]
 }

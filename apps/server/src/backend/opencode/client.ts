@@ -1,4 +1,7 @@
-import { createOpencodeClient as createSdkClient, type OpencodeClient } from "@opencode-ai/sdk/client";
+import {
+  createOpencodeClient as createSdkClient,
+  type OpencodeClient,
+} from "@opencode-ai/sdk/client";
 import {
   createOpencodeClient as createSdkV2Client,
   type OpencodeClient as OpencodeV2Client,
@@ -6,16 +9,18 @@ import {
 
 import { env } from "../env";
 
-const DEFAULT_OPENCODE_BASE_URL = "http://127.0.0.1:4096";
+const DEFAULT_OPENCODE_BASE_URL =
+  env.AGENT_MOCKINGBIRD_OPENCODE_BASE_URL?.trim() ||
+  `http://127.0.0.1:${process.env.OPENCODE_PORT?.trim() || "4096"}`;
 const DEFAULT_OPENCODE_TIMEOUT_MS = 120_000;
 
-export interface OpencodeConnectionConfig {
+interface OpencodeConnectionConfig {
   baseUrl: string;
   directory?: string | null;
   timeoutMs: number;
 }
 
-export interface OpencodeConnectionInfo {
+interface OpencodeConnectionInfo {
   baseUrl: string;
   timeoutMs: number;
   directoryConfigured: boolean;
@@ -32,7 +37,9 @@ function resolveAuthHeader() {
   return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
 }
 
-export function getOpencodeConnectionInfo(connection?: OpencodeConnectionConfig): OpencodeConnectionInfo {
+export function getOpencodeConnectionInfo(
+  connection?: OpencodeConnectionConfig,
+): OpencodeConnectionInfo {
   const authHeader = resolveAuthHeader();
   const resolved = connection ?? {
     baseUrl: DEFAULT_OPENCODE_BASE_URL,

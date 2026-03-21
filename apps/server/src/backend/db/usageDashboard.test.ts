@@ -1,0 +1,208 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { sqlite } from "./client";
+import type * as RepositoryModuleType from "./repository";
+
+const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-usage-db-test-"));
+const testDbPath = path.join(testRoot, "agent-mockingbird.usage-dashboard.test.db");
+const testConfigPath = path.join(testRoot, "agent-mockingbird.usage-dashboard.config.json");
+const testWorkspacePath = path.join(testRoot, "workspace");
+const originalEnv = {
+  AGENT_MOCKINGBIRD_DB_PATH: process.env.AGENT_MOCKINGBIRD_DB_PATH,
+  AGENT_MOCKINGBIRD_CONFIG_PATH: process.env.AGENT_MOCKINGBIRD_CONFIG_PATH,
+  AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR: process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+  AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER: process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER,
+  NODE_ENV: process.env.NODE_ENV,
+};
+
+function restoreEnvValue(key: keyof typeof originalEnv, value: string | undefined) {
+  if (typeof value === "undefined") {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}
+
+process.env.NODE_ENV = "test";
+process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
+process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = testConfigPath;
+process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR = testWorkspacePath;
+process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER = "none";
+
+type RepositoryModule = typeof RepositoryModuleType;
+
+let repository: RepositoryModule;
+
+beforeAll(async () => {
+  repository = await import("./repository");
+});
+
+beforeEach(() => {
+  repository.resetDatabaseToDefaults();
+});
+
+afterAll(() => {
+  sqlite.close(false);
+  restoreEnvValue("AGENT_MOCKINGBIRD_DB_PATH", originalEnv.AGENT_MOCKINGBIRD_DB_PATH);
+  restoreEnvValue("AGENT_MOCKINGBIRD_CONFIG_PATH", originalEnv.AGENT_MOCKINGBIRD_CONFIG_PATH);
+  restoreEnvValue(
+    "AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR",
+    originalEnv.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+  );
+  restoreEnvValue(
+    "AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER",
+    originalEnv.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER,
+  );
+  restoreEnvValue("NODE_ENV", originalEnv.NODE_ENV);
+  rmSync(testRoot, { recursive: true, force: true });
+});
+
+describe("usage dashboard repository", () => {
+  test("groups attributed usage by provider and model for the selected date range", () => {
+    const now = Date.now();
+    const session = repository.createSession({
+      title: "Usage Session",
+      model: "anthropic/claude-sonnet-4.5",
+    });
+
+    repository.recordUsageDelta({
+      sessionId: session.id,
+      requestCountDelta: 1,
+      inputTokensDelta: 120,
+      outputTokensDelta: 80,
+      estimatedCostUsdDelta: 0.42,
+      source: "runtime",
+      createdAt: now - 2 * 60 * 60 * 1000,
+    });
+    repository.recordUsageDelta({
+      requestCountDelta: 1,
+      inputTokensDelta: 40,
+      outputTokensDelta: 10,
+      estimatedCostUsdDelta: 0.08,
+      source: "system",
+      createdAt: now - 60 * 60 * 1000,
+    });
+    repository.recordUsageDelta({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      requestCountDelta: 1,
+      inputTokensDelta: 500,
+      outputTokensDelta: 400,
+      estimatedCostUsdDelta: 1.5,
+      source: "runtime",
+      createdAt: now - 10 * 24 * 60 * 60 * 1000,
+    });
+
+    const recentRange = repository.getUsageDashboardSnapshot({
+      startAt: now - 24 * 60 * 60 * 1000,
+      endAtExclusive: now + 1,
+    });
+    expect(recentRange.totals.requestCount).toBe(2);
+    expect(recentRange.totals.totalTokens).toBe(250);
+    expect(recentRange.unattributedTotals.totalTokens).toBe(50);
+    expect(recentRange.providers).toHaveLength(1);
+    expect(recentRange.providers[0]).toMatchObject({
+      providerId: "anthropic",
+      totalTokens: 200,
+    });
+    expect(recentRange.models).toHaveLength(1);
+    expect(recentRange.models[0]).toMatchObject({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4.5",
+      totalTokens: 200,
+    });
+
+    const fullRange = repository.getUsageDashboardSnapshot({
+      startAt: now - 30 * 24 * 60 * 60 * 1000,
+      endAtExclusive: now + 1,
+    });
+    expect(fullRange.totals.requestCount).toBe(3);
+    expect(fullRange.providers.map(row => row.providerId)).toEqual(["openai", "anthropic"]);
+    expect(fullRange.models.map(row => `${row.providerId}/${row.modelId}`)).toEqual([
+      "openai/gpt-5.4",
+      "anthropic/claude-sonnet-4.5",
+    ]);
+  });
+
+  test("does not mix caller attribution with session model inference and only backfills null attribution on conflict", () => {
+    const session = repository.createSession({
+      title: "Partial Attribution Session",
+      model: "anthropic/claude-sonnet-4.5",
+    });
+
+    repository.recordUsageDelta({
+      id: "partial-attribution",
+      sessionId: session.id,
+      providerId: "openai",
+      requestCountDelta: 2,
+      inputTokensDelta: 111,
+      outputTokensDelta: 222,
+      estimatedCostUsdDelta: 0.33,
+      source: "runtime",
+      createdAt: 1_700_000_000_000,
+    });
+
+    let row = sqlite
+      .query(
+        `
+        SELECT provider_id, model_id, request_count_delta, input_tokens_delta, output_tokens_delta
+        FROM usage_events
+        WHERE id = ?1
+      `,
+      )
+      .get("partial-attribution") as {
+      provider_id: string | null;
+      model_id: string | null;
+      request_count_delta: number;
+      input_tokens_delta: number;
+      output_tokens_delta: number;
+    };
+
+    expect(row).toMatchObject({
+      provider_id: "openai",
+      model_id: null,
+      request_count_delta: 2,
+      input_tokens_delta: 111,
+      output_tokens_delta: 222,
+    });
+
+    repository.recordUsageDelta({
+      id: "partial-attribution",
+      sessionId: session.id,
+      modelId: "gpt-5.4",
+      requestCountDelta: 999,
+      inputTokensDelta: 999,
+      outputTokensDelta: 999,
+      estimatedCostUsdDelta: 9.99,
+      source: "runtime",
+      createdAt: 1_700_000_000_001,
+    });
+
+    row = sqlite
+      .query(
+        `
+        SELECT provider_id, model_id, request_count_delta, input_tokens_delta, output_tokens_delta
+        FROM usage_events
+        WHERE id = ?1
+      `,
+      )
+      .get("partial-attribution") as {
+      provider_id: string | null;
+      model_id: string | null;
+      request_count_delta: number;
+      input_tokens_delta: number;
+      output_tokens_delta: number;
+    };
+
+    expect(row).toMatchObject({
+      provider_id: "openai",
+      model_id: "gpt-5.4",
+      request_count_delta: 2,
+      input_tokens_delta: 111,
+      output_tokens_delta: 222,
+    });
+  });
+});

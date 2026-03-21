@@ -6,7 +6,10 @@ function resolveApiBaseUrl() {
   if (explicit) return explicit.replace(/\/+$/, "");
   const memoryAlias = process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim();
   if (memoryAlias) return memoryAlias.replace(/\/+$/, "");
-  const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001";
+  const port =
+    process.env.AGENT_MOCKINGBIRD_PORT?.trim() ||
+    process.env.PORT?.trim() ||
+    "3001";
   return `http://127.0.0.1:${port}`;
 }
 
@@ -18,7 +21,10 @@ async function postJson(pathname: string, body: unknown) {
   });
   const payload = (await response.json()) as Record<string, unknown>;
   if (!response.ok) {
-    const error = typeof payload.error === "string" ? payload.error : `Request failed (${response.status})`;
+    const error =
+      typeof payload.error === "string"
+        ? payload.error
+        : `Request failed (${response.status})`;
     throw new Error(error);
   }
   return payload;
@@ -74,7 +80,11 @@ const argsSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("get_job"), jobId: z.string().min(1) }),
   z.object({ action: z.literal("create_job"), job: jobCreateSchema }),
   z.object({ action: z.literal("upsert_job"), job: jobCreateSchema }),
-  z.object({ action: z.literal("update_job"), jobId: z.string().min(1), patch: jobPatchSchema }),
+  z.object({
+    action: z.literal("update_job"),
+    jobId: z.string().min(1),
+    patch: jobPatchSchema,
+  }),
   z.object({ action: z.literal("enable_job"), jobId: z.string().min(1) }),
   z.object({ action: z.literal("disable_job"), jobId: z.string().min(1) }),
   z.object({ action: z.literal("describe_contract") }),
@@ -89,7 +99,8 @@ const argsSchema = z.discriminatedUnion("action", [
 ]);
 
 export default tool({
-  description: "Manage Agent Mockingbird cron jobs (list/create/update/run/delete/inspect).",
+  description:
+    "Manage Agent Mockingbird cron jobs (list/create/update/run/delete/inspect).",
   args: {
     action: tool.schema.enum([
       "list_jobs",
@@ -136,7 +147,7 @@ export default tool({
     patch?: unknown;
   }) {
     const args = argsSchema.parse(rawArgs);
-    const payload = await postJson("/api/cron/manage", args);
+    const payload = await postJson("/api/mockingbird/cron/manage", args);
     return JSON.stringify({
       ok: true,
       ...payload,

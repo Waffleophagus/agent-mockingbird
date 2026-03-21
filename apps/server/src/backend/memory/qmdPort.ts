@@ -1,7 +1,7 @@
 // Adapted from qmd (MIT): reciprocal-rank fusion and strong-signal gating.
 // Source: https://github.com/tobi/qmd
 
-export interface RankedResult {
+interface RankedResult {
   id: string;
   score: number;
 }

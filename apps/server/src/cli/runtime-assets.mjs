@@ -121,6 +121,7 @@ export async function syncRuntimeWorkspaceAssets(input) {
     keptLocal: 0,
     conflicts: 0,
     backupsCreated: 0,
+    removed: 0,
     conflictResolutions: [],
     backups: [],
   };
@@ -202,6 +203,65 @@ export async function syncRuntimeWorkspaceAssets(input) {
       appliedHash,
       updatedAt: nowIso,
     };
+  }
+
+  const removedPaths = Object.keys(previousState.files ?? {})
+    .filter(relativePath => !relativeFiles.includes(relativePath))
+    .sort((left, right) => left.localeCompare(right));
+
+  for (const relativePath of removedPaths) {
+    const previous = previousState.files?.[relativePath] ?? null;
+    const targetFilePath = path.join(targetWorkspaceDir, relativePath);
+    if (!fs.existsSync(targetFilePath)) {
+      if (logger) logger(`runtime-assets: already absent ${relativePath}`);
+      continue;
+    }
+
+    const targetHash = hashFile(targetFilePath);
+    const previousAppliedHash = typeof previous?.appliedHash === "string" ? previous.appliedHash : null;
+    const localChanged = previousAppliedHash === null ? true : targetHash !== previousAppliedHash;
+
+    if (!localChanged || mode === "install") {
+      fs.rmSync(targetFilePath, { force: true });
+      summary.removed += 1;
+      if (logger) logger(`runtime-assets: removed ${relativePath}`);
+      continue;
+    }
+
+    const conflictInput = {
+      relativePath,
+      targetFilePath,
+      sourceFilePath: null,
+      removed: true,
+    };
+
+    const decision =
+      interactive && onConflict ? readDecision(await onConflict(conflictInput)) : "use-packaged";
+
+    if (decision === "keep-local") {
+      summary.keptLocal += 1;
+      summary.conflictResolutions.push({ path: relativePath, decision: "keep-local" });
+      if (logger) logger(`runtime-assets: kept removed local file ${relativePath}`);
+      nextState.files[relativePath] = {
+        sourceHash: null,
+        appliedHash: targetHash,
+        updatedAt: nowIso,
+      };
+      continue;
+    }
+
+    if (!interactive) {
+      const backupPath = makeBackupPath(targetFilePath);
+      fs.copyFileSync(targetFilePath, backupPath);
+      summary.backupsCreated += 1;
+      summary.backups.push({ path: relativePath, backupPath });
+      if (logger) logger(`runtime-assets: backup ${relativePath} -> ${backupPath}`);
+    }
+
+    fs.rmSync(targetFilePath, { force: true });
+    summary.removed += 1;
+    summary.conflictResolutions.push({ path: relativePath, decision: "use-packaged" });
+    if (logger) logger(`runtime-assets: removed stale ${relativePath}`);
   }
 
   writeState(stateFilePath, nextState);

@@ -1,0 +1,131 @@
+From d92a8edad721d9de5de1f0cde8a66421ab3842a7 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <npm@d6software.com>
+Date: Sat, 21 Mar 2026 16:03:29 -0500
+Subject: [PATCH 11/11] feat(heartbeat): add session title and link to
+ heartbeat session
+
+---
+ .../app/src/components/settings-heartbeat.tsx | 50 +++++++++++++------
+ 1 file changed, 34 insertions(+), 16 deletions(-)
+
+diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
+index 770e0ccbd..c3746ffdc 100644
+--- a/packages/app/src/components/settings-heartbeat.tsx
++++ b/packages/app/src/components/settings-heartbeat.tsx
+@@ -5,8 +5,7 @@ import { showToast } from "@opencode-ai/ui/toast"
+ import { createMemo, onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+ import { useModels } from "@/context/models"
+-import { useGlobalSDK } from "@/context/global-sdk"
+-import { mockingbirdJson, readPinnedWorkspace } from "@/utils/mockingbird"
++import { mockingbirdJson } from "@/utils/mockingbird"
+ import { ModelSelectorPopover, type ModelSelectorState } from "./dialog-select-model"
+ import {
+   MockingbirdCard,
+@@ -37,6 +36,7 @@ type HeartbeatRuntimeConfig = {
+ 
+ type HeartbeatStatus = {
+   config: HeartbeatRuntimeConfig
++  sessionTitle: string | null
+   state: {
+     sessionId: string | null
+     running: boolean
+@@ -58,12 +58,16 @@ type RuntimePayload = {
+   path: string
+ }
+ 
+-type LiveAgent = {
+-  name: string
++type AgentType = {
++  id: string
+   mode?: string
+   hidden?: boolean
+ }
+ 
++type AgentsPayload = {
++  agentTypes: AgentType[]
++}
++
+ type HeartbeatFormState = {
+   enabled: boolean
+   interval: string
+@@ -151,7 +155,6 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
+ }
+ 
+ export const SettingsHeartbeat: Component = () => {
+-  const globalSDK = useGlobalSDK()
+   const models = useModels()
+   const [state, setState] = createStore({
+     loading: true,
+@@ -193,6 +196,12 @@ export const SettingsHeartbeat: Component = () => {
+     return models.find({ providerID, modelID })
+   })
+ 
++  const heartbeatSessionHref = createMemo(() => {
++    const sessionId = state.status?.state.sessionId?.trim()
++    if (!sessionId) return null
++    return `/session/${sessionId}`
++  })
++
+   const heartbeatModelSelector: ModelSelectorState = {
+     list: models.list,
+     current: currentModel,
+@@ -212,23 +221,16 @@ export const SettingsHeartbeat: Component = () => {
+       const [heartbeat, runtime, agents] = await Promise.all([
+         mockingbirdJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
+         mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config"),
+-        readPinnedWorkspace().then(async (workspace) => {
+-          const client = globalSDK.createClient({
+-            directory: workspace.directory,
+-            throwOnError: true,
+-          })
+-          const payload = await client.app.agents()
+-          return payload.data ?? []
+-        }),
++        mockingbirdJson<AgentsPayload>("/api/mockingbird/agents"),
+       ])
+       setState("status", heartbeat.heartbeat)
+       setState("runtimeHash", runtime.hash)
+       setState("runtimePath", runtime.path)
+       setState(
+         "agentOptions",
+-        agents
+-          .filter((item: LiveAgent) => item.mode !== "subagent" && !item.hidden)
+-          .map((item: LiveAgent) => item.name),
++        agents.agentTypes
++          .filter((item) => item.mode !== "subagent" && !item.hidden)
++          .map((item) => item.id),
+       )
+       setState("form", toForm(heartbeat.heartbeat.config))
+     } catch (error) {
+@@ -330,11 +332,27 @@ export const SettingsHeartbeat: Component = () => {
+               <MockingbirdMetaRow label="Config file" value={state.runtimePath || "Unavailable"} />
+               <MockingbirdMetaRow label="Enabled" value={status().config.enabled ? "Yes" : "No"} />
+               <MockingbirdMetaRow label="Session id" value={status().state.sessionId ?? "Not created yet"} />
++              <MockingbirdMetaRow label="Session title" value={status().sessionTitle ?? "Heartbeat"} />
+               <MockingbirdMetaRow label="Currently running" value={status().state.running ? "Yes" : "No"} />
+               <MockingbirdMetaRow label="Last run" value={formatTimestamp(status().state.lastRunAt)} />
+               <MockingbirdMetaRow label="Next due" value={formatTimestamp(status().nextDueAt)} />
+               <MockingbirdMetaRow label="Last result" value={formatResult(status().state.lastResult)} />
+               <MockingbirdMetaRow label="Last updated" value={formatTimestamp(status().state.updatedAt)} />
++              <Show when={heartbeatSessionHref()}>
++                {(href) => (
++                  <div class="flex justify-end">
++                    <Button
++                      variant="ghost"
++                      size="small"
++                      onClick={() => {
++                        window.location.href = href()
++                      }}
++                    >
++                      Open heartbeat session
++                    </Button>
++                  </div>
++                )}
++              </Show>
+             </MockingbirdSettingsSection>
+ 
+             <Show when={status().state.lastError}>
+-- 
+2.53.0
+

@@ -1567,7 +1567,7 @@ function mapCandidatesToResults(candidates: SearchCandidate[]): MemorySearchResu
   }));
 }
 
-export interface MemorySearchDebug {
+interface MemorySearchDebug {
   engine: "legacy" | "qmd_hybrid";
   strongSignalSkippedExpansion: boolean;
   matchedConceptPacks: string[];
@@ -1906,7 +1906,7 @@ export async function readMemoryFileSlice(input: { relPath: string; from?: numbe
   return { path: relPath, text: slice };
 }
 
-export async function appendStructuredMemory(input: MemoryRecordInput): Promise<{
+async function appendStructuredMemory(input: MemoryRecordInput): Promise<{
   record: MemoryRecord;
   path: string;
 }> {

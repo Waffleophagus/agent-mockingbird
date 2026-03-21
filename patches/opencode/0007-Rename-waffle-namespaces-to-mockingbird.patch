@@ -1,0 +1,1110 @@
+From aa99a5bc6827bc92d46194cf9b1fd0b8c05f3181 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <npm@d6software.com>
+Date: Thu, 19 Mar 2026 15:30:30 -0500
+Subject: [PATCH 07/11] Rename waffle namespaces to mockingbird
+
+---
+ .../app/src/components/settings-agents.tsx    |  38 +++---
+ .../src/components/settings-cron-data.test.ts |  12 +-
+ .../app/src/components/settings-cron-data.ts  |  12 +-
+ packages/app/src/components/settings-cron.tsx |  52 ++++-----
+ .../app/src/components/settings-heartbeat.tsx | 108 +++++++++---------
+ packages/app/src/components/settings-mcp.tsx  |  36 +++---
+ ...ed.tsx => settings-mockingbird-shared.tsx} |  16 +--
+ .../app/src/components/settings-runtime.tsx   |  38 +++---
+ .../app/src/components/settings-skills.tsx    |  50 ++++----
+ packages/app/src/i18n/en.ts                   |   2 +-
+ packages/app/src/pages/directory-layout.tsx   |   2 +-
+ packages/app/src/pages/home.tsx               |   2 +-
+ packages/app/src/pages/layout.tsx             |   2 +-
+ .../src/utils/{waffle.ts => mockingbird.ts}   |  12 +-
+ 14 files changed, 191 insertions(+), 191 deletions(-)
+ rename packages/app/src/components/{settings-waffle-shared.tsx => settings-mockingbird-shared.tsx} (85%)
+ rename packages/app/src/utils/{waffle.ts => mockingbird.ts} (75%)
+
+diff --git a/packages/app/src/components/settings-agents.tsx b/packages/app/src/components/settings-agents.tsx
+index dda48a075..81b547fb4 100644
+--- a/packages/app/src/components/settings-agents.tsx
++++ b/packages/app/src/components/settings-agents.tsx
+@@ -2,8 +2,8 @@ import { Button } from "@opencode-ai/ui/button"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+-import { prettyJson, waffleJson } from "@/utils/waffle"
+-import { WaffleCard, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++import { prettyJson, mockingbirdJson } from "@/utils/mockingbird"
++import { MockingbirdCard, MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdTextArea, MockingbirdToolbar } from "./settings-mockingbird-shared"
+ 
+ type AgentType = {
+   id: string
+@@ -45,7 +45,7 @@ export const SettingsAgents: Component = () => {
+     setState("loading", true)
+     setState("error", "")
+     try {
+-      const payload = await waffleJson<AgentsPayload>("/api/waffle/agents")
++      const payload = await mockingbirdJson<AgentsPayload>("/api/mockingbird/agents")
+       setState("payload", payload)
+       setState("text", prettyJson(payload.agentTypes))
+     } catch (error) {
+@@ -77,7 +77,7 @@ export const SettingsAgents: Component = () => {
+     setState("saving", true)
+     setState("error", "")
+     try {
+-      const payload = await waffleJson<AgentsPayload>("/api/waffle/agents", {
++      const payload = await mockingbirdJson<AgentsPayload>("/api/mockingbird/agents", {
+         method: "PATCH",
+         body: JSON.stringify({
+           upserts: parsed,
+@@ -104,44 +104,44 @@ export const SettingsAgents: Component = () => {
+   })
+ 
+   return (
+-    <WaffleSettingsPage
++    <MockingbirdSettingsPage
+       title="Agents"
+       description="Manage OpenCode agent definitions stored in the pinned workspace's .opencode/opencode.jsonc."
+       actions={
+-        <WaffleToolbar>
++        <MockingbirdToolbar>
+           <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving}>
+             Refresh
+           </Button>
+           <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving}>
+             Save
+           </Button>
+-        </WaffleToolbar>
++        </MockingbirdToolbar>
+       }
+     >
+       <Show when={state.error}>
+-        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++        <MockingbirdNotice tone="error">{state.error}</MockingbirdNotice>
+       </Show>
+ 
+       <Show when={state.payload?.storage}>
+         {(storage) => (
+-          <WaffleSettingsSection title="Storage">
+-            <WaffleMetaRow label="Workspace directory" value={storage().directory} />
+-            <WaffleMetaRow label="Config file" value={storage().configFilePath} />
+-            <WaffleMetaRow label="Persistence mode" value={storage().persistenceMode} />
+-          </WaffleSettingsSection>
++          <MockingbirdSettingsSection title="Storage">
++            <MockingbirdMetaRow label="Workspace directory" value={storage().directory} />
++            <MockingbirdMetaRow label="Config file" value={storage().configFilePath} />
++            <MockingbirdMetaRow label="Persistence mode" value={storage().persistenceMode} />
++          </MockingbirdSettingsSection>
+         )}
+       </Show>
+ 
+-      <WaffleSettingsSection title="Agent editor" description="Edit the current agent type array as JSON.">
+-        <WaffleCard>
+-          <WaffleTextArea
++      <MockingbirdSettingsSection title="Agent editor" description="Edit the current agent type array as JSON.">
++        <MockingbirdCard>
++          <MockingbirdTextArea
+             rows={22}
+             value={state.text}
+             onInput={(event) => setState("text", event.currentTarget.value)}
+             spellcheck={false}
+           />
+-        </WaffleCard>
+-      </WaffleSettingsSection>
+-    </WaffleSettingsPage>
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
++    </MockingbirdSettingsPage>
+   )
+ }
+diff --git a/packages/app/src/components/settings-cron-data.test.ts b/packages/app/src/components/settings-cron-data.test.ts
+index faf702691..c1ec8fcd3 100644
+--- a/packages/app/src/components/settings-cron-data.test.ts
++++ b/packages/app/src/components/settings-cron-data.test.ts
+@@ -6,13 +6,13 @@ describe("loadCronSettings", () => {
+     const calls: Array<{ path: string; init?: RequestInit }> = []
+     const requestJson = async <T>(path: string, init?: RequestInit) => {
+       calls.push({ path, init })
+-      if (path === "/api/waffle/cron/jobs") {
++      if (path === "/api/mockingbird/cron/jobs") {
+         return { jobs: [] } as T
+       }
+-      if (path === "/api/waffle/cron/health") {
++      if (path === "/api/mockingbird/cron/health") {
+         return { health: { enabled: true, jobs: { total: 0, enabled: 0 } } } as T
+       }
+-      if (path === "/api/waffle/cron/manage") {
++      if (path === "/api/mockingbird/cron/manage") {
+         return {
+           contract: {
+             runModes: {
+@@ -36,10 +36,10 @@ describe("loadCronSettings", () => {
+       },
+     })
+     expect(calls).toEqual([
+-      { path: "/api/waffle/cron/jobs", init: undefined },
+-      { path: "/api/waffle/cron/health", init: undefined },
++      { path: "/api/mockingbird/cron/jobs", init: undefined },
++      { path: "/api/mockingbird/cron/health", init: undefined },
+       {
+-        path: "/api/waffle/cron/manage",
++        path: "/api/mockingbird/cron/manage",
+         init: {
+           method: "POST",
+           body: JSON.stringify({ action: "describe_contract" }),
+diff --git a/packages/app/src/components/settings-cron-data.ts b/packages/app/src/components/settings-cron-data.ts
+index c747ce06f..2eeab5f94 100644
+--- a/packages/app/src/components/settings-cron-data.ts
++++ b/packages/app/src/components/settings-cron-data.ts
+@@ -1,4 +1,4 @@
+-import { prettyJson, waffleJson } from "@/utils/waffle"
++import { prettyJson, mockingbirdJson } from "@/utils/mockingbird"
+ 
+ export type CronJobDefinition = {
+   id: string
+@@ -49,7 +49,7 @@ type CronContractResponse = {
+   contract: CronContract
+ }
+ 
+-type WaffleJson = <T>(path: string, init?: RequestInit) => Promise<T>
++type MockingbirdJson = <T>(path: string, init?: RequestInit) => Promise<T>
+ 
+ const DEFAULT_AGENT_JOB = {
+   name: "Hourly review",
+@@ -63,11 +63,11 @@ const DEFAULT_AGENT_JOB = {
+ 
+ export const DEFAULT_JOB = prettyJson(DEFAULT_AGENT_JOB)
+ 
+-export async function loadCronSettings(requestJson: WaffleJson = waffleJson) {
++export async function loadCronSettings(requestJson: MockingbirdJson = mockingbirdJson) {
+   const [jobs, health, contract] = await Promise.all([
+-    requestJson<CronJobsResponse>("/api/waffle/cron/jobs"),
+-    requestJson<CronHealthResponse>("/api/waffle/cron/health"),
+-    requestJson<CronContractResponse>("/api/waffle/cron/manage", {
++    requestJson<CronJobsResponse>("/api/mockingbird/cron/jobs"),
++    requestJson<CronHealthResponse>("/api/mockingbird/cron/health"),
++    requestJson<CronContractResponse>("/api/mockingbird/cron/manage", {
+       method: "POST",
+       body: JSON.stringify({ action: "describe_contract" }),
+     }),
+diff --git a/packages/app/src/components/settings-cron.tsx b/packages/app/src/components/settings-cron.tsx
+index a5b15cb11..67f282245 100644
+--- a/packages/app/src/components/settings-cron.tsx
++++ b/packages/app/src/components/settings-cron.tsx
+@@ -2,9 +2,9 @@ import { Button } from "@opencode-ai/ui/button"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { For, onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+-import { waffleJson } from "@/utils/waffle"
++import { mockingbirdJson } from "@/utils/mockingbird"
+ import { DEFAULT_JOB, loadCronSettings, serializeCronJobForEdit, type CronContract, type CronHealthSnapshot, type CronJobDefinition } from "./settings-cron-data"
+-import { WaffleCard, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++import { MockingbirdCard, MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdTextArea, MockingbirdToolbar } from "./settings-mockingbird-shared"
+ 
+ export const SettingsCron: Component = () => {
+   const [state, setState] = createStore({
+@@ -51,7 +51,7 @@ export const SettingsCron: Component = () => {
+     setState("saving", true)
+     setState("error", "")
+     try {
+-      await waffleJson("/api/waffle/cron/jobs", {
++      await mockingbirdJson("/api/mockingbird/cron/jobs", {
+         method: "POST",
+         body: JSON.stringify(payload),
+       })
+@@ -82,7 +82,7 @@ export const SettingsCron: Component = () => {
+     setState("busyId", state.editingId)
+     setState("error", "")
+     try {
+-      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(state.editingId)}`, {
++      await mockingbirdJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(state.editingId)}`, {
+         method: "PATCH",
+         body: JSON.stringify(payload),
+       })
+@@ -99,7 +99,7 @@ export const SettingsCron: Component = () => {
+   async function runNow(id: string) {
+     setState("busyId", id)
+     try {
+-      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(id)}/run`, {
++      await mockingbirdJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(id)}/run`, {
+         method: "POST",
+       })
+       showToast({
+@@ -117,7 +117,7 @@ export const SettingsCron: Component = () => {
+   async function remove(id: string) {
+     setState("busyId", id)
+     try {
+-      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(id)}`, {
++      await mockingbirdJson(`/api/mockingbird/cron/jobs/${encodeURIComponent(id)}`, {
+         method: "DELETE",
+       })
+       await refresh()
+@@ -133,34 +133,34 @@ export const SettingsCron: Component = () => {
+   })
+ 
+   return (
+-    <WaffleSettingsPage
++    <MockingbirdSettingsPage
+       title="Cron"
+       description="Inspect cron health, create jobs, update jobs with JSON patches, and run them immediately."
+       actions={
+-        <WaffleToolbar>
++        <MockingbirdToolbar>
+           <Button variant="ghost" size="large" onClick={() => void refresh()} disabled={state.loading || state.saving}>
+             Refresh
+           </Button>
+-        </WaffleToolbar>
++        </MockingbirdToolbar>
+       }
+     >
+       <Show when={state.error}>
+-        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++        <MockingbirdNotice tone="error">{state.error}</MockingbirdNotice>
+       </Show>
+ 
+       <Show when={state.health}>
+         {(health) => (
+-          <WaffleSettingsSection title="Cron health">
+-            <WaffleMetaRow label="Enabled" value={health().enabled ? "Yes" : "No"} />
+-            <WaffleMetaRow label="Total jobs" value={String(health().jobs.total)} />
+-            <WaffleMetaRow label="Enabled jobs" value={String(health().jobs.enabled)} />
+-          </WaffleSettingsSection>
++          <MockingbirdSettingsSection title="Cron health">
++            <MockingbirdMetaRow label="Enabled" value={health().enabled ? "Yes" : "No"} />
++            <MockingbirdMetaRow label="Total jobs" value={String(health().jobs.total)} />
++            <MockingbirdMetaRow label="Enabled jobs" value={String(health().jobs.enabled)} />
++          </MockingbirdSettingsSection>
+         )}
+       </Show>
+ 
+       <Show when={state.contract}>
+         {(contract) => (
+-          <WaffleSettingsSection title="Run mode contract" description="Current backend requirements for each cron run mode.">
++          <MockingbirdSettingsSection title="Run mode contract" description="Current backend requirements for each cron run mode.">
+             <For each={Object.entries(contract().runModes)}>
+               {([mode, details]) => (
+                 <div class="px-4 py-4 border-b border-border-weak-base last:border-none flex flex-col gap-1">
+@@ -177,11 +177,11 @@ export const SettingsCron: Component = () => {
+                 </div>
+               )}
+             </For>
+-          </WaffleSettingsSection>
++          </MockingbirdSettingsSection>
+         )}
+       </Show>
+ 
+-      <WaffleSettingsSection title="Jobs">
++      <MockingbirdSettingsSection title="Jobs">
+         <Show
+           when={state.jobs.length > 0}
+           fallback={<div class="px-4 py-4 text-14-regular text-text-weak">No cron jobs configured.</div>}
+@@ -231,7 +231,7 @@ export const SettingsCron: Component = () => {
+ 
+                 <Show when={state.editingId === job.id}>
+                   <div class="flex flex-col gap-3">
+-                    <WaffleTextArea
++                    <MockingbirdTextArea
+                       rows={12}
+                       value={state.editText}
+                       onInput={(event) => setState("editText", event.currentTarget.value)}
+@@ -247,10 +247,10 @@ export const SettingsCron: Component = () => {
+             )}
+           </For>
+         </Show>
+-      </WaffleSettingsSection>
++      </MockingbirdSettingsSection>
+ 
+-      <WaffleSettingsSection title="Create job" description="Post a complete cron job definition as JSON using the current run mode contract.">
+-        <WaffleCard
++      <MockingbirdSettingsSection title="Create job" description="Post a complete cron job definition as JSON using the current run mode contract.">
++        <MockingbirdCard
+           footer={
+             <div class="flex justify-end">
+               <Button size="large" onClick={() => void createJob()} disabled={state.saving}>
+@@ -259,9 +259,9 @@ export const SettingsCron: Component = () => {
+             </div>
+           }
+         >
+-          <WaffleTextArea rows={16} value={state.createText} onInput={(event) => setState("createText", event.currentTarget.value)} />
+-        </WaffleCard>
+-      </WaffleSettingsSection>
+-    </WaffleSettingsPage>
++          <MockingbirdTextArea rows={16} value={state.createText} onInput={(event) => setState("createText", event.currentTarget.value)} />
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
++    </MockingbirdSettingsPage>
+   )
+ }
+diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
+index 95a1770cc..628fda355 100644
+--- a/packages/app/src/components/settings-heartbeat.tsx
++++ b/packages/app/src/components/settings-heartbeat.tsx
+@@ -3,17 +3,17 @@ import { Switch } from "@opencode-ai/ui/switch"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+-import { waffleJson } from "@/utils/waffle"
++import { mockingbirdJson } from "@/utils/mockingbird"
+ import {
+-  WaffleCard,
+-  WaffleInput,
+-  WaffleMetaRow,
+-  WaffleNotice,
+-  WaffleSettingsPage,
+-  WaffleSettingsSection,
+-  WaffleTextArea,
+-  WaffleToolbar,
+-} from "./settings-waffle-shared"
++  MockingbirdCard,
++  MockingbirdInput,
++  MockingbirdMetaRow,
++  MockingbirdNotice,
++  MockingbirdSettingsPage,
++  MockingbirdSettingsSection,
++  MockingbirdTextArea,
++  MockingbirdToolbar,
++} from "./settings-mockingbird-shared"
+ 
+ type HeartbeatActiveHours = {
+   start: string
+@@ -168,8 +168,8 @@ export const SettingsHeartbeat: Component = () => {
+     setState("error", "")
+     try {
+       const [heartbeat, runtime] = await Promise.all([
+-        waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat"),
+-        waffleJson<RuntimePayload>("/api/waffle/runtime/config"),
++        mockingbirdJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
++        mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config"),
+       ])
+       setState("status", heartbeat.heartbeat)
+       setState("runtimeHash", runtime.hash)
+@@ -194,7 +194,7 @@ export const SettingsHeartbeat: Component = () => {
+     setState("saving", true)
+     setState("error", "")
+     try {
+-      const runtime = await waffleJson<RuntimePayload>("/api/waffle/runtime/config", {
++      const runtime = await mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config", {
+         method: "PATCH",
+         body: JSON.stringify({
+           patch: {
+@@ -224,7 +224,7 @@ export const SettingsHeartbeat: Component = () => {
+     setState("running", true)
+     setState("error", "")
+     try {
+-      const payload = await waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat/run", {
++      const payload = await mockingbirdJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat/run", {
+         method: "POST",
+       })
+       setState("status", payload.heartbeat)
+@@ -246,11 +246,11 @@ export const SettingsHeartbeat: Component = () => {
+   })
+ 
+   return (
+-    <WaffleSettingsPage
++    <MockingbirdSettingsPage
+       title="Heartbeat"
+       description="Monitor the dedicated heartbeat session, control its schedule, and choose its model explicitly."
+       actions={
+-        <WaffleToolbar>
++        <MockingbirdToolbar>
+           <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving || state.running}>
+             Refresh
+           </Button>
+@@ -260,46 +260,46 @@ export const SettingsHeartbeat: Component = () => {
+           <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving || state.running}>
+             Save
+           </Button>
+-        </WaffleToolbar>
++        </MockingbirdToolbar>
+       }
+     >
+       <Show when={state.error}>
+-        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++        <MockingbirdNotice tone="error">{state.error}</MockingbirdNotice>
+       </Show>
+ 
+       <Show when={state.status}>
+         {(status) => (
+           <>
+-            <WaffleSettingsSection title="Status" description="Current scheduler state for the dedicated Heartbeat session.">
+-              <WaffleMetaRow label="Config file" value={state.runtimePath || "Unavailable"} />
+-              <WaffleMetaRow label="Enabled" value={status().config.enabled ? "Yes" : "No"} />
+-              <WaffleMetaRow label="Session id" value={status().state.sessionId ?? "Not created yet"} />
+-              <WaffleMetaRow label="Currently running" value={status().state.running ? "Yes" : "No"} />
+-              <WaffleMetaRow label="Last run" value={formatTimestamp(status().state.lastRunAt)} />
+-              <WaffleMetaRow label="Next due" value={formatTimestamp(status().nextDueAt)} />
+-              <WaffleMetaRow label="Last result" value={formatResult(status().state.lastResult)} />
+-              <WaffleMetaRow label="Last updated" value={formatTimestamp(status().state.updatedAt)} />
+-            </WaffleSettingsSection>
++            <MockingbirdSettingsSection title="Status" description="Current scheduler state for the dedicated Heartbeat session.">
++              <MockingbirdMetaRow label="Config file" value={state.runtimePath || "Unavailable"} />
++              <MockingbirdMetaRow label="Enabled" value={status().config.enabled ? "Yes" : "No"} />
++              <MockingbirdMetaRow label="Session id" value={status().state.sessionId ?? "Not created yet"} />
++              <MockingbirdMetaRow label="Currently running" value={status().state.running ? "Yes" : "No"} />
++              <MockingbirdMetaRow label="Last run" value={formatTimestamp(status().state.lastRunAt)} />
++              <MockingbirdMetaRow label="Next due" value={formatTimestamp(status().nextDueAt)} />
++              <MockingbirdMetaRow label="Last result" value={formatResult(status().state.lastResult)} />
++              <MockingbirdMetaRow label="Last updated" value={formatTimestamp(status().state.updatedAt)} />
++            </MockingbirdSettingsSection>
+ 
+             <Show when={status().state.lastError}>
+-              <WaffleNotice tone="error">{status().state.lastError ?? ""}</WaffleNotice>
++              <MockingbirdNotice tone="error">{status().state.lastError ?? ""}</MockingbirdNotice>
+             </Show>
+ 
+             <Show when={status().state.lastResponse}>
+-              <WaffleSettingsSection title="Last response" description="Most recent heartbeat response captured from the dedicated session.">
+-                <WaffleCard>
++              <MockingbirdSettingsSection title="Last response" description="Most recent heartbeat response captured from the dedicated session.">
++                <MockingbirdCard>
+                   <div class="text-13-regular text-text-strong whitespace-pre-wrap break-words">
+                     {status().state.lastResponse}
+                   </div>
+-                </WaffleCard>
+-              </WaffleSettingsSection>
++                </MockingbirdCard>
++              </MockingbirdSettingsSection>
+             </Show>
+           </>
+         )}
+       </Show>
+ 
+-      <WaffleSettingsSection title="Controls" description="Choose whether heartbeat runs, how often it runs, and which model it uses.">
+-        <WaffleCard>
++      <MockingbirdSettingsSection title="Controls" description="Choose whether heartbeat runs, how often it runs, and which model it uses.">
++        <MockingbirdCard>
+           <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-weak-base bg-surface-base px-4 py-3">
+             <div class="flex flex-col gap-1">
+               <div class="text-13-medium text-text-strong">Heartbeat enabled</div>
+@@ -313,7 +313,7 @@ export const SettingsHeartbeat: Component = () => {
+           <div class="grid gap-4 sm:grid-cols-2">
+             <div class="flex flex-col gap-2">
+               <span class="text-12-medium text-text-weak">Model</span>
+-              <WaffleInput
++              <MockingbirdInput
+                 value={state.form.model}
+                 placeholder="openai/gpt-5.4"
+                 onInput={(event) => setState("form", "model", event.currentTarget.value)}
+@@ -321,7 +321,7 @@ export const SettingsHeartbeat: Component = () => {
+             </div>
+             <div class="flex flex-col gap-2">
+               <span class="text-12-medium text-text-weak">Interval</span>
+-              <WaffleInput
++              <MockingbirdInput
+                 value={state.form.interval}
+                 placeholder="15m"
+                 onInput={(event) => setState("form", "interval", event.currentTarget.value)}
+@@ -329,7 +329,7 @@ export const SettingsHeartbeat: Component = () => {
+             </div>
+             <div class="flex flex-col gap-2">
+               <span class="text-12-medium text-text-weak">Agent id</span>
+-              <WaffleInput
++              <MockingbirdInput
+                 value={state.form.agentId}
+                 placeholder="build"
+                 onInput={(event) => setState("form", "agentId", event.currentTarget.value)}
+@@ -337,7 +337,7 @@ export const SettingsHeartbeat: Component = () => {
+             </div>
+             <div class="flex flex-col gap-2">
+               <span class="text-12-medium text-text-weak">Ack max chars</span>
+-              <WaffleInput
++              <MockingbirdInput
+                 type="number"
+                 min="1"
+                 value={state.form.ackMaxChars}
+@@ -345,11 +345,11 @@ export const SettingsHeartbeat: Component = () => {
+               />
+             </div>
+           </div>
+-        </WaffleCard>
+-      </WaffleSettingsSection>
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
+ 
+-      <WaffleSettingsSection title="Active hours" description="Optionally restrict heartbeat runs to a daily time window.">
+-        <WaffleCard>
++      <MockingbirdSettingsSection title="Active hours" description="Optionally restrict heartbeat runs to a daily time window.">
++        <MockingbirdCard>
+           <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-weak-base bg-surface-base px-4 py-3">
+             <div class="flex flex-col gap-1">
+               <div class="text-13-medium text-text-strong">Restrict to active hours</div>
+@@ -368,7 +368,7 @@ export const SettingsHeartbeat: Component = () => {
+             <div class="grid gap-4 sm:grid-cols-3">
+               <div class="flex flex-col gap-2">
+                 <span class="text-12-medium text-text-weak">Start</span>
+-                <WaffleInput
++                <MockingbirdInput
+                   value={state.form.activeStart}
+                   placeholder="09:00"
+                   onInput={(event) => setState("form", "activeStart", event.currentTarget.value)}
+@@ -376,7 +376,7 @@ export const SettingsHeartbeat: Component = () => {
+               </div>
+               <div class="flex flex-col gap-2">
+                 <span class="text-12-medium text-text-weak">End</span>
+-                <WaffleInput
++                <MockingbirdInput
+                   value={state.form.activeEnd}
+                   placeholder="17:00"
+                   onInput={(event) => setState("form", "activeEnd", event.currentTarget.value)}
+@@ -384,7 +384,7 @@ export const SettingsHeartbeat: Component = () => {
+               </div>
+               <div class="flex flex-col gap-2">
+                 <span class="text-12-medium text-text-weak">Timezone</span>
+-                <WaffleInput
++                <MockingbirdInput
+                   value={state.form.activeTimezone}
+                   placeholder="America/Chicago"
+                   onInput={(event) => setState("form", "activeTimezone", event.currentTarget.value)}
+@@ -392,18 +392,18 @@ export const SettingsHeartbeat: Component = () => {
+               </div>
+             </div>
+           </Show>
+-        </WaffleCard>
+-      </WaffleSettingsSection>
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
+ 
+-      <WaffleSettingsSection title="Prompt" description="This prompt runs in the visible Heartbeat session whenever the scheduler fires.">
+-        <WaffleCard>
+-          <WaffleTextArea
++      <MockingbirdSettingsSection title="Prompt" description="This prompt runs in the visible Heartbeat session whenever the scheduler fires.">
++        <MockingbirdCard>
++          <MockingbirdTextArea
+             rows={12}
+             value={state.form.prompt}
+             onInput={(event) => setState("form", "prompt", event.currentTarget.value)}
+           />
+-        </WaffleCard>
+-      </WaffleSettingsSection>
+-    </WaffleSettingsPage>
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
++    </MockingbirdSettingsPage>
+   )
+ }
+diff --git a/packages/app/src/components/settings-mcp.tsx b/packages/app/src/components/settings-mcp.tsx
+index 88abc0a06..26bc59c19 100644
+--- a/packages/app/src/components/settings-mcp.tsx
++++ b/packages/app/src/components/settings-mcp.tsx
+@@ -2,8 +2,8 @@ import { Button } from "@opencode-ai/ui/button"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { For, onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+-import { prettyJson, waffleJson } from "@/utils/waffle"
+-import { WaffleCard, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++import { prettyJson, mockingbirdJson } from "@/utils/mockingbird"
++import { MockingbirdCard, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdTextArea, MockingbirdToolbar } from "./settings-mockingbird-shared"
+ 
+ type McpServer =
+   | {
+@@ -51,7 +51,7 @@ export const SettingsMcp: Component = () => {
+     setState("loading", true)
+     setState("error", "")
+     try {
+-      const payload = await waffleJson<McpPayload>("/api/waffle/mcp")
++      const payload = await mockingbirdJson<McpPayload>("/api/mockingbird/mcp")
+       setState("payload", payload)
+       setState("text", prettyJson(payload.servers))
+     } catch (error) {
+@@ -78,7 +78,7 @@ export const SettingsMcp: Component = () => {
+     setState("saving", true)
+     setState("error", "")
+     try {
+-      const payload = await waffleJson<McpPayload>("/api/waffle/mcp", {
++      const payload = await mockingbirdJson<McpPayload>("/api/mockingbird/mcp", {
+         method: "PUT",
+         body: JSON.stringify({ servers: parsed }),
+       })
+@@ -99,8 +99,8 @@ export const SettingsMcp: Component = () => {
+   async function runAction(id: string, action: "connect" | "disconnect" | "auth/start" | "auth/remove") {
+     setState("busyId", id)
+     try {
+-      const payload = await waffleJson<{ status: McpStatusMap; authorizationUrl?: string }>(
+-        `/api/waffle/mcp/${encodeURIComponent(id)}/${action}`,
++      const payload = await mockingbirdJson<{ status: McpStatusMap; authorizationUrl?: string }>(
++        `/api/mockingbird/mcp/${encodeURIComponent(id)}/${action}`,
+         {
+           method: "POST",
+         },
+@@ -123,25 +123,25 @@ export const SettingsMcp: Component = () => {
+   const statusFor = (id: string) => state.payload?.status?.[id]?.status ?? "unknown"
+ 
+   return (
+-    <WaffleSettingsPage
++    <MockingbirdSettingsPage
+       title="MCP"
+       description="Edit MCP server definitions and drive connection or auth flows through Agent Mockingbird's same-origin APIs."
+       actions={
+-        <WaffleToolbar>
++        <MockingbirdToolbar>
+           <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving}>
+             Refresh
+           </Button>
+           <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving}>
+             Save
+           </Button>
+-        </WaffleToolbar>
++        </MockingbirdToolbar>
+       }
+     >
+       <Show when={state.error}>
+-        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++        <MockingbirdNotice tone="error">{state.error}</MockingbirdNotice>
+       </Show>
+ 
+-      <WaffleSettingsSection title="Configured servers" description="Connection status and auth actions for configured MCP servers.">
++      <MockingbirdSettingsSection title="Configured servers" description="Connection status and auth actions for configured MCP servers.">
+         <Show
+           when={(state.payload?.servers.length ?? 0) > 0}
+           fallback={<div class="px-4 py-4 text-14-regular text-text-weak">No MCP servers configured.</div>}
+@@ -186,18 +186,18 @@ export const SettingsMcp: Component = () => {
+             )}
+           </For>
+         </Show>
+-      </WaffleSettingsSection>
++      </MockingbirdSettingsSection>
+ 
+-      <WaffleSettingsSection title="Server editor" description="Edit the full MCP server array as JSON.">
+-        <WaffleCard>
+-          <WaffleTextArea
++      <MockingbirdSettingsSection title="Server editor" description="Edit the full MCP server array as JSON.">
++        <MockingbirdCard>
++          <MockingbirdTextArea
+             rows={22}
+             value={state.text}
+             onInput={(event) => setState("text", event.currentTarget.value)}
+             spellcheck={false}
+           />
+-        </WaffleCard>
+-      </WaffleSettingsSection>
+-    </WaffleSettingsPage>
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
++    </MockingbirdSettingsPage>
+   )
+ }
+diff --git a/packages/app/src/components/settings-waffle-shared.tsx b/packages/app/src/components/settings-mockingbird-shared.tsx
+similarity index 85%
+rename from packages/app/src/components/settings-waffle-shared.tsx
+rename to packages/app/src/components/settings-mockingbird-shared.tsx
+index 64ece4b04..6955f903c 100644
+--- a/packages/app/src/components/settings-waffle-shared.tsx
++++ b/packages/app/src/components/settings-mockingbird-shared.tsx
+@@ -1,6 +1,6 @@
+ import { type JSX, type ParentProps, Show } from "solid-js"
+ 
+-export function WaffleSettingsPage(
++export function MockingbirdSettingsPage(
+   props: ParentProps<{
+     title: string
+     description?: string
+@@ -28,7 +28,7 @@ export function WaffleSettingsPage(
+   )
+ }
+ 
+-export function WaffleSettingsSection(
++export function MockingbirdSettingsSection(
+   props: ParentProps<{
+     title: string
+     description?: string
+@@ -53,7 +53,7 @@ export function WaffleSettingsSection(
+   )
+ }
+ 
+-export function WaffleMetaRow(props: { label: string; value: string | JSX.Element }) {
++export function MockingbirdMetaRow(props: { label: string; value: string | JSX.Element }) {
+   return (
+     <div class="flex flex-col gap-1 px-4 py-3 border-b border-border-weak-base last:border-none">
+       <span class="text-12-medium text-text-weak">{props.label}</span>
+@@ -62,11 +62,11 @@ export function WaffleMetaRow(props: { label: string; value: string | JSX.Elemen
+   )
+ }
+ 
+-export function WaffleToolbar(props: ParentProps) {
++export function MockingbirdToolbar(props: ParentProps) {
+   return <div class="flex flex-wrap items-center gap-2">{props.children}</div>
+ }
+ 
+-export function WaffleNotice(props: { tone?: "error" | "success" | "info"; children: JSX.Element }) {
++export function MockingbirdNotice(props: { tone?: "error" | "success" | "info"; children: JSX.Element }) {
+   const tone = () => props.tone ?? "info"
+   return (
+     <div
+@@ -82,7 +82,7 @@ export function WaffleNotice(props: { tone?: "error" | "success" | "info"; child
+   )
+ }
+ 
+-export function WaffleInput(props: JSX.InputHTMLAttributes<HTMLInputElement>) {
++export function MockingbirdInput(props: JSX.InputHTMLAttributes<HTMLInputElement>) {
+   return (
+     <input
+       {...props}
+@@ -93,7 +93,7 @@ export function WaffleInput(props: JSX.InputHTMLAttributes<HTMLInputElement>) {
+   )
+ }
+ 
+-export function WaffleTextArea(props: JSX.TextareaHTMLAttributes<HTMLTextAreaElement>) {
++export function MockingbirdTextArea(props: JSX.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+   return (
+     <textarea
+       {...props}
+@@ -104,7 +104,7 @@ export function WaffleTextArea(props: JSX.TextareaHTMLAttributes<HTMLTextAreaEle
+   )
+ }
+ 
+-export function WaffleCard(props: ParentProps<{ footer?: JSX.Element }>) {
++export function MockingbirdCard(props: ParentProps<{ footer?: JSX.Element }>) {
+   return (
+     <div class="rounded-lg border border-border-weak-base bg-background-base overflow-hidden">
+       <div class="p-4 flex flex-col gap-4">{props.children}</div>
+diff --git a/packages/app/src/components/settings-runtime.tsx b/packages/app/src/components/settings-runtime.tsx
+index fd091697e..808430278 100644
+--- a/packages/app/src/components/settings-runtime.tsx
++++ b/packages/app/src/components/settings-runtime.tsx
+@@ -2,8 +2,8 @@ import { Button } from "@opencode-ai/ui/button"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+-import { prettyJson, waffleJson } from "@/utils/waffle"
+-import { WaffleCard, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++import { prettyJson, mockingbirdJson } from "@/utils/mockingbird"
++import { MockingbirdCard, MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdTextArea, MockingbirdToolbar } from "./settings-mockingbird-shared"
+ 
+ type RuntimePayload = {
+   hash: string
+@@ -29,7 +29,7 @@ export const SettingsRuntime: Component = () => {
+     setState("loading", true)
+     setState("error", "")
+     try {
+-      const payload = await waffleJson<RuntimePayload>("/api/waffle/runtime/config")
++      const payload = await mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config")
+       setState("payload", payload)
+       setState("text", prettyJson(payload.config))
+     } catch (error) {
+@@ -51,7 +51,7 @@ export const SettingsRuntime: Component = () => {
+     setState("saving", true)
+     setState("error", "")
+     try {
+-      const payload = await waffleJson<RuntimePayload>("/api/waffle/runtime/config/replace", {
++      const payload = await mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config/replace", {
+         method: "POST",
+         body: JSON.stringify({
+           config: parsed,
+@@ -77,44 +77,44 @@ export const SettingsRuntime: Component = () => {
+   })
+ 
+   return (
+-    <WaffleSettingsPage
++    <MockingbirdSettingsPage
+       title="Runtime"
+       description="Edit Agent Mockingbird runtime settings owned outside OpenCode's workspace config."
+       actions={
+-        <WaffleToolbar>
++        <MockingbirdToolbar>
+           <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving}>
+             Refresh
+           </Button>
+           <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving}>
+             Save
+           </Button>
+-        </WaffleToolbar>
++        </MockingbirdToolbar>
+       }
+     >
+       <Show when={state.error}>
+-        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++        <MockingbirdNotice tone="error">{state.error}</MockingbirdNotice>
+       </Show>
+ 
+       <Show when={state.payload}>
+         {(payload) => (
+-          <WaffleSettingsSection title="Config metadata">
+-            <WaffleMetaRow label="Config file" value={payload().path} />
+-            <WaffleMetaRow label="Pinned workspace" value={payload().config.workspace.pinnedDirectory} />
+-            <WaffleMetaRow label="Revision hash" value={payload().hash} />
+-          </WaffleSettingsSection>
++          <MockingbirdSettingsSection title="Config metadata">
++            <MockingbirdMetaRow label="Config file" value={payload().path} />
++            <MockingbirdMetaRow label="Pinned workspace" value={payload().config.workspace.pinnedDirectory} />
++            <MockingbirdMetaRow label="Revision hash" value={payload().hash} />
++          </MockingbirdSettingsSection>
+         )}
+       </Show>
+ 
+-      <WaffleSettingsSection title="Config editor" description="Replace the current Agent Mockingbird config payload with JSON.">
+-        <WaffleCard>
+-          <WaffleTextArea
++      <MockingbirdSettingsSection title="Config editor" description="Replace the current Agent Mockingbird config payload with JSON.">
++        <MockingbirdCard>
++          <MockingbirdTextArea
+             rows={22}
+             value={state.text}
+             onInput={(event) => setState("text", event.currentTarget.value)}
+             spellcheck={false}
+           />
+-        </WaffleCard>
+-      </WaffleSettingsSection>
+-    </WaffleSettingsPage>
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
++    </MockingbirdSettingsPage>
+   )
+ }
+diff --git a/packages/app/src/components/settings-skills.tsx b/packages/app/src/components/settings-skills.tsx
+index 2254d384c..ca7c7b3cf 100644
+--- a/packages/app/src/components/settings-skills.tsx
++++ b/packages/app/src/components/settings-skills.tsx
+@@ -3,8 +3,8 @@ import { Switch } from "@opencode-ai/ui/switch"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { createSignal, For, onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+-import { WaffleCard, WaffleInput, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
+-import { waffleJson } from "@/utils/waffle"
++import { MockingbirdCard, MockingbirdInput, MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdTextArea, MockingbirdToolbar } from "./settings-mockingbird-shared"
++import { mockingbirdJson } from "@/utils/mockingbird"
+ 
+ type SkillEntry = {
+   id: string
+@@ -48,7 +48,7 @@ export const SettingsSkills: Component = () => {
+     setState("loading", true)
+     setState("error", "")
+     try {
+-      const catalog = await waffleJson<SkillsPayload>("/api/waffle/skills")
++      const catalog = await mockingbirdJson<SkillsPayload>("/api/mockingbird/skills")
+       setState("catalog", catalog)
+     } catch (error) {
+       const message = error instanceof Error ? error.message : "Failed to load skills"
+@@ -66,7 +66,7 @@ export const SettingsSkills: Component = () => {
+   async function toggleSkill(id: string, enabled: boolean) {
+     setState("busyId", id)
+     try {
+-      const next = await waffleJson<SkillsPayload>(`/api/waffle/skills/${encodeURIComponent(id)}`, {
++      const next = await mockingbirdJson<SkillsPayload>(`/api/mockingbird/skills/${encodeURIComponent(id)}`, {
+         method: "PATCH",
+         body: JSON.stringify({ enabled }),
+       })
+@@ -84,7 +84,7 @@ export const SettingsSkills: Component = () => {
+   async function removeSkill(id: string) {
+     setState("busyId", id)
+     try {
+-      const next = await waffleJson<SkillsPayload>(`/api/waffle/skills/${encodeURIComponent(id)}`, {
++      const next = await mockingbirdJson<SkillsPayload>(`/api/mockingbird/skills/${encodeURIComponent(id)}`, {
+         method: "DELETE",
+       })
+       setState("catalog", next)
+@@ -107,7 +107,7 @@ export const SettingsSkills: Component = () => {
+     setState("error", "")
+     setState("busyId", "import")
+     try {
+-      await waffleJson("/api/waffle/skills/import", {
++      await mockingbirdJson("/api/mockingbird/skills/import", {
+         method: "POST",
+         body: JSON.stringify({
+           id: state.importId,
+@@ -135,30 +135,30 @@ export const SettingsSkills: Component = () => {
+   })
+ 
+   return (
+-    <WaffleSettingsPage
++    <MockingbirdSettingsPage
+       title="Skills"
+       description="Manage the workspace skill catalog and import managed skills for the pinned workspace."
+       actions={
+-        <WaffleToolbar>
++        <MockingbirdToolbar>
+           <Button variant="ghost" size="large" onClick={() => void refresh()} disabled={state.loading}>
+             Refresh
+           </Button>
+-        </WaffleToolbar>
++        </MockingbirdToolbar>
+       }
+     >
+       <Show when={state.error}>
+-        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++        <MockingbirdNotice tone="error">{state.error}</MockingbirdNotice>
+       </Show>
+ 
+       <Show when={state.catalog}>
+         {(catalog) => (
+           <>
+-            <WaffleSettingsSection title="Catalog paths">
+-              <WaffleMetaRow label="Managed skills path" value={catalog().managedPath} />
+-              <WaffleMetaRow label="Disabled skills path" value={catalog().disabledPath} />
+-            </WaffleSettingsSection>
++            <MockingbirdSettingsSection title="Catalog paths">
++              <MockingbirdMetaRow label="Managed skills path" value={catalog().managedPath} />
++              <MockingbirdMetaRow label="Disabled skills path" value={catalog().disabledPath} />
++            </MockingbirdSettingsSection>
+ 
+-            <WaffleSettingsSection title="Installed skills" description="Enable, disable, or remove managed skills.">
++            <MockingbirdSettingsSection title="Installed skills" description="Enable, disable, or remove managed skills.">
+               <Show
+                 when={catalog().skills.length > 0}
+                 fallback={<div class="px-4 py-4 text-14-regular text-text-weak">No managed skills found.</div>}
+@@ -193,10 +193,10 @@ export const SettingsSkills: Component = () => {
+                   )}
+                 </For>
+               </Show>
+-            </WaffleSettingsSection>
++            </MockingbirdSettingsSection>
+ 
+             <Show when={catalog().invalid.length > 0}>
+-              <WaffleSettingsSection title="Invalid skills">
++              <MockingbirdSettingsSection title="Invalid skills">
+                 <For each={catalog().invalid}>
+                   {(issue) => (
+                     <div class="px-4 py-3 border-b border-border-weak-base last:border-none">
+@@ -206,17 +206,17 @@ export const SettingsSkills: Component = () => {
+                     </div>
+                   )}
+                 </For>
+-              </WaffleSettingsSection>
++              </MockingbirdSettingsSection>
+             </Show>
+           </>
+         )}
+       </Show>
+ 
+-      <WaffleSettingsSection
++      <MockingbirdSettingsSection
+         title="Import skill"
+         description="Paste a managed SKILL.md and import it into the pinned workspace."
+       >
+-        <WaffleCard
++        <MockingbirdCard
+           footer={
+             <div class="flex flex-wrap items-center justify-between gap-3">
+               <label class="flex items-center gap-2 text-13-regular text-text-strong">
+@@ -235,7 +235,7 @@ export const SettingsSkills: Component = () => {
+         >
+           <div class="flex flex-col gap-2">
+             <span class="text-12-medium text-text-weak">Skill id</span>
+-            <WaffleInput
++            <MockingbirdInput
+               value={state.importId}
+               placeholder="example-skill"
+               onInput={(event) => setState("importId", event.currentTarget.value)}
+@@ -243,14 +243,14 @@ export const SettingsSkills: Component = () => {
+           </div>
+           <div class="flex flex-col gap-2">
+             <span class="text-12-medium text-text-weak">SKILL.md content</span>
+-            <WaffleTextArea
++            <MockingbirdTextArea
+               rows={14}
+               value={state.importContent}
+               onInput={(event) => setState("importContent", event.currentTarget.value)}
+             />
+           </div>
+-        </WaffleCard>
+-      </WaffleSettingsSection>
+-    </WaffleSettingsPage>
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
++    </MockingbirdSettingsPage>
+   )
+ }
+diff --git a/packages/app/src/i18n/en.ts b/packages/app/src/i18n/en.ts
+index 0bb31bab0..5c6e30b68 100644
+--- a/packages/app/src/i18n/en.ts
++++ b/packages/app/src/i18n/en.ts
+@@ -703,7 +703,7 @@ export const dict = {
+ 
+   "settings.section.desktop": "Desktop",
+   "settings.section.server": "Server",
+-  "settings.section.wafflebot": "Wafflebot",
++  "settings.section.agent-mockingbird": "Agent Mockingbird",
+   "settings.tab.general": "General",
+   "settings.tab.shortcuts": "Shortcuts",
+   "settings.desktop.section.wsl": "WSL",
+diff --git a/packages/app/src/pages/directory-layout.tsx b/packages/app/src/pages/directory-layout.tsx
+index 50b6fa5ad..f6c5b7b23 100644
+--- a/packages/app/src/pages/directory-layout.tsx
++++ b/packages/app/src/pages/directory-layout.tsx
+@@ -11,7 +11,7 @@ import { base64Encode } from "@opencode-ai/util/encode"
+ import { decode64 } from "@/utils/base64"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { useLanguage } from "@/context/language"
+-import { readPinnedWorkspace, workspaceHref } from "@/utils/waffle"
++import { readPinnedWorkspace, workspaceHref } from "@/utils/mockingbird"
+ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
+   const navigate = useNavigate()
+   const sync = useSync()
+diff --git a/packages/app/src/pages/home.tsx b/packages/app/src/pages/home.tsx
+index ab5c84329..a556507cb 100644
+--- a/packages/app/src/pages/home.tsx
++++ b/packages/app/src/pages/home.tsx
+@@ -1,6 +1,6 @@
+ import { useNavigate } from "@solidjs/router"
+ import { createSignal, onMount, Show } from "solid-js"
+-import { readPinnedWorkspace, workspaceHref } from "@/utils/waffle"
++import { readPinnedWorkspace, workspaceHref } from "@/utils/mockingbird"
+ 
+ export default function Home() {
+   const navigate = useNavigate()
+diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
+index 86cfb0b9b..3246eaebc 100644
+--- a/packages/app/src/pages/layout.tsx
++++ b/packages/app/src/pages/layout.tsx
+@@ -91,7 +91,7 @@ import {
+ } from "./layout/sidebar-workspace"
+ import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
+ import { SidebarContent } from "./layout/sidebar-shell"
+-import { readPinnedWorkspace } from "@/utils/waffle"
++import { readPinnedWorkspace } from "@/utils/mockingbird"
+ 
+ export default function Layout(props: ParentProps) {
+   const [store, setStore, , ready] = persisted(
+diff --git a/packages/app/src/utils/waffle.ts b/packages/app/src/utils/mockingbird.ts
+similarity index 75%
+rename from packages/app/src/utils/waffle.ts
+rename to packages/app/src/utils/mockingbird.ts
+index 79286f66b..c30e7aac8 100644
+--- a/packages/app/src/utils/waffle.ts
++++ b/packages/app/src/utils/mockingbird.ts
+@@ -1,11 +1,11 @@
+ import { base64Encode } from "@opencode-ai/util/encode"
+ 
+-export class WaffleApiError extends Error {
++export class MockingbirdApiError extends Error {
+   status: number
+ 
+   constructor(message: string, status: number) {
+     super(message)
+-    this.name = "WaffleApiError"
++    this.name = "MockingbirdApiError"
+     this.status = status
+   }
+ }
+@@ -13,13 +13,13 @@ export class WaffleApiError extends Error {
+ async function parseJson<T>(response: Response): Promise<T> {
+   const contentType = response.headers.get("content-type") ?? ""
+   if (!contentType.includes("application/json")) {
+-    throw new WaffleApiError(`Expected JSON response from ${response.url}`, response.status)
++    throw new MockingbirdApiError(`Expected JSON response from ${response.url}`, response.status)
+   }
+ 
+   return (await response.json()) as T
+ }
+ 
+-export async function waffleJson<T>(path: string, init?: RequestInit): Promise<T> {
++export async function mockingbirdJson<T>(path: string, init?: RequestInit): Promise<T> {
+   const response = await fetch(path, {
+     ...init,
+     headers: {
+@@ -36,7 +36,7 @@ export async function waffleJson<T>(path: string, init?: RequestInit): Promise<T
+     } catch {
+       // Preserve the default HTTP status message when the error body is not JSON.
+     }
+-    throw new WaffleApiError(message, response.status)
++    throw new MockingbirdApiError(message, response.status)
+   }
+ 
+   return parseJson<T>(response)
+@@ -57,5 +57,5 @@ export interface PinnedWorkspacePayload {
+ }
+ 
+ export function readPinnedWorkspace() {
+-  return waffleJson<PinnedWorkspacePayload>("/api/waffle/runtime/pinned-workspace")
++  return mockingbirdJson<PinnedWorkspacePayload>("/api/mockingbird/runtime/pinned-workspace")
+ }
+-- 
+2.53.0
+

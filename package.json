@@ -1,9 +1,17 @@
 {
   "name": "agent-mockingbird",
   "version": "0.0.1",
-  "private": true,
   "type": "module",
+  "description": "Bun-native orchestration dashboard scaffold for a long-running agent stack.",
   "packageManager": "bun@1.3.10",
+  "homepage": "https://github.com/Waffleophagus/agent-mockingbird",
+  "bugs": {
+    "url": "https://github.com/Waffleophagus/agent-mockingbird/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Waffleophagus/agent-mockingbird"
+  },
   "bin": {
     "agent-mockingbird": "bin/agent-mockingbird"
   },
@@ -12,18 +20,23 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev --parallel --filter=@agent-mockingbird/server --filter=@agent-mockingbird/mobile",
+    "prepare": "bun run ./scripts/setup-git-hooks.ts",
+    "setup:hooks": "bun run ./scripts/setup-git-hooks.ts",
+    "check:ship": "bun run ./scripts/check-ship.ts",
+    "opencode:sync": "bun run ./scripts/opencode-sync.ts",
+    "opencode:swap": "bun run ./scripts/opencode-swap.ts",
+    "dev": "turbo run dev --filter=@agent-mockingbird/server",
+    "dev:opencode": "bash scripts/dev-opencode.sh",
+    "dev:cleanroom:opencode": "bun run --cwd cleanroom/opencode/packages/opencode --conditions=browser ./src/index.ts serve --hostname 127.0.0.1 --port 4097 --print-logs --log-level INFO",
+    "dev:cleanroom:web": "VITE_OPENCODE_SERVER_HOST=127.0.0.1 VITE_OPENCODE_SERVER_PORT=4097 bun run --cwd cleanroom/opencode/packages/app dev -- --host 127.0.0.1 --port 4444",
+    "dev:cleanroom": "concurrently -k -n cleanroom-opencode,cleanroom-web -c cyan,green \"bun run dev:cleanroom:opencode\" \"bun run dev:cleanroom:web\"",
     "dev:server": "turbo run dev --filter=@agent-mockingbird/server",
-    "dev:web": "turbo run dev --filter=@agent-mockingbird/server",
-    "dev:mobile": "turbo run dev --filter=@agent-mockingbird/mobile",
-    "dev:stack": "bun run build:web && bun run build:cli && bash scripts/dev-stack.sh",
+    "dev:stack": "bash scripts/dev-stack-opencode.sh",
     "build:cli": "bun run ./build-cli.mjs",
     "build:bin": "bun run ./build-bin.ts",
-    "build:android": "bash ./apps/mobile/build-android.sh",
     "build": "turbo run build",
     "build:server": "turbo run build --filter=@agent-mockingbird/server",
-    "build:web": "turbo run build --filter=@agent-mockingbird/web",
-    "refresh:streamdown": "bash ./scripts/refresh-streamdown.sh",
+    "build:app": "bun run ./build.ts",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
@@ -34,19 +47,12 @@
     "config:migrate-opencode-env": "bun run ./scripts/migrate-opencode-env.ts"
   },
   "overrides": {
-    "@streamdown/cjk": "1.0.3",
-    "@streamdown/code": "1.1.1",
-    "@streamdown/core": "0.1.5",
-    "@streamdown/math": "1.0.3",
-    "@streamdown/mermaid": "1.0.3",
-    "@streamdown/react-native": "0.1.5",
     "remend": "1.2.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",
     "@types/bun": "latest",
-    "@types/react": "~19.1.10",
-    "@types/react-dom": "~19.1.7",
+    "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.9",
     "eslint": "^9.39.3",
     "eslint-import-resolver-typescript": "^4.4.4",

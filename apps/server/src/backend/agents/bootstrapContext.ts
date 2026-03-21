@@ -1,10 +1,13 @@
 import { parse as parseJsonc } from "jsonc-parser";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { AgentMockingbirdConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
-import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
+import {
+  resolveOpencodeConfigDir,
+  resolveOpencodeWorkspaceDir,
+} from "../workspace/resolve";
 
 const DEFAULT_BOOTSTRAP_FILE_NAMES = [
   "AGENTS.md",
@@ -33,7 +36,7 @@ const IDENTITY_PLACEHOLDER_VALUES = new Set([
 
 type BootstrapFileName = (typeof DEFAULT_BOOTSTRAP_FILE_NAMES)[number];
 
-export interface WorkspaceIdentityProfile {
+interface WorkspaceIdentityProfile {
   name?: string;
   emoji?: string;
   theme?: string;
@@ -64,7 +67,7 @@ interface LoadedBootstrapFile {
   originalLength: number;
 }
 
-export interface WorkspaceBootstrapPromptContext {
+interface WorkspaceBootstrapPromptContext {
   section: string | null;
   workspaceDir: string;
   mode: "full" | "minimal";
@@ -75,19 +78,13 @@ export interface WorkspaceBootstrapPromptContext {
   agentPromptSource: string | null;
 }
 
-export interface ImportedOpenclawBootstrap {
-  sourceDirectory: string;
-  targetDirectory: string;
-  copied: Array<{ name: BootstrapFileName; sourcePath: string; targetPath: string }>;
-  skippedMissing: Array<{ name: BootstrapFileName; sourcePath: string }>;
-  skippedExisting: Array<{ name: BootstrapFileName; targetPath: string }>;
-}
-
 function resolveWorkspaceDir(config: AgentMockingbirdConfig): string {
   return resolveOpencodeWorkspaceDir(config);
 }
 
-function resolveBootstrapConfig(config: AgentMockingbirdConfig): BootstrapConfig {
+function resolveBootstrapConfig(
+  config: AgentMockingbirdConfig,
+): BootstrapConfig {
   const source = config.runtime.opencode.bootstrap;
   return {
     enabled: source.enabled === true,
@@ -113,14 +110,18 @@ function isIdentityPlaceholder(value: string): boolean {
   return IDENTITY_PLACEHOLDER_VALUES.has(normalizeIdentityValue(value));
 }
 
-export function parseIdentityMarkdown(content: string): WorkspaceIdentityProfile {
+function parseIdentityMarkdown(content: string): WorkspaceIdentityProfile {
   const identity: WorkspaceIdentityProfile = {};
   const lines = content.split(/\r?\n/);
   for (const line of lines) {
     const cleaned = line.trim().replace(/^\s*-\s*/, "");
     const colonIndex = cleaned.indexOf(":");
     if (colonIndex === -1) continue;
-    const label = cleaned.slice(0, colonIndex).replace(/[*_]/g, "").trim().toLowerCase();
+    const label = cleaned
+      .slice(0, colonIndex)
+      .replace(/[*_]/g, "")
+      .trim()
+      .toLowerCase();
     const value = cleaned
       .slice(colonIndex + 1)
       .replace(/^[*_]+|[*_]+$/g, "")
@@ -139,15 +140,17 @@ export function parseIdentityMarkdown(content: string): WorkspaceIdentityProfile
 function identityHasValues(identity: WorkspaceIdentityProfile): boolean {
   return Boolean(
     identity.name ||
-      identity.emoji ||
-      identity.theme ||
-      identity.creature ||
-      identity.vibe ||
-      identity.avatar,
+    identity.emoji ||
+    identity.theme ||
+    identity.creature ||
+    identity.vibe ||
+    identity.avatar,
   );
 }
 
-export function loadWorkspaceIdentityProfile(config: AgentMockingbirdConfig = getConfigSnapshot().config) {
+function loadWorkspaceIdentityProfile(
+  config: AgentMockingbirdConfig = getConfigSnapshot().config,
+) {
   const workspaceDir = resolveWorkspaceDir(config);
   const identityPath = path.join(workspaceDir, "IDENTITY.md");
   if (!existsSync(identityPath)) return null;
@@ -169,7 +172,11 @@ function clampToBudget(content: string, budget: number): string {
   return `${content.slice(0, budget - 1)}…`;
 }
 
-function trimBootstrapContent(content: string, fileName: string, maxChars: number) {
+function trimBootstrapContent(
+  content: string,
+  fileName: string,
+  maxChars: number,
+) {
   const trimmed = content.trimEnd();
   if (trimmed.length <= maxChars) {
     return {
@@ -189,101 +196,60 @@ function trimBootstrapContent(content: string, fileName: string, maxChars: numbe
   ].join("\n");
 
   return {
-    content: [trimmed.slice(0, headChars), marker, trimmed.slice(-tailChars)].join("\n"),
+    content: [
+      trimmed.slice(0, headChars),
+      marker,
+      trimmed.slice(-tailChars),
+    ].join("\n"),
     truncated: true,
     originalLength: trimmed.length,
   };
 }
 
 function resolveOpencodeConfigFilePath(config: AgentMockingbirdConfig): string {
-  const workspaceDir = resolveWorkspaceDir(config);
-  return path.join(workspaceDir, ".opencode", "opencode.jsonc");
+  return path.join(resolveOpencodeConfigDir(config), "opencode.jsonc");
 }
 
-function resolveAgentRuntimeDetails(config: AgentMockingbirdConfig, agentId: string): AgentRuntimeDetails | null {
+function resolveAgentRuntimeDetails(
+  config: AgentMockingbirdConfig,
+  agentId: string,
+): AgentRuntimeDetails | null {
   const trimmedId = agentId.trim();
   if (!trimmedId) return null;
   const configPath = resolveOpencodeConfigFilePath(config);
   if (!existsSync(configPath)) return null;
   try {
-    const parsed = parseJsonc(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    const parsed = parseJsonc(readFileSync(configPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
     const agentMap = parsed?.agent;
-    if (!agentMap || typeof agentMap !== "object" || Array.isArray(agentMap)) return null;
+    if (!agentMap || typeof agentMap !== "object" || Array.isArray(agentMap))
+      return null;
     const rawEntry = (agentMap as Record<string, unknown>)[trimmedId];
-    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) return null;
+    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry))
+      return null;
     const entry = rawEntry as Record<string, unknown>;
     return {
-      mode: typeof entry.mode === "string" ? entry.mode.trim().toLowerCase() : undefined,
-      prompt: typeof entry.prompt === "string" ? entry.prompt.trim() : undefined,
+      mode:
+        typeof entry.mode === "string"
+          ? entry.mode.trim().toLowerCase()
+          : undefined,
+      prompt:
+        typeof entry.prompt === "string" ? entry.prompt.trim() : undefined,
     };
   } catch {
     return null;
   }
 }
 
-function resolveBootstrapFileNames(mode: "full" | "minimal"): Array<BootstrapFileName> {
+function resolveBootstrapFileNames(
+  mode: "full" | "minimal",
+): Array<BootstrapFileName> {
   if (mode === "full") return [...DEFAULT_BOOTSTRAP_FILE_NAMES];
-  return DEFAULT_BOOTSTRAP_FILE_NAMES.filter((name) => SUBAGENT_BOOTSTRAP_ALLOWLIST.has(name));
-}
-
-function normalizeImportFiles(files: unknown): Array<BootstrapFileName> {
-  const seen = new Set<string>();
-  const normalized: Array<BootstrapFileName> = [];
-  const source = Array.isArray(files) ? files : DEFAULT_BOOTSTRAP_FILE_NAMES;
-  for (const value of source) {
-    if (typeof value !== "string") continue;
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    if (!DEFAULT_BOOTSTRAP_FILE_NAMES.includes(trimmed as BootstrapFileName)) continue;
-    if (seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    normalized.push(trimmed as BootstrapFileName);
-  }
-  return normalized;
-}
-
-export function importOpenclawBootstrapFromDirectory(input: {
-  sourceDirectory: string;
-  overwrite?: boolean;
-  files?: unknown;
-  config?: AgentMockingbirdConfig;
-}): ImportedOpenclawBootstrap {
-  const sourceDirectory = path.resolve(input.sourceDirectory.trim());
-  const sourceStats = statSync(sourceDirectory);
-  if (!sourceStats.isDirectory()) {
-    throw new Error(`sourceDirectory is not a directory: ${sourceDirectory}`);
-  }
-  const config = input.config ?? getConfigSnapshot().config;
-  const targetDirectory = resolveWorkspaceDir(config);
-  mkdirSync(targetDirectory, { recursive: true });
-
-  const files = normalizeImportFiles(input.files);
-  const copied: ImportedOpenclawBootstrap["copied"] = [];
-  const skippedMissing: ImportedOpenclawBootstrap["skippedMissing"] = [];
-  const skippedExisting: ImportedOpenclawBootstrap["skippedExisting"] = [];
-
-  for (const fileName of files) {
-    const sourcePath = path.join(sourceDirectory, fileName);
-    if (!existsSync(sourcePath)) {
-      skippedMissing.push({ name: fileName, sourcePath });
-      continue;
-    }
-    const targetPath = path.join(targetDirectory, fileName);
-    if (existsSync(targetPath) && input.overwrite !== true) {
-      skippedExisting.push({ name: fileName, targetPath });
-      continue;
-    }
-    copyFileSync(sourcePath, targetPath);
-    copied.push({ name: fileName, sourcePath, targetPath });
-  }
-
-  return {
-    sourceDirectory,
-    targetDirectory,
-    copied,
-    skippedMissing,
-    skippedExisting,
-  };
+  return DEFAULT_BOOTSTRAP_FILE_NAMES.filter((name) =>
+    SUBAGENT_BOOTSTRAP_ALLOWLIST.has(name),
+  );
 }
 
 export function buildWorkspaceBootstrapPromptContext(input?: {
@@ -293,9 +259,13 @@ export function buildWorkspaceBootstrapPromptContext(input?: {
   const config = input?.config ?? getConfigSnapshot().config;
   const workspaceDir = resolveWorkspaceDir(config);
   const bootstrap = resolveBootstrapConfig(config);
-  const details = input?.agentId ? resolveAgentRuntimeDetails(config, input.agentId) : null;
+  const details = input?.agentId
+    ? resolveAgentRuntimeDetails(config, input.agentId)
+    : null;
   const mode: "full" | "minimal" =
-    bootstrap.subagentMinimal && details?.mode === "subagent" ? "minimal" : "full";
+    bootstrap.subagentMinimal && details?.mode === "subagent"
+      ? "minimal"
+      : "full";
   const agentPrompt =
     bootstrap.includeAgentPrompt && details?.prompt ? details.prompt : null;
 
@@ -338,7 +308,10 @@ export function buildWorkspaceBootstrapPromptContext(input?: {
       break;
     }
     const raw = readFileSync(filePath, "utf8");
-    const maxChars = Math.max(1, Math.min(bootstrap.maxCharsPerFile, remainingTotalChars));
+    const maxChars = Math.max(
+      1,
+      Math.min(bootstrap.maxCharsPerFile, remainingTotalChars),
+    );
     const trimmed = trimBootstrapContent(raw, fileName, maxChars);
     const content = clampToBudget(trimmed.content, remainingTotalChars);
     if (!content) continue;
@@ -353,11 +326,17 @@ export function buildWorkspaceBootstrapPromptContext(input?: {
     remainingTotalChars = Math.max(0, remainingTotalChars - content.length);
   }
 
-  const hasSoul = files.some((file) => file.name.toLowerCase() === "soul.md" && !file.missing);
+  const hasSoul = files.some(
+    (file) => file.name.toLowerCase() === "soul.md" && !file.missing,
+  );
   let section: string | null = null;
   if (files.length > 0) {
     const lines: string[] = [];
-    lines.push("# Project Context", "", "The following workspace context files have been loaded:");
+    lines.push(
+      "# Project Context",
+      "",
+      "The following workspace context files have been loaded:",
+    );
     if (hasSoul) {
       lines.push(
         "If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.",

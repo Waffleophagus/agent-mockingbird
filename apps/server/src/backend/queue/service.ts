@@ -1,4 +1,5 @@
 import type { DrainHandler, LaneStats, QueueConfig, QueueDrainResult, QueuedMessage, QueueMode } from "./types";
+import { getConfigSnapshot } from "../config/service";
 import type { RuntimeInputPart } from "../contracts/runtime";
 
 export class LaneQueue {
@@ -164,14 +165,13 @@ export class LaneQueue {
 
 let laneQueue: LaneQueue | null = null;
 
-export function getLaneQueue(): LaneQueue {
-  if (!laneQueue) {
-    throw new Error("LaneQueue not initialized. Call initLaneQueue first.");
-  }
-  return laneQueue;
+function resolveQueueConfig(): QueueConfig {
+  return getConfigSnapshot().config.runtime.queue;
 }
 
-export function initLaneQueue(config: QueueConfig): LaneQueue {
-  laneQueue = new LaneQueue(config);
+export function getLaneQueue(): LaneQueue {
+  if (!laneQueue) {
+    laneQueue = new LaneQueue(resolveQueueConfig());
+  }
   return laneQueue;
 }

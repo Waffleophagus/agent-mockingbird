@@ -14,7 +14,6 @@ const cronJobCreateSchema = z.object({
   atIso: z.string().min(1).nullable().optional(),
   timezone: z.string().min(1).nullable().optional(),
   runMode: cronRunModeSchema,
-  handlerKey: z.string().min(1).nullable().optional(),
   conditionModulePath: z.string().min(1).nullable().optional(),
   conditionDescription: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
@@ -33,7 +32,6 @@ const cronJobPatchSchema = z.object({
   atIso: z.string().min(1).nullable().optional(),
   timezone: z.string().min(1).nullable().optional(),
   runMode: cronRunModeSchema.optional(),
-  handlerKey: z.string().min(1).nullable().optional(),
   conditionModulePath: z.string().min(1).nullable().optional(),
   conditionDescription: z.string().min(1).nullable().optional(),
   agentPromptTemplate: z.string().min(1).nullable().optional(),
@@ -45,7 +43,6 @@ const cronJobPatchSchema = z.object({
 
 const cronManageSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list_jobs") }),
-  z.object({ action: z.literal("list_handlers") }),
   z.object({ action: z.literal("health") }),
   z.object({ action: z.literal("get_job"), jobId: z.string().min(1) }),
   z.object({ action: z.literal("create_job"), job: cronJobCreateSchema }),

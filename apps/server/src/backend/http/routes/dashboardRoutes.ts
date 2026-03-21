@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { buildWorkspaceBootstrapPromptContext } from "../../agents/bootstrapContext";
 import { getOpencodeAgentStorageInfo } from "../../agents/opencodeConfig";
 import { applyConfigPatch, ConfigApplyError, getConfigSnapshot } from "../../config/service";
@@ -13,6 +15,20 @@ import {
 import { listOpencodeModelOptions } from "../../opencode/models";
 import { getRuntimeStartupInfo } from "../../runtime";
 import { resolveWorkspaceAlignment } from "../../workspace/resolve";
+import { parseJsonWithSchema } from "../parsers";
+
+const createSessionBodySchema = z
+  .object({
+    title: z.string().optional(),
+    model: z.string().optional(),
+  })
+  .strict();
+
+const modelSelectionBodySchema = z
+  .object({
+    model: z.string(),
+  })
+  .strict();
 
 function parseModelSelection(model: string, defaultProviderId: string) {
   const trimmed = model.trim();
@@ -73,13 +89,17 @@ function toConfigErrorResponse(error: unknown) {
 
 export function createDashboardRoutes(runtime: RuntimeEngine) {
   return {
-    "/api/health": () =>
-      Response.json({
-        status: "ok",
-        now: new Date().toISOString(),
-      }),
+    "/api/health": {
+      GET: () =>
+        Response.json({
+          status: "ok",
+          now: new Date().toISOString(),
+        }),
+    },
 
-    "/api/dashboard/bootstrap": () => Response.json(getDashboardBootstrap()),
+    "/api/dashboard/bootstrap": {
+      GET: () => Response.json(getDashboardBootstrap()),
+    },
 
     "/api/runtime/health": {
       GET: async (req: Request) => {
@@ -119,7 +139,8 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
           },
           opencode: {
             ...runtimeInfo.opencode,
-            directory: storage.directory,
+            workspaceDirectory: storage.workspaceDirectory,
+            configDirectory: storage.configDirectory,
             effectiveConfigPath: storage.configFilePath,
             persistenceMode: storage.persistenceMode,
             projection: {
@@ -141,7 +162,8 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
             workspace: {
               aligned: workspaceAlignment.aligned,
               opencodeDirectoryExplicit: workspaceAlignment.opencodeDirectoryExplicit,
-              opencodeDirectory: workspaceAlignment.opencodeWorkspaceDir,
+              opencodeWorkspaceDir: workspaceAlignment.opencodeWorkspaceDir,
+              opencodeConfigDir: storage.configDirectory,
               memoryWorkspaceDir: workspaceAlignment.memoryWorkspaceDir,
             },
           },
@@ -152,10 +174,13 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
     "/api/sessions": {
       GET: () => Response.json({ sessions: listSessions() }),
       POST: async (req: Request) => {
-        const body = (await req.json()) as { title?: string; model?: string } | null;
+        const parsed = await parseJsonWithSchema(req, createSessionBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
         const session = createSession({
-          title: body?.title,
-          model: body?.model,
+          title: parsed.body.title,
+          model: parsed.body.model,
         });
         return Response.json({ session }, { status: 201 });
       },
@@ -185,8 +210,11 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
     "/api/sessions/:id/model": {
       PUT: async (req: Request & { params: { id: string } }) => {
         const sessionId = req.params.id;
-        const body = (await req.json()) as { model?: string };
-        const model = body.model?.trim();
+        const parsedBody = await parseJsonWithSchema(req, modelSelectionBodySchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const model = parsedBody.body.model.trim();
         if (!model) {
           return Response.json({ error: "model is required" }, { status: 400 });
         }
@@ -249,8 +277,11 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
 
     "/api/runtime/default-model": {
       PUT: async (req: Request) => {
-        const body = (await req.json()) as { model?: string };
-        const model = body.model?.trim();
+        const parsedBody = await parseJsonWithSchema(req, modelSelectionBodySchema);
+        if (!parsedBody.ok) {
+          return parsedBody.response;
+        }
+        const model = parsedBody.body.model.trim();
         if (!model) {
           return Response.json({ error: "model is required" }, { status: 400 });
         }

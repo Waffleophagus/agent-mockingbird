@@ -1,65 +1,48 @@
-name: CI/CD
+name: CI
 
 on:
   pull_request:
   push:
     branches:
-      - main
-    tags:
-      - "v*"
+      - "**"
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
+  id-token: write
 
 jobs:
   pipeline:
     runs-on: ubuntu-latest
     env:
-      REGISTRY_URL: ${{ secrets.PACKAGE_REGISTRY_URL }}
-      PACKAGE_REGISTRY_URL: ${{ secrets.PACKAGE_REGISTRY_URL }}
-      PACKAGE_REGISTRY_TOKEN: ${{ secrets.PACKAGE_REGISTRY_TOKEN }}
-      PACKAGE_REGISTRY_SCOPE: ${{ secrets.PACKAGE_REGISTRY_SCOPE }}
-      REGISTRY_SCOPE: ${{ secrets.PACKAGE_REGISTRY_SCOPE }}
-      REGISTRY_TOKEN: ${{ secrets.PACKAGE_REGISTRY_TOKEN }}
+      NPM_REGISTRY_URL: https://registry.npmjs.org/
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build CLI
-        run: bun run build:cli
-
-      - name: Verify CLI is synced
+      - name: Print Publish Tooling
         run: |
-          set -euo pipefail
-          if ! git diff --quiet -- bin/agent-mockingbird; then
-            echo "bin/agent-mockingbird is out of sync with src/cli/agent-mockingbird.mjs."
-            echo "Run: bun run build:cli"
-            git --no-pager diff -- bin/agent-mockingbird
-            exit 1
-          fi
+          node -v
+          npm -v
+          npm config get registry
 
-      - name: Lint
-        run: bun run lint
-
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Build
-        run: bun run build
-
-      - name: Build standalone runtime
-        run: bun run build:bin
+      - name: Ship Check
+        run: bun run check:ship
 
       - name: Resolve publish metadata
         id: meta
@@ -67,63 +50,93 @@ jobs:
           set -euo pipefail
           event="${GITHUB_EVENT_NAME:-}"
           ref="${GITHUB_REF:-}"
-          ref_name="${GITHUB_REF_NAME:-${GITEA_REF_NAME:-}}"
-          package_version="$(bun -e 'const p=require("./package.json"); if(!p.version){process.exit(2)}; console.log(p.version)')"
-          base_version="${package_version}"
-          build_number="${GITHUB_RUN_NUMBER:-${GITEA_RUN_NUMBER:-}}"
-          registry_url="${PACKAGE_REGISTRY_URL:-}"
-          scope="${PACKAGE_REGISTRY_SCOPE:-}"
-          scope="$(printf '%s' "${scope}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          scope="${scope,,}"
-          registry_url="$(printf '%s' "${registry_url}" | tr -d '\r' | sed 's/[[:space:]]*$//')"
-          registry_url="${registry_url%/}/"
+          ref_name="${GITHUB_REF_NAME:-}"
+          actor="${GITHUB_ACTOR:-}"
 
           should_publish="false"
           npm_tag="latest"
+          bootstrap_ref="main"
+          bootstrap_tag="latest"
+          package_version=""
+          latest_version=""
+          next_version=""
 
           if [[ "${event}" == "pull_request" ]]; then
             should_publish="false"
-          elif [[ "${event}" == "push" && "${ref}" == refs/tags/v* ]]; then
-            should_publish="true"
-            expected_tag="v${base_version}"
-            if [[ "${ref_name}" != "${expected_tag}" ]]; then
-              echo "Tag ${ref_name} does not match package.json version ${base_version} (${expected_tag})."
-              exit 1
-            fi
-          elif [[ "${event}" == "workflow_dispatch" ]]; then
-            should_publish="true"
           elif [[ "${event}" == "push" && "${ref}" == "refs/heads/main" ]]; then
             should_publish="true"
-            if [[ -z "${build_number}" ]]; then
-              build_number="$(date +%s)"
-            fi
-            package_version="${base_version}-build.${build_number}"
+          elif [[ "${event}" == "push" && "${ref}" == refs/heads/* && "${ref}" != "refs/heads/main" ]]; then
+            should_publish="true"
+            npm_tag="next"
+            bootstrap_ref="${ref_name}"
+            bootstrap_tag="next"
           fi
+
+          if [[ "${should_publish}" == "true" ]]; then
+            registry_json="$(curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true)"
+            version_info="$(REGISTRY_JSON="${registry_json}" node -e '
+              const raw = process.env.REGISTRY_JSON || "";
+              let latest = "";
+              let next = "";
+
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                latest = parsed?.["dist-tags"]?.latest ?? "";
+                next = parsed?.["dist-tags"]?.next ?? "";
+              }
+
+              const stablePattern = /^(\d+)\.(\d+)\.(\d+)$/;
+              const nextPattern = /^(\d+)\.(\d+)\.(\d+)-next\.(\d+)$/;
+              const parseStable = (value) => {
+                const match = value.match(stablePattern);
+                return match ? match.slice(1).map(Number) : null;
+              };
+              const parseNext = (value) => {
+                const match = value.match(nextPattern);
+                return match
+                  ? {
+                      major: Number(match[1]),
+                      minor: Number(match[2]),
+                      patch: Number(match[3]),
+                      prerelease: Number(match[4]),
+                    }
+                  : null;
+              };
+
+              const stable = parseStable(latest) ?? [0, 0, 0];
+              const [major, minor, patch] = stable;
+              const nextBase = `${major}.${minor}.${patch + 1}`;
+              const currentNext = parseNext(next);
+              const nextCounter =
+                currentNext && `${currentNext.major}.${currentNext.minor}.${currentNext.patch}` === nextBase
+                  ? currentNext.prerelease + 1
+                  : 1;
+
+              console.log(`LATEST_VERSION=${latest}`);
+              console.log(`NEXT_VERSION=${next}`);
+              console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
+              console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
+            ')"
+            eval "${version_info}"
+            latest_version="${LATEST_VERSION}"
+            next_version="${NEXT_VERSION}"
+
+            if [[ "${npm_tag}" == "latest" ]]; then
+              package_version="${MAIN_PACKAGE_VERSION}"
+            else
+              package_version="${NEXT_PACKAGE_VERSION}"
+            fi
+          fi
+
+          echo "Publish decision: event=${event} ref=${ref} ref_name=${ref_name} actor=${actor} should_publish=${should_publish} npm_tag=${npm_tag}"
 
           echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
           echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
-          echo "build_number=${build_number}" >> "${GITHUB_OUTPUT}"
           echo "npm_tag=${npm_tag}" >> "${GITHUB_OUTPUT}"
-
-      - name: Validate publish secrets
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          registry_url="${PACKAGE_REGISTRY_URL:-}"
-          token="${PACKAGE_REGISTRY_TOKEN:-}"
-          scope="${PACKAGE_REGISTRY_SCOPE:-}"
-
-          : "${registry_url:?Missing PACKAGE_REGISTRY_URL}"
-          : "${token:?Missing PACKAGE_REGISTRY_TOKEN}"
-          : "${scope:?Missing PACKAGE_REGISTRY_SCOPE}"
-
-          registry_url="$(printf '%s' "${registry_url}" | tr -d '\r' | sed 's/[[:space:]]*$//')"
-          token="$(printf '%s' "${token}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          scope="$(printf '%s' "${scope}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          scope="${scope,,}"
-          echo "REGISTRY_URL=${registry_url}" >> "${GITHUB_ENV}"
-          echo "REGISTRY_TOKEN=${token}" >> "${GITHUB_ENV}"
-          echo "REGISTRY_SCOPE=${scope}" >> "${GITHUB_ENV}"
+          echo "bootstrap_ref=${bootstrap_ref}" >> "${GITHUB_OUTPUT}"
+          echo "bootstrap_tag=${bootstrap_tag}" >> "${GITHUB_OUTPUT}"
+          echo "latest_version=${latest_version}" >> "${GITHUB_OUTPUT}"
+          echo "next_version=${next_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build package metadata for publish
         if: steps.meta.outputs.should_publish == 'true'
@@ -131,54 +144,36 @@ jobs:
           set -euo pipefail
           PKG_VERSION="${{ steps.meta.outputs.package_version }}" bun -e '
             const fs = require("fs");
-            const scope = (process.env.REGISTRY_SCOPE || "").toLowerCase();
             const version = process.env.PKG_VERSION;
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.name = `@${scope}/agent-mockingbird`;
+            pkg.name = "agent-mockingbird";
             pkg.private = false;
             pkg.version = version;
-            pkg.module = "apps/server/src/index.ts";
-            pkg.main = "apps/server/src/index.ts";
-            pkg.publishConfig = { registry: process.env.REGISTRY_URL };
+            delete pkg.module;
+            delete pkg.main;
+            pkg.publishConfig = {
+              access: "public",
+              registry: process.env.NPM_REGISTRY_URL,
+            };
             pkg.files = [
               "bin",
               "runtime-assets",
-              ".agents",
-              "apps/server",
-              "apps/web",
-              "packages/api",
-              "packages/contracts",
               "dist",
               "deploy",
               "scripts",
-              "drizzle",
-              "drizzle.config.ts",
+              "opencode.lock.json",
               "README.md",
               "bun.lock",
-              "bunfig.toml",
-              "tsconfig.json",
               "agent-mockingbird.config.example.json"
             ];
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           '
 
-      - name: Build installer package metadata for publish
+      - name: Rebuild published CLI artifacts
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          PKG_VERSION="${{ steps.meta.outputs.package_version }}" bun -e '
-            const fs = require("fs");
-            const path = require("path");
-            const scope = (process.env.REGISTRY_SCOPE || "").toLowerCase();
-            const version = process.env.PKG_VERSION;
-            const pkgPath = path.join("packages", "agent-mockingbird-installer", "package.json");
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-            pkg.name = `@${scope}/agent-mockingbird-installer`;
-            pkg.private = false;
-            pkg.version = version;
-            pkg.publishConfig = { registry: process.env.REGISTRY_URL };
-            fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-          '
+          bun run build:cli
 
       - name: Pack agent-mockingbird artifact
         if: steps.meta.outputs.should_publish == 'true'
@@ -190,20 +185,28 @@ jobs:
           tar_contents="$(tar -tzf "${tarball}")"
           grep -Fqx -- "package/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/agent-mockingbird" <<<"${tar_contents}"
+          grep -Fqx -- "package/bin/runtime-assets.mjs" <<<"${tar_contents}"
+          grep -Fqx -- "package/bin/runtime-layout.mjs" <<<"${tar_contents}"
+          grep -Fqx -- "package/opencode.lock.json" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/agent-mockingbird" <<<"${tar_contents}"
+          grep -Fqx -- "package/dist/app/index.html" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/drizzle/meta/_journal.json" <<<"${tar_contents}"
-          grep -Fqx -- "package/apps/server/package.json" <<<"${tar_contents}"
-          grep -Fqx -- "package/apps/server/src/index.ts" <<<"${tar_contents}"
-          grep -Fqx -- "package/packages/api/package.json" <<<"${tar_contents}"
-          grep -Fqx -- "package/packages/contracts/package.json" <<<"${tar_contents}"
-          grep -Fqx -- "package/apps/web/index.html" <<<"${tar_contents}"
-          grep -Fqx -- "package/dist/web/index.html" <<<"${tar_contents}"
-          grep -Fqx -- "package/dist/web/vendor/opencode-ui/fonts/geist.woff2" <<<"${tar_contents}"
-          grep -Fqx -- "package/drizzle/meta/_journal.json" <<<"${tar_contents}"
+          grep -Fqx -- "package/runtime-assets/workspace/AGENTS.md" <<<"${tar_contents}"
+          grep -Fqx -- "package/runtime-assets/opencode-config/opencode.jsonc" <<<"${tar_contents}"
+          grep -Fqx -- "package/runtime-assets/opencode-config/plugins/agent-mockingbird.ts" <<<"${tar_contents}"
+          ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/plugins/agent-mockingbird.ts" <<<"${tar_contents}"
+          ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/tools/memory_search.ts" <<<"${tar_contents}"
+          ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/tools/memory_get.ts" <<<"${tar_contents}"
+          ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/tools/memory_remember.ts" <<<"${tar_contents}"
+          ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/tools/cron_manager.ts" <<<"${tar_contents}"
+          ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/tools/config_manager.ts" <<<"${tar_contents}"
+          ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/tools/agent_type_manager.ts" <<<"${tar_contents}"
+          grep -Fqx -- "package/deploy/systemd/agent-mockingbird.service" <<<"${tar_contents}"
+          grep -Fqx -- "package/scripts/onboard/bootstrap.sh" <<<"${tar_contents}"
           echo "AGENT_MOCKINGBIRD_TARBALL=${tarball}" >> "${GITHUB_ENV}"
           ls -lh -- "${tarball}"
 
-      - name: Verify packaged frontend markdown assets
+      - name: Verify packaged compiled app bundle
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
@@ -212,25 +215,22 @@ jobs:
           tar -xzf "${AGENT_MOCKINGBIRD_TARBALL}" -C "${tmpdir}"
           PACKAGE_ROOT="${tmpdir}/package" bun -e '
             const path = require("path");
+            const fs = require("fs");
             const pkgRoot = process.env.PACKAGE_ROOT;
-            const cssPath = path.join(pkgRoot, "dist", "web", "index.css");
-            const fontPath = path.join(pkgRoot, "dist", "web", "vendor", "opencode-ui", "fonts", "geist.woff2");
-            const css = require("fs").readFileSync(cssPath, "utf8");
-            const markers = [".chat-markdown", "[data-streamdown=code-block]", "counter(line)", "sdm-c"];
-            for (const marker of markers) {
-              if (!css.includes(marker)) {
-                throw new Error(`Packaged CSS missing marker: ${marker}`);
-              }
+            const indexPath = path.join(pkgRoot, "dist", "app", "index.html");
+            const indexHtml = fs.readFileSync(indexPath, "utf8");
+            if (!indexHtml.includes("/assets/")) {
+              throw new Error("Packaged app index does not reference compiled assets.");
             }
-            const font = require("fs").readFileSync(fontPath);
-            const sig = font.subarray(0, 4).toString("ascii");
-            if (sig !== "wOF2") {
-              throw new Error(`Packaged font signature invalid: ${sig || "<empty>"}`);
+            const assetDir = path.join(pkgRoot, "dist", "app", "assets");
+            const assetEntries = fs.readdirSync(assetDir);
+            if (assetEntries.length === 0) {
+              throw new Error("Packaged app assets directory is empty.");
             }
-            console.log("Packaged frontend markdown assets validated.");
+            console.log("Packaged compiled app bundle validated.");
           '
 
-      - name: Verify packaged runtime prefers source mode
+      - name: Verify packaged runtime prefers compiled bundle
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
@@ -250,102 +250,40 @@ jobs:
               throw new Error("Could not locate packaged runtime resolver.");
             }
             const snippet = text.slice(start, end);
-            const sourceIndex = snippet.indexOf("const entrypoint = resolveAgentMockingbirdServiceEntrypoint");
             const compiledIndex = snippet.indexOf("const compiledBinary = path.join");
-            if (sourceIndex < 0 || compiledIndex < 0) {
-              throw new Error("Packaged runtime resolver is missing source/compiled branches.");
+            const compiledModeIndex = snippet.indexOf("mode: \"compiled\"");
+            const sourceIndex = snippet.indexOf("const entrypoint = resolveAgentMockingbirdServiceEntrypoint");
+            if (compiledIndex < 0 || compiledModeIndex < 0) {
+              throw new Error("Packaged runtime resolver is missing compiled bundle support.");
             }
-            if (sourceIndex > compiledIndex) {
-              throw new Error("Packaged runtime still prefers compiled mode.");
+            if (sourceIndex >= 0 && sourceIndex < compiledIndex) {
+              throw new Error("Packaged runtime still prefers source mode.");
             }
-            console.log("Packaged runtime prefers source mode.");
+            console.log("Packaged runtime prefers compiled bundle.");
           '
-
-      - name: Pack agent-mockingbird-installer artifact
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          tarball="agent-mockingbird-installer-${{ steps.meta.outputs.package_version }}.tgz"
-          packed_tarball="$(
-            cd packages/agent-mockingbird-installer
-            bun pm pack --destination ../.. --quiet
-          )"
-          packed_tarball="$(printf '%s' "${packed_tarball}" | tail -n 1)"
-          test -f "${packed_tarball}"
-          mv -- "${packed_tarball}" "${tarball}"
-          test -f "${tarball}"
-          echo "AGENT_MOCKINGBIRD_INSTALLER_TARBALL=${tarball}" >> "${GITHUB_ENV}"
-          ls -lh -- "${tarball}"
-
-      - name: Configure registry auth
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          echo "::add-mask::${REGISTRY_TOKEN}"
-          registry="$(printf '%s' "${REGISTRY_URL}" | tr -d '\r' | sed 's/[[:space:]]*$//')"
-          registry="${registry%/}/"
-          registry_no_proto="${registry#https://}"
-          registry_no_proto="${registry_no_proto#http://}"
-          registry_host="${registry_no_proto%%/*}"
-          {
-            printf "@%s:registry=%s\n" "${REGISTRY_SCOPE}" "${registry}"
-            printf "registry=%s\n" "${registry}"
-            printf "always-auth=true\n"
-            printf "//%s:_authToken=%s\n" "${registry_no_proto}" "${REGISTRY_TOKEN}"
-            printf "//%s/:_authToken=%s\n" "${registry_host}" "${REGISTRY_TOKEN}"
-          } > "${HOME}/.npmrc"
-
-      - name: Debug registry auth (safe)
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          echo "Registry URL: ${REGISTRY_URL%/}/"
-          echo "Registry scope: ${REGISTRY_SCOPE}"
-          echo "Token length: ${#REGISTRY_TOKEN}"
-          echo "package.json publishConfig.registry:"
-          bun -e 'const p=require("./package.json"); console.log(p.publishConfig?.registry || "<missing>")'
-          echo ".npmrc (token redacted):"
-          sed -E 's#(_authToken=).*#\1***REDACTED***#' "${HOME}/.npmrc"
-          echo ".npmrc visible control chars:"
-          cat -vet "${HOME}/.npmrc"
-          echo "npm whoami via bunx:"
-          bunx npm whoami --registry "${REGISTRY_URL%/}/" || true
 
       - name: Publish package tarball
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          package_name="@${REGISTRY_SCOPE}/agent-mockingbird"
+          package_name="agent-mockingbird"
           package_version="${{ steps.meta.outputs.package_version }}"
-          if bunx npm view "${package_name}@${package_version}" version --registry "${REGISTRY_URL%/}/" >/dev/null 2>&1; then
+          if bunx npm view "${package_name}@${package_version}" version --registry "${NPM_REGISTRY_URL}" >/dev/null 2>&1; then
             echo "Version ${package_name}@${package_version} already exists; skipping publish."
             exit 0
           fi
-          bunx npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
+          npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${NPM_REGISTRY_URL}" --access public --tag "${{ steps.meta.outputs.npm_tag }}"
 
-      - name: Publish installer package tarball
+      - name: Publish install command summary
         if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          package_name="@${REGISTRY_SCOPE}/agent-mockingbird-installer"
-          package_version="${{ steps.meta.outputs.package_version }}"
-          if bunx npm view "${package_name}@${package_version}" version --registry "${REGISTRY_URL%/}/" >/dev/null 2>&1; then
-            echo "Version ${package_name}@${package_version} already exists; skipping publish."
-            exit 0
-          fi
-          bunx npm publish "${AGENT_MOCKINGBIRD_INSTALLER_TARBALL}" --registry "${REGISTRY_URL%/}/" --tag "${{ steps.meta.outputs.npm_tag }}"
-
-      - name: Verify published dist-tags
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          package_name="@${REGISTRY_SCOPE}/agent-mockingbird"
-          installer_name="@${REGISTRY_SCOPE}/agent-mockingbird-installer"
-          expected_version="${{ steps.meta.outputs.package_version }}"
-          npm_tag="${{ steps.meta.outputs.npm_tag }}"
-          bunx npm view "${package_name}" dist-tags version --registry "${REGISTRY_URL%/}/" --json
-          bunx npm view "${installer_name}" dist-tags version --registry "${REGISTRY_URL%/}/" --json
-          actual_pkg_tag="$(bunx npm view "${package_name}" "dist-tags.${npm_tag}" --registry "${REGISTRY_URL%/}/")"
-          actual_installer_tag="$(bunx npm view "${installer_name}" "dist-tags.${npm_tag}" --registry "${REGISTRY_URL%/}/")"
-          test "${actual_pkg_tag}" = "${expected_version}"
-          test "${actual_installer_tag}" = "${expected_version}"
+          bootstrap_ref="${{ steps.meta.outputs.bootstrap_ref }}"
+          bootstrap_tag="${{ steps.meta.outputs.bootstrap_tag }}"
+          {
+            echo "## Install command"
+            echo
+            echo '```bash'
+            echo "AGENT_MOCKINGBIRD_TAG=${bootstrap_tag} curl -fsSL \"https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/onboard/bootstrap.sh\" | bash"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

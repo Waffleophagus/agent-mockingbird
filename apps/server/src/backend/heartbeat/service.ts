@@ -6,7 +6,7 @@ import type { HeartbeatConfig, HeartbeatContext, HeartbeatResult } from "./types
 import { getConfigSnapshot } from "../config/service";
 import { getRuntime } from "../runtime";
 
-const DEFAULT_HEARTBEAT_PROMPT =
+export const DEFAULT_HEARTBEAT_PROMPT =
   "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.";
 
 export function parseInterval(interval: string): number {
@@ -29,7 +29,7 @@ export function parseInterval(interval: string): number {
   }
 }
 
-export function buildHeartbeatPrompt(config: HeartbeatConfig, context: HeartbeatContext): string {
+function buildHeartbeatPrompt(config: HeartbeatConfig, context: HeartbeatContext): string {
   const parts: string[] = [];
 
   const workspaceDir = getConfigSnapshot().config.runtime.opencode.directory;
@@ -49,6 +49,8 @@ ${config.prompt?.trim() || DEFAULT_HEARTBEAT_PROMPT}`);
 
   parts.push(`## Heartbeat Context
 - Agent: ${context.agentId}
+- Main session: main
+- Thread kind: heartbeat
 - Current time: ${context.now}
 - Scheduled for: ${context.scheduledFor}
 ${context.lastHeartbeat ? `- Last heartbeat: ${context.lastHeartbeat}` : ""}
@@ -58,7 +60,7 @@ ${context.lastHeartbeat ? `- Last heartbeat: ${context.lastHeartbeat}` : ""}
   return parts.join("\n\n");
 }
 
-export function isHeartbeatAck(response: string, ackMaxChars: number): boolean {
+function isHeartbeatAck(response: string, ackMaxChars: number): boolean {
   const trimmed = response.trim();
   if (!trimmed) return false;
 

@@ -3,7 +3,10 @@ import { tool } from "@opencode-ai/plugin";
 function resolveApiBaseUrl() {
   const explicit = process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001";
+  const port =
+    process.env.AGENT_MOCKINGBIRD_PORT?.trim() ||
+    process.env.PORT?.trim() ||
+    "3001";
   return `http://127.0.0.1:${port}`;
 }
 
@@ -15,7 +18,10 @@ async function postJson(pathname: string, body: unknown) {
   });
   const payload = (await response.json()) as Record<string, unknown>;
   if (!response.ok && response.status !== 422) {
-    const error = typeof payload.error === "string" ? payload.error : `Request failed (${response.status})`;
+    const error =
+      typeof payload.error === "string"
+        ? payload.error
+        : `Request failed (${response.status})`;
     throw new Error(error);
   }
   return { ok: response.ok, status: response.status, payload };
@@ -39,7 +45,7 @@ export default tool({
     supersedes?: string[];
     topic?: string;
   }) {
-    const response = await postJson("/api/memory/remember", {
+    const response = await postJson("/api/mockingbird/memory/remember", {
       ...args,
       source: args.source ?? "assistant",
     });

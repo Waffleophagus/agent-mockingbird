@@ -24,34 +24,6 @@ const openCodePermissionRuleMapSchema = z.record(z.string(), openCodePermissionS
 const openCodePermissionValueSchema = z.union([openCodePermissionScalarSchema, openCodePermissionRuleMapSchema]);
 const openCodePermissionSchema = z.record(z.string(), openCodePermissionValueSchema);
 
-const heartbeatActiveHoursSchema = z
-  .object({
-    start: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).default("08:00"),
-    end: z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/).default("22:00"),
-    timezone: z
-      .string()
-      .default("America/New_York")
-      .refine(value => {
-        try {
-          new Intl.DateTimeFormat("en-US", { timeZone: value });
-          return true;
-        } catch {
-          return false;
-        }
-      }, "Invalid timezone"),
-  })
-  .strict();
-
-const heartbeatConfigSchema = z
-  .object({
-    enabled: z.boolean().default(true),
-    interval: z.string().regex(/^\d+[mhd]$/).default("30m"),
-    activeHours: heartbeatActiveHoursSchema.optional(),
-    prompt: z.string().optional(),
-    ackMaxChars: z.number().int().min(0).max(1000).default(300),
-  })
-  .strict();
-
 const queueModeSchema = z.enum(["collect", "followup", "replace"]);
 
 export const agentTypeDefinitionSchema = z
@@ -70,7 +42,6 @@ export const agentTypeDefinitionSchema = z
     steps: z.number().int().positive().optional(),
     permission: openCodePermissionSchema.optional(),
     options: z.record(z.string(), z.unknown()).default({}),
-    heartbeat: heartbeatConfigSchema.optional(),
     queueMode: queueModeSchema.optional(),
   })
   .strict();
@@ -125,7 +96,7 @@ const configuredMcpServerListSchema = z.array(configuredMcpServerSchema).transfo
   return [...deduped.values()].sort((a, b) => a.id.localeCompare(b.id));
 });
 
-export const runtimeOpencodeSchema = z
+const runtimeOpencodeSchema = z
   .object({
     baseUrl: z.string().url(),
     providerId: z.string().min(1),
@@ -157,21 +128,21 @@ export const runtimeOpencodeSchema = z
   })
   .strict();
 
-export const runtimeSmokeTestSchema = z
+const runtimeSmokeTestSchema = z
   .object({
     prompt: z.string().min(1),
     expectedResponsePattern: z.string().min(1),
   })
   .strict();
 
-export const runtimeRunStreamSchema = z
+const runtimeRunStreamSchema = z
   .object({
     heartbeatMs: z.number().int().min(1_000).default(15_000),
     replayPageSize: z.number().int().positive().max(1_000).default(200),
   })
   .strict();
 
-export const runtimeMemorySchema = z
+const runtimeMemorySchema = z
   .object({
     enabled: z.boolean().default(true),
     workspaceDir: z.string().min(1).default("./data/workspace"),
@@ -236,7 +207,7 @@ export const runtimeMemorySchema = z
   })
   .strict();
 
-export const runtimeCronSchema = z
+const runtimeCronSchema = z
   .object({
     defaultMaxAttempts: z.number().int().min(1).default(3),
     defaultRetryBackoffMs: z.number().int().min(1_000).default(30_000),
@@ -245,7 +216,31 @@ export const runtimeCronSchema = z
   })
   .strict();
 
-export const runtimeQueueSchema = z
+const runtimeHeartbeatActiveHoursSchema = z
+  .object({
+    start: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+    end: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+    timezone: z.string().min(1),
+  })
+  .strict();
+
+const runtimeHeartbeatSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    interval: z.string().regex(/^([1-9]\d*)(m|h|d)$/).default("30m"),
+    agentId: z.string().min(1).default("build"),
+    model: z.string().min(1),
+    prompt: z.string().min(1).default(
+      'Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.',
+    ),
+    ackMaxChars: z.number().int().positive().max(4_000).default(300),
+    activeHours: runtimeHeartbeatActiveHoursSchema.nullable().default(null),
+  })
+  .strict();
+
+const runtimeAgentHeartbeatsSchema = z.record(z.string(), runtimeHeartbeatSchema).default({});
+
+const runtimeQueueSchema = z
   .object({
     enabled: z.boolean().default(true),
     defaultMode: queueModeSchema.default("collect"),
@@ -254,97 +249,7 @@ export const runtimeQueueSchema = z
   })
   .strict();
 
-const signalDmPolicySchema = z.enum(["pairing", "allowlist", "open", "disabled"]);
-const signalGroupPolicySchema = z.enum(["open", "allowlist", "disabled"]);
-const signalGroupActivationSchema = z.enum(["mention", "always"]);
-
-const signalGroupConfigSchema = z
-  .object({
-    requireMention: z.boolean().optional(),
-    activation: signalGroupActivationSchema.optional(),
-  })
-  .strict();
-
-export const runtimeSignalChannelSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    httpUrl: z.string().url().default("http://127.0.0.1:8080"),
-    account: z.string().min(1).nullable().default(null),
-    dmPolicy: signalDmPolicySchema.default("pairing"),
-    allowFrom: stringListSchema.default([]),
-    groupPolicy: signalGroupPolicySchema.default("allowlist"),
-    groupAllowFrom: stringListSchema.default([]),
-    groups: z.record(z.string(), signalGroupConfigSchema).default({}),
-    mentionPatterns: stringListSchema.default([]),
-    groupActivationDefault: signalGroupActivationSchema.default("mention"),
-    textChunkLimit: z.number().int().positive().default(4_000),
-    chunkMode: z.enum(["length", "newline"]).default("length"),
-    pairing: z
-      .object({
-        ttlMs: z.number().int().positive().default(3_600_000),
-        maxPending: z.number().int().positive().max(100).default(3),
-      })
-      .strict()
-      .default({
-        ttlMs: 3_600_000,
-        maxPending: 3,
-      }),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (value.dmPolicy === "open" && !value.allowFrom.includes("*")) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'runtime.channels.signal.dmPolicy="open" requires runtime.channels.signal.allowFrom to include "*"',
-        path: ["allowFrom"],
-      });
-    }
-  });
-
-export const runtimeChannelsSchema = z
-  .object({
-    signal: runtimeSignalChannelSchema.default({
-      enabled: false,
-      httpUrl: "http://127.0.0.1:8080",
-      account: null,
-      dmPolicy: "pairing",
-      allowFrom: [],
-      groupPolicy: "allowlist",
-      groupAllowFrom: [],
-      groups: {},
-      mentionPatterns: [],
-      groupActivationDefault: "mention",
-      textChunkLimit: 4_000,
-      chunkMode: "length",
-      pairing: {
-        ttlMs: 3_600_000,
-        maxPending: 3,
-      },
-    }),
-  })
-  .strict()
-  .default({
-    signal: {
-      enabled: false,
-      httpUrl: "http://127.0.0.1:8080",
-      account: null,
-      dmPolicy: "pairing",
-      allowFrom: [],
-      groupPolicy: "allowlist",
-      groupAllowFrom: [],
-      groups: {},
-      mentionPatterns: [],
-      groupActivationDefault: "mention",
-      textChunkLimit: 4_000,
-      chunkMode: "length",
-      pairing: {
-        ttlMs: 3_600_000,
-        maxPending: 3,
-      },
-    },
-  });
-
-export const runtimeConfigPolicySchema = z
+const runtimeConfigPolicySchema = z
   .object({
     mode: z.enum(["builder", "strict"]).default("builder"),
     denyPaths: stringListSchema.default(["version", "runtime.configPolicy", "runtime.smokeTest"]),
@@ -355,9 +260,10 @@ export const runtimeConfigPolicySchema = z
       "runtime.opencode.imageModel",
       "runtime.runStream",
       "runtime.memory",
+      "runtime.heartbeat",
+      "runtime.agentHeartbeats",
       "runtime.cron",
       "runtime.queue",
-      "runtime.channels",
       "ui.skills",
       "ui.mcps",
       "ui.mcpServers",
@@ -372,7 +278,12 @@ export const runtimeConfigPolicySchema = z
 
 export const agentMockingbirdConfigSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
+    workspace: z
+      .object({
+        pinnedDirectory: z.string().min(1).default("./data/workspace"),
+      })
+      .strict(),
     runtime: z
       .object({
         opencode: runtimeOpencodeSchema,
@@ -419,6 +330,17 @@ export const agentMockingbirdConfigSchema = z
             vectorProbeLimit: 20,
           },
         }),
+        heartbeat: runtimeHeartbeatSchema.default({
+          enabled: true,
+          interval: "30m",
+          agentId: "build",
+          model: "opencode/big-pickle",
+          prompt:
+            "Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.",
+          ackMaxChars: 300,
+          activeHours: null,
+        }),
+        agentHeartbeats: runtimeAgentHeartbeatsSchema,
         cron: runtimeCronSchema.default({
           defaultMaxAttempts: 3,
           defaultRetryBackoffMs: 30_000,
@@ -431,7 +353,6 @@ export const agentMockingbirdConfigSchema = z
           maxDepth: 10,
           coalesceDebounceMs: 500,
         }),
-        channels: runtimeChannelsSchema,
         configPolicy: runtimeConfigPolicySchema.default({
           mode: "builder",
           denyPaths: ["version", "runtime.configPolicy", "runtime.smokeTest"],
@@ -442,9 +363,10 @@ export const agentMockingbirdConfigSchema = z
             "runtime.opencode.imageModel",
             "runtime.runStream",
             "runtime.memory",
+            "runtime.heartbeat",
+            "runtime.agentHeartbeats",
             "runtime.cron",
             "runtime.queue",
-            "runtime.channels",
             "ui.skills",
             "ui.mcps",
             "ui.mcpServers",

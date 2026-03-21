@@ -1,0 +1,104 @@
+From e6f3084be1883e1d02911b034ff4b1903de01ced Mon Sep 17 00:00:00 2001
+From: Matt Campbell <npm@d6software.com>
+Date: Mon, 16 Mar 2026 14:17:21 -0500
+Subject: [PATCH 02/11] Fix OpenCode web entry and settings icons
+
+---
+ .../app/src/components/dialog-settings.tsx    | 10 +++---
+ packages/app/src/entry.tsx                    | 33 +++++++++++++++----
+ 2 files changed, 32 insertions(+), 11 deletions(-)
+
+diff --git a/packages/app/src/components/dialog-settings.tsx b/packages/app/src/components/dialog-settings.tsx
+index 005920ccb..460555ed1 100644
+--- a/packages/app/src/components/dialog-settings.tsx
++++ b/packages/app/src/components/dialog-settings.tsx
+@@ -57,23 +57,23 @@ export const DialogSettings: Component = () => {
+                   <Tabs.SectionTitle>Agent Mockingbird</Tabs.SectionTitle>
+                   <div class="flex flex-col gap-1.5 w-full">
+                     <Tabs.Trigger value="agents">
+-                      <Icon name="sparkles" />
++                      <Icon name="brain" />
+                       {language.t("settings.agents.title")}
+                     </Tabs.Trigger>
+                     <Tabs.Trigger value="mcp">
+-                      <Icon name="plug-2" />
++                      <Icon name="providers" />
+                       {language.t("settings.mcp.title")}
+                     </Tabs.Trigger>
+                     <Tabs.Trigger value="skills">
+-                      <Icon name="book-open" />
++                      <Icon name="help" />
+                       {language.t("settings.skills.title")}
+                     </Tabs.Trigger>
+                     <Tabs.Trigger value="runtime">
+-                      <Icon name="terminal-square" />
++                      <Icon name="terminal" />
+                       {language.t("settings.runtime.title")}
+                     </Tabs.Trigger>
+                     <Tabs.Trigger value="cron">
+-                      <Icon name="clock-3" />
++                      <Icon name="warning" />
+                       {language.t("settings.cron.title")}
+                     </Tabs.Trigger>
+                   </div>
+diff --git a/packages/app/src/entry.tsx b/packages/app/src/entry.tsx
+index 2198a7bc1..52b6e7669 100644
+--- a/packages/app/src/entry.tsx
++++ b/packages/app/src/entry.tsx
+@@ -9,6 +9,8 @@ import { handleNotificationClick } from "@/utils/notification-click"
+ import pkg from "../package.json"
+ import { ServerConnection } from "./context/server"
+ 
++const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
++
+ const getLocale = () => {
+   if (typeof navigator !== "object") return "en" as const
+   const languages = navigator.languages?.length ? navigator.languages : [navigator.language]
+@@ -25,6 +27,31 @@ const getRootNotFoundError = () => {
+   return locale === "zh" ? (zh[key] ?? en[key]) : en[key]
+ }
+ 
++const getStorage = (key: string) => {
++  if (typeof localStorage === "undefined") return null
++  try {
++    return localStorage.getItem(key)
++  } catch {
++    return null
++  }
++}
++
++const setStorage = (key: string, value: string | null) => {
++  if (typeof localStorage === "undefined") return
++  try {
++    if (value !== null) {
++      localStorage.setItem(key, value)
++      return
++    }
++    localStorage.removeItem(key)
++  } catch {
++    return
++  }
++}
++
++const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
++const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
++
+ const notify: Platform["notify"] = async (title, description, href) => {
+   if (!("Notification" in window)) return
+ 
+@@ -77,12 +104,6 @@ const getCurrentUrl = () => {
+   return location.origin
+ }
+ 
+-const getDefaultUrl = () => {
+-  const lsDefault = readDefaultServerUrl()
+-  if (lsDefault) return lsDefault
+-  return getCurrentUrl()
+-}
+-
+ const platform: Platform = {
+   platform: "web",
+   version: pkg.version,
+-- 
+2.53.0
+

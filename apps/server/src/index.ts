@@ -1,189 +1,172 @@
-import { serve, type Server as BunServer } from "bun";
+import { serve } from "bun";
 
-import { SignalChannelService } from "./backend/channels/signal/service";
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
-import { createHeartbeatUpdatedEvent, createUsageUpdatedEvent } from "./backend/contracts/events";
 import { CronService } from "./backend/cron/service";
 import "./backend/db/migrate";
-import {
-  ensureSeedData,
-  getHeartbeatSnapshot,
-  getUsageSnapshot,
-  recordHeartbeat,
-} from "./backend/db/repository";
+import { ensureSeedData, getHeartbeatSnapshot, getUsageSnapshot } from "./backend/db/repository";
 import { env } from "./backend/env";
-import { syncHeartbeatJobsForAgents } from "./backend/heartbeat/jobSync";
+import { HeartbeatRuntimeService } from "./backend/heartbeat/runtimeService";
+import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
-import type { MobileRealtimeSocketData } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
-import { NotificationService } from "./backend/notifications/service";
-import { resolveWebDistDir } from "./backend/paths";
-import { initLaneQueue, getLaneQueue } from "./backend/queue/service";
+import { resolveAppDistDir } from "./backend/paths";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
-import { startSkillsCatalogWatcher } from "./backend/skills/watcher";
+
+const OPENCODE_SERVER_PREFIXES = [
+  "/agent",
+  "/auth",
+  "/command",
+  "/config",
+  "/doc",
+  "/event",
+  "/experimental",
+  "/file",
+  "/find",
+  "/formatter",
+  "/global",
+  "/instance",
+  "/log",
+  "/lsp",
+  "/mcp",
+  "/path",
+  "/permission",
+  "/project",
+  "/provider",
+  "/pty",
+  "/question",
+  "/session",
+  "/skill",
+  "/tui",
+  "/vcs",
+];
+
+function isOpenCodeServerPath(pathname: string) {
+  return OPENCODE_SERVER_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
 
 ensureSeedData();
 ensureConfigFile();
 const configSnapshot = getConfigSnapshot();
-let heartbeatConfigSyncHash = configSnapshot.hash;
-
-const queueConfig = configSnapshot.config.runtime.queue;
-const laneQueue = initLaneQueue({
-  enabled: queueConfig.enabled,
-  defaultMode: queueConfig.defaultMode,
-  maxDepth: queueConfig.maxDepth,
-  coalesceDebounceMs: queueConfig.coalesceDebounceMs,
-});
-
 const runtime = createRuntime();
-
-laneQueue.setDrainHandler(async (sessionId, messages, _mode) => {
-  if (messages.length === 0) return;
-  for (const msg of messages) {
-    try {
-      await runtime.sendUserMessage({
-        sessionId,
-        content: msg.content,
-        parts: msg.parts,
-        agent: msg.agent,
-        metadata: {
-          ...(msg.metadata ?? {}),
-          __queueDrain: true,
-        },
-      });
-    } catch (err) {
-      console.error("Queue drain handler error:", err);
-      break;
-    }
-  }
-});
-
 const cronService = new CronService(runtime);
+const heartbeatService = new HeartbeatRuntimeService();
 const runService = new RunService(runtime);
-const signalService = new SignalChannelService(runtime);
-const runtimeInfo = getRuntimeStartupInfo();
 const eventStream = createRuntimeEventStream({
   getHeartbeatSnapshot,
   getUsageSnapshot,
 });
-const notificationService = new NotificationService();
-const stopSkillsCatalogWatcher = startSkillsCatalogWatcher({ eventStream });
+const runtimeInfo = getRuntimeStartupInfo();
+const appDistDir = resolveAppDistDir();
+const apiRoutes = createApiRoutes({
+  runtime,
+  cronService,
+  heartbeatService,
+  eventStream,
+  runService,
+});
 
-if (env.NODE_ENV === "production" && !runtimeInfo.opencode.directoryConfigured) {
-  console.warn(
-    "[startup] runtime.opencode.directory is not configured in agent-mockingbird config. OpenCode config visibility may differ across workspaces.",
-  );
+const unsubscribeRuntimeEvents = runtime.subscribe(eventStream.publish);
+
+async function proxyOpenCodeSidecar(req: Request) {
+  const sidecarBaseUrl = getConfigSnapshot().config.runtime.opencode.baseUrl;
+  const incoming = new URL(req.url);
+  const target = new URL(`${incoming.pathname}${incoming.search}`, sidecarBaseUrl);
+  const headers = new Headers(req.headers);
+  headers.delete("host");
+  return fetch(target, {
+    method: req.method,
+    headers,
+    body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+    redirect: "manual",
+  });
+}
+
+async function serveOpenCodeApp(req: Request) {
+  if (!appDistDir) {
+    return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
+  }
+
+  const url = new URL(req.url);
+  const pathname = decodeURIComponent(url.pathname);
+  if (isOpenCodeServerPath(pathname)) {
+    return proxyOpenCodeSidecar(req);
+  }
+
+  const relativePath = pathname.replace(/^\/+/, "") || "index.html";
+  const candidate = Bun.file(`${appDistDir}/${relativePath}`);
+  if (await candidate.exists()) {
+    return new Response(candidate);
+  }
+
+  if (relativePath.includes(".")) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  return new Response(Bun.file(`${appDistDir}/index.html`));
 }
 
 void initializeMemory().catch(() => {
   // Memory startup should not block server boot.
 });
 
-runtime.subscribe(event => {
-  eventStream.publish(event);
-  void notificationService.publishRuntimeEvent(event);
-});
-signalService.subscribe(event => {
-  eventStream.publish(event);
-});
-cronService.start();
 runService.start();
-signalService.start();
+cronService.start();
+heartbeatService.start();
 
-void syncHeartbeatJobsForAgents(cronService, configSnapshot.config.ui.agentTypes).catch(err => {
-  console.error("[startup] Failed to sync heartbeat jobs:", err);
-});
-
-const heartbeatJobSyncTimer = setInterval(() => {
-  const nextSnapshot = getConfigSnapshot();
-  if (nextSnapshot.hash === heartbeatConfigSyncHash) return;
-  heartbeatConfigSyncHash = nextSnapshot.hash;
-  void syncHeartbeatJobsForAgents(cronService, nextSnapshot.config.ui.agentTypes).catch(err => {
-    console.error("[heartbeat] Failed to sync heartbeat jobs:", err);
-  });
-}, 5_000);
-
-const heartbeatTimer = setInterval(() => {
-  const heartbeat = recordHeartbeat("scheduler");
-  eventStream.publish(createHeartbeatUpdatedEvent(heartbeat, "scheduler"));
-  eventStream.publish(createUsageUpdatedEvent(getUsageSnapshot(), "scheduler"));
-}, 12_000);
-
-const webDistDir = resolveWebDistDir();
-
-async function serveDashboard(req: Request) {
-  if (!webDistDir) {
-    return new Response("Missing built dashboard assets (dist/web).", { status: 500 });
-  }
-
-  const url = new URL(req.url);
-  const requestPath = decodeURIComponent(url.pathname);
-  const normalizedPath = requestPath.replace(/^\/+/, "");
-  const relativePath = normalizedPath === "" ? "index.html" : normalizedPath;
-  const candidate = Bun.file(`${webDistDir}/${relativePath}`);
-  if (await candidate.exists()) {
-    return new Response(candidate);
-  }
-
-  // For explicit asset requests, avoid returning index.html, which causes confusing parse errors.
-  if (relativePath.includes(".")) {
-    return new Response("Not found", { status: 404 });
-  }
-
-  return new Response(Bun.file(`${webDistDir}/index.html`));
-}
-
-const dashboardRoute = serveDashboard;
-
-const server: BunServer<MobileRealtimeSocketData> = serve({
+const server = serve({
   idleTimeout: 120,
-  routes: {
-    "/*": dashboardRoute,
-    ...createApiRoutes({
-      runtime,
-      cronService,
-      eventStream,
-      runService,
-      signalService,
-    }),
+  fetch: async (req) => {
+    const apiResponse = await dispatchRoute(apiRoutes, req);
+    if (apiResponse) {
+      return apiResponse;
+    }
+    return serveOpenCodeApp(req);
   },
   development: env.NODE_ENV !== "production" && {
     hmr: true,
     console: true,
   },
-  websocket: eventStream.websocket,
 });
 
 const shutdown = () => {
-  clearInterval(heartbeatTimer);
-  clearInterval(heartbeatJobSyncTimer);
-  stopSkillsCatalogWatcher();
-  cronService.stop();
+  unsubscribeRuntimeEvents();
   runService.stop();
-  signalService.stop();
-  try {
-    getLaneQueue().clearAll();
-  } catch {
-    // Queue not initialized
-  }
+  cronService.stop();
+  heartbeatService.stop();
 };
 
+let shuttingDown = false;
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
+  process.once(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     shutdown();
-    process.exit(0);
+    void Promise.resolve(runtime.dispose?.())
+      .catch(() => {})
+      .finally(() => {
+        try {
+          server.stop(true);
+        } catch {
+          // ignore shutdown races
+        }
+        process.exit(0);
+      });
   });
 }
 
 console.log("[startup] agent-mockingbird runtime", {
   nodeEnv: env.NODE_ENV,
-  webDistDir,
+  appDistDir,
   runtimeMode: process.env.AGENT_MOCKINGBIRD_RUNTIME_MODE || "unknown",
   config: {
     path: configSnapshot.path,
     hash: configSnapshot.hash,
+  },
+  workspace: {
+    pinnedDirectory: configSnapshot.config.workspace.pinnedDirectory,
   },
   opencode: runtimeInfo.opencode,
   cron: {
@@ -192,4 +175,4 @@ console.log("[startup] agent-mockingbird runtime", {
     workerPollMs: env.AGENT_MOCKINGBIRD_CRON_WORKER_POLL_MS,
   },
 });
-console.log(`Agent Mockingbird dashboard running at ${server.url}`);
+console.log(`Agent Mockingbird running at ${server.url}`);

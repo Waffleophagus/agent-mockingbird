@@ -11,8 +11,7 @@
     ".": "./src/index.ts",
     "./agentTypes": "./src/agentTypes.ts",
     "./cron": "./src/cron.ts",
-    "./dashboard": "./src/dashboard.ts",
-    "./realtime": "./src/realtime.ts"
+    "./dashboard": "./src/dashboard.ts"
   },
   "dependencies": {
     "zod": "^4.3.6"

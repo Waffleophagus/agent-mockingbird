@@ -21,9 +21,7 @@ const SKILL_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 const MANAGED_SKILLS_RELATIVE = path.join(".agents", "skills");
 const DISABLED_SKILLS_RELATIVE = path.join(".agent-mockingbird", "disabled-skills");
 
-type PermissionAction = "allow" | "deny" | "ask";
-
-export interface RuntimeSkill {
+interface RuntimeSkill {
   id: string;
   name: string;
   description: string;
@@ -32,20 +30,20 @@ export interface RuntimeSkill {
   managed: boolean;
 }
 
-export interface ManagedSkillWriteResult {
+interface ManagedSkillWriteResult {
   id: string;
   directoryPath: string;
   filePath: string;
   created: boolean;
 }
 
-export interface RuntimeSkillIssue {
+interface RuntimeSkillIssue {
   id?: string;
   location: string;
   reason: string;
 }
 
-export interface RuntimeSkillCatalog {
+interface RuntimeSkillCatalog {
   skills: RuntimeSkill[];
   enabled: string[];
   disabled: string[];
@@ -272,11 +270,11 @@ export function getDisabledSkillsRootPath(workspaceDir?: string | null) {
   return resolveDisabledSkillRoot(workspaceDir);
 }
 
-export function getManagedSkillDirectoryPath(skillId: string, workspaceDir?: string | null) {
+function getManagedSkillDirectoryPath(skillId: string, workspaceDir?: string | null) {
   return path.join(resolveManagedSkillRoot(workspaceDir), normalizeSkillId(skillId));
 }
 
-export function getDisabledSkillDirectoryPath(skillId: string, workspaceDir?: string | null) {
+function getDisabledSkillDirectoryPath(skillId: string, workspaceDir?: string | null) {
   return path.join(resolveDisabledSkillRoot(workspaceDir), normalizeSkillId(skillId));
 }
 
@@ -441,16 +439,4 @@ export async function disposeOpencodeSkillInstance(config: AgentMockingbirdConfi
 export function buildManagedSkillPaths(currentConfig: Config, workspaceDir?: string | null) {
   const root = getManagedSkillsRootPath(workspaceDir);
   return normalizePathList([root]);
-}
-
-export function buildSkillPermissionAllowlist(enabledIds: Array<string>): Record<string, PermissionAction> {
-  const allowlist: Record<string, PermissionAction> = { "*": "deny" };
-  for (const id of normalizeSkillIds(enabledIds)) {
-    allowlist[id] = "allow";
-  }
-  return allowlist;
-}
-
-export function isConfigPermissionObject(permission: unknown): permission is Record<string, unknown> {
-  return Boolean(permission) && typeof permission === "object" && !Array.isArray(permission);
 }

@@ -15,6 +15,7 @@ import {
   type AgentTypeDefinition,
   type AgentMockingbirdConfig,
 } from "./schema";
+import { isPlainObject, stableSerialize as stableStringify } from "./serialization";
 import { ConfigApplyError, type AgentMockingbirdConfigSnapshot } from "./types";
 import { resolveWorkspaceAlignment } from "../workspace/resolve";
 
@@ -22,18 +23,23 @@ interface ConfigRow {
   value_json: string;
 }
 
-const CONFIG_VERSION = 1 as const;
+const CONFIG_VERSION = 2 as const;
 const DEFAULT_CONFIG_FILENAME = "agent-mockingbird.config.json";
+const LEGACY_CONFIG_FILENAME = "mockingbird.config.json";
 const BACKUP_SUFFIX = ".bak";
 const DEFAULT_SMOKE_TEST_PROMPT = 'Just respond "OK" to this to confirm the gateway is working.';
 const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
-const DEFAULT_OPENCODE_BASE_URL = "http://127.0.0.1:4096";
+const DEFAULT_OPENCODE_BASE_URL =
+  process.env.AGENT_MOCKINGBIRD_OPENCODE_BASE_URL?.trim() ||
+  `http://127.0.0.1:${process.env.OPENCODE_PORT?.trim() || "4096"}`;
 const DEFAULT_OPENCODE_PROVIDER_ID = "opencode";
 const DEFAULT_OPENCODE_MODEL_ID = "big-pickle";
 const DEFAULT_OPENCODE_SMALL_MODEL = "opencode/big-pickle";
 const DEFAULT_OPENCODE_TIMEOUT_MS = 120_000;
 const DEFAULT_OPENCODE_PROMPT_TIMEOUT_MS = 300_000;
 const DEFAULT_OPENCODE_RUN_WAIT_TIMEOUT_MS = 180_000;
+const DEFAULT_HEARTBEAT_PROMPT =
+  'Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.';
 const legacyStringListSchema = z.array(z.string().min(1));
 const legacyAgentListSchema = z.array(specialistAgentSchema);
 const legacyAgentTypeListSchema = z.array(agentTypeDefinitionSchema);
@@ -47,12 +53,12 @@ function resolvedConfigPath() {
   return resolveDataPath(DEFAULT_CONFIG_FILENAME);
 }
 
-function backupPathFor(configPath: string) {
-  return `${configPath}${BACKUP_SUFFIX}`;
+function legacyDefaultConfigPath() {
+  return resolveDataPath(LEGACY_CONFIG_FILENAME);
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+function backupPathFor(configPath: string) {
+  return `${configPath}${BACKUP_SUFFIX}`;
 }
 
 function appearsToBeOpencodeConfig(raw: unknown) {
@@ -63,17 +69,6 @@ function appearsToBeOpencodeConfig(raw: unknown) {
 
 function normalizeStringList(values: string[]) {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))];
-}
-
-function stableStringify(value: unknown): string {
-  if (value === null) return "null";
-  if (typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
-  if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(item => stableStringify(item)).join(",")}]`;
-  if (!isPlainObject(value)) return JSON.stringify(value);
-  const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-  const serializedEntries = entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`);
-  return `{${serializedEntries.join(",")}}`;
 }
 
 function computeConfigHash(config: AgentMockingbirdConfig) {
@@ -106,6 +101,24 @@ function readExplicitEnvBoolean(key: string) {
 }
 
 function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
+  const opencodePatch: Record<string, unknown> = {};
+  const opencodeBaseUrl = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_BASE_URL");
+  if (opencodeBaseUrl) opencodePatch.baseUrl = opencodeBaseUrl;
+  const opencodeDirectory = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY");
+  if (opencodeDirectory) opencodePatch.directory = opencodeDirectory;
+  const opencodeProviderId = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_PROVIDER_ID");
+  if (opencodeProviderId) opencodePatch.providerId = opencodeProviderId;
+  const opencodeModelId = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_MODEL_ID");
+  if (opencodeModelId) opencodePatch.modelId = opencodeModelId;
+  const opencodeSmallModel = readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_SMALL_MODEL");
+  if (opencodeSmallModel) opencodePatch.smallModel = opencodeSmallModel;
+  const opencodeTimeoutMs = readExplicitEnvNumber("AGENT_MOCKINGBIRD_OPENCODE_TIMEOUT_MS");
+  if (typeof opencodeTimeoutMs === "number") opencodePatch.timeoutMs = opencodeTimeoutMs;
+  const opencodePromptTimeoutMs = readExplicitEnvNumber("AGENT_MOCKINGBIRD_OPENCODE_PROMPT_TIMEOUT_MS");
+  if (typeof opencodePromptTimeoutMs === "number") opencodePatch.promptTimeoutMs = opencodePromptTimeoutMs;
+  const opencodeRunWaitTimeoutMs = readExplicitEnvNumber("AGENT_MOCKINGBIRD_OPENCODE_RUN_WAIT_TIMEOUT_MS");
+  if (typeof opencodeRunWaitTimeoutMs === "number") opencodePatch.runWaitTimeoutMs = opencodeRunWaitTimeoutMs;
+
   const memoryPatch: Record<string, unknown> = {};
 
   const memoryEnabled = readExplicitEnvBoolean("AGENT_MOCKINGBIRD_MEMORY_ENABLED");
@@ -143,10 +156,22 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
     memoryPatch.injectionDedupeMaxTracked = memoryInjectionDedupeMaxTracked;
   }
 
-  if (!Object.keys(memoryPatch).length) {
+  if (!Object.keys(opencodePatch).length && !Object.keys(memoryPatch).length) {
     return {};
   }
-  return { runtime: { memory: memoryPatch } };
+  return {
+    ...(opencodeDirectory
+      ? {
+          workspace: {
+            pinnedDirectory: opencodeDirectory,
+          },
+        }
+      : {}),
+    runtime: {
+      ...(Object.keys(opencodePatch).length ? { opencode: opencodePatch } : {}),
+      ...(Object.keys(memoryPatch).length ? { memory: memoryPatch } : {}),
+    },
+  };
 }
 
 function readLegacyConfigRow(key: LegacyConfigKey) {
@@ -193,9 +218,18 @@ function mergeAgentTypesWithLegacyAgents(
   return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+function normalizeOpencodeBaseUrl(baseUrl: string) {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return DEFAULT_OPENCODE_BASE_URL;
+  return trimmed;
+}
+
 function buildLegacyBootstrappedConfig() {
   const candidate: AgentMockingbirdConfig = {
     version: CONFIG_VERSION,
+    workspace: {
+      pinnedDirectory: env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+    },
     runtime: {
       opencode: {
         baseUrl: DEFAULT_OPENCODE_BASE_URL,
@@ -263,6 +297,16 @@ function buildLegacyBootstrappedConfig() {
           vectorProbeLimit: 20,
         },
       },
+      heartbeat: {
+        enabled: true,
+        interval: "30m",
+        agentId: "build",
+        model: `${DEFAULT_OPENCODE_PROVIDER_ID}/${DEFAULT_OPENCODE_MODEL_ID}`,
+        prompt: DEFAULT_HEARTBEAT_PROMPT,
+        ackMaxChars: 300,
+        activeHours: null,
+      },
+      agentHeartbeats: {},
       cron: {
         defaultMaxAttempts: 3,
         defaultRetryBackoffMs: 30_000,
@@ -275,26 +319,6 @@ function buildLegacyBootstrappedConfig() {
         maxDepth: 10,
         coalesceDebounceMs: 500,
       },
-      channels: {
-        signal: {
-          enabled: false,
-          httpUrl: "http://127.0.0.1:8080",
-          account: null,
-          dmPolicy: "pairing",
-          allowFrom: [],
-          groupPolicy: "allowlist",
-          groupAllowFrom: [],
-          groups: {},
-          mentionPatterns: [],
-          groupActivationDefault: "mention",
-          textChunkLimit: 4_000,
-          chunkMode: "length",
-          pairing: {
-            ttlMs: 3_600_000,
-            maxPending: 3,
-          },
-        },
-      },
       configPolicy: {
         mode: "builder",
         denyPaths: ["version", "runtime.configPolicy", "runtime.smokeTest"],
@@ -304,9 +328,10 @@ function buildLegacyBootstrappedConfig() {
           "runtime.opencode.bootstrap",
           "runtime.runStream",
           "runtime.memory",
+          "runtime.heartbeat",
+          "runtime.agentHeartbeats",
           "runtime.cron",
           "runtime.queue",
-          "runtime.channels",
           "ui.skills",
           "ui.mcps",
           "ui.mcpServers",
@@ -330,6 +355,36 @@ function buildLegacyBootstrappedConfig() {
   return agentMockingbirdConfigSchema.parse(candidate);
 }
 
+function migrateConfigShape(raw: unknown): unknown {
+  if (!isPlainObject(raw)) return raw;
+  if (raw.version === CONFIG_VERSION && isPlainObject(raw.workspace)) {
+    return raw;
+  }
+
+  const root = { ...raw };
+  const runtime = isPlainObject(root.runtime) ? root.runtime : {};
+  const opencode = isPlainObject(runtime.opencode) ? runtime.opencode : {};
+  const memory = isPlainObject(runtime.memory) ? runtime.memory : {};
+  const pinnedDirectory =
+    (typeof root.workspace === "object" &&
+    root.workspace &&
+    !Array.isArray(root.workspace) &&
+    typeof (root.workspace as { pinnedDirectory?: unknown }).pinnedDirectory === "string"
+      ? (root.workspace as { pinnedDirectory: string }).pinnedDirectory
+      : undefined) ??
+    (typeof opencode.directory === "string" ? opencode.directory : undefined) ??
+    (typeof memory.workspaceDir === "string" ? memory.workspaceDir : undefined) ??
+    env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
+
+  return {
+    ...root,
+    version: CONFIG_VERSION,
+    workspace: {
+      pinnedDirectory,
+    },
+  };
+}
+
 function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
   if (!isPlainObject(raw)) return raw;
   const root = { ...raw };
@@ -346,12 +401,96 @@ function stripLegacyMemoryWriteConfig(raw: unknown): unknown {
   return root;
 }
 
+function normalizeLegacyAgentHeartbeat(rawAgentType: Record<string, unknown>): Record<string, unknown> | null {
+  const heartbeat = isPlainObject(rawAgentType.heartbeat) ? rawAgentType.heartbeat : null;
+  if (!heartbeat) return null;
+
+  const model =
+    typeof rawAgentType.model === "string" && rawAgentType.model.trim()
+      ? rawAgentType.model.trim()
+      : `${DEFAULT_OPENCODE_PROVIDER_ID}/${DEFAULT_OPENCODE_MODEL_ID}`;
+
+  return {
+    enabled: typeof heartbeat.enabled === "boolean" ? heartbeat.enabled : true,
+    interval: typeof heartbeat.interval === "string" && heartbeat.interval.trim() ? heartbeat.interval.trim() : "30m",
+    agentId: typeof rawAgentType.id === "string" && rawAgentType.id.trim() ? rawAgentType.id.trim() : "build",
+    model,
+    prompt:
+      typeof heartbeat.prompt === "string" && heartbeat.prompt.trim()
+        ? heartbeat.prompt.trim()
+        : DEFAULT_HEARTBEAT_PROMPT,
+    ackMaxChars:
+      typeof heartbeat.ackMaxChars === "number" && Number.isFinite(heartbeat.ackMaxChars)
+        ? heartbeat.ackMaxChars
+        : 300,
+    activeHours: isPlainObject(heartbeat.activeHours) ? heartbeat.activeHours : null,
+  };
+}
+
+function buildLegacyHeartbeatAgentKey(rawAgentType: Record<string, unknown>, index: number, usedKeys: Set<string>) {
+  const rawId = typeof rawAgentType.id === "string" ? rawAgentType.id.trim() : "";
+  const baseKey = rawId || "build";
+  let candidate = baseKey;
+  let suffix = rawId ? index + 1 : 1;
+  while (usedKeys.has(candidate)) {
+    candidate = `${baseKey}-${suffix}`;
+    suffix += 1;
+  }
+  usedKeys.add(candidate);
+  return candidate;
+}
+
+function migrateLegacyHeartbeatConfig(raw: unknown): unknown {
+  if (!isPlainObject(raw)) return raw;
+
+  const root = { ...raw };
+  const runtime = isPlainObject(root.runtime) ? { ...root.runtime } : {};
+  const ui = isPlainObject(root.ui) ? { ...root.ui } : {};
+  const agentTypes = Array.isArray(ui.agentTypes)
+    ? ui.agentTypes.map(value => (isPlainObject(value) ? { ...value } : value))
+    : [];
+
+  const existingAgentHeartbeats = isPlainObject(runtime.agentHeartbeats) ? { ...runtime.agentHeartbeats } : null;
+  const derivedAgentHeartbeats = existingAgentHeartbeats ?? {};
+  const normalizedAgentTypes: unknown[] = [];
+  const usedKeys = new Set(Object.keys(derivedAgentHeartbeats));
+
+  for (const [index, rawAgentType] of agentTypes.entries()) {
+    if (!isPlainObject(rawAgentType)) {
+      normalizedAgentTypes.push(rawAgentType);
+      continue;
+    }
+    const normalizedHeartbeat = normalizeLegacyAgentHeartbeat(rawAgentType);
+    if (normalizedHeartbeat) {
+      const agentKey = buildLegacyHeartbeatAgentKey(rawAgentType, index, usedKeys);
+      derivedAgentHeartbeats[agentKey] = normalizedHeartbeat;
+      delete rawAgentType.heartbeat;
+    }
+
+    const hasValidId = typeof rawAgentType.id === "string" && rawAgentType.id.trim().length > 0;
+    if (hasValidId || !normalizedHeartbeat) {
+      normalizedAgentTypes.push(rawAgentType);
+    }
+  }
+
+  if (Object.keys(derivedAgentHeartbeats).length > 0) {
+    runtime.agentHeartbeats = derivedAgentHeartbeats;
+  }
+
+  root.runtime = runtime;
+  if (normalizedAgentTypes.length > 0) {
+    ui.agentTypes = normalizedAgentTypes;
+  }
+  root.ui = ui;
+  return root;
+}
+
 export function parseConfig(raw: unknown) {
-  const normalized = stripLegacyMemoryWriteConfig(raw);
+  const normalized = migrateLegacyHeartbeatConfig(migrateConfigShape(stripLegacyMemoryWriteConfig(raw)));
   if (appearsToBeOpencodeConfig(normalized)) {
     throw new ConfigApplyError(
       "schema",
-      "Config file appears to be OpenCode config.json, not agent-mockingbird config. Set AGENT_MOCKINGBIRD_CONFIG_PATH to a agent-mockingbird config file (default: ./data/agent-mockingbird.config.json).",
+      "Config file appears to be OpenCode config.json, not Agent Mockingbird config. Set AGENT_MOCKINGBIRD_CONFIG_PATH to an Agent Mockingbird config file (default: ./data/agent-mockingbird.config.json).",
     );
   }
   const withExplicitEnvDefaults = deepMerge(buildExplicitEnvConfigDefaultsPatch(), normalized);
@@ -360,11 +499,10 @@ export function parseConfig(raw: unknown) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }
   const config = parsed.data;
+  config.runtime.opencode.baseUrl = normalizeOpencodeBaseUrl(config.runtime.opencode.baseUrl);
   const workspaceAlignment = resolveWorkspaceAlignment(config);
-  let normalizedMemoryWorkspaceDir = workspaceAlignment.memoryWorkspaceDir;
-  if (workspaceAlignment.opencodeDirectoryExplicit && !workspaceAlignment.aligned) {
-    normalizedMemoryWorkspaceDir = workspaceAlignment.opencodeWorkspaceDir;
-  }
+  const normalizedMemoryWorkspaceDir = workspaceAlignment.memoryWorkspaceDir;
+  config.workspace.pinnedDirectory = workspaceAlignment.opencodeWorkspaceDir;
   config.runtime.opencode.directory = workspaceAlignment.opencodeWorkspaceDir;
   config.runtime.memory.workspaceDir = normalizedMemoryWorkspaceDir;
   config.ui.agentTypes = mergeAgentTypesWithLegacyAgents(config.ui.agentTypes, config.ui.agents);
@@ -416,6 +554,12 @@ export function ensureConfigSnapshot() {
   if (existsSync(configPath)) {
     return readSnapshotFromDisk(configPath);
   }
+  const legacyPath = legacyDefaultConfigPath();
+  if (!env.AGENT_MOCKINGBIRD_CONFIG_PATH && existsSync(legacyPath)) {
+    const snapshot = readSnapshotFromDisk(legacyPath);
+    writeConfigAtomic(configPath, snapshot.config);
+    return readSnapshotFromDisk(configPath);
+  }
   const config = buildLegacyBootstrappedConfig();
   writeConfigAtomic(configPath, config);
   return readSnapshotFromDisk(configPath);
@@ -427,10 +571,6 @@ export function getConfigSnapshot() {
 
 export function getConfig() {
   return getConfigSnapshot().config;
-}
-
-export function getConfigPath() {
-  return getConfigSnapshot().path;
 }
 
 export function mergeConfigPatch(baseConfig: AgentMockingbirdConfig, patch: unknown): unknown {

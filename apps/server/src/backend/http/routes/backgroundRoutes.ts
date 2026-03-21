@@ -1,5 +1,8 @@
+import { z } from "zod";
+
 import type { RuntimeEngine , RuntimeInputPart } from "../../contracts/runtime";
 import { getSessionById } from "../../db/repository";
+import { parseJsonWithSchema } from "../parsers";
 
 function parseBoolean(value: string | null) {
   if (!value) return false;
@@ -30,6 +33,31 @@ function normalizeRuntimeInputParts(value: unknown): RuntimeInputPart[] {
   return parts;
 }
 
+const backgroundCreateBodySchema = z
+  .object({
+    sessionId: z.string(),
+    title: z.string().optional(),
+    requestedBy: z.string().optional(),
+    prompt: z.string().optional(),
+    parts: z.array(z.unknown()).optional(),
+    model: z.string().optional(),
+    system: z.string().optional(),
+    agent: z.string().optional(),
+    noReply: z.boolean().optional(),
+  })
+  .strict();
+
+const backgroundSteerBodySchema = z
+  .object({
+    content: z.string().optional(),
+    parts: z.array(z.unknown()).optional(),
+    model: z.string().optional(),
+    system: z.string().optional(),
+    agent: z.string().optional(),
+    noReply: z.boolean().optional(),
+  })
+  .strict();
+
 export function createBackgroundRoutes(runtime: RuntimeEngine) {
   return {
     "/api/background": {
@@ -59,18 +87,12 @@ export function createBackgroundRoutes(runtime: RuntimeEngine) {
           return Response.json({ error: "Runtime does not support background sessions" }, { status: 501 });
         }
 
-        const body = (await req.json()) as {
-          sessionId?: string;
-          title?: string;
-          requestedBy?: string;
-          prompt?: string;
-          parts?: RuntimeInputPart[];
-          model?: string;
-          system?: string;
-          agent?: string;
-          noReply?: boolean;
-        };
-        const sessionId = body.sessionId?.trim();
+        const parsed = await parseJsonWithSchema(req, backgroundCreateBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const body = parsed.body;
+        const sessionId = body.sessionId.trim();
         if (!sessionId) {
           return Response.json({ error: "sessionId is required" }, { status: 400 });
         }
@@ -79,6 +101,10 @@ export function createBackgroundRoutes(runtime: RuntimeEngine) {
         }
 
         const parts = normalizeRuntimeInputParts(body.parts);
+        const shouldPrompt = Boolean(body.prompt?.trim() || parts.length > 0);
+        if (shouldPrompt && !runtime.promptBackgroundAsync) {
+          return Response.json({ error: "Runtime does not support background prompting" }, { status: 501 });
+        }
         try {
           const run = await runtime.spawnBackgroundSession({
             parentSessionId: sessionId,
@@ -86,11 +112,12 @@ export function createBackgroundRoutes(runtime: RuntimeEngine) {
             requestedBy: body.requestedBy,
             prompt: body.prompt,
           });
-          if (body.prompt?.trim() || parts.length > 0) {
-            if (!runtime.promptBackgroundAsync) {
+          if (shouldPrompt) {
+            const promptBackgroundAsync = runtime.promptBackgroundAsync;
+            if (!promptBackgroundAsync) {
               return Response.json({ error: "Runtime does not support background prompting" }, { status: 501 });
             }
-            const updated = await runtime.promptBackgroundAsync({
+            const updated = await promptBackgroundAsync({
               runId: run.runId,
               content: body.prompt?.trim() ?? "",
               parts,
@@ -147,14 +174,11 @@ export function createBackgroundRoutes(runtime: RuntimeEngine) {
         if (!runtime.promptBackgroundAsync) {
           return Response.json({ error: "Runtime does not support background steering" }, { status: 501 });
         }
-        const body = (await req.json()) as {
-          content?: string;
-          parts?: RuntimeInputPart[];
-          model?: string;
-          system?: string;
-          agent?: string;
-          noReply?: boolean;
-        };
+        const parsed = await parseJsonWithSchema(req, backgroundSteerBodySchema);
+        if (!parsed.ok) {
+          return parsed.response;
+        }
+        const body = parsed.body;
         const content = body.content?.trim();
         const parts = normalizeRuntimeInputParts(body.parts);
         if (!content && parts.length === 0) {

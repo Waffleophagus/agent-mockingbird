@@ -13,6 +13,8 @@ Environment=PORT=3001
 Environment=AGENT_MOCKINGBIRD_CONFIG_PATH=/var/lib/agent-mockingbird/agent-mockingbird.config.json
 Environment=AGENT_MOCKINGBIRD_DB_PATH=/var/lib/agent-mockingbird/agent-mockingbird.db
 Environment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=/srv/agent-mockingbird/app
+Environment=OPENCODE_CONFIG_DIR=__AGENT_MOCKINGBIRD_OPENCODE_CONFIG_DIR__
+Environment=OPENCODE_DISABLE_PROJECT_CONFIG=1
 ExecStart=/usr/bin/env bun apps/server/src/index.ts
 Restart=always
 RestartSec=2

@@ -3,12 +3,14 @@ node_modules
 
 # output
 out
-dist
+dist/
 *.tgz
-data/*
+cleanroom/opencode
+vendor/opencode
 data/*
 bin/*
 !bin/agent-mockingbird
+!bin/runtime-layout.mjs
 data/workspace/
 data/agent-mockingbird.config.json
 data/agent-mockingbird.config.json.bak
@@ -36,16 +38,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .turbo
 *.tsbuildinfo
 
-# expo
-.expo
-apps/mobile/.expo
-apps/mobile/web-build
-
 # IntelliJ based IDEs
 .idea
 
 # Finder (MacOS) folder config
 .DS_Store
 
-#Expo Android stuff
-apps/mobile/android/*
+#local test data
+apps/server/data/*

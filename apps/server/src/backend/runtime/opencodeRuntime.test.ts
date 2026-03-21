@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +10,13 @@ const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-runtime-test
 const testDbPath = path.join(testRoot, "agent-mockingbird.runtime.test.db");
 const testWorkspacePath = path.join(testRoot, "workspace");
 const testConfigPath = path.join(testRoot, "agent-mockingbird.runtime.config.json");
+const testWorkspaceConfigPath = path.join(testWorkspacePath, "config.json");
+const testManagedConfigDir = path.join(
+  testRoot,
+  "opencode-config",
+  createHash("sha256").update(path.resolve(testWorkspacePath)).digest("hex").slice(0, 16),
+);
+const testManagedConfigPath = path.join(testManagedConfigDir, "opencode.jsonc");
 
 process.env.NODE_ENV = "test";
 process.env.AGENT_MOCKINGBIRD_DB_PATH = testDbPath;
@@ -21,6 +29,8 @@ process.env.AGENT_MOCKINGBIRD_CRON_ENABLED = "false";
 interface RepositoryApi {
   ensureSeedData: () => void;
   resetDatabaseToDefaults: () => unknown;
+  createSession: (input?: { title?: string; model?: string }) => { id: string; title: string; model: string };
+  getSessionById: (sessionId: string) => { id: string; title: string; model: string } | null;
   setSessionModel: (sessionId: string, model: string) => { id: string; model: string } | null;
   listMessagesForSession: (sessionId: string) => Array<{ id: string; role: string; content: string; at: string }>;
   upsertSessionMessages: (input: {
@@ -266,9 +276,15 @@ beforeAll(async () => {
   repository.ensureSeedData();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   repository.resetDatabaseToDefaults();
   repository.setSessionModel("main", "test-provider/test-model");
+  rmSync(testWorkspaceConfigPath, { force: true });
+  rmSync(testManagedConfigDir, { recursive: true, force: true });
+  const { getLaneQueue } = (await import("../queue/service")) as unknown as {
+    getLaneQueue: () => { clearAll: () => void };
+  };
+  getLaneQueue().clearAll();
 });
 
 afterAll(() => {
@@ -1256,34 +1272,32 @@ describe("opencode runtime failover contract", () => {
     expect(retryEvent?.payload?.message).toContain("Retrying with backup-provider/backup-model.");
   });
 
-  test("syncs runtime skill paths and MCP config into OpenCode config without permission skill writes", async () => {
-    const updates: Array<Record<string, unknown>> = [];
+  test("syncs runtime skill paths into managed OpenCode config without writing workspace config", async () => {
+    let configGetCount = 0;
     const client = createMockClient({
       prompt: async (request) => assistantResponse(request.path.id, "OK"),
     });
-    client.config.get = async () => ({
-      data: {
-        small_model: "test-provider/test-small",
-        skills: {
-          paths: [],
-        },
-        mcp: {
-          github: {
-            enabled: true,
+    client.config.get = async () => {
+      configGetCount += 1;
+      return {
+        data: {
+          small_model: "test-provider/test-small",
+          skills: {
+            paths: [],
           },
-          linear: {
-            type: "remote",
-            url: "https://example.com/mcp",
-            enabled: true,
+          mcp: {
+            github: {
+              enabled: true,
+            },
+            linear: {
+              type: "remote",
+              url: "https://example.com/mcp",
+              enabled: true,
+            },
           },
+          permission: {},
         },
-        permission: {},
-      },
-    });
-    client.config.update = async (input: unknown) => {
-      const body = (input as { body?: Record<string, unknown> }).body ?? {};
-      updates.push(body);
-      return { data: body };
+      };
     };
 
     const runtime = createRuntimeWithClient(client, {
@@ -1302,36 +1316,50 @@ describe("opencode runtime failover contract", () => {
         },
       ],
     });
+    expect(configGetCount).toBe(0);
     const ack = await runtime.sendUserMessage({
       sessionId: "main",
       content: "hello",
     });
 
     expect(ack.messages.at(-1)?.content).toBe("OK");
-    const updated = updates.at(-1) as
-      | {
-          skills?: { paths?: Array<string> };
-          mcp?: Record<string, { enabled?: boolean; url?: string }>;
-          agent?: Record<
-            string,
-            {
-              model?: string;
-              description?: string;
-              prompt?: string;
-              disable?: boolean;
-              options?: Record<string, unknown>;
-            }
-          >;
-          permission?: Record<string, unknown>;
-        }
-      | undefined;
-    expect(updated).toBeTruthy();
-    expect(updated?.skills?.paths).toContain(path.resolve(testWorkspacePath, ".agents", "skills"));
-    expect(updated?.permission).toEqual({});
-    expect(updated?.mcp?.github?.enabled).toBe(true);
-    expect(updated?.mcp?.github?.url).toBe("https://api.github.com/mcp");
-    expect(updated?.mcp?.linear?.enabled).toBe(false);
-    expect(updated?.agent).toBeUndefined();
+    expect(configGetCount).toBeGreaterThan(0);
+    expect(existsSync(testWorkspaceConfigPath)).toBe(false);
+    expect(existsSync(testManagedConfigPath)).toBe(true);
+
+    const managedConfig = JSON.parse(
+      JSON.stringify((await import("../opencode/managedConfig")).readManagedOpencodeConfig({
+        workspace: { pinnedDirectory: testWorkspacePath },
+        runtime: {
+          opencode: {
+            baseUrl: "http://127.0.0.1:4096",
+            providerId: "test-provider",
+            modelId: "test-model",
+            fallbackModels: [],
+            imageModel: null,
+            smallModel: "test-provider/test-small",
+            timeoutMs: 120_000,
+            promptTimeoutMs: 120_000,
+            runWaitTimeoutMs: 180_000,
+            childSessionHideAfterDays: 3,
+            directory: testWorkspacePath,
+            bootstrap: {
+              enabled: true,
+              maxCharsPerFile: 20_000,
+              maxCharsTotal: 150_000,
+              subagentMinimal: true,
+              includeAgentPrompt: true,
+            },
+          },
+        },
+      } as never)),
+    ) as { skills?: { paths?: string[] }; permission?: Record<string, unknown>; agent?: Record<string, unknown> };
+
+    expect(managedConfig.skills?.paths).toContain(path.resolve(testWorkspacePath, ".agents", "skills"));
+    expect(managedConfig.permission).toBeUndefined();
+    expect(managedConfig.agent).toBeUndefined();
+    expect(readFileSync(testManagedConfigPath, "utf8")).not.toContain('"default_agent"');
+    expect(readFileSync(testManagedConfigPath, "utf8")).not.toContain('"agent-mockingbird"');
   });
 
   test("maps authentication errors to RuntimeProviderAuthError", async () => {
@@ -2302,6 +2330,39 @@ describe("opencode runtime failover contract", () => {
     );
   });
 
+  test("memory injection state evicts oldest sessions when over limit", () => {
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        prompt: async (request) => assistantResponse(request.path.id, "Seed response"),
+      }),
+    );
+    const internal = runtime as unknown as {
+      setMemoryInjectionState: (sessionId: string, state: {
+        fingerprint: string;
+        forceReinject: boolean;
+        generation: number;
+        turn: number;
+        injectedKeysByGeneration: string[];
+      }) => void;
+      memoryInjectionStateBySessionId: Map<string, unknown>;
+    };
+
+    const totalEntries = 1_250;
+    for (let index = 0; index < totalEntries; index += 1) {
+      internal.setMemoryInjectionState(`ses-memory-${index}`, {
+        fingerprint: `fp-${index}`,
+        forceReinject: false,
+        generation: index,
+        turn: index,
+        injectedKeysByGeneration: [],
+      });
+    }
+
+    expect(internal.memoryInjectionStateBySessionId.size).toBe(1_000);
+    expect(internal.memoryInjectionStateBySessionId.has("ses-memory-0")).toBe(false);
+    expect(internal.memoryInjectionStateBySessionId.has(`ses-memory-${totalEntries - 1}`)).toBe(true);
+  });
+
   test("session.idle triggers best-effort parent transcript sync", async () => {
     const runtime = createRuntimeWithClient(
       createMockClient({
@@ -2647,21 +2708,9 @@ describe("opencode runtime failover contract", () => {
   });
 
   test("queues parent message when child runs are in flight", async () => {
-    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
-      initLaneQueue: (config: {
-        enabled: boolean;
-        defaultMode: "collect" | "followup" | "replace";
-        maxDepth: number;
-        coalesceDebounceMs: number;
-      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+    const { getLaneQueue } = (await import("../queue/service")) as unknown as {
       getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
     };
-    initLaneQueue({
-      enabled: true,
-      defaultMode: "collect",
-      maxDepth: 10,
-      coalesceDebounceMs: 500,
-    });
 
     let createCount = 0;
     let statusType: "busy" | "idle" = "busy";
@@ -2736,21 +2785,9 @@ describe("opencode runtime failover contract", () => {
   });
 
   test("does not enqueue heartbeat messages when session is busy", async () => {
-    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
-      initLaneQueue: (config: {
-        enabled: boolean;
-        defaultMode: "collect" | "followup" | "replace";
-        maxDepth: number;
-        coalesceDebounceMs: number;
-      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+    const { getLaneQueue } = (await import("../queue/service")) as unknown as {
       getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
     };
-    initLaneQueue({
-      enabled: true,
-      defaultMode: "collect",
-      maxDepth: 10,
-      coalesceDebounceMs: 500,
-    });
 
     let promptResolve: () => void;
     const promptPromise = new Promise<void>((resolve) => {
@@ -2784,22 +2821,52 @@ describe("opencode runtime failover contract", () => {
     getLaneQueue().clearAll();
   });
 
+  test("keeps the active heartbeat session title pinned", async () => {
+    const { patchHeartbeatRuntimeState } = (await import("../heartbeat/state")) as unknown as {
+      patchHeartbeatRuntimeState: (patch: {
+        sessionId?: string | null;
+        backgroundRunId?: string | null;
+        parentSessionId?: string | null;
+        externalSessionId?: string | null;
+      }) => void;
+    };
+
+    const session = repository.createSession({
+      title: "Heartbeat",
+      model: "test-provider/test-model",
+    });
+    patchHeartbeatRuntimeState({
+      sessionId: session.id,
+      backgroundRunId: "bg-heartbeat-1",
+      parentSessionId: "main",
+      externalSessionId: "ses-heartbeat",
+    });
+
+    const runtime = createRuntimeWithClient(
+      createMockClient({
+        get: async (request) => ({
+          data: {
+            id: (request as { path: { id: string } }).path.id,
+            title: "Heartbeat prompt overview and action check",
+          },
+        }),
+        prompt: async (request) => assistantResponse(request.path.id, "HEARTBEAT_OK"),
+      }),
+    );
+
+    await runtime.sendUserMessage({
+      sessionId: session.id,
+      content: "heartbeat",
+      metadata: { heartbeat: true },
+    });
+
+    expect(repository.getSessionById(session.id)?.title).toBe("Heartbeat");
+  });
+
   test("reports queued non-heartbeat messages while session is busy", async () => {
-    const { initLaneQueue, getLaneQueue } = (await import("../queue/service")) as unknown as {
-      initLaneQueue: (config: {
-        enabled: boolean;
-        defaultMode: "collect" | "followup" | "replace";
-        maxDepth: number;
-        coalesceDebounceMs: number;
-      }) => { depth: (sessionId: string) => number; clearAll: () => void };
+    const { getLaneQueue } = (await import("../queue/service")) as unknown as {
       getLaneQueue: () => { depth: (sessionId: string) => number; clearAll: () => void };
     };
-    initLaneQueue({
-      enabled: true,
-      defaultMode: "collect",
-      maxDepth: 10,
-      coalesceDebounceMs: 500,
-    });
 
     let promptResolve: () => void;
     const promptPromise = new Promise<void>((resolve) => {

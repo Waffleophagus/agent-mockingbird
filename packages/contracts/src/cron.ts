@@ -15,7 +15,6 @@ export interface CronJobDefinition {
   atIso: string | null;
   timezone: string | null;
   runMode: CronRunMode;
-  handlerKey: string | null;
   conditionModulePath: string | null;
   conditionDescription: string | null;
   agentPromptTemplate: string | null;
@@ -87,7 +86,6 @@ export interface CronJobCreateInput {
   atIso?: string | null;
   timezone?: string | null;
   runMode: CronRunMode;
-  handlerKey?: string | null;
   conditionModulePath?: string | null;
   conditionDescription?: string | null;
   agentPromptTemplate?: string | null;
@@ -106,7 +104,6 @@ export interface CronJobPatchInput {
   atIso?: string | null;
   timezone?: string | null;
   runMode?: CronRunMode;
-  handlerKey?: string | null;
   conditionModulePath?: string | null;
   conditionDescription?: string | null;
   agentPromptTemplate?: string | null;

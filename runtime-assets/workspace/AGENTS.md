@@ -8,6 +8,12 @@ You are operating as a runtime assistant inside a Agent Mockingbird workspace.
 2. Use configured tools and skills instead of guessing.
 3. Keep changes minimal and reversible.
 
+## Tool Usage
+
+For independent reads, searches, listings, and other non-dependent tool calls, prefer the `batch` tool so they run in parallel.
+
+Do not use `batch` for ordered mutations or steps that depend on earlier tool output.
+
 ## Runtime Skills
 
 Use workspace skills from `.agents/skills` when relevant:
@@ -24,7 +30,7 @@ When using cron tools:
 
 1. Start with `cron_manager` `action: "describe_contract"` for current mode requirements.
 2. Prefer `action: "upsert_job"` with explicit `job.id` for idempotent job management.
-3. For `conditional_agent`, use `conditionModulePath` (workspace module file) and include `conditionDescription` for the Job Details summary. Do not use `handlerKey`.
+3. For `background` and `conditional_agent`, use `conditionModulePath` (workspace module file). For `conditional_agent`, include `conditionDescription` for the Job Details summary.
 4. Use `agentPromptTemplate` as optional fallback prompt; per-run overrides can come from `invokeAgent.prompt`.
 5. Use `run_job_now` + `list_instances` + `list_steps` to validate behavior after create/update.
 6. Use `disable_job` to pause without deleting, and `enable_job` to resume.

@@ -4,10 +4,7 @@ import type {
   DashboardBootstrap,
   HeartbeatSnapshot,
   MessageMemoryTrace,
-  SessionMessageCursor,
-  SessionMessagesWindowResponse,
   SessionSummary,
-  StreamdownRenderSnapshot,
   UsageSnapshot,
 } from "@agent-mockingbird/contracts/dashboard";
 import type { SQLQueryBindings } from "bun:sqlite";
@@ -17,6 +14,7 @@ import { toLegacySpecialistAgent } from "../agents/service";
 import { getConfig as getManagedConfig } from "../config/service";
 import { clearCronTables } from "../cron/storage";
 import { DEFAULT_SESSIONS } from "../defaults";
+import { ensureHeartbeatStateTable } from "../heartbeat/state";
 import { clearRunTables } from "../run/storage";
 import { listManagedSkillCatalog } from "../skills/service";
 
@@ -49,11 +47,6 @@ interface MessagePartsRow {
   parts_json: string;
 }
 
-interface MessageRenderSnapshotRow {
-  message_id: string;
-  snapshot_json: string;
-}
-
 interface HeartbeatRow {
   online: number;
   created_at: number;
@@ -66,6 +59,18 @@ interface UsageAggregateRow {
   cost_micros: number;
 }
 
+interface UsageGroupedRow extends UsageAggregateRow {
+  provider_id: string | null;
+  model_id: string | null;
+}
+
+interface UsageRecentRow extends UsageGroupedRow {
+  id: string;
+  session_id: string | null;
+  created_at: number;
+  title: string | null;
+}
+
 interface RuntimeSessionBindingRow {
   runtime: string;
   session_id: string;
@@ -73,70 +78,16 @@ interface RuntimeSessionBindingRow {
   updated_at: number;
 }
 
-interface ChannelConversationBindingRow {
-  channel: string;
-  conversation_key: string;
-  session_id: string;
-  last_target: string | null;
-  updated_at: number;
-}
-
-interface ChannelPairingRequestRow {
-  channel: string;
-  sender_id: string;
-  code: string;
-  created_at: number;
-  last_seen_at: number;
-  expires_at: number;
-  meta_json: string;
-}
-
-interface ChannelAllowlistEntryRow {
-  channel: string;
-  sender_id: string;
-  source: string;
-  created_at: number;
-}
-
 interface ExistingMessageIdRow {
   id: string;
   content: string;
 }
 
-interface MessageCountRow {
-  count: number;
-}
-
-export interface RuntimeSessionBindingRecord {
+interface RuntimeSessionBindingRecord {
   runtime: string;
   sessionId: string;
   externalSessionId: string;
   updatedAt: string;
-}
-
-export interface ChannelConversationBindingRecord {
-  channel: string;
-  conversationKey: string;
-  sessionId: string;
-  lastTarget: string | null;
-  updatedAt: string;
-}
-
-export interface ChannelPairingRequestRecord {
-  channel: string;
-  senderId: string;
-  code: string;
-  createdAt: string;
-  lastSeenAt: string;
-  expiresAt: string;
-  meta: Record<string, string>;
-}
-
-export interface ChannelAllowlistEntryRecord {
-  channel: string;
-  senderId: string;
-  source: string;
-  createdAt: string;
 }
 
 export type BackgroundRunStatus =
@@ -182,7 +133,40 @@ export interface BackgroundRunRecord {
   completedAt: string | null;
 }
 
-export interface SessionMessageImportInput {
+interface UsageDashboardWindowSnapshot {
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+}
+
+interface UsageDashboardGroupRecord extends UsageDashboardWindowSnapshot {
+  providerId: string;
+  modelId?: string;
+}
+
+interface UsageDashboardRecentRecord extends UsageDashboardWindowSnapshot {
+  id: string;
+  createdAt: string;
+  sessionId: string | null;
+  sessionTitle: string | null;
+  providerId: string | null;
+  modelId: string | null;
+}
+
+interface UsageDashboardSnapshot {
+  rangeStartAt: string | null;
+  rangeEndAtExclusive: string | null;
+  totals: UsageDashboardWindowSnapshot;
+  unattributedTotals: UsageDashboardWindowSnapshot;
+  providers: UsageDashboardGroupRecord[];
+  models: UsageDashboardGroupRecord[];
+  recent: UsageDashboardRecentRecord[];
+  forwardOnlyBreakdown: true;
+}
+
+interface SessionMessageImportInput {
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -198,6 +182,67 @@ const toMillisOrNull = (isoTimestamp: string | null) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 const sessionIdPrefix = "session";
+function parseQualifiedModelRef(rawModel: string | null | undefined) {
+  const trimmed = rawModel?.trim() ?? "";
+  if (!trimmed) return { providerId: null, modelId: null };
+  const slash = trimmed.indexOf("/");
+  if (slash <= 0 || slash === trimmed.length - 1) {
+    return { providerId: null, modelId: null };
+  }
+  const providerId = trimmed.slice(0, slash).trim();
+  const modelId = trimmed.slice(slash + 1).trim();
+  if (!providerId || !modelId) {
+    return { providerId: null, modelId: null };
+  }
+  return { providerId, modelId };
+}
+
+function usageSnapshotFromAggregate(row: UsageAggregateRow): UsageDashboardWindowSnapshot {
+  return {
+    requestCount: row.request_count,
+    inputTokens: row.input_tokens,
+    outputTokens: row.output_tokens,
+    totalTokens: row.input_tokens + row.output_tokens,
+    estimatedCostUsd: row.cost_micros / 1_000_000,
+  };
+}
+
+interface UsageDashboardRange {
+  startAt: number | null;
+  endAtExclusive: number | null;
+}
+
+function normalizeUsageDashboardRange(input?: Partial<UsageDashboardRange> | null): UsageDashboardRange {
+  const startAt = Number.isFinite(input?.startAt) ? Math.trunc(input!.startAt as number) : null;
+  const endAtExclusive = Number.isFinite(input?.endAtExclusive)
+    ? Math.trunc(input!.endAtExclusive as number)
+    : null;
+
+  return {
+    startAt: startAt !== null && startAt >= 0 ? startAt : null,
+    endAtExclusive: endAtExclusive !== null && endAtExclusive >= 0 ? endAtExclusive : null,
+  };
+}
+
+function usageRangeFilter(range: UsageDashboardRange) {
+  const clauses: string[] = [];
+  const bindings: number[] = [];
+
+  if (range.startAt !== null) {
+    clauses.push(`usage_events.created_at >= ?${bindings.length + 1}`);
+    bindings.push(range.startAt);
+  }
+
+  if (range.endAtExclusive !== null) {
+    clauses.push(`usage_events.created_at < ?${bindings.length + 1}`);
+    bindings.push(range.endAtExclusive);
+  }
+
+  return {
+    whereClause: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
+    bindings,
+  };
+}
 
 function scalar<T>(query: string, ...bindings: SQLQueryBindings[]): T {
   const row = sqlite.query(query).get(...bindings);
@@ -226,18 +271,6 @@ function messageRowToMessage(row: MessageRow): ChatMessage {
     content: row.content,
     at: toIso(row.created_at),
   };
-}
-
-function messageToCursor(message: ChatMessage): SessionMessageCursor {
-  return {
-    at: message.at,
-    role: message.role,
-    id: message.id,
-  };
-}
-
-function roleSortValue(role: "user" | "assistant") {
-  return role === "user" ? 0 : 1;
 }
 
 function hydrateMessagesForSession(sessionId: string, messages: ChatMessage[]): ChatMessage[] {
@@ -287,34 +320,10 @@ function hydrateMessagesForSession(sessionId: string, messages: ChatMessage[]): 
     }
   }
 
-  const renderSnapshotRows = sqlite
-    .query(
-      `
-      SELECT message_id, snapshot_json
-      FROM message_render_snapshots
-      WHERE session_id = ?1
-        AND message_id IN (${placeholders})
-    `,
-    )
-    .all(sessionId, ...messageIds) as MessageRenderSnapshotRow[];
-  const renderSnapshotMap = new Map<string, StreamdownRenderSnapshot>();
-  for (const row of renderSnapshotRows) {
-    try {
-      const parsed = JSON.parse(row.snapshot_json) as unknown;
-      const renderSnapshot = normalizeStreamdownRenderSnapshot(parsed);
-      if (renderSnapshot) {
-        renderSnapshotMap.set(row.message_id, renderSnapshot);
-      }
-    } catch {
-      // ignore malformed snapshot rows
-    }
-  }
-
   return messages.map(message => ({
     ...message,
     memoryTrace: traceMap.get(message.id),
     parts: partMap.get(message.id),
-    renderSnapshot: renderSnapshotMap.get(message.id),
   }));
 }
 
@@ -343,53 +352,6 @@ function runtimeSessionBindingRowToRecord(row: RuntimeSessionBindingRow): Runtim
     sessionId: row.session_id,
     externalSessionId: row.external_session_id,
     updatedAt: toIso(row.updated_at),
-  };
-}
-
-function channelConversationBindingRowToRecord(row: ChannelConversationBindingRow): ChannelConversationBindingRecord {
-  return {
-    channel: row.channel,
-    conversationKey: row.conversation_key,
-    sessionId: row.session_id,
-    lastTarget: row.last_target,
-    updatedAt: toIso(row.updated_at),
-  };
-}
-
-function parsePairingMeta(raw: string): Record<string, string> {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isRecord(parsed)) return {};
-    const normalized: Record<string, string> = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      const normalizedKey = key.trim();
-      if (!normalizedKey) continue;
-      normalized[normalizedKey] = typeof value === "string" ? value : String(value);
-    }
-    return normalized;
-  } catch {
-    return {};
-  }
-}
-
-function channelPairingRequestRowToRecord(row: ChannelPairingRequestRow): ChannelPairingRequestRecord {
-  return {
-    channel: row.channel,
-    senderId: row.sender_id,
-    code: row.code,
-    createdAt: toIso(row.created_at),
-    lastSeenAt: toIso(row.last_seen_at),
-    expiresAt: toIso(row.expires_at),
-    meta: parsePairingMeta(row.meta_json),
-  };
-}
-
-function channelAllowlistEntryRowToRecord(row: ChannelAllowlistEntryRow): ChannelAllowlistEntryRecord {
-  return {
-    channel: row.channel,
-    senderId: row.sender_id,
-    source: row.source,
-    createdAt: toIso(row.created_at),
   };
 }
 
@@ -459,58 +421,6 @@ function normalizeChatMessageParts(value: unknown): ChatMessagePart[] {
     .filter((part): part is ChatMessagePart => Boolean(part));
 }
 
-function normalizeStreamdownRenderSnapshot(value: unknown): StreamdownRenderSnapshot | null {
-  if (!isRecord(value)) return null;
-  if (value.version !== 1) return null;
-  if (typeof value.contentHash !== "string" || !value.contentHash.trim()) return null;
-  if (typeof value.themeId !== "string" || !value.themeId.trim()) return null;
-  if (!Array.isArray(value.codeBlocks)) return null;
-
-  const codeBlocks = value.codeBlocks
-    .map((block): StreamdownRenderSnapshot["codeBlocks"][number] | null => {
-      if (!isRecord(block)) return null;
-      if (typeof block.blockIndex !== "number" || !Number.isInteger(block.blockIndex) || block.blockIndex < 0) {
-        return null;
-      }
-      if (typeof block.codeHash !== "string" || !block.codeHash.trim()) return null;
-      if (typeof block.language !== "string") return null;
-      if (!Array.isArray(block.tokens)) return null;
-
-      const tokens = block.tokens
-        .map((row) => {
-          if (!Array.isArray(row)) return null;
-          const normalizedRow = row
-            .map((token) => {
-              if (!isRecord(token)) return null;
-              if (typeof token.content !== "string") return null;
-              return {
-                bgColor: typeof token.bgColor === "string" ? token.bgColor : undefined,
-                color: typeof token.color === "string" ? token.color : undefined,
-                content: token.content,
-              };
-            })
-            .filter((token): token is NonNullable<typeof token> => Boolean(token));
-          return normalizedRow;
-        })
-        .filter((row): row is NonNullable<typeof row> => Array.isArray(row));
-
-      return {
-        blockIndex: block.blockIndex,
-        codeHash: block.codeHash,
-        language: block.language,
-        tokens,
-      };
-    })
-    .filter((block): block is NonNullable<typeof block> => Boolean(block));
-
-  return {
-    codeBlocks,
-    contentHash: value.contentHash,
-    themeId: value.themeId,
-    version: 1,
-  };
-}
-
 function ensureAuxiliaryTables() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS message_memory_traces (
@@ -533,21 +443,11 @@ function ensureAuxiliaryTables() {
 
     CREATE INDEX IF NOT EXISTS message_parts_session_updated_idx
       ON message_parts(session_id, updated_at DESC);
-
-    CREATE TABLE IF NOT EXISTS message_render_snapshots (
-      message_id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      snapshot_json TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS message_render_snapshots_session_updated_idx
-      ON message_render_snapshots(session_id, updated_at DESC);
   `);
 }
 
 ensureAuxiliaryTables();
+ensureHeartbeatStateTable();
 
 function getDefaultSessionModel() {
   try {
@@ -661,12 +561,9 @@ export function resetDatabaseToDefaults(): DashboardBootstrap {
     sqlite.query("DELETE FROM messages").run();
     sqlite.query("DELETE FROM usage_events").run();
     sqlite.query("DELETE FROM heartbeat_events").run();
+    sqlite.query("DELETE FROM heartbeat_runtime_state").run();
     sqlite.query("DELETE FROM runtime_config").run();
     sqlite.query("DELETE FROM runtime_session_bindings").run();
-    sqlite.query("DELETE FROM channel_conversation_bindings").run();
-    sqlite.query("DELETE FROM channel_pairing_requests").run();
-    sqlite.query("DELETE FROM channel_allowlist_entries").run();
-    sqlite.query("DELETE FROM channel_inbound_dedupe").run();
     sqlite.query("DELETE FROM background_runs").run();
     sqlite.query("DELETE FROM sessions").run();
     seedDefaultState(nowMs());
@@ -764,84 +661,6 @@ export function listMessagesForSession(sessionId: string): ChatMessage[] {
   return hydrateMessagesForSession(sessionId, rows.map(messageRowToMessage));
 }
 
-export function listMessageWindowForSession(
-  sessionId: string,
-  input: {
-    limit: number;
-    before?: SessionMessageCursor;
-  },
-): SessionMessagesWindowResponse {
-  const limit = Math.max(1, input.limit);
-  const beforeMillis = toMillisOrNull(input.before?.at ?? null) ?? Number.MAX_SAFE_INTEGER;
-  const beforeRole = input.before ? roleSortValue(input.before.role) : Number.MAX_SAFE_INTEGER;
-  const beforeId = input.before?.id ?? "\uffff";
-
-  const rows = allRows<MessageRow>(
-    `
-      SELECT id, session_id, role, content, created_at
-      FROM (
-        SELECT id, session_id, role, content, created_at
-        FROM messages
-        WHERE session_id = ?1
-          AND (
-            ?2 IS NULL
-            OR created_at < ?2
-            OR (created_at = ?2 AND CASE role WHEN 'user' THEN 0 ELSE 1 END < ?3)
-            OR (
-              created_at = ?2
-              AND CASE role WHEN 'user' THEN 0 ELSE 1 END = ?3
-              AND id < ?4
-            )
-          )
-        ORDER BY
-          created_at DESC,
-          CASE role
-            WHEN 'user' THEN 0
-            ELSE 1
-          END DESC,
-          id DESC
-        LIMIT ?5
-      )
-      ORDER BY
-        created_at ASC,
-        CASE role
-          WHEN 'user' THEN 0
-          ELSE 1
-        END ASC,
-        id ASC
-    `,
-    sessionId,
-    input.before ? beforeMillis : null,
-    beforeRole,
-    beforeId,
-    limit + 1,
-  );
-
-  const hasOlder = rows.length > limit;
-  const windowRows = hasOlder ? rows.slice(1) : rows;
-  const messages = hydrateMessagesForSession(sessionId, windowRows.map(messageRowToMessage));
-  const totalMessages =
-    scalar<MessageCountRow>(
-      `
-        SELECT COUNT(*) as count
-        FROM messages
-        WHERE session_id = ?1
-      `,
-      sessionId,
-    )?.count ?? 0;
-
-  return {
-    messages,
-    meta: {
-      oldestLoaded: messages[0] ? messageToCursor(messages[0]) : null,
-      newestLoaded: messages[messages.length - 1] ? messageToCursor(messages[messages.length - 1]!) : null,
-      hasOlder,
-      totalMessages,
-      isWindowed: true,
-    },
-  };
-}
-
 export function setMessageMemoryTrace(input: {
   sessionId: string;
   messageId: string;
@@ -864,7 +683,7 @@ export function setMessageMemoryTrace(input: {
     .run(input.messageId, input.sessionId, JSON.stringify(input.trace), createdAt);
 }
 
-export function setMessageParts(input: {
+function setMessageParts(input: {
   sessionId: string;
   messageId: string;
   parts: ChatMessagePart[];
@@ -889,36 +708,6 @@ export function setMessageParts(input: {
     .run(input.messageId, input.sessionId, JSON.stringify(parts), createdAt, updatedAt);
 }
 
-export function setMessageRenderSnapshot(input: {
-  createdAt?: number;
-  messageId: string;
-  renderSnapshot: StreamdownRenderSnapshot;
-  sessionId: string;
-  updatedAt?: number;
-}) {
-  ensureAuxiliaryTables();
-  const createdAt = input.createdAt ?? nowMs();
-  const updatedAt = input.updatedAt ?? createdAt;
-  sqlite
-    .query(
-      `
-      INSERT INTO message_render_snapshots (message_id, session_id, snapshot_json, created_at, updated_at)
-      VALUES (?1, ?2, ?3, ?4, ?5)
-      ON CONFLICT(message_id) DO UPDATE SET
-        session_id = excluded.session_id,
-        snapshot_json = excluded.snapshot_json,
-        updated_at = excluded.updated_at
-    `,
-    )
-    .run(
-      input.messageId,
-      input.sessionId,
-      JSON.stringify(input.renderSnapshot),
-      createdAt,
-      updatedAt,
-    );
-}
-
 export function getUsageSnapshot(): UsageSnapshot {
   const row = scalar<UsageAggregateRow>(
     `
@@ -931,17 +720,20 @@ export function getUsageSnapshot(): UsageSnapshot {
     `,
   );
 
+  const snapshot = usageSnapshotFromAggregate(row);
   return {
-    requestCount: row.request_count,
-    inputTokens: row.input_tokens,
-    outputTokens: row.output_tokens,
-    estimatedCostUsd: row.cost_micros / 1_000_000,
+    requestCount: snapshot.requestCount,
+    inputTokens: snapshot.inputTokens,
+    outputTokens: snapshot.outputTokens,
+    estimatedCostUsd: snapshot.estimatedCostUsd,
   };
 }
 
 export function recordUsageDelta(input: {
   id?: string;
   sessionId?: string;
+  providerId?: string | null;
+  modelId?: string | null;
   requestCountDelta: number;
   inputTokensDelta: number;
   outputTokensDelta: number;
@@ -950,19 +742,43 @@ export function recordUsageDelta(input: {
   createdAt?: number;
 }) {
   const createdAt = input.createdAt ?? nowMs();
+  let providerId = input.providerId?.trim() || null;
+  let modelId = input.modelId?.trim() || null;
+
+  if (!providerId && !modelId && input.sessionId) {
+    const session = scalar<{ model: string } | null>(
+      `
+      SELECT model
+      FROM sessions
+      WHERE id = ?1
+    `,
+      input.sessionId,
+    );
+    if (session?.model) {
+      const parsed = parseQualifiedModelRef(session.model);
+      providerId ||= parsed.providerId;
+      modelId ||= parsed.modelId;
+    }
+  }
+
   sqlite
     .query(
       `
-      INSERT OR IGNORE INTO usage_events (
-        id, session_id, request_count_delta, input_tokens_delta,
+      INSERT INTO usage_events (
+        id, session_id, provider_id, model_id, request_count_delta, input_tokens_delta,
         output_tokens_delta, estimated_cost_usd_delta_micros, source, created_at
       )
-      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+      ON CONFLICT(id) DO UPDATE SET
+        provider_id = COALESCE(usage_events.provider_id, excluded.provider_id),
+        model_id = COALESCE(usage_events.model_id, excluded.model_id)
     `,
     )
     .run(
       input.id ?? crypto.randomUUID(),
       input.sessionId ?? null,
+      providerId,
+      modelId,
       input.requestCountDelta,
       input.inputTokensDelta,
       input.outputTokensDelta,
@@ -970,6 +786,117 @@ export function recordUsageDelta(input: {
       input.source,
       createdAt,
     );
+}
+
+export function getUsageDashboardSnapshot(input?: Partial<UsageDashboardRange> | null): UsageDashboardSnapshot {
+  const range = normalizeUsageDashboardRange(input);
+  const { whereClause: usageEventsWhereClause, bindings } = usageRangeFilter(range);
+
+  const totals = scalar<UsageAggregateRow>(
+    `
+      SELECT
+        COALESCE(SUM(request_count_delta), 0) AS request_count,
+        COALESCE(SUM(input_tokens_delta), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
+        COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
+      FROM usage_events
+      ${usageEventsWhereClause}
+    `,
+    ...bindings,
+  );
+  const unattributedTotals = scalar<UsageAggregateRow>(
+    `
+      SELECT
+        COALESCE(SUM(request_count_delta), 0) AS request_count,
+        COALESCE(SUM(input_tokens_delta), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
+        COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
+      FROM usage_events
+      ${usageEventsWhereClause ? `${usageEventsWhereClause} AND` : "WHERE"} (provider_id IS NULL OR model_id IS NULL)
+    `,
+    ...bindings,
+  );
+  const providers = allRows<UsageGroupedRow>(
+    `
+      SELECT
+        provider_id,
+        NULL AS model_id,
+        COALESCE(SUM(request_count_delta), 0) AS request_count,
+        COALESCE(SUM(input_tokens_delta), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
+        COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
+      FROM usage_events
+      ${usageEventsWhereClause ? `${usageEventsWhereClause} AND provider_id IS NOT NULL` : "WHERE provider_id IS NOT NULL"}
+      GROUP BY provider_id
+      ORDER BY cost_micros DESC, output_tokens DESC, provider_id ASC
+    `,
+    ...bindings,
+  ).map(row => ({
+    providerId: row.provider_id ?? "unknown",
+    ...usageSnapshotFromAggregate(row),
+  }));
+  const models = allRows<UsageGroupedRow>(
+    `
+      SELECT
+        provider_id,
+        model_id,
+        COALESCE(SUM(request_count_delta), 0) AS request_count,
+        COALESCE(SUM(input_tokens_delta), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens_delta), 0) AS output_tokens,
+        COALESCE(SUM(estimated_cost_usd_delta_micros), 0) AS cost_micros
+      FROM usage_events
+      ${usageEventsWhereClause
+        ? `${usageEventsWhereClause} AND provider_id IS NOT NULL AND model_id IS NOT NULL`
+        : "WHERE provider_id IS NOT NULL AND model_id IS NOT NULL"}
+      GROUP BY provider_id, model_id
+      ORDER BY cost_micros DESC, output_tokens DESC, provider_id ASC, model_id ASC
+    `,
+    ...bindings,
+  ).map(row => ({
+    providerId: row.provider_id ?? "unknown",
+    modelId: row.model_id ?? "unknown",
+    ...usageSnapshotFromAggregate(row),
+  }));
+  const recent = allRows<UsageRecentRow>(
+    `
+      SELECT
+        usage_events.id,
+        usage_events.session_id,
+        usage_events.provider_id,
+        usage_events.model_id,
+        usage_events.request_count_delta AS request_count,
+        usage_events.input_tokens_delta AS input_tokens,
+        usage_events.output_tokens_delta AS output_tokens,
+        usage_events.estimated_cost_usd_delta_micros AS cost_micros,
+        usage_events.created_at,
+        sessions.title
+      FROM usage_events
+      LEFT JOIN sessions ON sessions.id = usage_events.session_id
+      ${usageEventsWhereClause}
+      ORDER BY usage_events.created_at DESC, usage_events.id DESC
+      LIMIT 50
+    `,
+    ...bindings,
+  ).map(row => ({
+    id: row.id,
+    createdAt: toIso(row.created_at),
+    sessionId: row.session_id,
+    sessionTitle: row.title,
+    providerId: row.provider_id,
+    modelId: row.model_id,
+    ...usageSnapshotFromAggregate(row),
+  }));
+
+  return {
+    rangeStartAt: range.startAt === null ? null : toIso(range.startAt),
+    rangeEndAtExclusive: range.endAtExclusive === null ? null : toIso(range.endAtExclusive),
+    totals: usageSnapshotFromAggregate(totals),
+    unattributedTotals: usageSnapshotFromAggregate(unattributedTotals),
+    providers,
+    models,
+    recent,
+    forwardOnlyBreakdown: true,
+  };
 }
 
 export function getHeartbeatSnapshot(): HeartbeatSnapshot {
@@ -992,7 +919,7 @@ export function getHeartbeatSnapshot(): HeartbeatSnapshot {
   };
 }
 
-export function recordHeartbeat(source: RuntimeEventSource, online = true, createdAt = nowMs()): HeartbeatSnapshot {
+function recordHeartbeat(source: RuntimeEventSource, online = true, createdAt = nowMs()): HeartbeatSnapshot {
   sqlite
     .query(
       `
@@ -1008,7 +935,7 @@ export function recordHeartbeat(source: RuntimeEventSource, online = true, creat
   };
 }
 
-export function getConfig() {
+function getConfig() {
   const managedConfig = getManagedConfig();
   const catalog = listManagedSkillCatalog(managedConfig.runtime.opencode.directory);
   const agents =
@@ -1160,459 +1087,6 @@ export function listRuntimeSessionBindings(runtime: string, limit = 500): Array<
   return rows.map(runtimeSessionBindingRowToRecord);
 }
 
-function normalizeChannel(channel: string) {
-  return channel.trim().toLowerCase();
-}
-
-function normalizeConversationKey(conversationKey: string) {
-  return conversationKey.trim();
-}
-
-function generatePairingCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let index = 0; index < 8; index += 1) {
-    code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return code;
-}
-
-export function getSessionIdByChannelConversationBinding(channel: string, conversationKey: string): string | null {
-  const normalizedChannel = normalizeChannel(channel);
-  const normalizedConversationKey = normalizeConversationKey(conversationKey);
-  if (!normalizedChannel || !normalizedConversationKey) return null;
-  const row = scalar<{ session_id: string } | null>(
-    `
-      SELECT session_id
-      FROM channel_conversation_bindings
-      WHERE channel = ?1
-        AND conversation_key = ?2
-      LIMIT 1
-    `,
-    normalizedChannel,
-    normalizedConversationKey,
-  );
-  return row?.session_id ?? null;
-}
-
-export function setChannelConversationBinding(input: {
-  channel: string;
-  conversationKey: string;
-  sessionId: string;
-  lastTarget?: string | null;
-  updatedAt?: number;
-}) {
-  const normalizedChannel = normalizeChannel(input.channel);
-  const normalizedConversationKey = normalizeConversationKey(input.conversationKey);
-  const normalizedSessionId = input.sessionId.trim();
-  const lastTarget = input.lastTarget?.trim() || null;
-  if (!normalizedChannel || !normalizedConversationKey || !normalizedSessionId) return;
-  const updatedAt = input.updatedAt ?? nowMs();
-  sqlite
-    .query(
-      `
-      INSERT INTO channel_conversation_bindings (channel, conversation_key, session_id, last_target, updated_at)
-      VALUES (?1, ?2, ?3, ?4, ?5)
-      ON CONFLICT(channel, conversation_key) DO UPDATE SET
-        session_id = excluded.session_id,
-        last_target = excluded.last_target,
-        updated_at = excluded.updated_at
-    `,
-    )
-    .run(normalizedChannel, normalizedConversationKey, normalizedSessionId, lastTarget, updatedAt);
-}
-
-export function ensureSessionForChannelConversation(input: {
-  channel: string;
-  conversationKey: string;
-  title?: string;
-  model?: string;
-  lastTarget?: string | null;
-  createdAt?: number;
-}): SessionSummary | null {
-  const normalizedChannel = normalizeChannel(input.channel);
-  const normalizedConversationKey = normalizeConversationKey(input.conversationKey);
-  if (!normalizedChannel || !normalizedConversationKey) return null;
-
-  const tx = sqlite.transaction(() => {
-    const existingSessionId = getSessionIdByChannelConversationBinding(normalizedChannel, normalizedConversationKey);
-    const createdAt = input.createdAt ?? nowMs();
-    if (existingSessionId) {
-      const existing = getSessionById(existingSessionId);
-      if (!existing) return null;
-      const title = input.title?.trim();
-      const model = input.model?.trim();
-      if (title) {
-        setSessionTitle(existingSessionId, title);
-      }
-      if (model) {
-        setSessionModel(existingSessionId, model);
-      }
-      setChannelConversationBinding({
-        channel: normalizedChannel,
-        conversationKey: normalizedConversationKey,
-        sessionId: existingSessionId,
-        lastTarget: input.lastTarget,
-        updatedAt: createdAt,
-      });
-      return getSessionById(existingSessionId);
-    }
-
-    const created = createSession({
-      title: input.title,
-      model: input.model,
-    });
-    setChannelConversationBinding({
-      channel: normalizedChannel,
-      conversationKey: normalizedConversationKey,
-      sessionId: created.id,
-      lastTarget: input.lastTarget,
-      updatedAt: createdAt,
-    });
-    return created;
-  });
-
-  return tx();
-}
-
-export function listChannelConversationBindings(channel: string, limit = 500): Array<ChannelConversationBindingRecord> {
-  const normalizedChannel = normalizeChannel(channel);
-  if (!normalizedChannel) return [];
-  const normalizedLimit = Math.max(1, Math.min(2_000, Math.floor(limit)));
-  const rows = allRows<ChannelConversationBindingRow>(
-    `
-      SELECT channel, conversation_key, session_id, last_target, updated_at
-      FROM channel_conversation_bindings
-      WHERE channel = ?1
-      ORDER BY updated_at DESC
-      LIMIT ?2
-    `,
-    normalizedChannel,
-    normalizedLimit,
-  );
-  return rows.map(channelConversationBindingRowToRecord);
-}
-
-function pruneExpiredChannelPairingRequests(channel: string, now = nowMs()) {
-  sqlite
-    .query(
-      `
-      DELETE FROM channel_pairing_requests
-      WHERE channel = ?1
-        AND expires_at <= ?2
-    `,
-    )
-    .run(channel, now);
-}
-
-export function listChannelPairingRequests(channel: string): Array<ChannelPairingRequestRecord> {
-  const normalizedChannel = normalizeChannel(channel);
-  if (!normalizedChannel) return [];
-  pruneExpiredChannelPairingRequests(normalizedChannel);
-  const rows = allRows<ChannelPairingRequestRow>(
-    `
-      SELECT channel, sender_id, code, created_at, last_seen_at, expires_at, meta_json
-      FROM channel_pairing_requests
-      WHERE channel = ?1
-      ORDER BY last_seen_at DESC
-    `,
-    normalizedChannel,
-  );
-  return rows.map(channelPairingRequestRowToRecord);
-}
-
-export function upsertChannelPairingRequest(input: {
-  channel: string;
-  senderId: string;
-  meta?: Record<string, string>;
-  ttlMs: number;
-  maxPending: number;
-  now?: number;
-}): { code: string; created: boolean; expiresAt: string } {
-  const normalizedChannel = normalizeChannel(input.channel);
-  const normalizedSenderId = input.senderId.trim();
-  if (!normalizedChannel || !normalizedSenderId) {
-    throw new Error("channel and senderId are required");
-  }
-
-  const now = input.now ?? nowMs();
-  const ttlMs = Math.max(1_000, Math.floor(input.ttlMs));
-  const maxPending = Math.max(1, Math.floor(input.maxPending));
-  pruneExpiredChannelPairingRequests(normalizedChannel, now);
-
-  const tx = sqlite.transaction(() => {
-    const existing = scalar<ChannelPairingRequestRow | null>(
-      `
-        SELECT channel, sender_id, code, created_at, last_seen_at, expires_at, meta_json
-        FROM channel_pairing_requests
-        WHERE channel = ?1
-          AND sender_id = ?2
-        LIMIT 1
-      `,
-      normalizedChannel,
-      normalizedSenderId,
-    );
-    const metaJson = JSON.stringify(input.meta ?? {});
-    if (existing) {
-      sqlite
-        .query(
-          `
-          UPDATE channel_pairing_requests
-          SET last_seen_at = ?3, expires_at = ?4, meta_json = ?5
-          WHERE channel = ?1
-            AND sender_id = ?2
-        `,
-        )
-        .run(normalizedChannel, normalizedSenderId, now, now + ttlMs, metaJson);
-      return {
-        code: existing.code,
-        created: false,
-        expiresAt: toIso(now + ttlMs),
-      };
-    }
-
-    const currentCount = scalar<{ count: number }>(
-      `
-      SELECT COUNT(*) AS count
-      FROM channel_pairing_requests
-      WHERE channel = ?1
-    `,
-      normalizedChannel,
-    ).count;
-    if (currentCount >= maxPending) {
-      sqlite
-        .query(
-          `
-          DELETE FROM channel_pairing_requests
-          WHERE rowid IN (
-            SELECT rowid
-            FROM channel_pairing_requests
-            WHERE channel = ?1
-            ORDER BY last_seen_at ASC
-            LIMIT ?2
-          )
-        `,
-        )
-        .run(normalizedChannel, currentCount - maxPending + 1);
-    }
-
-    let code = generatePairingCode();
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      const exists = scalar<{ count: number }>(
-        `
-          SELECT COUNT(*) AS count
-          FROM channel_pairing_requests
-          WHERE channel = ?1
-            AND code = ?2
-        `,
-        normalizedChannel,
-        code,
-      ).count;
-      if (!exists) break;
-      code = generatePairingCode();
-    }
-
-    sqlite
-      .query(
-        `
-        INSERT INTO channel_pairing_requests (
-          channel, sender_id, code, created_at, last_seen_at, expires_at, meta_json
-        )
-        VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6)
-      `,
-      )
-      .run(normalizedChannel, normalizedSenderId, code, now, now + ttlMs, metaJson);
-    return {
-      code,
-      created: true,
-      expiresAt: toIso(now + ttlMs),
-    };
-  });
-
-  return tx();
-}
-
-function resolveChannelPairingLookup(input: { code?: string; senderId?: string }) {
-  const code = input.code?.trim().toUpperCase();
-  const senderId = input.senderId?.trim();
-  if (code) {
-    return { field: "code" as const, value: code };
-  }
-  if (senderId) {
-    return { field: "sender_id" as const, value: senderId };
-  }
-  return null;
-}
-
-export function approveChannelPairingRequest(input: {
-  channel: string;
-  code?: string;
-  senderId?: string;
-  source?: string;
-}): ChannelAllowlistEntryRecord | null {
-  const normalizedChannel = normalizeChannel(input.channel);
-  if (!normalizedChannel) return null;
-  pruneExpiredChannelPairingRequests(normalizedChannel);
-  const lookup = resolveChannelPairingLookup(input);
-  if (!lookup) return null;
-  const now = nowMs();
-
-  const tx = sqlite.transaction(() => {
-    const row = scalar<ChannelPairingRequestRow | null>(
-      `
-        SELECT channel, sender_id, code, created_at, last_seen_at, expires_at, meta_json
-        FROM channel_pairing_requests
-        WHERE channel = ?1
-          AND ${lookup.field} = ?2
-        LIMIT 1
-      `,
-      normalizedChannel,
-      lookup.value,
-    );
-    if (!row) return null;
-
-    sqlite
-      .query(
-        `
-        INSERT INTO channel_allowlist_entries (channel, sender_id, source, created_at)
-        VALUES (?1, ?2, ?3, ?4)
-        ON CONFLICT(channel, sender_id) DO UPDATE SET
-          source = excluded.source
-      `,
-      )
-      .run(normalizedChannel, row.sender_id, input.source?.trim() || "pairing", now);
-
-    sqlite
-      .query(
-        `
-        DELETE FROM channel_pairing_requests
-        WHERE channel = ?1
-          AND sender_id = ?2
-      `,
-      )
-      .run(normalizedChannel, row.sender_id);
-
-    const entry = scalar<ChannelAllowlistEntryRow | null>(
-      `
-      SELECT channel, sender_id, source, created_at
-      FROM channel_allowlist_entries
-      WHERE channel = ?1
-        AND sender_id = ?2
-      LIMIT 1
-    `,
-      normalizedChannel,
-      row.sender_id,
-    );
-    return entry ? channelAllowlistEntryRowToRecord(entry) : null;
-  });
-
-  return tx();
-}
-
-export function rejectChannelPairingRequest(input: { channel: string; code?: string; senderId?: string }): boolean {
-  const normalizedChannel = normalizeChannel(input.channel);
-  if (!normalizedChannel) return false;
-  pruneExpiredChannelPairingRequests(normalizedChannel);
-  const lookup = resolveChannelPairingLookup(input);
-  if (!lookup) return false;
-  const result = sqlite
-    .query(
-      `
-      DELETE FROM channel_pairing_requests
-      WHERE channel = ?1
-        AND ${lookup.field} = ?2
-    `,
-    )
-    .run(normalizedChannel, lookup.value);
-  return Number(result.changes ?? 0) > 0;
-}
-
-export function listChannelAllowlistEntries(channel: string): Array<ChannelAllowlistEntryRecord> {
-  const normalizedChannel = normalizeChannel(channel);
-  if (!normalizedChannel) return [];
-  const rows = allRows<ChannelAllowlistEntryRow>(
-    `
-      SELECT channel, sender_id, source, created_at
-      FROM channel_allowlist_entries
-      WHERE channel = ?1
-      ORDER BY created_at DESC
-    `,
-    normalizedChannel,
-  );
-  return rows.map(channelAllowlistEntryRowToRecord);
-}
-
-export function upsertChannelAllowlistEntry(input: {
-  channel: string;
-  senderId: string;
-  source?: string;
-  createdAt?: number;
-}) {
-  const normalizedChannel = normalizeChannel(input.channel);
-  const normalizedSenderId = input.senderId.trim();
-  if (!normalizedChannel || !normalizedSenderId) return;
-  const createdAt = input.createdAt ?? nowMs();
-  sqlite
-    .query(
-      `
-      INSERT INTO channel_allowlist_entries (channel, sender_id, source, created_at)
-      VALUES (?1, ?2, ?3, ?4)
-      ON CONFLICT(channel, sender_id) DO UPDATE SET
-        source = excluded.source
-    `,
-    )
-    .run(normalizedChannel, normalizedSenderId, input.source?.trim() || "manual", createdAt);
-}
-
-export function recordChannelInboundEventIfFirstSeen(input: {
-  channel: string;
-  eventId: string;
-  now?: number;
-  ttlMs?: number;
-}): boolean {
-  const normalizedChannel = normalizeChannel(input.channel);
-  const normalizedEventId = input.eventId.trim();
-  if (!normalizedChannel || !normalizedEventId) return false;
-  const now = input.now ?? nowMs();
-  const ttlMs = Math.max(60_000, input.ttlMs ?? 24 * 60 * 60 * 1_000);
-
-  const tx = sqlite.transaction(() => {
-    sqlite
-      .query(
-        `
-        DELETE FROM channel_inbound_dedupe
-        WHERE channel = ?1
-          AND seen_at < ?2
-      `,
-      )
-      .run(normalizedChannel, now - ttlMs);
-
-    const existing = scalar<{ count: number }>(
-      `
-      SELECT COUNT(*) AS count
-      FROM channel_inbound_dedupe
-      WHERE channel = ?1
-        AND event_id = ?2
-    `,
-      normalizedChannel,
-      normalizedEventId,
-    ).count;
-    if (existing > 0) {
-      return false;
-    }
-    sqlite
-      .query(
-        `
-        INSERT INTO channel_inbound_dedupe (channel, event_id, seen_at)
-        VALUES (?1, ?2, ?3)
-      `,
-      )
-      .run(normalizedChannel, normalizedEventId, now);
-    return true;
-  });
-
-  return tx();
-}
 
 export function createBackgroundRun(input: {
   runtime: string;
@@ -1859,6 +1333,8 @@ export function appendChatExchange(input: {
   userMessageId?: string;
   assistantMessageId?: string;
   usage: {
+    providerId?: string | null;
+    modelId?: string | null;
     requestCountDelta: number;
     inputTokensDelta: number;
     outputTokensDelta: number;
@@ -2040,6 +1516,8 @@ export function appendChatExchange(input: {
     recordUsageDelta({
       id: `assistant-message:${assistantMessage.id}`,
       sessionId: input.sessionId,
+      providerId: input.usage.providerId,
+      modelId: input.usage.modelId,
       requestCountDelta: input.usage.requestCountDelta,
       inputTokensDelta: input.usage.inputTokensDelta,
       outputTokensDelta: input.usage.outputTokensDelta,

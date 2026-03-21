@@ -98,6 +98,7 @@ export interface ListBackgroundRunsInput {
 export interface RuntimeEngine {
   sendUserMessage(input: SendUserMessageInput): Promise<RuntimeMessageAck>;
   subscribe(onEvent: (event: RuntimeEvent) => void): () => void;
+  dispose?(): Promise<void> | void;
   syncSessionMessages?(sessionId: string): Promise<void>;
   checkHealth?(input?: RuntimeHealthCheckInput): Promise<RuntimeHealthCheckResult>;
   abortSession?(sessionId: string): Promise<boolean>;

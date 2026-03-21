@@ -9,25 +9,25 @@ Use this skill when users want to manage scheduled jobs in Agent Mockingbird.
 
 ## Cron mode model
 
-- `background`: deterministic handler only, no agent step.
+- `background`: execute workspace module at `conditionModulePath`; no agent step.
 - `conditional_agent`: execute workspace module at `conditionModulePath`; module can request agent invocation with `invokeAgent.shouldInvoke === true`.
 - `agent`: agent runs every execution.
 
 ## Required fields by mode
 
 - `background`
-- requires: `handlerKey`
-- should not include: `conditionModulePath`
+- requires: `conditionModulePath`
+- should include: `conditionDescription` when a short Job Details summary is useful
+- should not include: `agentPromptTemplate`
 
 - `conditional_agent`
 - requires: `conditionModulePath`
 - should include: `conditionDescription` (1-2 sentence plain summary for Job Details UI)
-- should not include: `handlerKey`
 - `agentPromptTemplate` is optional fallback when module does not provide `invokeAgent.prompt`
 
 - `agent`
 - requires: `agentPromptTemplate`
-- should not include: `handlerKey`, `conditionModulePath`
+- should not include: `conditionModulePath`
 
 ## Safe workflow
 
@@ -42,7 +42,7 @@ Use this skill when users want to manage scheduled jobs in Agent Mockingbird.
 ## Patterns
 
 - Create recurring background job:
-- `scheduleKind: "every"`, `everyMs`, `runMode: "background"`, `handlerKey`.
+- `scheduleKind: "every"`, `everyMs`, `runMode: "background"`, `conditionModulePath`, optional `conditionDescription`.
 
 - Create cron-expression conditional job:
 - `scheduleKind: "cron"`, `scheduleExpr`, `runMode: "conditional_agent"`, `conditionModulePath`, `conditionDescription`, optional `agentPromptTemplate`.
@@ -52,7 +52,6 @@ Use this skill when users want to manage scheduled jobs in Agent Mockingbird.
 
 ## Rules
 
-- Always validate handler availability via `list_handlers` before assigning `handlerKey` in `background` mode.
 - Prefer `upsert_job` with stable IDs over delete+create.
 - Use `enable_job` / `disable_job` for quick pause/resume instead of delete+recreate.
 - Keep payloads small and explicit; avoid storing secrets in payload unless user explicitly requests it.

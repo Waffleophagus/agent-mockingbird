@@ -1,33 +1,27 @@
 import path from "node:path";
 
 import type { AgentMockingbirdConfig } from "../config/schema";
-import { getBinaryDir } from "../paths";
+import { getBinaryDir, resolveManagedOpencodeConfigDir } from "../paths";
 
 function resolvePathFromBinaryRoot(dirPath: string) {
   if (path.isAbsolute(dirPath)) return path.resolve(dirPath);
   return path.resolve(getBinaryDir(), dirPath);
 }
 
-export function resolveMemoryWorkspaceDir(config: AgentMockingbirdConfig) {
-  return resolvePathFromBinaryRoot(config.runtime.memory.workspaceDir.trim());
+export function resolveOpencodeWorkspaceDir(config: AgentMockingbirdConfig) {
+  return resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
 }
 
-export function resolveOpencodeWorkspaceDir(config: AgentMockingbirdConfig) {
-  const configured = config.runtime.opencode.directory?.trim();
-  if (configured) return resolvePathFromBinaryRoot(configured);
-  return resolveMemoryWorkspaceDir(config);
+export function resolveOpencodeConfigDir(config: AgentMockingbirdConfig) {
+  return resolveManagedOpencodeConfigDir(resolveOpencodeWorkspaceDir(config));
 }
 
 export function resolveWorkspaceAlignment(config: AgentMockingbirdConfig) {
-  const memoryWorkspaceDir = resolveMemoryWorkspaceDir(config);
-  const opencodeConfigured = config.runtime.opencode.directory?.trim();
-  const opencodeWorkspaceDir = opencodeConfigured
-    ? resolvePathFromBinaryRoot(opencodeConfigured)
-    : memoryWorkspaceDir;
+  const pinnedWorkspaceDir = resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
   return {
-    memoryWorkspaceDir,
-    opencodeWorkspaceDir,
-    opencodeDirectoryExplicit: Boolean(opencodeConfigured),
-    aligned: memoryWorkspaceDir === opencodeWorkspaceDir,
+    memoryWorkspaceDir: pinnedWorkspaceDir,
+    opencodeWorkspaceDir: pinnedWorkspaceDir,
+    opencodeDirectoryExplicit: true,
+    aligned: true,
   };
 }

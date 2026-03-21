@@ -1,28 +1,33 @@
-import { normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft, normalizeAgentTypeMode } from "@agent-mockingbird/contracts/agentTypes";
-import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
+import {
+  normalizeAgentQueueMode,
+  normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft,
+  normalizeAgentTypeMode,
+} from "@agent-mockingbird/contracts/agentTypes";
+import type { ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import type { AgentTypeDefinition, AgentMockingbirdConfig } from "../config/schema";
 import { agentTypeDefinitionSchema } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
-import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
+import { BUILTIN_PRIMARY_AGENT_IDS, BUILTIN_SUBAGENT_IDS } from "../runtime/opencodeRuntime/shared";
+import { resolveOpencodeConfigDir, resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
 type OpenCodeAgentConfigRecord = Record<string, unknown>;
 
-export interface OpencodeAgentValidationIssue {
+interface OpencodeAgentValidationIssue {
   path: string;
   message: string;
 }
 
-export interface OpencodeAgentStorageInfo {
-  directory: string;
+interface OpencodeAgentStorageInfo {
+  workspaceDirectory: string;
+  configDirectory: string;
   configFilePath: string;
-  persistenceMode: "project-opencode-jsonc";
+  persistenceMode: "managed-config-dir";
 }
 
 const NON_DELETABLE_BUILTIN_AGENT_IDS = new Set(["explore", "general"]);
@@ -61,25 +66,117 @@ function normalizeAgentTypeDraft(input: AgentTypeDefinition): AgentTypeDefinitio
   return normalizeSharedAgentTypeDraft(parsed) as AgentTypeDefinition;
 }
 
-function toAgentTypeDefinition(id: string, config: OpenCodeAgentConfigRecord): AgentTypeDefinition {
+function builtinAgentTypeDefinition(id: string): AgentTypeDefinition | null {
+  switch (id) {
+    case "build":
+      return normalizeAgentTypeDraft({
+        id,
+        description: "The default agent. Executes tools based on configured permissions.",
+        mode: "primary",
+        hidden: false,
+        disable: false,
+        options: {},
+      });
+    case "plan":
+      return normalizeAgentTypeDraft({
+        id,
+        description: "Plan mode. Disallows all edit tools.",
+        mode: "primary",
+        hidden: false,
+        disable: false,
+        options: {},
+      });
+    case "general":
+      return normalizeAgentTypeDraft({
+        id,
+        description: "General-purpose subagent for delegated tasks.",
+        mode: "subagent",
+        hidden: false,
+        disable: false,
+        options: {},
+      });
+    case "explore":
+      return normalizeAgentTypeDraft({
+        id,
+        description: "Fast subagent specialized for codebase exploration.",
+        mode: "subagent",
+        hidden: false,
+        disable: false,
+        options: {},
+      });
+    case "title":
+    case "summary":
+    case "compaction":
+      return normalizeAgentTypeDraft({
+        id,
+        mode: "primary",
+        hidden: true,
+        disable: false,
+        options: {},
+      });
+    default:
+      return null;
+  }
+}
+
+function toAgentTypeDefinition(
+  id: string,
+  config: OpenCodeAgentConfigRecord,
+  base?: AgentTypeDefinition | null,
+): AgentTypeDefinition {
   const permission =
     isPlainObject(config.permission) ? (config.permission as AgentTypeDefinition["permission"]) : undefined;
   return normalizeAgentTypeDraft({
+    ...(base ?? {
+      id,
+      mode: "all",
+      hidden: false,
+      disable: false,
+      options: {},
+    }),
     id,
-    name: typeof config.name === "string" ? config.name : undefined,
-    description: typeof config.description === "string" ? config.description : undefined,
-    prompt: typeof config.prompt === "string" ? config.prompt : undefined,
-    model: typeof config.model === "string" ? config.model : undefined,
-    variant: typeof config.variant === "string" ? config.variant : undefined,
-    mode: normalizeAgentTypeMode(config.mode),
-    hidden: config.hidden === true,
-    disable: config.disable === true,
+    name: typeof config.name === "string" ? config.name : base?.name,
+    description: typeof config.description === "string" ? config.description : base?.description,
+    prompt: typeof config.prompt === "string" ? config.prompt : base?.prompt,
+    model: typeof config.model === "string" ? config.model : base?.model,
+    variant: typeof config.variant === "string" ? config.variant : base?.variant,
+    mode:
+      typeof config.mode === "string"
+        ? normalizeAgentTypeMode(config.mode)
+        : (base?.mode ?? "all"),
+    hidden: typeof config.hidden === "boolean" ? config.hidden : base?.hidden === true,
+    disable: typeof config.disable === "boolean" ? config.disable : base?.disable === true,
     temperature: typeof config.temperature === "number" ? config.temperature : undefined,
     topP: typeof config.top_p === "number" ? config.top_p : undefined,
     steps: typeof config.steps === "number" ? config.steps : undefined,
     permission,
-    options: isPlainObject(config.options) ? (config.options as Record<string, unknown>) : {},
+    options: {
+      ...(isPlainObject(base?.options) ? base.options : {}),
+      ...(isPlainObject(config.options) ? (config.options as Record<string, unknown>) : {}),
+    },
+    queueMode: normalizeAgentQueueMode(config.queueMode),
   });
+}
+
+function readEffectiveAgentTypeDefinitions(config: AgentMockingbirdConfig) {
+  const configPath = resolveOpencodeConfigFile(config);
+  const currentMap = readFileAgentConfigMap(configPath);
+  const agentTypes = new Map<string, AgentTypeDefinition>();
+
+  for (const id of [...BUILTIN_PRIMARY_AGENT_IDS, ...BUILTIN_SUBAGENT_IDS]) {
+    const builtin = builtinAgentTypeDefinition(id);
+    if (builtin) {
+      agentTypes.set(id, builtin);
+    }
+  }
+
+  for (const [id, agentConfig] of Object.entries(currentMap)) {
+    agentTypes.set(id, toAgentTypeDefinition(id, agentConfig, agentTypes.get(id) ?? builtinAgentTypeDefinition(id)));
+  }
+
+  return [...agentTypes.values()]
+    .filter(agentType => agentType.disable !== true)
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function toOpenCodeAgentConfig(
@@ -101,16 +198,16 @@ function toOpenCodeAgentConfig(
     steps: agentType.steps,
     permission: agentType.permission,
     options: isPlainObject(agentType.options) ? { ...agentType.options } : {},
+    queueMode: normalizeAgentQueueMode(agentType.queueMode),
   };
 }
 
 function canonicalOpencodeConfigPath(baseDir: string) {
-  return path.join(baseDir, ".opencode", "opencode.jsonc");
+  return path.join(baseDir, "opencode.jsonc");
 }
 
-function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissing = true) {
-  const baseDir = resolveOpencodeWorkspaceDir(config);
-  const fallback = canonicalOpencodeConfigPath(baseDir);
+function resolveOpencodeConfigFileFromDir(configDirectory: string, createIfMissing = true) {
+  const fallback = canonicalOpencodeConfigPath(configDirectory);
   if (!createIfMissing) {
     return fallback;
   }
@@ -121,38 +218,23 @@ function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissi
   return fallback;
 }
 
+function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissing = true) {
+  return resolveOpencodeConfigFileFromDir(resolveOpencodeConfigDir(config), createIfMissing);
+}
+
 export function getOpencodeAgentStorageInfo(config: AgentMockingbirdConfig = getConfigSnapshot().config): OpencodeAgentStorageInfo {
-  const directory = resolveOpencodeWorkspaceDir(config);
+  const workspaceDirectory = resolveOpencodeWorkspaceDir(config);
+  const configDirectory = resolveOpencodeConfigDir(config);
   return {
-    directory,
-    configFilePath: resolveOpencodeConfigFile(config, false),
-    persistenceMode: "project-opencode-jsonc",
+    workspaceDirectory,
+    configDirectory,
+    configFilePath: resolveOpencodeConfigFileFromDir(configDirectory, false),
+    persistenceMode: "managed-config-dir",
   };
 }
 
 function listAgentSearchRoots(config: AgentMockingbirdConfig): string[] {
-  const roots = new Set<string>();
-  const baseDir = resolveOpencodeWorkspaceDir(config);
-  roots.add(baseDir);
-
-  // OpenCode scans .opencode directories walking up project + home.
-  let cursor = path.resolve(baseDir);
-  while (true) {
-    roots.add(path.join(cursor, ".opencode"));
-    const parent = path.dirname(cursor);
-    if (parent === cursor) break;
-    cursor = parent;
-  }
-
-  const homeDir = os.homedir();
-  roots.add(path.join(homeDir, ".opencode"));
-  roots.add(path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir, ".config"), "opencode"));
-
-  if (process.env.OPENCODE_CONFIG_DIR?.trim()) {
-    roots.add(process.env.OPENCODE_CONFIG_DIR.trim());
-  }
-
-  return [...roots];
+  return [resolveOpencodeConfigDir(config)];
 }
 
 function deleteAgentMarkdownFiles(config: AgentMockingbirdConfig, agentId: string): string[] {
@@ -210,16 +292,16 @@ function hashAgentTypes(agentTypes: AgentTypeDefinition[]): string {
     .digest("hex");
 }
 
-function createOpencodeConfigClient(config: AgentMockingbirdConfig) {
+function createOpencodeConfigClient(config: AgentMockingbirdConfig, directory = resolveOpencodeConfigDir(config)) {
   return createOpencodeClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
-    directory: config.runtime.opencode.directory,
+    directory,
   });
 }
 
 async function disposeOpencodeInstance(config: AgentMockingbirdConfig) {
   try {
-    await createOpencodeConfigClient(config).instance.dispose({
+    await createOpencodeConfigClient(config, resolveOpencodeConfigDir(config)).instance.dispose({
       responseStyle: "data",
       throwOnError: true,
       signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),
@@ -229,19 +311,8 @@ async function disposeOpencodeInstance(config: AgentMockingbirdConfig) {
   }
 }
 
-async function getOpencodeConfig(config: AgentMockingbirdConfig) {
-  const client = createOpencodeConfigClient(config);
-  return unwrapSdkData<Config>(
-    await client.config.get({
-      responseStyle: "data",
-      throwOnError: true,
-      signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),
-    }),
-  );
-}
-
 async function loadProviderModelMap(config: AgentMockingbirdConfig) {
-  const client = createOpencodeConfigClient(config);
+  const client = createOpencodeConfigClient(config, resolveOpencodeConfigDir(config));
   const payload = unwrapSdkData<ConfigProvidersResponse>(
     await client.config.providers({
       responseStyle: "data",
@@ -277,12 +348,7 @@ function parseModelRef(rawRef: string, defaultProviderId: string) {
 export async function listOpencodeAgentTypes() {
   const config = getConfigSnapshot().config;
   const storage = getOpencodeAgentStorageInfo(config);
-  const runtimeConfig = await getOpencodeConfig(config);
-  const currentMap = normalizeRuntimeAgentConfigMap((runtimeConfig as Record<string, unknown>).agent);
-  const agentTypes = Object.entries(currentMap)
-    .map(([id, agentConfig]) => toAgentTypeDefinition(id, agentConfig))
-    .filter(agentType => agentType.disable !== true)
-    .sort((left, right) => left.id.localeCompare(right.id));
+  const agentTypes = readEffectiveAgentTypeDefinitions(config);
   return {
     agentTypes,
     hash: hashAgentTypes(agentTypes),
@@ -385,11 +451,7 @@ export async function patchOpencodeAgentTypes(input: {
 }) {
   const config = getConfigSnapshot().config;
   const storage = getOpencodeAgentStorageInfo(config);
-  const currentConfig = await getOpencodeConfig(config);
-  const currentMap = normalizeRuntimeAgentConfigMap((currentConfig as Record<string, unknown>).agent);
-  const currentAgentTypes = Object.entries(currentMap)
-    .map(([id, entry]) => toAgentTypeDefinition(id, entry))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const currentAgentTypes = readEffectiveAgentTypeDefinitions(config);
   const currentHash = hashAgentTypes(currentAgentTypes);
   if (currentHash !== input.expectedHash.trim()) {
     return {
@@ -440,7 +502,8 @@ export async function patchOpencodeAgentTypes(input: {
       deleted: input.deletes.slice().sort((a, b) => a.localeCompare(b)),
       deletedAgentFiles: deletedAgentFiles.sort((a, b) => a.localeCompare(b)),
       configFilePath: fileConfigPath,
-      directory: storage.directory,
+      workspaceDirectory: storage.workspaceDirectory,
+      configDirectory: storage.configDirectory,
     },
   };
 }

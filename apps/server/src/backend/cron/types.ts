@@ -8,6 +8,7 @@ export type CronStepKind = "background" | "conditional_agent" | "agent";
 export interface CronJobDefinition {
   id: string;
   name: string;
+  threadSessionId: string | null;
   enabled: boolean;
   scheduleKind: CronScheduleKind;
   scheduleExpr: string | null;
@@ -15,7 +16,6 @@ export interface CronJobDefinition {
   atIso: string | null;
   timezone: string | null;
   runMode: CronRunMode;
-  handlerKey: string | null;
   conditionModulePath: string | null;
   conditionDescription: string | null;
   agentPromptTemplate: string | null;
@@ -87,7 +87,6 @@ export interface CronJobCreateInput {
   atIso?: string | null;
   timezone?: string | null;
   runMode: CronRunMode;
-  handlerKey?: string | null;
   conditionModulePath?: string | null;
   conditionDescription?: string | null;
   agentPromptTemplate?: string | null;
@@ -106,7 +105,6 @@ export interface CronJobPatchInput {
   atIso?: string | null;
   timezone?: string | null;
   runMode?: CronRunMode;
-  handlerKey?: string | null;
   conditionModulePath?: string | null;
   conditionDescription?: string | null;
   agentPromptTemplate?: string | null;
@@ -114,13 +112,6 @@ export interface CronJobPatchInput {
   maxAttempts?: number;
   retryBackoffMs?: number;
   payload?: Record<string, unknown>;
-}
-
-export interface CronHandlerContext {
-  nowMs: number;
-  payload: Record<string, unknown>;
-  job: CronJobDefinition;
-  instance: CronJobInstance;
 }
 
 export interface CronHandlerResult {
@@ -134,8 +125,6 @@ export interface CronHandlerResult {
     severity?: "info" | "warn" | "critical";
   };
 }
-
-export type CronHandler = (ctx: CronHandlerContext) => Promise<CronHandlerResult> | CronHandlerResult;
 
 export interface CronConditionalModuleContext {
   nowMs: number;

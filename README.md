@@ -1,251 +1,96 @@
-# agent-mockingbird
+# <div align="center"><img src="./agent-mockingbird-logo-4k-transparent-with-holes-punched2.png" alt="Agent Mockingbird logo" width="220" /></div>
 
-Bun-native orchestration dashboard scaffold for a long-running agent stack.
+# Agent Mockingbird
 
-## Stack
+Agent Mockingbird is a personal personal assistant built around OpenCode. It gives you a long-running local agent with persistent memory, scheduled jobs, workspace bootstrap context, and a web API/UI layer for managing runs and configuration.
 
-- Runtime: `bun`
-- Frontend: `react` + `typescript`
-- Styling: `tailwindcss v4`
-- UI primitives: `@base-ui-components/react` with shadcn-style component structure
-- Linting: `eslint` (flat config) + `typescript-eslint` + `react-hooks` + `jsx-a11y`
+As OpenClaw is to Pi, the goal is that Agent Mockingbird will be to OpenCode.
 
-## Commands
+## What It Is
+
+Agent Mockingbird sits between your workspace and OpenCode:
+
+- it stores runtime config locally
+- it forwards prompts and run events through an OpenCode-backed runtime
+- it adds memory tools and retrieval over your workspace data
+- it runs scheduled agent jobs with a cron-style execution system
+- it injects OpenClaw-style workspace context files such as `AGENTS.md`, `TOOLS.md`, and `IDENTITY.md`
+
+The result is a personal agent stack you can keep running locally instead of a one-shot CLI session.
+
+## Why this over OpenClaw?
+
+In short, control by the human. Openclaw gives the machine everything, which has pros and cons. The pros are it can do anything you can on the machine. The cons means that often times it makes the same mistakes and can break things. The goal of Agent Mockingbird is to tighten the scope using Opencode's first in class agent management, limiting it to a specific workspace, and limiting what commands it can call out of the gate to limit blast radius of mistakes.
+
+## Highlights
+
+- OpenCode-backed runtime with local run tracking and event streaming
+- Persistent memory APIs and tools for retrieval, recall, and note storage
+- Cron job management for recurring or conditional agent work
+- Managed OpenCode config and plugin wiring
+- Workspace bootstrap context from markdown files in the bound workspace
+- Local API surface for config, runs, memory, heartbeat, cron, agents, and UI routes
+
+## Quick Start
+
+Recommended install flow for end users on Linux:
+
+```bash
+bun install -g agent-mockingbird
+agent-mockingbird install
+```
+
+`agent-mockingbird install` provisions and starts the `opencode` and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
+
+If you are working from source:
 
 ```bash
 bun install
-bun run dev
-bun run build:cli
-```
-
-Run agent-mockingbird + OpenCode together for smoke testing:
-
-```bash
 bun run dev:stack
 ```
 
-`dev:stack` runs `build:cli` first so the local `bin/agent-mockingbird` command stays in sync.
+`bun run dev:stack` builds the bundled app, starts the local OpenCode sidecar on `127.0.0.1:4096`, and starts the Agent Mockingbird server in one command.
 
-Production build and run:
+## How It Works
 
-```bash
-bun run build
-bun run start
+```text
+Your workspace
+  |
+  +-- bootstrap files (AGENTS.md, TOOLS.md, IDENTITY.md, ...)
+  |
+  v
+Agent Mockingbird
+  |- config + API + UI routes
+  |- memory service
+  |- cron scheduler / workers
+  |- run storage + event streaming
+  |
+  v
+OpenCode runtime
 ```
 
-Code quality:
+Agent Mockingbird owns the local orchestration layer. OpenCode handles the underlying agent runtime. Mockingbird adds local state, managed config, workspace context injection, memory, and automation on top.
 
-```bash
-bun run test
-bun run lint
-bun run typecheck
-```
+## Core Concepts
 
-`bun run test` is intentionally scoped to `src` so local `opencode/` clone tests are not included.
+### Runtime
 
-Optional local OpenCode checkout for smoke testing and sync scripts:
+Runtime configuration is stored in JSON at `./data/agent-mockingbird.config.json` by default. Agent Mockingbird validates config changes before persisting them and uses that config to drive provider, model, directory, timeout, and runtime behavior.
 
-```bash
-git clone https://github.com/anomalyco/opencode.git opencode
-bash scripts/pull-opencode.sh
-```
+### Memory
 
-`opencode/` is intentionally gitignored in this repo. The frontend no longer imports UI CSS/fonts from that sibling checkout during normal builds.
-
-Database migrations (Drizzle + SQLite):
-
-```bash
-bun run db:generate
-bun run db:migrate
-bun run db:check
-```
-
-By default the SQLite file is `./data/agent-mockingbird.db`. Override with `AGENT_MOCKINGBIRD_DB_PATH`.
-
-Reset local database to defaults (including cron job tables):
-
-```bash
-bun run db:wipe
-```
-
-Memory CLI:
-
-```bash
-bun run memory:status
-bun run memory:sync
-bun run memory:reindex
-bun run memory:search "query"
-bun run memory:e2e
-bun run memory:trace:e2e
-bun run src/backend/memory/cli.ts remember "some note to store"
-bun run src/backend/memory/cli.ts activity 20
-bun run memory:lint
-```
-
-`memory:trace:e2e` auto-selects a model from existing sessions (prefers `main`). Override with `AGENT_MOCKINGBIRD_E2E_MODEL=provider/model`.
-
-Memory operator references:
+Memory is enabled by default and can index workspace content, store notes, and expose retrieval tools to the runtime. The operator references live in:
 
 - `docs/memory-ops.md`
 - `docs/memory-runtime-contract.md`
-- `runtime-assets/workspace/.agents/skills/memory-ops/SKILL.md` (runtime bundle source)
-- `.agents/skills/memory-ops/SKILL.md` (development copy)
 
-## Runtime
+### Cron
 
-Agent Mockingbird runs with an OpenCode-backed runtime that forwards prompts to OpenCode and stores mirrored messages locally.
+Cron jobs can enqueue recurring or conditional agent work. The cron API supports job creation, updates, execution, instance inspection, and health checks.
 
-Runtime configuration is stored in JSON (`./data/agent-mockingbird.config.json` by default). On first boot, agent-mockingbird migrates legacy env/DB runtime settings into this file.
-Example config template: `agent-mockingbird.config.example.json`.
-`./config.json` at repo root is OpenCode config, not agent-mockingbird runtime config.
-Runtime behavior is sourced from agent-mockingbird config JSON. OpenCode runtime env vars are no longer accepted for model/provider/timeouts/directory.
-If you still have legacy `AGENT_MOCKINGBIRD_OPENCODE_*` runtime vars, run `bun run config:migrate-opencode-env` once, then unset them.
+### Workspace Bootstrap
 
-Skill deployment behavior (install/update):
-
-- Runtime bundle source files live in `runtime-assets/workspace`.
-- Install/update syncs that bundle into the active workspace root (including `.agents/skills` and `AGENTS.md`).
-- Sync state is tracked in `data/runtime-assets-state.json`.
-- On update, interactive installs prompt only when both:
-  - local file changed since last sync
-  - packaged runtime asset also changed since last sync
-- On non-interactive update conflicts, install creates `<file>.backup-<UTCSTAMP>` then overwrites with packaged content.
-- Runtime OpenCode `skills.paths` is synced to include workspace `.agents/skills`.
-- If `ui.skills` is empty, install/update initializes defaults:
-  - `config-editor`
-  - `config-auditor`
-  - `runtime-diagnose`
-  - `memory-ops`
-- Install/update also seeds runtime OpenCode workspace config at `.opencode/opencode.jsonc` from `runtime-assets/workspace`:
-  - default `agent.general.tools` enables `memory_search`, `memory_get`, and `memory_remember`.
-
-Config API:
-
-- `GET /api/config`
-- `PATCH /api/config` (partial update with optimistic `expectedHash`)
-- `PUT /api/config` (full replace with optimistic `expectedHash`)
-- `GET /api/runtime/info` (effective OpenCode connection + directory/config persistence metadata)
-
-After every config change, agent-mockingbird performs:
-
-- schema validation
-- semantic provider/model validation via OpenCode `config/providers`
-- gateway smoke test prompt (expects an `OK` response pattern)
-
-If any validation step fails, the config change is not persisted.
-
-Auth and path env variables:
-
-- `AGENT_MOCKINGBIRD_DB_PATH` (default `./data/agent-mockingbird.db`)
-- `AGENT_MOCKINGBIRD_CONFIG_PATH` (default `./data/agent-mockingbird.config.json`)
-- `AGENT_MOCKINGBIRD_OPENCODE_AUTH_HEADER` (optional full `Authorization` header)
-- `AGENT_MOCKINGBIRD_OPENCODE_USERNAME` / `AGENT_MOCKINGBIRD_OPENCODE_PASSWORD` (optional Basic auth fallback)
-
-Cron environment variables:
-
-- `AGENT_MOCKINGBIRD_CRON_ENABLED` (default `true`)
-- `AGENT_MOCKINGBIRD_CRON_SCHEDULER_POLL_MS` (default `1000`)
-- `AGENT_MOCKINGBIRD_CRON_WORKER_POLL_MS` (default `1000`)
-- `AGENT_MOCKINGBIRD_CRON_LEASE_MS` (default `30000`)
-- `AGENT_MOCKINGBIRD_CRON_MAX_ENQUEUE_PER_JOB_TICK` (default `25`)
-
-Signal channel runtime config (JSON config file: `runtime.channels.signal`):
-
-- `enabled` (default `false`)
-- `httpUrl` (default `http://127.0.0.1:8080`)
-- `account` (optional E.164 or UUID account identity)
-- `dmPolicy` (`pairing`, `allowlist`, `open`, `disabled`; default `pairing`)
-- `allowFrom` (sender allowlist; include `"*"` for open DM mode)
-- `groupPolicy` (`open`, `allowlist`, `disabled`; default `allowlist`)
-- `groupAllowFrom` (group sender allowlist; falls back to `allowFrom`)
-- `groups` (per-group overrides; supports `"*"` default)
-- `mentionPatterns` (regex list for mention detection)
-- `groupActivationDefault` (`mention` or `always`; default `mention`)
-- `textChunkLimit` / `chunkMode` (`length` or `newline`)
-- `pairing.ttlMs` / `pairing.maxPending`
-
-Memory mode environment variables:
-
-- `AGENT_MOCKINGBIRD_MEMORY_ENABLED` (default `true`)
-- `AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR` (default `./data/workspace`)
-- `AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER` (`ollama` or `none`, default `ollama`)
-- `AGENT_MOCKINGBIRD_MEMORY_EMBED_MODEL` (default `qwen3-embedding:4b`)
-- `AGENT_MOCKINGBIRD_MEMORY_OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
-- `AGENT_MOCKINGBIRD_MEMORY_CHUNK_TOKENS` (default `400`)
-- `AGENT_MOCKINGBIRD_MEMORY_CHUNK_OVERLAP` (default `80`)
-- `AGENT_MOCKINGBIRD_MEMORY_MAX_RESULTS` (default `6`)
-- `AGENT_MOCKINGBIRD_MEMORY_MIN_SCORE` (default `0.25`)
-- `AGENT_MOCKINGBIRD_MEMORY_SYNC_COOLDOWN_MS` (default `10000`)
-- `AGENT_MOCKINGBIRD_MEMORY_TOOL_MODE` (`hybrid`, `inject_only`, `tool_only`; default `hybrid`)
-- `AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_ENABLED` (default `true`)
-- `AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_FALLBACK_RECALL_ONLY` (default `true`)
-- `AGENT_MOCKINGBIRD_MEMORY_INJECTION_DEDUPE_MAX_TRACKED` (default `256`)
-
-OpenCode local memory tools:
-
-- `.opencode/tools/memory_search.ts`
-- `.opencode/tools/memory_get.ts`
-- `.opencode/tools/memory_remember.ts`
-- `.opencode/tools/cron_manager.ts`
-
-These tools call Agent Mockingbird APIs. Set `AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL` and/or `AGENT_MOCKINGBIRD_CRON_API_BASE_URL` for the OpenCode process if needed (default `http://127.0.0.1:3001`).
-
-Memory API endpoints used by tools:
-
-- `POST /api/memory/retrieve`
-- `POST /api/memory/read`
-- `POST /api/memory/remember`
-- `POST /api/memory/remember/validate`
-- `GET /api/memory/activity`
-
-Signal channel API endpoints:
-
-- `GET /api/channels/signal/status`
-- `GET /api/channels/signal/pairing`
-- `POST /api/channels/signal/pairing/approve`
-- `POST /api/channels/signal/pairing/reject`
-
-Run API endpoints:
-
-- `POST /api/runs`
-- `GET /api/runs/:id`
-- `GET /api/runs/:id/events`
-- `GET /api/runs/:id/events/stream`
-
-Cron API endpoints:
-
-- `GET /api/cron/handlers`
-- `GET /api/cron/health`
-- `GET /api/cron/jobs`
-- `POST /api/cron/jobs`
-- `GET /api/cron/jobs/:id`
-- `PATCH /api/cron/jobs/:id`
-- `DELETE /api/cron/jobs/:id`
-- `POST /api/cron/jobs/:id/run`
-- `GET /api/cron/instances`
-- `GET /api/cron/instances/:id/steps`
-- `POST /api/cron/manage` (used by `cron_manager`)
-
-Environment variables are parsed and validated at startup via `@t3-oss/env-core` + `zod`.
-
-`bun run dev:stack` launcher env knobs:
-
-- `OPENCODE_HOST` (default `127.0.0.1`)
-- `OPENCODE_PORT` (default `4096`)
-- `AGENT_MOCKINGBIRD_PORT` (default `3001`)
-- `OPENCODE_LOG_LEVEL` (default `INFO`)
-
-## OpenCode Agent Persistence
-
-Agent Mockingbird now manages OpenCode agents directly in project-scoped OpenCode config.
-
-- Save target is `<workspace>/.opencode/opencode.jsonc`.
-- OpenCode also loads `.opencode/agent/*.md` and `.opencode/agents/*.md`; deleting an agent in Agent Mockingbird removes matching files as well.
-- Agents UI shows `Saving to` and `Bound directory` so you can verify which workspace is authoritative.
-
-## Workspace Bootstrap Context (OpenClaw-style)
-
-Agent Mockingbird now injects workspace markdown context into runtime system prompts using OpenClaw-style files from your bound workspace root (not `.opencode/`):
+Agent Mockingbird can inject workspace markdown context files into runtime system prompts using files such as:
 
 - `AGENTS.md`
 - `SOUL.md`
@@ -254,178 +99,46 @@ Agent Mockingbird now injects workspace markdown context into runtime system pro
 - `USER.md`
 - `HEARTBEAT.md`
 - `BOOTSTRAP.md`
-- `MEMORY.md` / `memory.md`
+- `MEMORY.md`
 
-Behavior:
+## Current State
 
-- Per-file and total prompt injection caps are configurable at `runtime.opencode.bootstrap`.
-- If a selected OpenCode agent is `mode: "subagent"` and `runtime.opencode.bootstrap.subagentMinimal=true`, only `AGENTS.md` and `TOOLS.md` are injected.
-- `IDENTITY.md` is parsed for metadata (name/emoji/avatar/theme/creature/vibe) and returned via `GET /api/runtime/info`.
-- Selected agent prompt text can also be mirrored into runtime system prompts with `runtime.opencode.bootstrap.includeAgentPrompt=true`.
+This is a non-production personal project. Breaking changes are acceptable, internal systems can be refactored aggressively, and the README should be read as a guide to the current shape of the project rather than a long-term compatibility promise.
 
-- `POST /api/config/opencode/bootstrap/import-openclaw`
-  - Body:
-    - Local source: `{ "source": { "mode": "local", "path": "/path/to/openclaw/workspace" } }`
-    - Git source: `{ "source": { "mode": "git", "url": "git@github.com:you/openclaw-memory.git", "ref": "main" } }`
-  - Optional: `targetDirectory`
-  - Performs one-shot migration with conflict rules:
-    - Missing target path: copy source file wholesale.
-    - Existing target path: keep target by default.
-    - `AGENTS.md` conflicts: attempt model-assisted rewrite/merge; if unavailable/invalid, keep target.
-    - Compatibility bridge: if source has no `AGENTS.md` but has `CLAUDE.md`, importer maps `CLAUDE.md -> AGENTS.md` during migration.
-  - Preserves protected Agent Mockingbird runtime files and triggers a memory index sync after import.
+## Development
 
-CLI migration UX is now integrated into `agent-mockingbird onboard`:
-
-- Choose onboarding path: `quickstart`, `model-only`, `memory-only`, `openclaw-only`, or `skip`.
-- OpenClaw migration runs through an onboarding wizard (git clone or local folder source).
-- `AGENTS.md` conflicts go through a model-assisted rewrite/merge pass via OpenCode; on failure, existing target content is kept.
-- If memory is enabled, onboarding runs memory sync after successful migration.
-- Legacy `agent-mockingbird import openclaw ...` commands are removed.
-
-If OpenCode UI/TUI looks different from Agent Mockingbird:
-
-1. Confirm `GET /api/runtime/info` reports the directory you expect.
-2. Launch/attach OpenCode against the same workspace directory.
-3. Verify the same `.opencode/opencode.jsonc` file path is being used.
-
-## Deployment
-
-Recommended production topology is **single VM + systemd sidecar**:
-
-- `opencode.service` running on `127.0.0.1:4096`
-- `agent-mockingbird.service` running on `127.0.0.1:3001`
-- both pinned to one workspace path via `runtime.opencode.directory` in agent-mockingbird config
-- `runtime.memory.workspaceDir` must resolve to the same path as `runtime.opencode.directory`
-
-Deployment artifacts:
-
-- `deploy/systemd/opencode.service`
-- `deploy/systemd/agent-mockingbird.service`
-- `deploy/systemd/README.md`
-- `deploy/docker-compose.yml` (reference stack)
-
-## CI/CD Release Bundles
-
-This repo uses one CI/CD workflow:
-
-- `.github/workflows/ci.yml` runs lint/typecheck/build, then publishes the same packed artifact to your npm-compatible package registry.
-- Pull requests run checks only (no publish).
-- `main` pushes auto-increment patch version from the currently published stable version (`0.0.1` -> `0.0.2` -> `0.0.3`) and publish with npm tag `latest`.
-- Pushes to matching `v*` tags publish the exact `package.json` version with npm tag `latest`.
-- Manual dispatch publishes `package.json` version with npm tag `latest`.
-- Tag pushes must match `v<package.json version>` or CI fails.
-
-Published package artifact:
-
-- `@<scope>/agent-mockingbird@<version>` generated from a single packed `.tgz` built in CI after lint/typecheck/build.
-
-Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
-
-## Linux Onboarding (Private Gitea)
-
-Primary path (interactive by default):
+For local development:
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash
+bun install
+bun run dev:stack
 ```
 
-Run a different lifecycle command:
+Useful commands:
 
 ```bash
-curl -fsSL "https://git.waffleophagus.com/waffleophagus/agent-mockingbird/raw/branch/main/scripts/onboard/bootstrap.sh" | bash -s -- status
+bun run test
+bun run lint
+bun run typecheck
+bun run build
+bun run check:ship
 ```
 
-Direct package execution from private registry:
+OpenCode source workflow:
 
 ```bash
-npx --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  --package "@waffleophagus/agent-mockingbird-installer@latest" \
-  agent-mockingbird-installer install
+bun run opencode:sync --status
+bun run opencode:sync --rebuild-only
+bun run opencode:sync --check
 ```
 
-```bash
-bunx --bun npm exec --yes --registry "https://git.waffleophagus.com/api/packages/waffleophagus/npm/" \
-  --package "@waffleophagus/agent-mockingbird-installer@latest" \
-  agent-mockingbird-installer -- install
-```
+The repo treats `cleanroom/opencode` as a pristine upstream clone, `vendor/opencode` as the editable worktree, and `patches/opencode/*.patch` as the tracked patch stack.
 
-Agent Mockingbird commands:
+## Docs And References
 
-```bash
-agent-mockingbird install
-agent-mockingbird update
-agent-mockingbird onboard
-agent-mockingbird status
-agent-mockingbird restart
-agent-mockingbird start
-agent-mockingbird stop
-agent-mockingbird uninstall
-```
-
-`agent-mockingbird install` and `agent-mockingbird update` now show a mode-specific action plan before confirmation.
-
-- `install` flow now launches interactive provider/model onboarding immediately (interactive installs).
-- `update` plan explicitly calls out what is refreshed vs what is preserved (data/workspace/config are not reset).
-- `update --dry-run` previews planned update actions without mutating files/services.
-- `onboard` reruns interactive provider/model onboarding without reinstalling.
-- Install/update now also maintain an `opencode` shim in `~/.local/bin` so the OpenCode CLI is directly available.
-- Onboarding model selection is searchable + paginated (works with providers that expose large model catalogs).
-- During onboarding, provider-auth changes trigger a transparent `opencode.service` refresh before model selection, so newly added providers/models show up immediately.
-- Onboarding can now configure memory embeddings for Ollama: set the Ollama URL, discover `/api/tags` models live, then select an embedding model with searchable pagination.
-- `agent-mockingbird onboard` supports `memory-only` and `openclaw-only` paths for focused setup.
-
-Compatibility alias remains available:
-
-```bash
-agent-mockingbird-installer install
-```
-
-Default install root is `~/.agent-mockingbird`, with systemd **user** services:
-
-- `opencode.service` (local sidecar on `127.0.0.1:4096`)
-- `agent-mockingbird.service` (dashboard/API on `127.0.0.1:3001`)
-
-On Linux, installer attempts `loginctl enable-linger $USER` so services keep running after logout.
-
-## Install Directly From GitHub (No npmjs.org)
-
-You can still install the main CLI directly from git:
-
-```bash
-OWNER="<github-owner>"
-REPO="<repo-name>"
-VERSION="v0.1.0"
-bun add -g "github:${OWNER}/${REPO}#${VERSION}"
-```
-
-2. Run:
-
-```bash
-agent-mockingbird
-```
-
-## Publish To Package Registry
-
-`ci.yml` publish steps expect these repository secrets:
-
-- `PACKAGE_REGISTRY_URL` example: `https://gitea.example.com/api/packages/matt/npm/`
-- `PACKAGE_REGISTRY_TOKEN` token with package write permission
-- `PACKAGE_REGISTRY_SCOPE` scope/user/org, example: `matt`
-
-On tag push like `v0.1.0`, CI publishes `@<scope>/agent-mockingbird@0.1.0` to that registry.
-
-Install from that registry with Bun:
-
-```bash
-SCOPE="<scope>"
-REGISTRY_URL="https://gitea.example.com/api/packages/${SCOPE}/npm/"
-TOKEN="<gitea-token>"
-
-registry_no_proto="${REGISTRY_URL#https://}"
-registry_no_proto="${registry_no_proto#http://}"
-printf "@%s:registry=%s\n//%s:_authToken=%s\n" "$SCOPE" "$REGISTRY_URL" "$registry_no_proto" "$TOKEN" >> ~/.npmrc
-
-bun add -g "@${SCOPE}/agent-mockingbird"
-agent-mockingbird
-```
+- `docs/memory-ops.md`
+- `docs/memory-runtime-contract.md`
+- `docs/vendor-opencode.md`
+- `docs/opencode-rebase-workflow-plan.md`
+- `docs/opencode-startup-sync-plan.md`
+- `packages/agent-mockingbird-installer/README.md`

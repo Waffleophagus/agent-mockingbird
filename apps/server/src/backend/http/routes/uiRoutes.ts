@@ -7,9 +7,9 @@ import {
   listMessagesForSession,
   listSessions,
 } from "../../db/repository";
+import { isActiveHeartbeatSession } from "../../heartbeat/state";
 import { listOpencodeModelOptions } from "../../opencode/models";
 import { listPendingPrompts } from "../../prompts/service";
-import type { RuntimeEventStream } from "../sse";
 
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -44,14 +44,17 @@ function estimateContextBreakdown(messages: ReturnType<typeof listMessagesForSes
   };
 }
 
-export function createUiRoutes(runtime: RuntimeEngine, eventStream: Pick<RuntimeEventStream, "getLatestSeq">) {
+export function createUiRoutes(runtime: RuntimeEngine) {
   return {
     "/api/ui/session-screen/bootstrap": {
       GET: async (req: Request) => {
         const url = new URL(req.url);
         const requestedSessionId = url.searchParams.get("sessionId")?.trim() ?? "";
-        const sessions = listSessions();
-        const activeSessionId = requestedSessionId || sessions[0]?.id || "";
+        const sessions = listSessions().filter(session => !isActiveHeartbeatSession(session.id));
+        const activeSessionId =
+          (requestedSessionId && !isActiveHeartbeatSession(requestedSessionId) ? requestedSessionId : "") ||
+          sessions[0]?.id ||
+          "";
 
         if (activeSessionId && runtime.syncSessionMessages) {
           try {
@@ -97,9 +100,6 @@ export function createUiRoutes(runtime: RuntimeEngine, eventStream: Pick<Runtime
           },
           featureFlags: {
             reviewEnabled: false,
-          },
-          realtime: {
-            latestSeq: eventStream.getLatestSeq(),
           },
         });
       },

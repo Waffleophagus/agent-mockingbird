@@ -1,0 +1,506 @@
+From d0ccb6f44aaff458f67afa3bde01cf7fd0ddf3ab Mon Sep 17 00:00:00 2001
+From: Matt Campbell <npm@d6software.com>
+Date: Wed, 18 Mar 2026 15:36:33 -0500
+Subject: [PATCH 04/11] Add heartbeat settings and usage nav
+
+---
+ .../app/src/components/dialog-settings.tsx    |   8 +
+ .../app/src/components/settings-heartbeat.tsx | 409 ++++++++++++++++++
+ packages/app/src/pages/layout.tsx             |   2 +
+ .../app/src/pages/layout/sidebar-shell.tsx    |  11 +
+ 4 files changed, 430 insertions(+)
+ create mode 100644 packages/app/src/components/settings-heartbeat.tsx
+
+diff --git a/packages/app/src/components/dialog-settings.tsx b/packages/app/src/components/dialog-settings.tsx
+index 460555ed1..8b51a29fd 100644
+--- a/packages/app/src/components/dialog-settings.tsx
++++ b/packages/app/src/components/dialog-settings.tsx
+@@ -13,6 +13,7 @@ import { SettingsMcp } from "./settings-mcp"
+ import { SettingsSkills } from "./settings-skills"
+ import { SettingsRuntime } from "./settings-runtime"
+ import { SettingsCron } from "./settings-cron"
++import { SettingsHeartbeat } from "./settings-heartbeat"
+ 
+ export const DialogSettings: Component = () => {
+   const language = useLanguage()
+@@ -72,6 +73,10 @@ export const DialogSettings: Component = () => {
+                       <Icon name="terminal" />
+                       {language.t("settings.runtime.title")}
+                     </Tabs.Trigger>
++                    <Tabs.Trigger value="heartbeat">
++                      <Icon name="status" />
++                      Heartbeat
++                    </Tabs.Trigger>
+                     <Tabs.Trigger value="cron">
+                       <Icon name="warning" />
+                       {language.t("settings.cron.title")}
+@@ -110,6 +115,9 @@ export const DialogSettings: Component = () => {
+         <Tabs.Content value="runtime" class="no-scrollbar">
+           <SettingsRuntime />
+         </Tabs.Content>
++        <Tabs.Content value="heartbeat" class="no-scrollbar">
++          <SettingsHeartbeat />
++        </Tabs.Content>
+         <Tabs.Content value="cron" class="no-scrollbar">
+           <SettingsCron />
+         </Tabs.Content>
+diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
+new file mode 100644
+index 000000000..95a1770cc
+--- /dev/null
++++ b/packages/app/src/components/settings-heartbeat.tsx
+@@ -0,0 +1,409 @@
++import { Button } from "@opencode-ai/ui/button"
++import { Switch } from "@opencode-ai/ui/switch"
++import { showToast } from "@opencode-ai/ui/toast"
++import { onMount, Show, type Component } from "solid-js"
++import { createStore } from "solid-js/store"
++import { waffleJson } from "@/utils/waffle"
++import {
++  WaffleCard,
++  WaffleInput,
++  WaffleMetaRow,
++  WaffleNotice,
++  WaffleSettingsPage,
++  WaffleSettingsSection,
++  WaffleTextArea,
++  WaffleToolbar,
++} from "./settings-waffle-shared"
++
++type HeartbeatActiveHours = {
++  start: string
++  end: string
++  timezone: string
++} | null
++
++type HeartbeatRuntimeConfig = {
++  enabled: boolean
++  interval: string
++  agentId: string
++  model: string
++  prompt: string
++  ackMaxChars: number
++  activeHours?: HeartbeatActiveHours
++}
++
++type HeartbeatStatus = {
++  config: HeartbeatRuntimeConfig
++  state: {
++    sessionId: string | null
++    running: boolean
++    lastRunAt: string | null
++    lastResult: "idle" | "acknowledged" | "attention" | "skipped" | "error"
++    lastResponse: string | null
++    lastError: string | null
++    updatedAt: string
++  }
++  nextDueAt: string | null
++}
++
++type HeartbeatStatusPayload = {
++  heartbeat: HeartbeatStatus
++}
++
++type RuntimePayload = {
++  hash: string
++  path: string
++}
++
++type HeartbeatFormState = {
++  enabled: boolean
++  interval: string
++  model: string
++  agentId: string
++  ackMaxChars: string
++  prompt: string
++  activeHoursEnabled: boolean
++  activeStart: string
++  activeEnd: string
++  activeTimezone: string
++}
++
++function toForm(config: HeartbeatRuntimeConfig): HeartbeatFormState {
++  return {
++    enabled: config.enabled,
++    interval: config.interval,
++    model: config.model,
++    agentId: config.agentId,
++    ackMaxChars: String(config.ackMaxChars),
++    prompt: config.prompt,
++    activeHoursEnabled: !!config.activeHours,
++    activeStart: config.activeHours?.start ?? "09:00",
++    activeEnd: config.activeHours?.end ?? "17:00",
++    activeTimezone: config.activeHours?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
++  }
++}
++
++function formatTimestamp(value: string | null) {
++  if (!value) return "Never"
++  const date = new Date(value)
++  if (Number.isNaN(date.getTime())) return value
++  return date.toLocaleString()
++}
++
++function formatResult(value: HeartbeatStatus["state"]["lastResult"]) {
++  switch (value) {
++    case "acknowledged":
++      return "Acknowledged"
++    case "attention":
++      return "Needs attention"
++    case "skipped":
++      return "Skipped"
++    case "error":
++      return "Error"
++    default:
++      return "Idle"
++  }
++}
++
++function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
++  const interval = form.interval.trim()
++  const model = form.model.trim()
++  const agentId = form.agentId.trim()
++  const prompt = form.prompt.trim()
++  const ackMaxChars = Number(form.ackMaxChars)
++
++  if (!interval) throw new Error("Interval is required")
++  if (!model) throw new Error("Model is required")
++  if (!prompt) throw new Error("Prompt is required")
++  if (!Number.isFinite(ackMaxChars) || ackMaxChars < 1) throw new Error("Ack max chars must be a positive number")
++
++  const activeHours =
++    form.activeHoursEnabled
++      ? {
++          start: form.activeStart.trim(),
++          end: form.activeEnd.trim(),
++          timezone: form.activeTimezone.trim(),
++        }
++      : null
++
++  if (activeHours && (!activeHours.start || !activeHours.end || !activeHours.timezone)) {
++    throw new Error("Active hours require a start, end, and timezone")
++  }
++
++  return {
++    enabled: form.enabled,
++    interval,
++    model,
++    agentId,
++    prompt,
++    ackMaxChars,
++    activeHours,
++  }
++}
++
++export const SettingsHeartbeat: Component = () => {
++  const [state, setState] = createStore({
++    loading: true,
++    saving: false,
++    running: false,
++    error: "",
++    runtimeHash: "",
++    runtimePath: "",
++    status: null as HeartbeatStatus | null,
++    form: {
++      enabled: true,
++      interval: "15m",
++      model: "",
++      agentId: "build",
++      ackMaxChars: "280",
++      prompt: "",
++      activeHoursEnabled: false,
++      activeStart: "09:00",
++      activeEnd: "17:00",
++      activeTimezone: "UTC",
++    } as HeartbeatFormState,
++  })
++
++  async function load() {
++    setState("loading", true)
++    setState("error", "")
++    try {
++      const [heartbeat, runtime] = await Promise.all([
++        waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat"),
++        waffleJson<RuntimePayload>("/api/waffle/runtime/config"),
++      ])
++      setState("status", heartbeat.heartbeat)
++      setState("runtimeHash", runtime.hash)
++      setState("runtimePath", runtime.path)
++      setState("form", toForm(heartbeat.heartbeat.config))
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to load heartbeat settings")
++    } finally {
++      setState("loading", false)
++    }
++  }
++
++  async function save() {
++    let heartbeatPatch: HeartbeatRuntimeConfig
++    try {
++      heartbeatPatch = buildHeartbeatPatch(state.form)
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Invalid heartbeat settings")
++      return
++    }
++
++    setState("saving", true)
++    setState("error", "")
++    try {
++      const runtime = await waffleJson<RuntimePayload>("/api/waffle/runtime/config", {
++        method: "PATCH",
++        body: JSON.stringify({
++          patch: {
++            runtime: {
++              heartbeat: heartbeatPatch,
++            },
++          },
++          expectedHash: state.runtimeHash || undefined,
++        }),
++      })
++      setState("runtimeHash", runtime.hash)
++      setState("runtimePath", runtime.path)
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "Heartbeat settings saved",
++      })
++      await load()
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to save heartbeat settings")
++    } finally {
++      setState("saving", false)
++    }
++  }
++
++  async function runNow() {
++    setState("running", true)
++    setState("error", "")
++    try {
++      const payload = await waffleJson<HeartbeatStatusPayload>("/api/waffle/heartbeat/run", {
++        method: "POST",
++      })
++      setState("status", payload.heartbeat)
++      setState("form", toForm(payload.heartbeat.config))
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "Heartbeat run completed",
++      })
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to run heartbeat")
++    } finally {
++      setState("running", false)
++    }
++  }
++
++  onMount(() => {
++    void load()
++  })
++
++  return (
++    <WaffleSettingsPage
++      title="Heartbeat"
++      description="Monitor the dedicated heartbeat session, control its schedule, and choose its model explicitly."
++      actions={
++        <WaffleToolbar>
++          <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving || state.running}>
++            Refresh
++          </Button>
++          <Button variant="ghost" size="large" onClick={() => void runNow()} disabled={state.loading || state.saving || state.running}>
++            Run now
++          </Button>
++          <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving || state.running}>
++            Save
++          </Button>
++        </WaffleToolbar>
++      }
++    >
++      <Show when={state.error}>
++        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++      </Show>
++
++      <Show when={state.status}>
++        {(status) => (
++          <>
++            <WaffleSettingsSection title="Status" description="Current scheduler state for the dedicated Heartbeat session.">
++              <WaffleMetaRow label="Config file" value={state.runtimePath || "Unavailable"} />
++              <WaffleMetaRow label="Enabled" value={status().config.enabled ? "Yes" : "No"} />
++              <WaffleMetaRow label="Session id" value={status().state.sessionId ?? "Not created yet"} />
++              <WaffleMetaRow label="Currently running" value={status().state.running ? "Yes" : "No"} />
++              <WaffleMetaRow label="Last run" value={formatTimestamp(status().state.lastRunAt)} />
++              <WaffleMetaRow label="Next due" value={formatTimestamp(status().nextDueAt)} />
++              <WaffleMetaRow label="Last result" value={formatResult(status().state.lastResult)} />
++              <WaffleMetaRow label="Last updated" value={formatTimestamp(status().state.updatedAt)} />
++            </WaffleSettingsSection>
++
++            <Show when={status().state.lastError}>
++              <WaffleNotice tone="error">{status().state.lastError ?? ""}</WaffleNotice>
++            </Show>
++
++            <Show when={status().state.lastResponse}>
++              <WaffleSettingsSection title="Last response" description="Most recent heartbeat response captured from the dedicated session.">
++                <WaffleCard>
++                  <div class="text-13-regular text-text-strong whitespace-pre-wrap break-words">
++                    {status().state.lastResponse}
++                  </div>
++                </WaffleCard>
++              </WaffleSettingsSection>
++            </Show>
++          </>
++        )}
++      </Show>
++
++      <WaffleSettingsSection title="Controls" description="Choose whether heartbeat runs, how often it runs, and which model it uses.">
++        <WaffleCard>
++          <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-weak-base bg-surface-base px-4 py-3">
++            <div class="flex flex-col gap-1">
++              <div class="text-13-medium text-text-strong">Heartbeat enabled</div>
++              <div class="text-12-regular text-text-weak">Disable this to stop the scheduler without removing the Heartbeat session.</div>
++            </div>
++            <Switch checked={state.form.enabled} onChange={(enabled) => setState("form", "enabled", enabled)} hideLabel>
++              Heartbeat enabled
++            </Switch>
++          </div>
++
++          <div class="grid gap-4 sm:grid-cols-2">
++            <div class="flex flex-col gap-2">
++              <span class="text-12-medium text-text-weak">Model</span>
++              <WaffleInput
++                value={state.form.model}
++                placeholder="openai/gpt-5.4"
++                onInput={(event) => setState("form", "model", event.currentTarget.value)}
++              />
++            </div>
++            <div class="flex flex-col gap-2">
++              <span class="text-12-medium text-text-weak">Interval</span>
++              <WaffleInput
++                value={state.form.interval}
++                placeholder="15m"
++                onInput={(event) => setState("form", "interval", event.currentTarget.value)}
++              />
++            </div>
++            <div class="flex flex-col gap-2">
++              <span class="text-12-medium text-text-weak">Agent id</span>
++              <WaffleInput
++                value={state.form.agentId}
++                placeholder="build"
++                onInput={(event) => setState("form", "agentId", event.currentTarget.value)}
++              />
++            </div>
++            <div class="flex flex-col gap-2">
++              <span class="text-12-medium text-text-weak">Ack max chars</span>
++              <WaffleInput
++                type="number"
++                min="1"
++                value={state.form.ackMaxChars}
++                onInput={(event) => setState("form", "ackMaxChars", event.currentTarget.value)}
++              />
++            </div>
++          </div>
++        </WaffleCard>
++      </WaffleSettingsSection>
++
++      <WaffleSettingsSection title="Active hours" description="Optionally restrict heartbeat runs to a daily time window.">
++        <WaffleCard>
++          <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-weak-base bg-surface-base px-4 py-3">
++            <div class="flex flex-col gap-1">
++              <div class="text-13-medium text-text-strong">Restrict to active hours</div>
++              <div class="text-12-regular text-text-weak">When enabled, heartbeat only runs inside the configured local time window.</div>
++            </div>
++            <Switch
++              checked={state.form.activeHoursEnabled}
++              onChange={(enabled) => setState("form", "activeHoursEnabled", enabled)}
++              hideLabel
++            >
++              Restrict to active hours
++            </Switch>
++          </div>
++
++          <Show when={state.form.activeHoursEnabled}>
++            <div class="grid gap-4 sm:grid-cols-3">
++              <div class="flex flex-col gap-2">
++                <span class="text-12-medium text-text-weak">Start</span>
++                <WaffleInput
++                  value={state.form.activeStart}
++                  placeholder="09:00"
++                  onInput={(event) => setState("form", "activeStart", event.currentTarget.value)}
++                />
++              </div>
++              <div class="flex flex-col gap-2">
++                <span class="text-12-medium text-text-weak">End</span>
++                <WaffleInput
++                  value={state.form.activeEnd}
++                  placeholder="17:00"
++                  onInput={(event) => setState("form", "activeEnd", event.currentTarget.value)}
++                />
++              </div>
++              <div class="flex flex-col gap-2">
++                <span class="text-12-medium text-text-weak">Timezone</span>
++                <WaffleInput
++                  value={state.form.activeTimezone}
++                  placeholder="America/Chicago"
++                  onInput={(event) => setState("form", "activeTimezone", event.currentTarget.value)}
++                />
++              </div>
++            </div>
++          </Show>
++        </WaffleCard>
++      </WaffleSettingsSection>
++
++      <WaffleSettingsSection title="Prompt" description="This prompt runs in the visible Heartbeat session whenever the scheduler fires.">
++        <WaffleCard>
++          <WaffleTextArea
++            rows={12}
++            value={state.form.prompt}
++            onInput={(event) => setState("form", "prompt", event.currentTarget.value)}
++          />
++        </WaffleCard>
++      </WaffleSettingsSection>
++    </WaffleSettingsPage>
++  )
++}
+diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
+index 9df2a3681..86cfb0b9b 100644
+--- a/packages/app/src/pages/layout.tsx
++++ b/packages/app/src/pages/layout.tsx
+@@ -2227,6 +2227,8 @@ export default function Layout(props: ParentProps) {
+       openProjectKeybind={() => command.keybind("project.open")}
+       onOpenProject={chooseProject}
+       renderProjectOverlay={projectOverlay}
++      usageLabel={() => "Usage"}
++      onOpenUsage={() => window.location.assign("/usage")}
+       settingsLabel={() => language.t("sidebar.settings")}
+       settingsKeybind={() => command.keybind("settings.open")}
+       onOpenSettings={openSettings}
+diff --git a/packages/app/src/pages/layout/sidebar-shell.tsx b/packages/app/src/pages/layout/sidebar-shell.tsx
+index 924828c2f..7ed209697 100644
+--- a/packages/app/src/pages/layout/sidebar-shell.tsx
++++ b/packages/app/src/pages/layout/sidebar-shell.tsx
+@@ -25,6 +25,8 @@ export const SidebarContent = (props: {
+   openProjectKeybind?: Accessor<string | undefined>
+   onOpenProject?: () => void
+   renderProjectOverlay: () => JSX.Element
++  usageLabel: Accessor<string>
++  onOpenUsage: () => void
+   settingsLabel: Accessor<string>
+   settingsKeybind: Accessor<string | undefined>
+   onOpenSettings: () => void
+@@ -71,6 +73,15 @@ export const SidebarContent = (props: {
+           </DragDropProvider>
+         </div>
+         <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
++          <Tooltip placement={placement()} value={props.usageLabel()}>
++            <IconButton
++              icon="status"
++              variant="ghost"
++              size="large"
++              onClick={props.onOpenUsage}
++              aria-label={props.usageLabel()}
++            />
++          </Tooltip>
+           <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>
+             <IconButton
+               icon="settings-gear"
+-- 
+2.53.0
+

@@ -5,13 +5,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@agent-mockingbird/contracts": ["../../packages/contracts/src/index.ts"],
-      "@agent-mockingbird/contracts/*": ["../../packages/contracts/src/*"],
-      "@agent-mockingbird/api": ["../../packages/api/src/index.ts"],
-      "@agent-mockingbird/api/*": ["../../packages/api/src/*"],
-      "@agent-mockingbird/app-core": ["../../packages/app-core/src/index.ts"],
-      "@agent-mockingbird/app-core/*": ["../../packages/app-core/src/*"]
+      "@agent-mockingbird/contracts/*": ["../../packages/contracts/src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["src/test-embedded.ts", "src/test-embedded2.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

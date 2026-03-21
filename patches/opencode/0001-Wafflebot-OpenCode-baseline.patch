@@ -1,0 +1,2341 @@
+From a8c5e7494994dfd5ba79be9777a67dd9ddb6257d Mon Sep 17 00:00:00 2001
+From: Matt Campbell <npm@d6software.com>
+Date: Mon, 16 Mar 2026 14:05:14 -0500
+Subject: [PATCH 01/11] Wafflebot OpenCode baseline
+
+---
+ packages/app/src/app.tsx                      |   7 +-
+ .../app/src/components/dialog-settings.tsx    |  46 +++
+ .../app/src/components/settings-agents.tsx    | 147 ++++++++
+ packages/app/src/components/settings-cron.tsx | 319 ++++++++++++++++++
+ packages/app/src/components/settings-mcp.tsx  | 203 +++++++++++
+ .../app/src/components/settings-runtime.tsx   | 120 +++++++
+ .../app/src/components/settings-skills.tsx    | 256 ++++++++++++++
+ .../src/components/settings-waffle-shared.tsx | 116 +++++++
+ .../app/src/components/status-popover.tsx     |  48 +--
+ packages/app/src/context/server.tsx           |  17 +-
+ packages/app/src/entry.tsx                    |  31 +-
+ packages/app/src/i18n/en.ts                   |   8 +-
+ packages/app/src/pages/directory-layout.tsx   |  11 +-
+ packages/app/src/pages/home.tsx               | 140 ++------
+ packages/app/src/pages/layout.tsx             |  89 ++---
+ .../app/src/pages/layout/sidebar-project.tsx  |  23 --
+ .../app/src/pages/layout/sidebar-shell.tsx    |  25 +-
+ packages/app/src/utils/waffle.ts              |  61 ++++
+ packages/opencode/src/cli/cmd/providers.ts    |   7 +-
+ packages/opencode/src/plugin/index.ts         |  39 ++-
+ packages/opencode/src/provider/provider.ts    |   1 +
+ packages/opencode/src/server/server.ts        |   6 +-
+ .../test/cli/plugin-auth-picker.test.ts       |  10 +
+ .../test/plugin/module-exports.test.ts        |  39 +++
+ 24 files changed, 1463 insertions(+), 306 deletions(-)
+ create mode 100644 packages/app/src/components/settings-agents.tsx
+ create mode 100644 packages/app/src/components/settings-cron.tsx
+ create mode 100644 packages/app/src/components/settings-mcp.tsx
+ create mode 100644 packages/app/src/components/settings-runtime.tsx
+ create mode 100644 packages/app/src/components/settings-skills.tsx
+ create mode 100644 packages/app/src/components/settings-waffle-shared.tsx
+ create mode 100644 packages/app/src/utils/waffle.ts
+ create mode 100644 packages/opencode/test/plugin/module-exports.test.ts
+
+diff --git a/packages/app/src/app.tsx b/packages/app/src/app.tsx
+index e37086221..3dd67839b 100644
+--- a/packages/app/src/app.tsx
++++ b/packages/app/src/app.tsx
+@@ -269,11 +269,16 @@ export function AppInterface(props: {
+   children?: JSX.Element
+   defaultServer: ServerConnection.Key
+   servers?: Array<ServerConnection.Any>
++  lockServerSelection?: boolean
+   router?: Component<BaseRouterProps>
+   disableHealthCheck?: boolean
+ }) {
+   return (
+-    <ServerProvider defaultServer={props.defaultServer} servers={props.servers}>
++    <ServerProvider
++      defaultServer={props.defaultServer}
++      servers={props.servers}
++      locked={props.lockServerSelection}
++    >
+       <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
+         <GlobalSDKProvider>
+           <GlobalSyncProvider>
+diff --git a/packages/app/src/components/dialog-settings.tsx b/packages/app/src/components/dialog-settings.tsx
+index 83cea131f..005920ccb 100644
+--- a/packages/app/src/components/dialog-settings.tsx
++++ b/packages/app/src/components/dialog-settings.tsx
+@@ -8,6 +8,11 @@ import { SettingsGeneral } from "./settings-general"
+ import { SettingsKeybinds } from "./settings-keybinds"
+ import { SettingsProviders } from "./settings-providers"
+ import { SettingsModels } from "./settings-models"
++import { SettingsAgents } from "./settings-agents"
++import { SettingsMcp } from "./settings-mcp"
++import { SettingsSkills } from "./settings-skills"
++import { SettingsRuntime } from "./settings-runtime"
++import { SettingsCron } from "./settings-cron"
+ 
+ export const DialogSettings: Component = () => {
+   const language = useLanguage()
+@@ -47,6 +52,32 @@ export const DialogSettings: Component = () => {
+                     </Tabs.Trigger>
+                   </div>
+                 </div>
++
++                <div class="flex flex-col gap-1.5">
++                  <Tabs.SectionTitle>Agent Mockingbird</Tabs.SectionTitle>
++                  <div class="flex flex-col gap-1.5 w-full">
++                    <Tabs.Trigger value="agents">
++                      <Icon name="sparkles" />
++                      {language.t("settings.agents.title")}
++                    </Tabs.Trigger>
++                    <Tabs.Trigger value="mcp">
++                      <Icon name="plug-2" />
++                      {language.t("settings.mcp.title")}
++                    </Tabs.Trigger>
++                    <Tabs.Trigger value="skills">
++                      <Icon name="book-open" />
++                      {language.t("settings.skills.title")}
++                    </Tabs.Trigger>
++                    <Tabs.Trigger value="runtime">
++                      <Icon name="terminal-square" />
++                      {language.t("settings.runtime.title")}
++                    </Tabs.Trigger>
++                    <Tabs.Trigger value="cron">
++                      <Icon name="clock-3" />
++                      {language.t("settings.cron.title")}
++                    </Tabs.Trigger>
++                  </div>
++                </div>
+               </div>
+             </div>
+             <div class="flex flex-col gap-1 pl-1 py-1 text-12-medium text-text-weak">
+@@ -67,6 +98,21 @@ export const DialogSettings: Component = () => {
+         <Tabs.Content value="models" class="no-scrollbar">
+           <SettingsModels />
+         </Tabs.Content>
++        <Tabs.Content value="agents" class="no-scrollbar">
++          <SettingsAgents />
++        </Tabs.Content>
++        <Tabs.Content value="mcp" class="no-scrollbar">
++          <SettingsMcp />
++        </Tabs.Content>
++        <Tabs.Content value="skills" class="no-scrollbar">
++          <SettingsSkills />
++        </Tabs.Content>
++        <Tabs.Content value="runtime" class="no-scrollbar">
++          <SettingsRuntime />
++        </Tabs.Content>
++        <Tabs.Content value="cron" class="no-scrollbar">
++          <SettingsCron />
++        </Tabs.Content>
+       </Tabs>
+     </Dialog>
+   )
+diff --git a/packages/app/src/components/settings-agents.tsx b/packages/app/src/components/settings-agents.tsx
+new file mode 100644
+index 000000000..dda48a075
+--- /dev/null
++++ b/packages/app/src/components/settings-agents.tsx
+@@ -0,0 +1,147 @@
++import { Button } from "@opencode-ai/ui/button"
++import { showToast } from "@opencode-ai/ui/toast"
++import { onMount, Show, type Component } from "solid-js"
++import { createStore } from "solid-js/store"
++import { prettyJson, waffleJson } from "@/utils/waffle"
++import { WaffleCard, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++
++type AgentType = {
++  id: string
++  name?: string
++  description?: string
++  prompt?: string
++  model?: string
++  variant?: string
++  mode?: string
++  hidden?: boolean
++  disable?: boolean
++  temperature?: number
++  topP?: number
++  steps?: number
++  permission?: Record<string, unknown>
++  options?: Record<string, unknown>
++}
++
++type AgentsPayload = {
++  agentTypes: AgentType[]
++  hash: string
++  storage?: {
++    directory: string
++    configFilePath: string
++    persistenceMode: string
++  }
++}
++
++export const SettingsAgents: Component = () => {
++  const [state, setState] = createStore({
++    loading: true,
++    saving: false,
++    error: "",
++    payload: null as AgentsPayload | null,
++    text: "[]",
++  })
++
++  async function load() {
++    setState("loading", true)
++    setState("error", "")
++    try {
++      const payload = await waffleJson<AgentsPayload>("/api/waffle/agents")
++      setState("payload", payload)
++      setState("text", prettyJson(payload.agentTypes))
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to load agent definitions")
++    } finally {
++      setState("loading", false)
++    }
++  }
++
++  async function save() {
++    let parsed: AgentType[]
++    try {
++      parsed = JSON.parse(state.text) as AgentType[]
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Invalid agent JSON")
++      return
++    }
++
++    if (!Array.isArray(parsed)) {
++      setState("error", "Agent payload must be a JSON array.")
++      return
++    }
++
++    const previous = state.payload?.agentTypes ?? []
++    const previousIDs = new Set(previous.map((item) => item.id))
++    const nextIDs = new Set(parsed.map((item) => item.id))
++    const deletes = [...previousIDs].filter((id) => !nextIDs.has(id))
++
++    setState("saving", true)
++    setState("error", "")
++    try {
++      const payload = await waffleJson<AgentsPayload>("/api/waffle/agents", {
++        method: "PATCH",
++        body: JSON.stringify({
++          upserts: parsed,
++          deletes,
++          expectedHash: state.payload?.hash,
++        }),
++      })
++      setState("payload", payload)
++      setState("text", prettyJson(payload.agentTypes))
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "Agent definitions saved",
++      })
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to save agent definitions")
++    } finally {
++      setState("saving", false)
++    }
++  }
++
++  onMount(() => {
++    void load()
++  })
++
++  return (
++    <WaffleSettingsPage
++      title="Agents"
++      description="Manage OpenCode agent definitions stored in the pinned workspace's .opencode/opencode.jsonc."
++      actions={
++        <WaffleToolbar>
++          <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving}>
++            Refresh
++          </Button>
++          <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving}>
++            Save
++          </Button>
++        </WaffleToolbar>
++      }
++    >
++      <Show when={state.error}>
++        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++      </Show>
++
++      <Show when={state.payload?.storage}>
++        {(storage) => (
++          <WaffleSettingsSection title="Storage">
++            <WaffleMetaRow label="Workspace directory" value={storage().directory} />
++            <WaffleMetaRow label="Config file" value={storage().configFilePath} />
++            <WaffleMetaRow label="Persistence mode" value={storage().persistenceMode} />
++          </WaffleSettingsSection>
++        )}
++      </Show>
++
++      <WaffleSettingsSection title="Agent editor" description="Edit the current agent type array as JSON.">
++        <WaffleCard>
++          <WaffleTextArea
++            rows={22}
++            value={state.text}
++            onInput={(event) => setState("text", event.currentTarget.value)}
++            spellcheck={false}
++          />
++        </WaffleCard>
++      </WaffleSettingsSection>
++    </WaffleSettingsPage>
++  )
++}
+diff --git a/packages/app/src/components/settings-cron.tsx b/packages/app/src/components/settings-cron.tsx
+new file mode 100644
+index 000000000..8bda2bf9c
+--- /dev/null
++++ b/packages/app/src/components/settings-cron.tsx
+@@ -0,0 +1,319 @@
++import { Button } from "@opencode-ai/ui/button"
++import { showToast } from "@opencode-ai/ui/toast"
++import { createSignal, For, onMount, Show, type Component } from "solid-js"
++import { createStore } from "solid-js/store"
++import { prettyJson, waffleJson } from "@/utils/waffle"
++import { WaffleCard, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++
++type CronJobDefinition = {
++  id: string
++  name: string
++  enabled: boolean
++  scheduleKind: "at" | "every" | "cron"
++  scheduleExpr: string | null
++  everyMs: number | null
++  atIso: string | null
++  timezone: string | null
++  runMode: "background" | "conditional_agent" | "agent"
++  handlerKey: string | null
++  conditionModulePath: string | null
++  conditionDescription: string | null
++  agentPromptTemplate: string | null
++  agentModelOverride: string | null
++  maxAttempts: number
++  retryBackoffMs: number
++  payload: Record<string, unknown>
++}
++
++type CronHealthSnapshot = {
++  enabled: boolean
++  jobs: {
++    total: number
++    enabled: number
++  }
++}
++
++const DEFAULT_JOB = prettyJson({
++  name: "Daily summary",
++  enabled: true,
++  scheduleKind: "cron",
++  scheduleExpr: "0 9 * * *",
++  timezone: "America/Phoenix",
++  runMode: "background",
++  handlerKey: "daily_summary",
++  payload: {},
++})
++
++export const SettingsCron: Component = () => {
++  const [state, setState] = createStore({
++    loading: true,
++    saving: false,
++    busyId: "",
++    error: "",
++    jobs: [] as CronJobDefinition[],
++    handlers: [] as string[],
++    health: null as CronHealthSnapshot | null,
++    createText: DEFAULT_JOB,
++    editingId: "",
++    editText: "",
++  })
++  const [refreshTick, setRefreshTick] = createSignal(0)
++
++  async function load() {
++    refreshTick()
++    setState("loading", true)
++    setState("error", "")
++    try {
++      const [jobs, handlers, health] = await Promise.all([
++        waffleJson<{ jobs: CronJobDefinition[] }>("/api/waffle/cron/jobs"),
++        waffleJson<{ handlers: string[] }>("/api/waffle/cron/handlers"),
++        waffleJson<{ health: CronHealthSnapshot }>("/api/waffle/cron/health"),
++      ])
++      setState("jobs", jobs.jobs)
++      setState("handlers", handlers.handlers)
++      setState("health", health.health)
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to load cron jobs")
++    } finally {
++      setState("loading", false)
++    }
++  }
++
++  async function refresh() {
++    setRefreshTick((value) => value + 1)
++    await load()
++  }
++
++  async function createJob() {
++    let payload: unknown
++    try {
++      payload = JSON.parse(state.createText)
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Invalid cron job JSON")
++      return
++    }
++
++    setState("saving", true)
++    setState("error", "")
++    try {
++      await waffleJson("/api/waffle/cron/jobs", {
++        method: "POST",
++        body: JSON.stringify(payload),
++      })
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "Cron job created",
++      })
++      await refresh()
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to create cron job")
++    } finally {
++      setState("saving", false)
++    }
++  }
++
++  async function saveEdit() {
++    if (!state.editingId) return
++
++    let payload: unknown
++    try {
++      payload = JSON.parse(state.editText)
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Invalid cron patch JSON")
++      return
++    }
++
++    setState("busyId", state.editingId)
++    setState("error", "")
++    try {
++      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(state.editingId)}`, {
++        method: "PATCH",
++        body: JSON.stringify(payload),
++      })
++      setState("editingId", "")
++      setState("editText", "")
++      await refresh()
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to update cron job")
++    } finally {
++      setState("busyId", "")
++    }
++  }
++
++  async function runNow(id: string) {
++    setState("busyId", id)
++    try {
++      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(id)}/run`, {
++        method: "POST",
++      })
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "Cron run queued",
++      })
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to queue cron run")
++    } finally {
++      setState("busyId", "")
++    }
++  }
++
++  async function remove(id: string) {
++    setState("busyId", id)
++    try {
++      await waffleJson(`/api/waffle/cron/jobs/${encodeURIComponent(id)}`, {
++        method: "DELETE",
++      })
++      await refresh()
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to delete cron job")
++    } finally {
++      setState("busyId", "")
++    }
++  }
++
++  onMount(() => {
++    void load()
++  })
++
++  return (
++    <WaffleSettingsPage
++      title="Cron"
++      description="Inspect cron health, create jobs, update jobs with JSON patches, and run them immediately."
++      actions={
++        <WaffleToolbar>
++          <Button variant="ghost" size="large" onClick={() => void refresh()} disabled={state.loading || state.saving}>
++            Refresh
++          </Button>
++        </WaffleToolbar>
++      }
++    >
++      <Show when={state.error}>
++        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++      </Show>
++
++      <Show when={state.health}>
++        {(health) => (
++          <WaffleSettingsSection title="Cron health">
++            <WaffleMetaRow label="Enabled" value={health().enabled ? "Yes" : "No"} />
++            <WaffleMetaRow label="Total jobs" value={String(health().jobs.total)} />
++            <WaffleMetaRow label="Enabled jobs" value={String(health().jobs.enabled)} />
++          </WaffleSettingsSection>
++        )}
++      </Show>
++
++      <WaffleSettingsSection title="Registered handlers">
++        <div class="px-4 py-3 text-13-regular text-text-strong break-words">
++          <Show when={state.handlers.length > 0} fallback={<span class="text-text-weak">No handlers registered.</span>}>
++            {state.handlers.join(", ")}
++          </Show>
++        </div>
++      </WaffleSettingsSection>
++
++      <WaffleSettingsSection title="Jobs">
++        <Show
++          when={state.jobs.length > 0}
++          fallback={<div class="px-4 py-4 text-14-regular text-text-weak">No cron jobs configured.</div>}
++        >
++          <For each={state.jobs}>
++            {(job) => (
++              <div class="px-4 py-4 border-b border-border-weak-base last:border-none flex flex-col gap-3">
++                <div class="flex flex-wrap items-start justify-between gap-3">
++                  <div class="flex flex-col gap-1">
++                    <div class="text-14-medium text-text-strong">{job.name}</div>
++                    <div class="text-12-regular text-text-weak">
++                      {job.id} | {job.scheduleKind} | {job.runMode}
++                    </div>
++                    <div class="text-12-regular text-text-weak">
++                      {job.scheduleExpr ?? job.everyMs ?? job.atIso ?? "No schedule"}
++                    </div>
++                  </div>
++                  <div class="flex flex-wrap items-center gap-2">
++                    <Button
++                      variant="ghost"
++                      size="large"
++                      onClick={() => {
++                        setState("editingId", state.editingId === job.id ? "" : job.id)
++                        setState(
++                          "editText",
++                          state.editingId === job.id
++                            ? ""
++                            : prettyJson({
++                                name: job.name,
++                                enabled: job.enabled,
++                                scheduleKind: job.scheduleKind,
++                                scheduleExpr: job.scheduleExpr,
++                                everyMs: job.everyMs,
++                                atIso: job.atIso,
++                                timezone: job.timezone,
++                                runMode: job.runMode,
++                                handlerKey: job.handlerKey,
++                                conditionModulePath: job.conditionModulePath,
++                                conditionDescription: job.conditionDescription,
++                                agentPromptTemplate: job.agentPromptTemplate,
++                                agentModelOverride: job.agentModelOverride,
++                                maxAttempts: job.maxAttempts,
++                                retryBackoffMs: job.retryBackoffMs,
++                                payload: job.payload,
++                              }),
++                        )
++                      }}
++                    >
++                      {state.editingId === job.id ? "Close editor" : "Edit JSON"}
++                    </Button>
++                    <Button
++                      variant="ghost"
++                      size="large"
++                      onClick={() => void runNow(job.id)}
++                      disabled={state.busyId === job.id}
++                    >
++                      Run now
++                    </Button>
++                    <Button
++                      variant="ghost"
++                      size="large"
++                      onClick={() => void remove(job.id)}
++                      disabled={state.busyId === job.id}
++                    >
++                      Delete
++                    </Button>
++                  </div>
++                </div>
++
++                <Show when={state.editingId === job.id}>
++                  <div class="flex flex-col gap-3">
++                    <WaffleTextArea
++                      rows={12}
++                      value={state.editText}
++                      onInput={(event) => setState("editText", event.currentTarget.value)}
++                    />
++                    <div class="flex justify-end">
++                      <Button size="large" onClick={() => void saveEdit()} disabled={state.busyId === job.id}>
++                        Save patch
++                      </Button>
++                    </div>
++                  </div>
++                </Show>
++              </div>
++            )}
++          </For>
++        </Show>
++      </WaffleSettingsSection>
++
++      <WaffleSettingsSection title="Create job" description="Post a complete cron job definition as JSON.">
++        <WaffleCard
++          footer={
++            <div class="flex justify-end">
++              <Button size="large" onClick={() => void createJob()} disabled={state.saving}>
++                Create job
++              </Button>
++            </div>
++          }
++        >
++          <WaffleTextArea rows={16} value={state.createText} onInput={(event) => setState("createText", event.currentTarget.value)} />
++        </WaffleCard>
++      </WaffleSettingsSection>
++    </WaffleSettingsPage>
++  )
++}
+diff --git a/packages/app/src/components/settings-mcp.tsx b/packages/app/src/components/settings-mcp.tsx
+new file mode 100644
+index 000000000..88abc0a06
+--- /dev/null
++++ b/packages/app/src/components/settings-mcp.tsx
+@@ -0,0 +1,203 @@
++import { Button } from "@opencode-ai/ui/button"
++import { showToast } from "@opencode-ai/ui/toast"
++import { For, onMount, Show, type Component } from "solid-js"
++import { createStore } from "solid-js/store"
++import { prettyJson, waffleJson } from "@/utils/waffle"
++import { WaffleCard, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++
++type McpServer =
++  | {
++      id: string
++      type: "remote"
++      enabled: boolean
++      url: string
++      headers?: Record<string, string>
++      oauth?: "auto" | "off"
++      timeoutMs?: number
++    }
++  | {
++      id: string
++      type: "local"
++      enabled: boolean
++      command: string[]
++      environment?: Record<string, string>
++      timeoutMs?: number
++    }
++
++type McpStatusMap = Record<
++  string,
++  {
++    status?: "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration" | "unknown"
++    error?: string
++  }
++>
++
++type McpPayload = {
++  servers: McpServer[]
++  status: McpStatusMap
++}
++
++export const SettingsMcp: Component = () => {
++  const [state, setState] = createStore({
++    loading: true,
++    saving: false,
++    busyId: "",
++    error: "",
++    payload: null as McpPayload | null,
++    text: "[]",
++  })
++
++  async function load() {
++    setState("loading", true)
++    setState("error", "")
++    try {
++      const payload = await waffleJson<McpPayload>("/api/waffle/mcp")
++      setState("payload", payload)
++      setState("text", prettyJson(payload.servers))
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to load MCP config")
++    } finally {
++      setState("loading", false)
++    }
++  }
++
++  async function save() {
++    let parsed: McpServer[]
++    try {
++      parsed = JSON.parse(state.text) as McpServer[]
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Invalid MCP JSON")
++      return
++    }
++
++    if (!Array.isArray(parsed)) {
++      setState("error", "MCP payload must be a JSON array.")
++      return
++    }
++
++    setState("saving", true)
++    setState("error", "")
++    try {
++      const payload = await waffleJson<McpPayload>("/api/waffle/mcp", {
++        method: "PUT",
++        body: JSON.stringify({ servers: parsed }),
++      })
++      setState("payload", payload)
++      setState("text", prettyJson(payload.servers))
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "MCP config saved",
++      })
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to save MCP config")
++    } finally {
++      setState("saving", false)
++    }
++  }
++
++  async function runAction(id: string, action: "connect" | "disconnect" | "auth/start" | "auth/remove") {
++    setState("busyId", id)
++    try {
++      const payload = await waffleJson<{ status: McpStatusMap; authorizationUrl?: string }>(
++        `/api/waffle/mcp/${encodeURIComponent(id)}/${action}`,
++        {
++          method: "POST",
++        },
++      )
++      if (payload.authorizationUrl) {
++        window.open(payload.authorizationUrl, "_blank", "noopener,noreferrer")
++      }
++      setState("payload", (current) => (current ? { ...current, status: payload.status } : current))
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to update MCP server")
++    } finally {
++      setState("busyId", "")
++    }
++  }
++
++  onMount(() => {
++    void load()
++  })
++
++  const statusFor = (id: string) => state.payload?.status?.[id]?.status ?? "unknown"
++
++  return (
++    <WaffleSettingsPage
++      title="MCP"
++      description="Edit MCP server definitions and drive connection or auth flows through Agent Mockingbird's same-origin APIs."
++      actions={
++        <WaffleToolbar>
++          <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving}>
++            Refresh
++          </Button>
++          <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving}>
++            Save
++          </Button>
++        </WaffleToolbar>
++      }
++    >
++      <Show when={state.error}>
++        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++      </Show>
++
++      <WaffleSettingsSection title="Configured servers" description="Connection status and auth actions for configured MCP servers.">
++        <Show
++          when={(state.payload?.servers.length ?? 0) > 0}
++          fallback={<div class="px-4 py-4 text-14-regular text-text-weak">No MCP servers configured.</div>}
++        >
++          <For each={state.payload?.servers ?? []}>
++            {(server) => (
++              <div class="px-4 py-3 border-b border-border-weak-base last:border-none flex flex-wrap items-center justify-between gap-4">
++                <div class="flex flex-col gap-1 min-w-0">
++                  <div class="text-14-medium text-text-strong">{server.id}</div>
++                  <div class="text-12-regular text-text-weak">
++                    {server.type === "remote" ? server.url : server.command.join(" ")}
++                  </div>
++                  <div class="text-12-regular text-text-weak">Status: {statusFor(server.id)}</div>
++                </div>
++                <div class="flex flex-wrap items-center gap-2">
++                  <Button
++                    variant="ghost"
++                    size="large"
++                    disabled={state.busyId === server.id}
++                    onClick={() => void runAction(server.id, statusFor(server.id) === "connected" ? "disconnect" : "connect")}
++                  >
++                    {statusFor(server.id) === "connected" ? "Disconnect" : "Connect"}
++                  </Button>
++                  <Button
++                    variant="ghost"
++                    size="large"
++                    disabled={state.busyId === server.id}
++                    onClick={() => void runAction(server.id, "auth/start")}
++                  >
++                    Start auth
++                  </Button>
++                  <Button
++                    variant="ghost"
++                    size="large"
++                    disabled={state.busyId === server.id}
++                    onClick={() => void runAction(server.id, "auth/remove")}
++                  >
++                    Remove auth
++                  </Button>
++                </div>
++              </div>
++            )}
++          </For>
++        </Show>
++      </WaffleSettingsSection>
++
++      <WaffleSettingsSection title="Server editor" description="Edit the full MCP server array as JSON.">
++        <WaffleCard>
++          <WaffleTextArea
++            rows={22}
++            value={state.text}
++            onInput={(event) => setState("text", event.currentTarget.value)}
++            spellcheck={false}
++          />
++        </WaffleCard>
++      </WaffleSettingsSection>
++    </WaffleSettingsPage>
++  )
++}
+diff --git a/packages/app/src/components/settings-runtime.tsx b/packages/app/src/components/settings-runtime.tsx
+new file mode 100644
+index 000000000..fd091697e
+--- /dev/null
++++ b/packages/app/src/components/settings-runtime.tsx
+@@ -0,0 +1,120 @@
++import { Button } from "@opencode-ai/ui/button"
++import { showToast } from "@opencode-ai/ui/toast"
++import { onMount, Show, type Component } from "solid-js"
++import { createStore } from "solid-js/store"
++import { prettyJson, waffleJson } from "@/utils/waffle"
++import { WaffleCard, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++
++type RuntimePayload = {
++  hash: string
++  path: string
++  config: {
++    workspace: {
++      pinnedDirectory: string
++    }
++    runtime: Record<string, unknown>
++  }
++}
++
++export const SettingsRuntime: Component = () => {
++  const [state, setState] = createStore({
++    loading: true,
++    saving: false,
++    error: "",
++    payload: null as RuntimePayload | null,
++    text: "{\n  \"workspace\": {\n    \"pinnedDirectory\": \"\"\n  },\n  \"runtime\": {}\n}",
++  })
++
++  async function load() {
++    setState("loading", true)
++    setState("error", "")
++    try {
++      const payload = await waffleJson<RuntimePayload>("/api/waffle/runtime/config")
++      setState("payload", payload)
++      setState("text", prettyJson(payload.config))
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to load runtime config")
++    } finally {
++      setState("loading", false)
++    }
++  }
++
++  async function save() {
++    let parsed: unknown
++    try {
++      parsed = JSON.parse(state.text)
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Invalid JSON")
++      return
++    }
++
++    setState("saving", true)
++    setState("error", "")
++    try {
++      const payload = await waffleJson<RuntimePayload>("/api/waffle/runtime/config/replace", {
++        method: "POST",
++        body: JSON.stringify({
++          config: parsed,
++          expectedHash: state.payload?.hash,
++        }),
++      })
++      setState("payload", payload)
++      setState("text", prettyJson(payload.config))
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "Runtime config saved",
++      })
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to save runtime config")
++    } finally {
++      setState("saving", false)
++    }
++  }
++
++  onMount(() => {
++    void load()
++  })
++
++  return (
++    <WaffleSettingsPage
++      title="Runtime"
++      description="Edit Agent Mockingbird runtime settings owned outside OpenCode's workspace config."
++      actions={
++        <WaffleToolbar>
++          <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving}>
++            Refresh
++          </Button>
++          <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving}>
++            Save
++          </Button>
++        </WaffleToolbar>
++      }
++    >
++      <Show when={state.error}>
++        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++      </Show>
++
++      <Show when={state.payload}>
++        {(payload) => (
++          <WaffleSettingsSection title="Config metadata">
++            <WaffleMetaRow label="Config file" value={payload().path} />
++            <WaffleMetaRow label="Pinned workspace" value={payload().config.workspace.pinnedDirectory} />
++            <WaffleMetaRow label="Revision hash" value={payload().hash} />
++          </WaffleSettingsSection>
++        )}
++      </Show>
++
++      <WaffleSettingsSection title="Config editor" description="Replace the current Agent Mockingbird config payload with JSON.">
++        <WaffleCard>
++          <WaffleTextArea
++            rows={22}
++            value={state.text}
++            onInput={(event) => setState("text", event.currentTarget.value)}
++            spellcheck={false}
++          />
++        </WaffleCard>
++      </WaffleSettingsSection>
++    </WaffleSettingsPage>
++  )
++}
+diff --git a/packages/app/src/components/settings-skills.tsx b/packages/app/src/components/settings-skills.tsx
+new file mode 100644
+index 000000000..2254d384c
+--- /dev/null
++++ b/packages/app/src/components/settings-skills.tsx
+@@ -0,0 +1,256 @@
++import { Button } from "@opencode-ai/ui/button"
++import { Switch } from "@opencode-ai/ui/switch"
++import { showToast } from "@opencode-ai/ui/toast"
++import { createSignal, For, onMount, Show, type Component } from "solid-js"
++import { createStore } from "solid-js/store"
++import { WaffleCard, WaffleInput, WaffleMetaRow, WaffleNotice, WaffleSettingsPage, WaffleSettingsSection, WaffleTextArea, WaffleToolbar } from "./settings-waffle-shared"
++import { waffleJson } from "@/utils/waffle"
++
++type SkillEntry = {
++  id: string
++  name: string
++  description: string
++  location: string
++  enabled: boolean
++  managed: boolean
++}
++
++type SkillsPayload = {
++  skills: SkillEntry[]
++  enabled: string[]
++  disabled: string[]
++  invalid: Array<{
++    id?: string
++    location: string
++    reason: string
++  }>
++  hash: string
++  revision: string
++  managedPath: string
++  disabledPath: string
++}
++
++export const SettingsSkills: Component = () => {
++  const [state, setState] = createStore({
++    loading: true,
++    busyId: "",
++    error: "",
++    catalog: null as SkillsPayload | null,
++    importId: "",
++    importEnabled: true,
++    importContent:
++      "---\nname: example-skill\ndescription: Example managed skill\n---\n\nAdd instructions here.\n",
++  })
++  const [refreshTick, setRefreshTick] = createSignal(0)
++
++  async function load() {
++    refreshTick()
++    setState("loading", true)
++    setState("error", "")
++    try {
++      const catalog = await waffleJson<SkillsPayload>("/api/waffle/skills")
++      setState("catalog", catalog)
++    } catch (error) {
++      const message = error instanceof Error ? error.message : "Failed to load skills"
++      setState("error", message)
++    } finally {
++      setState("loading", false)
++    }
++  }
++
++  async function refresh() {
++    setRefreshTick((value) => value + 1)
++    await load()
++  }
++
++  async function toggleSkill(id: string, enabled: boolean) {
++    setState("busyId", id)
++    try {
++      const next = await waffleJson<SkillsPayload>(`/api/waffle/skills/${encodeURIComponent(id)}`, {
++        method: "PATCH",
++        body: JSON.stringify({ enabled }),
++      })
++      setState("catalog", next)
++    } catch (error) {
++      showToast({
++        title: "Failed to update skill",
++        description: error instanceof Error ? error.message : String(error),
++      })
++    } finally {
++      setState("busyId", "")
++    }
++  }
++
++  async function removeSkill(id: string) {
++    setState("busyId", id)
++    try {
++      const next = await waffleJson<SkillsPayload>(`/api/waffle/skills/${encodeURIComponent(id)}`, {
++        method: "DELETE",
++      })
++      setState("catalog", next)
++    } catch (error) {
++      showToast({
++        title: "Failed to remove skill",
++        description: error instanceof Error ? error.message : String(error),
++      })
++    } finally {
++      setState("busyId", "")
++    }
++  }
++
++  async function importSkill() {
++    if (!state.importId.trim() || !state.importContent.trim()) {
++      setState("error", "Skill id and SKILL.md content are required.")
++      return
++    }
++
++    setState("error", "")
++    setState("busyId", "import")
++    try {
++      await waffleJson("/api/waffle/skills/import", {
++        method: "POST",
++        body: JSON.stringify({
++          id: state.importId,
++          content: state.importContent,
++          enable: state.importEnabled,
++          expectedHash: state.catalog?.hash,
++        }),
++      })
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "Skill imported",
++      })
++      setState("importId", "")
++      await refresh()
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to import skill")
++    } finally {
++      setState("busyId", "")
++    }
++  }
++
++  onMount(() => {
++    void load()
++  })
++
++  return (
++    <WaffleSettingsPage
++      title="Skills"
++      description="Manage the workspace skill catalog and import managed skills for the pinned workspace."
++      actions={
++        <WaffleToolbar>
++          <Button variant="ghost" size="large" onClick={() => void refresh()} disabled={state.loading}>
++            Refresh
++          </Button>
++        </WaffleToolbar>
++      }
++    >
++      <Show when={state.error}>
++        <WaffleNotice tone="error">{state.error}</WaffleNotice>
++      </Show>
++
++      <Show when={state.catalog}>
++        {(catalog) => (
++          <>
++            <WaffleSettingsSection title="Catalog paths">
++              <WaffleMetaRow label="Managed skills path" value={catalog().managedPath} />
++              <WaffleMetaRow label="Disabled skills path" value={catalog().disabledPath} />
++            </WaffleSettingsSection>
++
++            <WaffleSettingsSection title="Installed skills" description="Enable, disable, or remove managed skills.">
++              <Show
++                when={catalog().skills.length > 0}
++                fallback={<div class="px-4 py-4 text-14-regular text-text-weak">No managed skills found.</div>}
++              >
++                <For each={catalog().skills}>
++                  {(skill) => (
++                    <div class="flex flex-wrap items-center justify-between gap-4 px-4 py-3 border-b border-border-weak-base last:border-none">
++                      <div class="min-w-0 flex flex-col gap-1">
++                        <div class="text-14-medium text-text-strong">{skill.name}</div>
++                        <div class="text-12-regular text-text-weak">{skill.description}</div>
++                        <div class="text-11-regular text-text-weak break-all">{skill.location}</div>
++                      </div>
++                      <div class="flex items-center gap-2">
++                        <Switch
++                          checked={skill.enabled}
++                          disabled={state.busyId === skill.id}
++                          onChange={(enabled) => void toggleSkill(skill.id, enabled)}
++                          hideLabel
++                        >
++                          {skill.name}
++                        </Switch>
++                        <Button
++                          variant="ghost"
++                          size="large"
++                          disabled={state.busyId === skill.id}
++                          onClick={() => void removeSkill(skill.id)}
++                        >
++                          Remove
++                        </Button>
++                      </div>
++                    </div>
++                  )}
++                </For>
++              </Show>
++            </WaffleSettingsSection>
++
++            <Show when={catalog().invalid.length > 0}>
++              <WaffleSettingsSection title="Invalid skills">
++                <For each={catalog().invalid}>
++                  {(issue) => (
++                    <div class="px-4 py-3 border-b border-border-weak-base last:border-none">
++                      <div class="text-13-medium text-text-strong">{issue.id ?? "unknown-skill"}</div>
++                      <div class="text-12-regular text-text-weak">{issue.reason}</div>
++                      <div class="text-11-regular text-text-weak break-all">{issue.location}</div>
++                    </div>
++                  )}
++                </For>
++              </WaffleSettingsSection>
++            </Show>
++          </>
++        )}
++      </Show>
++
++      <WaffleSettingsSection
++        title="Import skill"
++        description="Paste a managed SKILL.md and import it into the pinned workspace."
++      >
++        <WaffleCard
++          footer={
++            <div class="flex flex-wrap items-center justify-between gap-3">
++              <label class="flex items-center gap-2 text-13-regular text-text-strong">
++                <input
++                  type="checkbox"
++                  checked={state.importEnabled}
++                  onChange={(event) => setState("importEnabled", event.currentTarget.checked)}
++                />
++                Enable after import
++              </label>
++              <Button size="large" onClick={() => void importSkill()} disabled={state.busyId === "import"}>
++                Import skill
++              </Button>
++            </div>
++          }
++        >
++          <div class="flex flex-col gap-2">
++            <span class="text-12-medium text-text-weak">Skill id</span>
++            <WaffleInput
++              value={state.importId}
++              placeholder="example-skill"
++              onInput={(event) => setState("importId", event.currentTarget.value)}
++            />
++          </div>
++          <div class="flex flex-col gap-2">
++            <span class="text-12-medium text-text-weak">SKILL.md content</span>
++            <WaffleTextArea
++              rows={14}
++              value={state.importContent}
++              onInput={(event) => setState("importContent", event.currentTarget.value)}
++            />
++          </div>
++        </WaffleCard>
++      </WaffleSettingsSection>
++    </WaffleSettingsPage>
++  )
++}
+diff --git a/packages/app/src/components/settings-waffle-shared.tsx b/packages/app/src/components/settings-waffle-shared.tsx
+new file mode 100644
+index 000000000..64ece4b04
+--- /dev/null
++++ b/packages/app/src/components/settings-waffle-shared.tsx
+@@ -0,0 +1,116 @@
++import { type JSX, type ParentProps, Show } from "solid-js"
++
++export function WaffleSettingsPage(
++  props: ParentProps<{
++    title: string
++    description?: string
++    actions?: JSX.Element
++  }>,
++) {
++  return (
++    <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
++      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
++        <div class="flex flex-wrap items-start justify-between gap-4 pt-6 pb-6 max-w-[760px]">
++          <div class="flex flex-col gap-1 min-w-0">
++            <h2 class="text-16-medium text-text-strong">{props.title}</h2>
++            <Show when={props.description}>
++              <p class="text-14-regular text-text-weak max-w-[640px]">{props.description}</p>
++            </Show>
++          </div>
++          <Show when={props.actions}>
++            <div class="flex items-center gap-2">{props.actions}</div>
++          </Show>
++        </div>
++      </div>
++
++      <div class="flex flex-col gap-8 max-w-[760px]">{props.children}</div>
++    </div>
++  )
++}
++
++export function WaffleSettingsSection(
++  props: ParentProps<{
++    title: string
++    description?: string
++    actions?: JSX.Element
++  }>,
++) {
++  return (
++    <section class="flex flex-col gap-3">
++      <div class="flex flex-wrap items-start justify-between gap-3">
++        <div class="flex flex-col gap-1">
++          <h3 class="text-14-medium text-text-strong">{props.title}</h3>
++          <Show when={props.description}>
++            <p class="text-12-regular text-text-weak">{props.description}</p>
++          </Show>
++        </div>
++        <Show when={props.actions}>
++          <div class="flex items-center gap-2">{props.actions}</div>
++        </Show>
++      </div>
++      <div class="bg-surface-raised-base rounded-lg border border-border-weak-base">{props.children}</div>
++    </section>
++  )
++}
++
++export function WaffleMetaRow(props: { label: string; value: string | JSX.Element }) {
++  return (
++    <div class="flex flex-col gap-1 px-4 py-3 border-b border-border-weak-base last:border-none">
++      <span class="text-12-medium text-text-weak">{props.label}</span>
++      <div class="text-13-regular text-text-strong break-all">{props.value}</div>
++    </div>
++  )
++}
++
++export function WaffleToolbar(props: ParentProps) {
++  return <div class="flex flex-wrap items-center gap-2">{props.children}</div>
++}
++
++export function WaffleNotice(props: { tone?: "error" | "success" | "info"; children: JSX.Element }) {
++  const tone = () => props.tone ?? "info"
++  return (
++    <div
++      classList={{
++        "rounded-lg px-3 py-2 text-13-regular border": true,
++        "bg-surface-base text-text-base border-border-weak-base": tone() === "info",
++        "bg-background-base text-text-strong border-border-strong-base": tone() === "success",
++        "bg-icon-critical-base/8 text-text-strong border-icon-critical-base/20": tone() === "error",
++      }}
++    >
++      {props.children}
++    </div>
++  )
++}
++
++export function WaffleInput(props: JSX.InputHTMLAttributes<HTMLInputElement>) {
++  return (
++    <input
++      {...props}
++      class={`w-full rounded-lg border border-border-weak-base bg-surface-base px-3 py-2 text-13-regular text-text-strong outline-none placeholder:text-text-weak focus:border-border-strong-base ${
++        props.class ?? ""
++      }`}
++    />
++  )
++}
++
++export function WaffleTextArea(props: JSX.TextareaHTMLAttributes<HTMLTextAreaElement>) {
++  return (
++    <textarea
++      {...props}
++      class={`w-full rounded-lg border border-border-weak-base bg-surface-base px-3 py-2 text-12-mono text-text-strong outline-none placeholder:text-text-weak focus:border-border-strong-base ${
++        props.class ?? ""
++      }`}
++    />
++  )
++}
++
++export function WaffleCard(props: ParentProps<{ footer?: JSX.Element }>) {
++  return (
++    <div class="rounded-lg border border-border-weak-base bg-background-base overflow-hidden">
++      <div class="p-4 flex flex-col gap-4">{props.children}</div>
++      <Show when={props.footer}>
++        <div class="px-4 py-3 border-t border-border-weak-base bg-surface-base">{props.footer}</div>
++      </Show>
++    </div>
++  )
++}
+diff --git a/packages/app/src/components/status-popover.tsx b/packages/app/src/components/status-popover.tsx
+index 61facb84e..30f360fb9 100644
+--- a/packages/app/src/components/status-popover.tsx
++++ b/packages/app/src/components/status-popover.tsx
+@@ -1,11 +1,9 @@
+ import { Button } from "@opencode-ai/ui/button"
+-import { useDialog } from "@opencode-ai/ui/context/dialog"
+ import { Icon } from "@opencode-ai/ui/icon"
+ import { Popover } from "@opencode-ai/ui/popover"
+ import { Switch } from "@opencode-ai/ui/switch"
+ import { Tabs } from "@opencode-ai/ui/tabs"
+ import { showToast } from "@opencode-ai/ui/toast"
+-import { useNavigate } from "@solidjs/router"
+ import { type Accessor, createEffect, createMemo, createSignal, For, type JSXElement, onCleanup, Show } from "solid-js"
+ import { createStore, reconcile } from "solid-js/store"
+ import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row"
+@@ -167,9 +165,7 @@ export function StatusPopover() {
+   const sdk = useSDK()
+   const server = useServer()
+   const platform = usePlatform()
+-  const dialog = useDialog()
+   const language = useLanguage()
+-  const navigate = useNavigate()
+ 
+   const [shown, setShown] = createSignal(false)
+   const servers = createMemo(() => {
+@@ -236,13 +232,12 @@ export function StatusPopover() {
+           aria-label={language.t("status.popover.ariaLabel")}
+           class="tabs bg-background-strong rounded-xl overflow-hidden"
+           data-component="tabs"
+-          data-active="servers"
+-          defaultValue="servers"
++          data-active="server"
++          defaultValue="server"
+           variant="alt"
+         >
+           <Tabs.List data-slot="tablist" class="bg-transparent border-b-0 px-4 pt-2 pb-0 gap-4 h-10">
+-            <Tabs.Trigger value="servers" data-slot="tab" class="text-12-regular">
+-              {sortedServers().length > 0 ? `${sortedServers().length} ` : ""}
++            <Tabs.Trigger value="server" data-slot="tab" class="text-12-regular">
+               {language.t("status.popover.tab.servers")}
+             </Tabs.Trigger>
+             <Tabs.Trigger value="mcp" data-slot="tab" class="text-12-regular">
+@@ -259,61 +254,32 @@ export function StatusPopover() {
+             </Tabs.Trigger>
+           </Tabs.List>
+ 
+-          <Tabs.Content value="servers">
++          <Tabs.Content value="server">
+             <div class="flex flex-col px-2 pb-2">
+               <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">
+                 <For each={sortedServers()}>
+                   {(s) => {
+                     const key = ServerConnection.key(s)
+-                    const isBlocked = () => health[key]?.healthy === false
+                     return (
+-                      <button
+-                        type="button"
+-                        class="flex items-center gap-2 w-full h-8 pl-3 pr-1.5 py-1.5 rounded-md transition-colors text-left"
+-                        classList={{
+-                          "hover:bg-surface-raised-base-hover": !isBlocked(),
+-                          "cursor-not-allowed": isBlocked(),
+-                        }}
+-                        aria-disabled={isBlocked()}
+-                        onClick={() => {
+-                          if (isBlocked()) return
+-                          server.setActive(key)
+-                          navigate("/")
+-                        }}
+-                      >
++                      <div class="flex items-center gap-2 w-full pl-3 pr-1.5 py-2 rounded-md">
+                         <ServerHealthIndicator health={health[key]} />
+                         <ServerRow
+                           conn={s}
+-                          dimmed={isBlocked()}
++                          dimmed={health[key]?.healthy === false}
+                           status={health[key]}
+                           class="flex items-center gap-2 w-full min-w-0"
+                           nameClass="text-14-regular text-text-base truncate"
+                           versionClass="text-12-regular text-text-weak truncate"
+-                          badge={
+-                            <Show when={key === defaultServer.key()}>
+-                              <span class="text-11-regular text-text-base bg-surface-base px-1.5 py-0.5 rounded-md">
+-                                {language.t("common.default")}
+-                              </span>
+-                            </Show>
+-                          }
+                         >
+                           <div class="flex-1" />
+                           <Show when={server.current && key === ServerConnection.key(server.current)}>
+                             <Icon name="check" size="small" class="text-icon-weak shrink-0" />
+                           </Show>
+                         </ServerRow>
+-                      </button>
++                      </div>
+                     )
+                   }}
+                 </For>
+-
+-                <Button
+-                  variant="secondary"
+-                  class="mt-3 self-start h-8 px-3 py-1.5"
+-                  onClick={() => dialog.show(() => <DialogSelectServer />, defaultServer.refresh)}
+-                >
+-                  {language.t("status.popover.action.manageServers")}
+-                </Button>
+               </div>
+             </div>
+           </Tabs.Content>
+diff --git a/packages/app/src/context/server.tsx b/packages/app/src/context/server.tsx
+index 1171ca905..5126d03a2 100644
+--- a/packages/app/src/context/server.tsx
++++ b/packages/app/src/context/server.tsx
+@@ -94,7 +94,11 @@ export namespace ServerConnection {
+ 
+ export const { use: useServer, provider: ServerProvider } = createSimpleContext({
+   name: "Server",
+-  init: (props: { defaultServer: ServerConnection.Key; servers?: Array<ServerConnection.Any> }) => {
++  init: (props: {
++    defaultServer: ServerConnection.Key
++    servers?: Array<ServerConnection.Any>
++    locked?: boolean
++  }) => {
+     const checkServerHealth = useCheckServerHealth()
+ 
+     const [store, setStore, _, ready] = persisted(
+@@ -109,6 +113,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
+     const url = (x: StoredServer) => (typeof x === "string" ? x : "type" in x ? x.http.url : x.url)
+ 
+     const allServers = createMemo((): Array<ServerConnection.Any> => {
++      if (props.locked) return props.servers ?? []
+       const servers = [
+         ...(props.servers ?? []),
+         ...store.list.map((value) =>
+@@ -164,10 +169,12 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
+     }
+ 
+     function setActive(input: ServerConnection.Key) {
++      if (!allServers().some((server) => ServerConnection.key(server) === input)) return
+       if (state.active !== input) setState("active", input)
+     }
+ 
+     function add(input: ServerConnection.Http) {
++      if (props.locked) return
+       const url_ = normalizeServerUrl(input.http.url)
+       if (!url_) return
+       const conn = { ...input, http: { ...input.http, url: url_ } }
+@@ -184,6 +191,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
+     }
+ 
+     function remove(key: ServerConnection.Key) {
++      if (props.locked) return
+       const list = store.list.filter((x) => url(x) !== key)
+       batch(() => {
+         setStore("list", list)
+@@ -198,6 +206,13 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
+ 
+     const check = (conn: ServerConnection.Any) => checkServerHealth(conn.http).then((x) => x.healthy)
+ 
++    createEffect(() => {
++      const available = allServers()
++      if (available.length === 0) return
++      if (available.some((server) => ServerConnection.key(server) === state.active)) return
++      setState("active", ServerConnection.key(available[0]!))
++    })
++
+     createEffect(() => {
+       const current_ = current()
+       if (!current_) return
+diff --git a/packages/app/src/entry.tsx b/packages/app/src/entry.tsx
+index b5cbed6e7..2198a7bc1 100644
+--- a/packages/app/src/entry.tsx
++++ b/packages/app/src/entry.tsx
+@@ -9,8 +9,6 @@ import { handleNotificationClick } from "@/utils/notification-click"
+ import pkg from "../package.json"
+ import { ServerConnection } from "./context/server"
+ 
+-const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
+-
+ const getLocale = () => {
+   if (typeof navigator !== "object") return "en" as const
+   const languages = navigator.languages?.length ? navigator.languages : [navigator.language]
+@@ -27,31 +25,6 @@ const getRootNotFoundError = () => {
+   return locale === "zh" ? (zh[key] ?? en[key]) : en[key]
+ }
+ 
+-const getStorage = (key: string) => {
+-  if (typeof localStorage === "undefined") return null
+-  try {
+-    return localStorage.getItem(key)
+-  } catch {
+-    return null
+-  }
+-}
+-
+-const setStorage = (key: string, value: string | null) => {
+-  if (typeof localStorage === "undefined") return
+-  try {
+-    if (value !== null) {
+-      localStorage.setItem(key, value)
+-      return
+-    }
+-    localStorage.removeItem(key)
+-  } catch {
+-    return
+-  }
+-}
+-
+-const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
+-const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
+-
+ const notify: Platform["notify"] = async (title, description, href) => {
+   if (!("Notification" in window)) return
+ 
+@@ -124,7 +97,6 @@ const platform: Platform = {
+   },
+   setDefaultServer: writeDefaultServerUrl,
+ }
+-
+ if (root instanceof HTMLElement) {
+   const server: ServerConnection.Http = { type: "http", http: { url: getCurrentUrl() } }
+   render(
+@@ -132,8 +104,9 @@ if (root instanceof HTMLElement) {
+       <PlatformProvider value={platform}>
+         <AppBaseProviders>
+           <AppInterface
+-            defaultServer={ServerConnection.Key.make(getDefaultUrl())}
++            defaultServer={ServerConnection.key(server)}
+             servers={[server]}
++            lockServerSelection
+             disableHealthCheck
+           />
+         </AppBaseProviders>
+diff --git a/packages/app/src/i18n/en.ts b/packages/app/src/i18n/en.ts
+index ad12e1e0d..0bb31bab0 100644
+--- a/packages/app/src/i18n/en.ts
++++ b/packages/app/src/i18n/en.ts
+@@ -703,6 +703,7 @@ export const dict = {
+ 
+   "settings.section.desktop": "Desktop",
+   "settings.section.server": "Server",
++  "settings.section.wafflebot": "Wafflebot",
+   "settings.tab.general": "General",
+   "settings.tab.shortcuts": "Shortcuts",
+   "settings.desktop.section.wsl": "WSL",
+@@ -862,11 +863,14 @@ export const dict = {
+   "settings.models.title": "Models",
+   "settings.models.description": "Model settings will be configurable here.",
+   "settings.agents.title": "Agents",
+-  "settings.agents.description": "Agent settings will be configurable here.",
++  "settings.agents.description": "Edit pinned-workspace agent definitions.",
+   "settings.commands.title": "Commands",
+   "settings.commands.description": "Command settings will be configurable here.",
+   "settings.mcp.title": "MCP",
+-  "settings.mcp.description": "MCP settings will be configurable here.",
++  "settings.mcp.description": "Configure pinned-workspace MCP servers.",
++  "settings.skills.title": "Skills",
++  "settings.runtime.title": "Runtime",
++  "settings.cron.title": "Cron",
+ 
+   "settings.permissions.title": "Permissions",
+   "settings.permissions.description": "Control what tools the server can use by default.",
+diff --git a/packages/app/src/pages/directory-layout.tsx b/packages/app/src/pages/directory-layout.tsx
+index f993ffcd8..50b6fa5ad 100644
+--- a/packages/app/src/pages/directory-layout.tsx
++++ b/packages/app/src/pages/directory-layout.tsx
+@@ -1,4 +1,4 @@
+-import { batch, createEffect, createMemo, Show, type ParentProps } from "solid-js"
++import { batch, createEffect, createMemo, createResource, Show, type ParentProps } from "solid-js"
+ import { createStore } from "solid-js/store"
+ import { useLocation, useNavigate, useParams } from "@solidjs/router"
+ import { SDKProvider } from "@/context/sdk"
+@@ -11,6 +11,7 @@ import { base64Encode } from "@opencode-ai/util/encode"
+ import { decode64 } from "@/utils/base64"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { useLanguage } from "@/context/language"
++import { readPinnedWorkspace, workspaceHref } from "@/utils/waffle"
+ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
+   const navigate = useNavigate()
+   const sync = useSync()
+@@ -35,8 +36,16 @@ export default function Layout(props: ParentProps) {
+   const language = useLanguage()
+   const globalSDK = useGlobalSDK()
+   const directory = createMemo(() => decode64(params.dir) ?? "")
++  const [pinnedWorkspace] = createResource(readPinnedWorkspace)
+   const [state, setState] = createStore({ invalid: "", resolved: "" })
+ 
++  createEffect(() => {
++    const current = directory()
++    const pinned = pinnedWorkspace()?.directory?.trim()
++    if (!current || !pinned || current === pinned) return
++    navigate(workspaceHref(pinned), { replace: true })
++  })
++
+   createEffect(() => {
+     if (!params.dir) return
+     const raw = directory()
+diff --git a/packages/app/src/pages/home.tsx b/packages/app/src/pages/home.tsx
+index ba3a2b942..ab5c84329 100644
+--- a/packages/app/src/pages/home.tsx
++++ b/packages/app/src/pages/home.tsx
+@@ -1,131 +1,33 @@
+-import { createMemo, For, Match, Switch } from "solid-js"
+-import { Button } from "@opencode-ai/ui/button"
+-import { Logo } from "@opencode-ai/ui/logo"
+-import { useLayout } from "@/context/layout"
+ import { useNavigate } from "@solidjs/router"
+-import { base64Encode } from "@opencode-ai/util/encode"
+-import { Icon } from "@opencode-ai/ui/icon"
+-import { usePlatform } from "@/context/platform"
+-import { DateTime } from "luxon"
+-import { useDialog } from "@opencode-ai/ui/context/dialog"
+-import { DialogSelectDirectory } from "@/components/dialog-select-directory"
+-import { DialogSelectServer } from "@/components/dialog-select-server"
+-import { useServer } from "@/context/server"
+-import { useGlobalSync } from "@/context/global-sync"
+-import { useLanguage } from "@/context/language"
++import { createSignal, onMount, Show } from "solid-js"
++import { readPinnedWorkspace, workspaceHref } from "@/utils/waffle"
+ 
+ export default function Home() {
+-  const sync = useGlobalSync()
+-  const layout = useLayout()
+-  const platform = usePlatform()
+-  const dialog = useDialog()
+   const navigate = useNavigate()
+-  const server = useServer()
+-  const language = useLanguage()
+-  const homedir = createMemo(() => sync.data.path.home)
+-  const recent = createMemo(() => {
+-    return sync.data.project
+-      .slice()
+-      .sort((a, b) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created))
+-      .slice(0, 5)
+-  })
+-
+-  const serverDotClass = createMemo(() => {
+-    const healthy = server.healthy()
+-    if (healthy === true) return "bg-icon-success-base"
+-    if (healthy === false) return "bg-icon-critical-base"
+-    return "bg-border-weak-base"
+-  })
+-
+-  function openProject(directory: string) {
+-    layout.projects.open(directory)
+-    server.projects.touch(directory)
+-    navigate(`/${base64Encode(directory)}`)
+-  }
++  const [error, setError] = createSignal("")
+ 
+-  async function chooseProject() {
+-    function resolve(result: string | string[] | null) {
+-      if (Array.isArray(result)) {
+-        for (const directory of result) {
+-          openProject(directory)
+-        }
+-      } else if (result) {
+-        openProject(result)
++  onMount(() => {
++    void (async () => {
++      try {
++        const workspace = await readPinnedWorkspace()
++        navigate(workspaceHref(workspace.directory), { replace: true })
++      } catch (error) {
++        setError(error instanceof Error ? error.message : "Failed to resolve pinned workspace")
+       }
+-    }
+-
+-    if (platform.openDirectoryPickerDialog && server.isLocal()) {
+-      const result = await platform.openDirectoryPickerDialog?.({
+-        title: language.t("command.project.open"),
+-        multiple: true,
+-      })
+-      resolve(result)
+-    } else {
+-      dialog.show(
+-        () => <DialogSelectDirectory multiple={true} onSelect={resolve} />,
+-        () => resolve(null),
+-      )
+-    }
+-  }
++    })()
++  })
+ 
+   return (
+-    <div class="mx-auto mt-55 w-full md:w-auto px-4">
+-      <Logo class="md:w-xl opacity-12" />
+-      <Button
+-        size="large"
+-        variant="ghost"
+-        class="mt-4 mx-auto text-14-regular text-text-weak"
+-        onClick={() => dialog.show(() => <DialogSelectServer />)}
+-      >
+-        <div
+-          classList={{
+-            "size-2 rounded-full": true,
+-            [serverDotClass()]: true,
+-          }}
+-        />
+-        {server.name}
+-      </Button>
+-      <Switch>
+-        <Match when={sync.data.project.length > 0}>
+-          <div class="mt-20 w-full flex flex-col gap-4">
+-            <div class="flex gap-2 items-center justify-between pl-3">
+-              <div class="text-14-medium text-text-strong">{language.t("home.recentProjects")}</div>
+-              <Button icon="folder-add-left" size="normal" class="pl-2 pr-3" onClick={chooseProject}>
+-                {language.t("command.project.open")}
+-              </Button>
+-            </div>
+-            <ul class="flex flex-col gap-2">
+-              <For each={recent()}>
+-                {(project) => (
+-                  <Button
+-                    size="large"
+-                    variant="ghost"
+-                    class="text-14-mono text-left justify-between px-3"
+-                    onClick={() => openProject(project.worktree)}
+-                  >
+-                    {project.worktree.replace(homedir(), "~")}
+-                    <div class="text-14-regular text-text-weak">
+-                      {DateTime.fromMillis(project.time.updated ?? project.time.created).toRelative()}
+-                    </div>
+-                  </Button>
+-                )}
+-              </For>
+-            </ul>
+-          </div>
+-        </Match>
+-        <Match when={true}>
+-          <div class="mt-30 mx-auto flex flex-col items-center gap-3">
+-            <Icon name="folder-add-left" size="large" />
+-            <div class="flex flex-col gap-1 items-center justify-center">
+-              <div class="text-14-medium text-text-strong">{language.t("home.empty.title")}</div>
+-              <div class="text-12-regular text-text-weak">{language.t("home.empty.description")}</div>
+-            </div>
+-            <Button class="px-3 mt-1" onClick={chooseProject}>
+-              {language.t("command.project.open")}
+-            </Button>
++    <div class="mx-auto mt-55 w-full max-w-xl px-4">
++      <div class="rounded-xl border border-border-weak-base bg-surface-raised-base px-5 py-5">
++        <div class="text-16-medium text-text-strong">Agent Mockingbird</div>
++        <div class="mt-2 text-14-regular text-text-weak">Opening the pinned workspace…</div>
++        <Show when={error()}>
++          <div class="mt-4 rounded-lg border border-icon-critical-base/20 bg-icon-critical-base/8 px-3 py-2 text-13-regular text-text-strong">
++            {error()}
+           </div>
+-        </Match>
+-      </Switch>
++        </Show>
++      </div>
+     </div>
+   )
+ }
+diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
+index ab2687dca..5626c040b 100644
+--- a/packages/app/src/pages/layout.tsx
++++ b/packages/app/src/pages/layout.tsx
+@@ -2,6 +2,8 @@ import {
+   batch,
+   createEffect,
+   createMemo,
++  createResource,
++  createSignal,
+   For,
+   on,
+   onCleanup,
+@@ -57,7 +59,6 @@ import { setSessionHandoff } from "@/pages/session/handoff"
+ import { useDialog } from "@opencode-ai/ui/context/dialog"
+ import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme"
+ import { DialogSelectProvider } from "@/components/dialog-select-provider"
+-import { DialogSelectServer } from "@/components/dialog-select-server"
+ import { DialogSettings } from "@/components/dialog-settings"
+ import { useCommand, type CommandOption } from "@/context/command"
+ import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
+@@ -90,6 +91,7 @@ import {
+ } from "./layout/sidebar-workspace"
+ import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
+ import { SidebarContent } from "./layout/sidebar-shell"
++import { readPinnedWorkspace } from "@/utils/waffle"
+ 
+ export default function Layout(props: ParentProps) {
+   const [store, setStore, , ready] = persisted(
+@@ -127,6 +129,7 @@ export default function Layout(props: ParentProps) {
+   const command = useCommand()
+   const theme = useTheme()
+   const language = useLanguage()
++  const [pinnedWorkspace] = createResource(readPinnedWorkspace)
+   const initialDirectory = decode64(params.dir)
+   const availableThemeEntries = createMemo(() => Object.entries(theme.themes()))
+   const colorSchemeOrder: ColorScheme[] = ["system", "light", "dark"]
+@@ -137,6 +140,7 @@ export default function Layout(props: ParentProps) {
+   }
+   const colorSchemeLabel = (scheme: ColorScheme) => language.t(colorSchemeKey[scheme])
+   const currentDir = createMemo(() => decode64(params.dir) ?? "")
++  const pinnedDirectory = createMemo(() => pinnedWorkspace()?.directory?.trim() ?? "")
+ 
+   const [state, setState] = createStore({
+     autoselect: !initialDirectory,
+@@ -572,6 +576,30 @@ export default function Layout(props: ParentProps) {
+     return projects.find((p) => p.worktree === root)
+   })
+ 
++  const sidebarProjects = createMemo(() => {
++    const pinned = pinnedDirectory()
++    const projects = layout.projects.list()
++    if (!pinned) return projects
++    const pinnedKey = workspaceKey(pinned)
++    const matches = projects.filter((project) => {
++      if (workspaceKey(project.worktree) === pinnedKey) return true
++      return project.sandboxes?.some((directory) => workspaceKey(directory) === pinnedKey) ?? false
++    })
++    if (matches.length > 0) return matches
++
++    const current = currentProject()
++    if (!current) return []
++    if (workspaceKey(current.worktree) === pinnedKey) return [current]
++    if (current.sandboxes?.some((directory) => workspaceKey(directory) === pinnedKey)) return [current]
++    return []
++  })
++
++  createEffect(() => {
++    const directory = currentDir()
++    if (!directory) return
++    layout.projects.open(directory)
++  })
++
+   createEffect(
+     on(
+       () => ({ ready: pageReady(), layoutReady: layoutReady(), dir: params.dir, list: layout.projects.list() }),
+@@ -624,10 +652,7 @@ export default function Layout(props: ParentProps) {
+     workspaceName(directory, projectId, branch) ?? branch ?? getFilename(directory)
+ 
+   const workspaceSetting = createMemo(() => {
+-    const project = currentProject()
+-    if (!project) return false
+-    if (project.vcs !== "git") return false
+-    return layout.sidebar.workspaces(project.worktree)()
++    return false
+   })
+ 
+   const visibleSessionDirs = createMemo(() => {
+@@ -999,25 +1024,12 @@ export default function Layout(props: ParentProps) {
+         keybind: "mod+b",
+         onSelect: () => layout.sidebar.toggle(),
+       },
+-      {
+-        id: "project.open",
+-        title: language.t("command.project.open"),
+-        category: language.t("command.category.project"),
+-        keybind: "mod+o",
+-        onSelect: () => chooseProject(),
+-      },
+       {
+         id: "provider.connect",
+         title: language.t("command.provider.connect"),
+         category: language.t("command.category.provider"),
+         onSelect: () => connectProvider(),
+       },
+-      {
+-        id: "server.switch",
+-        title: language.t("command.server.switch"),
+-        category: language.t("command.category.server"),
+-        onSelect: () => openServer(),
+-      },
+       {
+         id: "settings.open",
+         title: language.t("command.settings.open"),
+@@ -1064,41 +1076,6 @@ export default function Layout(props: ParentProps) {
+           if (session) archiveSession(session)
+         },
+       },
+-      {
+-        id: "workspace.new",
+-        title: language.t("workspace.new"),
+-        category: language.t("command.category.workspace"),
+-        keybind: "mod+shift+w",
+-        disabled: !workspaceSetting(),
+-        onSelect: () => {
+-          const project = currentProject()
+-          if (!project) return
+-          return createWorkspace(project)
+-        },
+-      },
+-      {
+-        id: "workspace.toggle",
+-        title: language.t("command.workspace.toggle"),
+-        description: language.t("command.workspace.toggle.description"),
+-        category: language.t("command.category.workspace"),
+-        slash: "workspace",
+-        disabled: !currentProject() || currentProject()?.vcs !== "git",
+-        onSelect: () => {
+-          const project = currentProject()
+-          if (!project) return
+-          if (project.vcs !== "git") return
+-          const wasEnabled = layout.sidebar.workspaces(project.worktree)()
+-          layout.sidebar.toggleWorkspaces(project.worktree)
+-          showToast({
+-            title: wasEnabled
+-              ? language.t("toast.workspace.disabled.title")
+-              : language.t("toast.workspace.enabled.title"),
+-            description: wasEnabled
+-              ? language.t("toast.workspace.disabled.description")
+-              : language.t("toast.workspace.enabled.description"),
+-          })
+-        },
+-      },
+       {
+         id: "theme.cycle",
+         title: language.t("command.theme.cycle"),
+@@ -1165,10 +1142,6 @@ export default function Layout(props: ParentProps) {
+     dialog.show(() => <DialogSelectProvider />)
+   }
+ 
+-  function openServer() {
+-    dialog.show(() => <DialogSelectServer />)
+-  }
+-
+   function openSettings() {
+     dialog.show(() => <DialogSettings />)
+   }
+@@ -2299,6 +2272,7 @@ export default function Layout(props: ParentProps) {
+                 arm()
+               }}
+             >
++              <div class="@container w-full h-full contain-strict">{sidebarContent()}</div>
+               <div class="@container w-full h-full contain-strict">{sidebarContent()}</div>
+               <Show when={layout.sidebar.opened()}>
+                 <div onPointerDown={() => setState("sizing", true)}>
+@@ -2347,6 +2321,7 @@ export default function Layout(props: ParentProps) {
+                 onClick={(e) => e.stopPropagation()}
+               >
+                 {sidebarContent(true)}
++                {sidebarContent(true)}
+               </nav>
+             </div>
+ 
+diff --git a/packages/app/src/pages/layout/sidebar-project.tsx b/packages/app/src/pages/layout/sidebar-project.tsx
+index a26bc1831..ea7e4d9dc 100644
+--- a/packages/app/src/pages/layout/sidebar-project.tsx
++++ b/packages/app/src/pages/layout/sidebar-project.tsx
+@@ -143,21 +143,6 @@ const ProjectTile = (props: {
+       </ContextMenu.Trigger>
+       <ContextMenu.Portal>
+         <ContextMenu.Content>
+-          <ContextMenu.Item onSelect={() => props.showEditProjectDialog(props.project)}>
+-            <ContextMenu.ItemLabel>{props.language.t("common.edit")}</ContextMenu.ItemLabel>
+-          </ContextMenu.Item>
+-          <ContextMenu.Item
+-            data-action="project-workspaces-toggle"
+-            data-project={base64Encode(props.project.worktree)}
+-            disabled={props.project.vcs !== "git" && !props.workspacesEnabled(props.project)}
+-            onSelect={() => props.toggleProjectWorkspaces(props.project)}
+-          >
+-            <ContextMenu.ItemLabel>
+-              {props.workspacesEnabled(props.project)
+-                ? props.language.t("sidebar.workspaces.disable")
+-                : props.language.t("sidebar.workspaces.enable")}
+-            </ContextMenu.ItemLabel>
+-          </ContextMenu.Item>
+           <ContextMenu.Item
+             data-action="project-clear-notifications"
+             data-project={base64Encode(props.project.worktree)}
+@@ -166,14 +151,6 @@ const ProjectTile = (props: {
+           >
+             <ContextMenu.ItemLabel>{props.language.t("sidebar.project.clearNotifications")}</ContextMenu.ItemLabel>
+           </ContextMenu.Item>
+-          <ContextMenu.Separator />
+-          <ContextMenu.Item
+-            data-action="project-close-menu"
+-            data-project={base64Encode(props.project.worktree)}
+-            onSelect={() => props.closeProject(props.project.worktree)}
+-          >
+-            <ContextMenu.ItemLabel>{props.language.t("common.close")}</ContextMenu.ItemLabel>
+-          </ContextMenu.Item>
+         </ContextMenu.Content>
+       </ContextMenu.Portal>
+     </ContextMenu>
+diff --git a/packages/app/src/pages/layout/sidebar-shell.tsx b/packages/app/src/pages/layout/sidebar-shell.tsx
+index ca36af2a4..924828c2f 100644
+--- a/packages/app/src/pages/layout/sidebar-shell.tsx
++++ b/packages/app/src/pages/layout/sidebar-shell.tsx
+@@ -21,9 +21,9 @@ export const SidebarContent = (props: {
+   handleDragStart: (event: unknown) => void
+   handleDragEnd: () => void
+   handleDragOver: (event: DragEvent) => void
+-  openProjectLabel: JSX.Element
+-  openProjectKeybind: Accessor<string | undefined>
+-  onOpenProject: () => void
++  openProjectLabel?: JSX.Element
++  openProjectKeybind?: Accessor<string | undefined>
++  onOpenProject?: () => void
+   renderProjectOverlay: () => JSX.Element
+   settingsLabel: Accessor<string>
+   settingsKeybind: Accessor<string | undefined>
+@@ -66,25 +66,6 @@ export const SidebarContent = (props: {
+               <SortableProvider ids={props.projects().map((p) => p.worktree)}>
+                 <For each={props.projects()}>{(project) => props.renderProject(project)}</For>
+               </SortableProvider>
+-              <Tooltip
+-                placement={placement()}
+-                value={
+-                  <div class="flex items-center gap-2">
+-                    <span>{props.openProjectLabel}</span>
+-                    <Show when={!props.mobile && !!props.openProjectKeybind()}>
+-                      <span class="text-icon-base text-12-medium">{props.openProjectKeybind()}</span>
+-                    </Show>
+-                  </div>
+-                }
+-              >
+-                <IconButton
+-                  icon="plus"
+-                  variant="ghost"
+-                  size="large"
+-                  onClick={props.onOpenProject}
+-                  aria-label={typeof props.openProjectLabel === "string" ? props.openProjectLabel : undefined}
+-                />
+-              </Tooltip>
+             </div>
+             <DragOverlay>{props.renderProjectOverlay()}</DragOverlay>
+           </DragDropProvider>
+diff --git a/packages/app/src/utils/waffle.ts b/packages/app/src/utils/waffle.ts
+new file mode 100644
+index 000000000..79286f66b
+--- /dev/null
++++ b/packages/app/src/utils/waffle.ts
+@@ -0,0 +1,61 @@
++import { base64Encode } from "@opencode-ai/util/encode"
++
++export class WaffleApiError extends Error {
++  status: number
++
++  constructor(message: string, status: number) {
++    super(message)
++    this.name = "WaffleApiError"
++    this.status = status
++  }
++}
++
++async function parseJson<T>(response: Response): Promise<T> {
++  const contentType = response.headers.get("content-type") ?? ""
++  if (!contentType.includes("application/json")) {
++    throw new WaffleApiError(`Expected JSON response from ${response.url}`, response.status)
++  }
++
++  return (await response.json()) as T
++}
++
++export async function waffleJson<T>(path: string, init?: RequestInit): Promise<T> {
++  const response = await fetch(path, {
++    ...init,
++    headers: {
++      ...(init?.body ? { "Content-Type": "application/json" } : {}),
++      ...(init?.headers ?? {}),
++    },
++  })
++
++  if (!response.ok) {
++    let message = `${response.status} ${response.statusText}`.trim()
++    try {
++      const payload = await parseJson<{ error?: string }>(response)
++      if (payload.error?.trim()) message = payload.error.trim()
++    } catch {
++      // Preserve the default HTTP status message when the error body is not JSON.
++    }
++    throw new WaffleApiError(message, response.status)
++  }
++
++  return parseJson<T>(response)
++}
++
++export function prettyJson(value: unknown) {
++  return JSON.stringify(value, null, 2)
++}
++
++export function workspaceHref(directory: string, sessionID?: string) {
++  const slug = base64Encode(directory)
++  return sessionID ? `/${slug}/session/${sessionID}` : `/${slug}/session`
++}
++
++export interface PinnedWorkspacePayload {
++  directory: string
++  hash: string
++}
++
++export function readPinnedWorkspace() {
++  return waffleJson<PinnedWorkspacePayload>("/api/waffle/runtime/pinned-workspace")
++}
+diff --git a/packages/opencode/src/cli/cmd/providers.ts b/packages/opencode/src/cli/cmd/providers.ts
+index 631ca7811..870c7a7cb 100644
+--- a/packages/opencode/src/cli/cmd/providers.ts
++++ b/packages/opencode/src/cli/cmd/providers.ts
+@@ -166,7 +166,7 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string,
+ }
+ 
+ export function resolvePluginProviders(input: {
+-  hooks: Hooks[]
++  hooks: Array<Hooks | null | undefined>
+   existingProviders: Record<string, unknown>
+   disabled: Set<string>
+   enabled?: Set<string>
+@@ -176,6 +176,7 @@ export function resolvePluginProviders(input: {
+   const result: Array<{ id: string; name: string }> = []
+ 
+   for (const hook of input.hooks) {
++    if (!hook) continue
+     if (!hook.auth) continue
+     const id = hook.auth.provider
+     if (seen.has(id)) continue
+@@ -384,7 +385,7 @@ export const ProvidersLoginCommand = cmd({
+           provider = selected as string
+         }
+ 
+-        const plugin = await Plugin.list().then((x) => x.findLast((x) => x.auth?.provider === provider))
++        const plugin = await Plugin.list().then((x) => x.findLast((x) => x?.auth?.provider === provider))
+         if (plugin && plugin.auth) {
+           const handled = await handlePluginAuth({ auth: plugin.auth }, provider, args.method)
+           if (handled) return
+@@ -398,7 +399,7 @@ export const ProvidersLoginCommand = cmd({
+           if (prompts.isCancel(custom)) throw new UI.CancelledError()
+           provider = custom.replace(/^@ai-sdk\//, "")
+ 
+-          const customPlugin = await Plugin.list().then((x) => x.findLast((x) => x.auth?.provider === provider))
++          const customPlugin = await Plugin.list().then((x) => x.findLast((x) => x?.auth?.provider === provider))
+           if (customPlugin && customPlugin.auth) {
+             const handled = await handlePluginAuth({ auth: customPlugin.auth }, provider, args.method)
+             if (handled) return
+diff --git a/packages/opencode/src/plugin/index.ts b/packages/opencode/src/plugin/index.ts
+index 8790efac4..1910ffd65 100644
+--- a/packages/opencode/src/plugin/index.ts
++++ b/packages/opencode/src/plugin/index.ts
+@@ -21,6 +21,30 @@ export namespace Plugin {
+   // Built-in plugins that are directly imported (not installed from npm)
+   const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin]
+ 
++  function isHooks(value: unknown): value is Hooks {
++    return Boolean(value) && typeof value === "object" && !Array.isArray(value)
++  }
++
++  async function collectHooksFromModuleExports(mod: Record<string, unknown>, input: PluginInput) {
++    const hooks: Hooks[] = []
++    const seen = new Set<PluginInstance>()
++
++    for (const [name, exported] of Object.entries(mod)) {
++      if (typeof exported !== "function") continue
++      const fn = exported as PluginInstance
++      if (seen.has(fn)) continue
++      seen.add(fn)
++      const init = await fn(input)
++      if (!isHooks(init)) {
++        log.info("ignoring non-hook plugin export", { name })
++        continue
++      }
++      hooks.push(init)
++    }
++
++    return hooks
++  }
++
+   const state = Instance.state(async () => {
+     const client = createOpencodeClient({
+       baseUrl: "http://localhost:4096",
+@@ -85,12 +109,7 @@ export namespace Plugin {
+       // Object.entries(mod) would return both entries pointing to the same function reference.
+       await import(plugin)
+         .then(async (mod) => {
+-          const seen = new Set<PluginInstance>()
+-          for (const [_name, fn] of Object.entries<PluginInstance>(mod)) {
+-            if (seen.has(fn)) continue
+-            seen.add(fn)
+-            hooks.push(await fn(input))
+-          }
++          hooks.push(...(await collectHooksFromModuleExports(mod as Record<string, unknown>, input)))
+         })
+         .catch((err) => {
+           const message = err instanceof Error ? err.message : String(err)
+@@ -116,6 +135,7 @@ export namespace Plugin {
+   >(name: Name, input: Input, output: Output): Promise<Output> {
+     if (!name) return output
+     for (const hook of await state().then((x) => x.hooks)) {
++      if (!hook) continue
+       const fn = hook[name]
+       if (!fn) continue
+       // @ts-expect-error if you feel adventurous, please fix the typing, make sure to bump the try-counter if you
+@@ -134,16 +154,23 @@ export namespace Plugin {
+     const hooks = await state().then((x) => x.hooks)
+     const config = await Config.get()
+     for (const hook of hooks) {
++      if (!hook) continue
+       // @ts-expect-error this is because we haven't moved plugin to sdk v2
+       await hook.config?.(config)
+     }
+     Bus.subscribeAll(async (input) => {
+       const hooks = await state().then((x) => x.hooks)
+       for (const hook of hooks) {
++        if (!hook) continue
+         hook["event"]?.({
+           event: input,
+         })
+       }
+     })
+   }
++
++  export const testing = {
++    collectHooksFromModuleExports,
++    isHooks,
++  }
+ }
+diff --git a/packages/opencode/src/provider/provider.ts b/packages/opencode/src/provider/provider.ts
+index 349073197..40b608c1d 100644
+--- a/packages/opencode/src/provider/provider.ts
++++ b/packages/opencode/src/provider/provider.ts
+@@ -999,6 +999,7 @@ export namespace Provider {
+     }
+ 
+     for (const plugin of await Plugin.list()) {
++      if (!plugin) continue
+       if (!plugin.auth) continue
+       const providerID = ProviderID.make(plugin.auth.provider)
+       if (disabled.has(providerID)) continue
+diff --git a/packages/opencode/src/server/server.ts b/packages/opencode/src/server/server.ts
+index 55bcf2dfc..7b67b5568 100644
+--- a/packages/opencode/src/server/server.ts
++++ b/packages/opencode/src/server/server.ts
+@@ -54,7 +54,7 @@ export namespace Server {
+ 
+   export const Default = lazy(() => createApp({}))
+ 
+-  export const createApp = (opts: { cors?: string[] }): Hono => {
++  export const createApp = (opts: { cors?: string[]; localApp?: boolean }): Hono => {
+     const app = new Hono()
+     return app
+       .onError((err, c) => {
+@@ -555,6 +555,10 @@ export namespace Server {
+         },
+       )
+       .all("/*", async (c) => {
++        if (opts.localApp) {
++          return c.notFound()
++        }
++
+         const path = c.req.path
+ 
+         const response = await proxy(`https://app.opencode.ai${path}`, {
+diff --git a/packages/opencode/test/cli/plugin-auth-picker.test.ts b/packages/opencode/test/cli/plugin-auth-picker.test.ts
+index 5a1cf059d..33656399e 100644
+--- a/packages/opencode/test/cli/plugin-auth-picker.test.ts
++++ b/packages/opencode/test/cli/plugin-auth-picker.test.ts
+@@ -117,4 +117,14 @@ describe("resolvePluginProviders", () => {
+     })
+     expect(result).toEqual([])
+   })
++
++  test("tolerates undefined hooks from malformed plugin exports", () => {
++    const result = resolvePluginProviders({
++      hooks: [undefined, hookWithAuth("portkey"), undefined],
++      existingProviders: {},
++      disabled: new Set(),
++      providerNames: {},
++    })
++    expect(result).toEqual([{ id: "portkey", name: "portkey" }])
++  })
+ })
+diff --git a/packages/opencode/test/plugin/module-exports.test.ts b/packages/opencode/test/plugin/module-exports.test.ts
+new file mode 100644
+index 000000000..07c24b3ca
+--- /dev/null
++++ b/packages/opencode/test/plugin/module-exports.test.ts
+@@ -0,0 +1,39 @@
++import { describe, expect, test } from "bun:test"
++
++import { Plugin } from "../../src/plugin"
++
++describe("Plugin.testing.collectHooksFromModuleExports", () => {
++  test("ignores helper exports that do not return hooks", async () => {
++    const pluginFactory = async () => ({
++      auth: {
++        provider: "portkey",
++        methods: [],
++      },
++    })
++    const helper = () => undefined
++
++    const hooks = await Plugin.testing.collectHooksFromModuleExports(
++      {
++        default: pluginFactory,
++        pluginFactory,
++        helper,
++      },
++      {} as never,
++    )
++
++    expect(hooks).toHaveLength(1)
++    expect(hooks[0]?.auth?.provider).toBe("portkey")
++  })
++
++  test("ignores non-function exports", async () => {
++    const hooks = await Plugin.testing.collectHooksFromModuleExports(
++      {
++        value: 123,
++        text: "hello",
++      },
++      {} as never,
++    )
++
++    expect(hooks).toEqual([])
++  })
++})
+-- 
+2.53.0
+
