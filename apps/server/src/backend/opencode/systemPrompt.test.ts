@@ -9,9 +9,18 @@ const tempDirs: string[] = [];
 const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
 const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
 
+function restoreEnv(key: "AGENT_MOCKINGBIRD_CONFIG_PATH" | "AGENT_MOCKINGBIRD_DB_PATH", value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}
+
 afterEach(() => {
-  process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = originalConfigPath;
-  process.env.AGENT_MOCKINGBIRD_DB_PATH = originalDbPath;
+  restoreEnv("AGENT_MOCKINGBIRD_CONFIG_PATH", originalConfigPath);
+  restoreEnv("AGENT_MOCKINGBIRD_DB_PATH", originalDbPath);
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }

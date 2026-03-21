@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { sqlite } from "./client";
 import type * as RepositoryModuleType from "./repository";
 
 const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-usage-db-test-"));
@@ -98,5 +99,84 @@ describe("usage dashboard repository", () => {
       "openai/gpt-5.4",
       "anthropic/claude-sonnet-4.5",
     ]);
+  });
+
+  test("does not mix caller attribution with session model inference and only backfills null attribution on conflict", () => {
+    const session = repository.createSession({
+      title: "Partial Attribution Session",
+      model: "anthropic/claude-sonnet-4.5",
+    });
+
+    repository.recordUsageDelta({
+      id: "partial-attribution",
+      sessionId: session.id,
+      providerId: "openai",
+      requestCountDelta: 2,
+      inputTokensDelta: 111,
+      outputTokensDelta: 222,
+      estimatedCostUsdDelta: 0.33,
+      source: "runtime",
+      createdAt: 1_700_000_000_000,
+    });
+
+    let row = sqlite
+      .query(
+        `
+        SELECT provider_id, model_id, request_count_delta, input_tokens_delta, output_tokens_delta
+        FROM usage_events
+        WHERE id = ?1
+      `,
+      )
+      .get("partial-attribution") as {
+      provider_id: string | null;
+      model_id: string | null;
+      request_count_delta: number;
+      input_tokens_delta: number;
+      output_tokens_delta: number;
+    };
+
+    expect(row).toMatchObject({
+      provider_id: "openai",
+      model_id: null,
+      request_count_delta: 2,
+      input_tokens_delta: 111,
+      output_tokens_delta: 222,
+    });
+
+    repository.recordUsageDelta({
+      id: "partial-attribution",
+      sessionId: session.id,
+      modelId: "gpt-5.4",
+      requestCountDelta: 999,
+      inputTokensDelta: 999,
+      outputTokensDelta: 999,
+      estimatedCostUsdDelta: 9.99,
+      source: "runtime",
+      createdAt: 1_700_000_000_001,
+    });
+
+    row = sqlite
+      .query(
+        `
+        SELECT provider_id, model_id, request_count_delta, input_tokens_delta, output_tokens_delta
+        FROM usage_events
+        WHERE id = ?1
+      `,
+      )
+      .get("partial-attribution") as {
+      provider_id: string | null;
+      model_id: string | null;
+      request_count_delta: number;
+      input_tokens_delta: number;
+      output_tokens_delta: number;
+    };
+
+    expect(row).toMatchObject({
+      provider_id: "openai",
+      model_id: "gpt-5.4",
+      request_count_delta: 2,
+      input_tokens_delta: 111,
+      output_tokens_delta: 222,
+    });
   });
 });

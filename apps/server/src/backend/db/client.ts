@@ -190,6 +190,9 @@ function ensureBootstrapSchema(db: Database) {
     );
     CREATE INDEX IF NOT EXISTS cron_job_definitions_enabled_idx
       ON cron_job_definitions(enabled, schedule_kind);
+    CREATE UNIQUE INDEX IF NOT EXISTS cron_job_definitions_thread_session_id_idx
+      ON cron_job_definitions(thread_session_id)
+      WHERE thread_session_id IS NOT NULL AND TRIM(thread_session_id) <> '';
 
     CREATE TABLE IF NOT EXISTS cron_job_instances (
       id TEXT PRIMARY KEY NOT NULL,

@@ -50,6 +50,13 @@
       "when": 1773619200000,
       "tag": "0006_usage_event_dimensions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1774051200000,
+      "tag": "0007_cron_thread_session_unique",
+      "breakpoints": true
     }
   ]
 }

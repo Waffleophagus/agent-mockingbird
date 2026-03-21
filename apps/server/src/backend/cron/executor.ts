@@ -12,7 +12,6 @@ import type {
 import {
   buildAgentPromptContext,
   computeBackoffMs,
-  definitionPayloadContext,
   normalizeConditionalModuleResult,
   nowMs,
   renderTemplate,
@@ -83,15 +82,27 @@ export class CronExecutor {
       throw new Error("Failed to create cron thread session");
     }
 
-    sqlite
-      .query(
-        `
-        UPDATE cron_job_definitions
-        SET thread_session_id = ?2, updated_at = ?3
-        WHERE id = ?1
-      `,
-      )
-      .run(definition.id, threadSessionId, nowMs());
+    try {
+      sqlite
+        .query(
+          `
+          UPDATE cron_job_definitions
+          SET thread_session_id = ?2, updated_at = ?3
+          WHERE id = ?1
+        `,
+        )
+        .run(definition.id, threadSessionId, nowMs());
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("cron_job_definitions_thread_session_id_idx")
+      ) {
+        throw new Error(
+          `Cron thread session ${threadSessionId} is already assigned to another cron job`,
+        );
+      }
+      throw error;
+    }
 
     const mainSession = getSessionById("main");
     if (mainSession) {
@@ -367,11 +378,10 @@ export class CronExecutor {
       },
       startedAt,
     });
-    const prompt = renderTemplate(template, definitionPayloadContext(definition));
     const agentResult = await this.invokeAgent({
       definition,
       instance,
-      prompt,
+      prompt: template,
     });
     if (!agentResult.ok) {
       insertStep({
@@ -460,10 +470,6 @@ export class CronExecutor {
 
     const template =
       moduleResult.invokeAgent?.prompt ?? definition.agentPromptTemplate ?? "";
-    const prompt = renderTemplate(template, {
-      ...definitionPayloadContext(definition),
-      ...(moduleResult.invokeAgent?.context ?? {}),
-    });
     const agentStartedAt = nowMs();
     insertStep({
       instanceId,
@@ -478,7 +484,7 @@ export class CronExecutor {
     const agentResult = await this.invokeAgent({
       definition,
       instance,
-      prompt,
+      prompt: template,
       context: moduleResult.invokeAgent?.context,
     });
     if (!agentResult.ok) {

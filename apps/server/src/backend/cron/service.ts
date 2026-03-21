@@ -34,7 +34,10 @@ import {
 import type { RuntimeEngine } from "../contracts/runtime";
 import { sqlite } from "../db/client";
 import { env } from "../env";
+import { createLogger } from "../logging/logger";
 import { resolveRuntimeSessionScope } from "../runtime/sessionScope";
+
+const logger = createLogger("cron");
 
 export class CronService {
   private schedulerTimer: Timer | null = null;
@@ -386,16 +389,23 @@ export class CronService {
   getJobByThreadSessionId(sessionId: string): CronJobDefinition | null {
     const normalizedSessionId = sessionId.trim();
     if (!normalizedSessionId) return null;
-    const row = selectOne<CronDefinitionRow>(
+    const rows = selectAll<CronDefinitionRow>(
       `
       SELECT *
       FROM cron_job_definitions
       WHERE thread_session_id = ?1
-      LIMIT 1
     `,
       normalizedSessionId,
     );
-    return row ? definitionRowToModel(row) : null;
+    if (rows.length === 0) return null;
+    if (rows.length > 1) {
+      logger.error("Ambiguous cron thread_session_id mapping", {
+        threadSessionId: normalizedSessionId,
+        jobIds: rows.map(row => row.id),
+      });
+      throw new Error(`Multiple cron jobs found for thread_session_id ${normalizedSessionId}`);
+    }
+    return definitionRowToModel(rows[0]!);
   }
 
   async notifyMainThread(input: {

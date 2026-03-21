@@ -1,6 +1,6 @@
 import { CronTime, validateCronExpression } from "cron";
 import { realpathSync, statSync } from "node:fs";
-import { extname, relative, resolve } from "node:path";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import type {
   CronHandlerResult,
@@ -65,6 +65,7 @@ export function validateSchedule(input: {
   scheduleExpr: string | null;
   everyMs: number | null;
   atIso: string | null;
+  timezone?: string | null;
 }) {
   if (input.scheduleKind === "at") {
     if (!input.atIso) throw new Error("scheduleKind=at requires atIso");
@@ -91,6 +92,13 @@ export function validateSchedule(input: {
   const valid = validateCronExpression(expr);
   if (!valid.valid) {
     throw new Error(`invalid cron expression: ${valid.error?.message ?? "parse failed"}`);
+  }
+
+  try {
+    new CronTime(expr, input.timezone ?? undefined);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "parse failed";
+    throw new Error(`invalid cron timezone: ${message}`);
   }
 }
 
@@ -265,7 +273,10 @@ export function resolveConditionModuleAbsolutePath(conditionModulePath: string):
   if (!relativePath || relativePath === ".") {
     throw new Error("conditionModulePath must target a file under the runtime workspace directory");
   }
-  if (relativePath.startsWith("..")) {
+  if (isAbsolute(relativePath)) {
+    throw new Error("conditionModulePath must target a file under the runtime workspace directory");
+  }
+  if (relativePath === ".." || relativePath.startsWith(`..${sep}`)) {
     throw new Error("conditionModulePath escapes the runtime workspace directory");
   }
   if (!statSync(resolvedTarget).isFile()) {
@@ -317,7 +328,7 @@ export function computeDueTimesForDefinition(
   if (!expr) return due;
   try {
     const cronTime = new CronTime(expr, row.timezone ?? undefined);
-    let cursor = lastEnqueued ?? row.created_at - 1_000;
+    let cursor = lastEnqueued ?? (row.created_at - 1);
     for (let i = 0; i < maxPerTick; i += 1) {
       const nextDate = cronTime.getNextDateFrom(new Date(cursor));
       const nextMs = nextDate.toMillis();
@@ -325,7 +336,7 @@ export function computeDueTimesForDefinition(
       if (nextMs > now) break;
       if (nextMs <= cursor) break;
       due.push(nextMs);
-      cursor = nextMs + 1_000;
+      cursor = nextMs + 1;
     }
   } catch {
     logger.warn("Ignoring invalid cron expression during scheduling", {

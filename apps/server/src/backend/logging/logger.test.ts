@@ -72,4 +72,32 @@ describe("createLogger", () => {
     expect(payload.data?.error?.name).toBe("Error");
     expect(payload.data?.error?.message).toBe("boom");
   });
+
+  test("does not throw when fields are circular and emits a safe fallback payload", () => {
+    const logger = createLogger("test-scope");
+    const fields: Record<string, unknown> = { requestId: "req-789" };
+    fields.self = fields;
+
+    expect(() => {
+      logger.info("circular payload", fields);
+    }).not.toThrow();
+
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    const [line] = consoleLogSpy.mock.calls[0] as [string];
+    const payload = JSON.parse(line) as {
+      message: string;
+      data?: {
+        requestId?: string;
+        self?: string;
+      };
+      serializationError?: {
+        message?: string;
+      };
+    };
+
+    expect(payload.message).toBe("circular payload");
+    expect(payload.data?.requestId).toBe("req-789");
+    expect(payload.data?.self).toBe("[Circular]");
+    expect(payload.serializationError?.message).toContain("circular structure");
+  });
 });

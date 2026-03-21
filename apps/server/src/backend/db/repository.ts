@@ -745,7 +745,7 @@ export function recordUsageDelta(input: {
   let providerId = input.providerId?.trim() || null;
   let modelId = input.modelId?.trim() || null;
 
-  if ((!providerId || !modelId) && input.sessionId) {
+  if (!providerId && !modelId && input.sessionId) {
     const session = scalar<{ model: string } | null>(
       `
       SELECT model
@@ -764,11 +764,14 @@ export function recordUsageDelta(input: {
   sqlite
     .query(
       `
-      INSERT OR IGNORE INTO usage_events (
+      INSERT INTO usage_events (
         id, session_id, provider_id, model_id, request_count_delta, input_tokens_delta,
         output_tokens_delta, estimated_cost_usd_delta_micros, source, created_at
       )
       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+      ON CONFLICT(id) DO UPDATE SET
+        provider_id = COALESCE(usage_events.provider_id, excluded.provider_id),
+        model_id = COALESCE(usage_events.model_id, excluded.model_id)
     `,
     )
     .run(

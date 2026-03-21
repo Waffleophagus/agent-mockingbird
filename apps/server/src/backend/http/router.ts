@@ -46,6 +46,7 @@ export async function dispatchRoute(table: RouteTable, req: Request) {
   const url = new URL(req.url);
   const pathname = url.pathname;
   const method = req.method.toUpperCase() as keyof RouteHandler;
+  let matchedPatternWithoutMethod = false;
 
   for (const [pattern, handlers] of Object.entries(table)) {
     const params = matchPattern(pattern, pathname);
@@ -56,9 +57,14 @@ export async function dispatchRoute(table: RouteTable, req: Request) {
     }
     const handler = handlers[method];
     if (!handler) {
-      return new Response("Method not allowed", { status: 405 });
+      matchedPatternWithoutMethod = true;
+      continue;
     }
     return handler(request);
+  }
+
+  if (matchedPatternWithoutMethod) {
+    return new Response("Method not allowed", { status: 405 });
   }
 
   return null;

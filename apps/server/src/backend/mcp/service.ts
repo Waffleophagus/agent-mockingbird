@@ -190,14 +190,28 @@ function opencodeConfigFilePath(config: AgentMockingbirdConfig) {
 export function readConfiguredMcpServersFromWorkspaceConfig(
   config: AgentMockingbirdConfig,
 ): Array<ConfiguredMcpServer> {
+  let parsed: unknown;
   try {
     const raw = readFileSync(opencodeConfigFilePath(config), "utf8");
-    const parsed = parseJsonc(raw);
-    if (!isPlainObject(parsed)) return [];
-    return readConfiguredMcpServersFromOpencodeConfig(parsed as Config);
-  } catch {
-    return [];
+    parsed = parseJsonc(raw);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT"
+    ) {
+      return [];
+    }
+    throw new Error(
+      "Failed to read or parse workspace MCP configuration from opencode.jsonc",
+      { cause: error },
+    );
   }
+  if (!isPlainObject(parsed)) {
+    throw new Error("Workspace MCP configuration must parse to a JSON object");
+  }
+  return readConfiguredMcpServersFromOpencodeConfig(parsed as Config);
 }
 
 export function normalizeMcpIds(ids: Array<string>) {

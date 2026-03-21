@@ -152,6 +152,7 @@ interface CronJobDefinitionLite {
 
 interface CronJobInstanceLite {
   id: string;
+  scheduledFor?: string;
   agentInvoked?: boolean;
   state: "queued" | "leased" | "running" | "completed" | "failed" | "dead";
   attempt: number;
@@ -193,6 +194,7 @@ interface CronServiceInstance {
   }) => Promise<{ created: boolean; job: CronJobDefinitionLite }>;
   updateJob: (jobId: string, patch: { enabled?: boolean }) => Promise<CronJobDefinitionLite & { enabled: boolean }>;
   getJob: (jobId: string) => Promise<(CronJobDefinitionLite & { enabled: boolean }) | null>;
+  getJobByThreadSessionId: (sessionId: string) => CronJobDefinitionLite | null;
   runJobNow: (jobId: string) => Promise<{ queued: boolean; instanceId: string | null }>;
   listJobs: () => Promise<CronJobDefinitionLite[]>;
   listInstances: (input?: { jobId?: string; limit?: number }) => Promise<CronJobInstanceLite[]>;
@@ -737,6 +739,55 @@ describe("runtime health route", () => {
     expect(typeof payload.opencode?.workspaceDirectory).toBe("string");
     expect(typeof payload.opencode?.configDirectory).toBe("string");
     expect(typeof payload.opencode?.effectiveConfigPath).toBe("string");
+  });
+
+  test("GET /api/mockingbird/runtime/info returns the resolved opencode workspace directory", async () => {
+    const configService = (await import("../config/service")) as unknown as {
+      applyConfigPatch: (input: { patch: unknown; runSmokeTest?: boolean }) => Promise<unknown>;
+      getConfigSnapshot: () => {
+        config: {
+          workspace: { pinnedDirectory: string };
+          runtime: { opencode: { directory: string } };
+        };
+      };
+    };
+    const { getOpencodeAgentStorageInfo } = (await import("../agents/opencodeConfig")) as unknown as {
+      getOpencodeAgentStorageInfo: (config: ReturnType<typeof configService.getConfigSnapshot>["config"]) => {
+        workspaceDirectory: string;
+      };
+    };
+
+    await configService.applyConfigPatch({
+      patch: {
+        workspace: {
+          pinnedDirectory: "./relative-pinned-workspace",
+        },
+        runtime: {
+          opencode: {
+            directory: "/tmp/stale-opencode-workspace",
+          },
+        },
+      },
+      runSmokeTest: false,
+    });
+
+    const snapshot = configService.getConfigSnapshot();
+    const storage = getOpencodeAgentStorageInfo(snapshot.config);
+    const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
+    const route = routes["/api/mockingbird/runtime/info"] as { GET: (req: Request) => Promise<Response> };
+    const response = await route.GET(new Request("http://localhost/api/mockingbird/runtime/info"));
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      pinnedWorkspace?: string;
+      opencode?: {
+        workspaceDirectory?: string;
+      };
+    };
+    expect(payload.pinnedWorkspace).toBe("./relative-pinned-workspace");
+    expect(snapshot.config.runtime.opencode.directory).toBe("/tmp/stale-opencode-workspace");
+    expect(storage.workspaceDirectory).not.toBe(snapshot.config.runtime.opencode.directory);
+    expect(payload.opencode?.workspaceDirectory).toBe(storage.workspaceDirectory);
   });
 });
 
@@ -1549,7 +1600,7 @@ describe("cron validation and retries", () => {
         "    summary: 'movement detected',",
         "    invokeAgent: {",
         "      shouldInvoke: true,",
-        "      prompt: 'Stock {{symbol}} moved {{movePct}}% in {{windowMin}}m',",
+        "      prompt: 'Stock {{symbol}} moved {{movePct}}% in {{windowMin}}m for {{instanceId}} at {{scheduledFor}} on {{threadSessionId}}',",
         "      context: { symbol: ctx.payload.symbol, movePct: ctx.payload.movePct, windowMin: 10 },",
         "    },",
         "  };",
@@ -1578,6 +1629,9 @@ describe("cron validation and retries", () => {
     expect(instances[0]?.agentInvoked).toBe(true);
     expect(captured.length).toBe(1);
     expect(captured[0]?.content).toContain("Stock AAPL moved 3.4% in 10m");
+    expect(captured[0]?.content).toContain(instances[0]?.id ?? "");
+    expect(captured[0]?.content).toContain(instances[0]?.scheduledFor ?? "");
+    expect(captured[0]?.content).toContain(cronThread.id);
     expect(captured[0]?.sessionId).toBe(cronThread.id);
     expect(spawnCount).toBe(1);
     const updatedJob = await cronService.getJob(job.id);
@@ -1887,6 +1941,74 @@ describe("cron validation and retries", () => {
     expect(updatedJob?.threadSessionId).toBe(cronThread.id);
   });
 
+  test("agent jobs preserve cron prompt placeholders until invokeAgent renders them", async () => {
+    const captured: Array<{ content: string; sessionId: string }> = [];
+    let spawnCount = 0;
+    const cronThread = repository.createSession({ title: "Cron Placeholder Thread" });
+    const runtime = {
+      ...createRuntimeStub(async input => {
+        captured.push({ content: input.content, sessionId: input.sessionId });
+        return {
+          sessionId: input.sessionId,
+          messages: [{ id: "assistant-1", role: "assistant", content: "done", at: new Date().toISOString() }],
+        };
+      }),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        sqlite
+          .query(
+            `
+            INSERT INTO runtime_session_bindings (runtime, session_id, external_session_id, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(runtime, session_id) DO UPDATE SET
+              external_session_id = excluded.external_session_id,
+              updated_at = excluded.updated_at
+          `,
+          )
+          .run("opencode", cronThread.id, `ext-cron-${spawnCount}`, Date.now());
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: `ext-cron-${spawnCount}`,
+          childSessionId: cronThread.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
+    const cronService = new CronService(runtime);
+
+    const job = await cronService.createJob({
+      name: "agent-placeholders",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "agent",
+      agentPromptTemplate:
+        "Run {{jobName}} for {{symbol}} on {{threadSessionId}} as {{instanceId}} at {{scheduledFor}}",
+      payload: {
+        symbol: "AAPL",
+      },
+    });
+
+    const queued = await cronService.runJobNow(job.id);
+    expect(queued.queued).toBe(true);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    const instances = await cronService.listInstances({ jobId: job.id, limit: 1 });
+    const updatedJob = await cronService.getJob(job.id);
+    expect(instances[0]?.state).toBe("completed");
+    expect(captured).toHaveLength(1);
+    expect(updatedJob?.threadSessionId).toBe(cronThread.id);
+    expect(captured[0]?.sessionId).toBe(cronThread.id);
+    expect(captured[0]?.content).toContain("Run agent-placeholders for AAPL");
+    expect(captured[0]?.content).toContain(cronThread.id);
+    expect(captured[0]?.content).toContain(instances[0]?.id ?? "");
+    expect(captured[0]?.content).toContain(instances[0]?.scheduledFor ?? "");
+  });
+
   test("heartbeat-style agent jobs use a cron-owned thread and sync that thread model from main", async () => {
     const captured: Array<{
       sessionId: string;
@@ -1966,6 +2088,71 @@ describe("cron validation and retries", () => {
 
     expect(captured[0]?.sessionId).toBe(threadSessionId);
     expect(repository.getSessionById(threadSessionId)?.model).toBe("opencode/follow-main");
+  });
+
+  test("cron jobs reject duplicate thread session ownership", async () => {
+    const captured: Array<{ sessionId: string; content: string; metadata?: Record<string, unknown> }> = [];
+    let spawnCount = 0;
+    const sharedThread = repository.createSession({ title: "Shared Cron Thread" });
+    const runtime = {
+      ...createRuntimeStub(async input => {
+        captured.push(input);
+        return {
+          sessionId: input.sessionId,
+          messages: [{ id: "assistant-1", role: "assistant", content: "done", at: new Date().toISOString() }],
+        };
+      }),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: "ext-shared-cron-thread",
+          childSessionId: sharedThread.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
+    const cronService = new CronService(runtime);
+
+    const firstJob = await cronService.createJob({
+      name: "first-thread-owner",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "agent",
+      agentPromptTemplate: "First job",
+    });
+    const secondJob = await cronService.createJob({
+      name: "second-thread-owner",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "agent",
+      agentPromptTemplate: "Second job",
+    });
+
+    await cronService.runJobNow(firstJob.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+    await cronService.runJobNow(secondJob.id);
+    await (cronService as unknown as { workerTick: () => Promise<void> }).workerTick();
+
+    const refreshedFirst = await cronService.getJob(firstJob.id);
+    const refreshedSecond = await cronService.getJob(secondJob.id);
+    expect(refreshedFirst?.threadSessionId).toBe(sharedThread.id);
+    expect(refreshedSecond?.threadSessionId).toBeNull();
+    expect(cronService.getJobByThreadSessionId(sharedThread.id)?.id).toBe(firstJob.id);
+
+    const firstInstances = await cronService.listInstances({ jobId: firstJob.id, limit: 1 });
+    const secondInstances = await cronService.listInstances({ jobId: secondJob.id, limit: 1 });
+    expect(firstInstances[0]?.state).toBe("completed");
+    expect(secondInstances[0]?.state).toBe("failed");
+    expect(JSON.stringify(secondInstances[0]?.error ?? null)).toContain(
+      "already assigned to another cron job",
+    );
+    expect(captured).toHaveLength(1);
   });
 
   test("cron threads can explicitly notify the main thread", async () => {

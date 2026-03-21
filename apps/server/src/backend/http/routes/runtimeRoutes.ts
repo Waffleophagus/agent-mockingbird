@@ -58,15 +58,7 @@ function buildRuntimePayload() {
   return {
     hash: snapshot.hash,
     path: snapshot.path,
-    config: {
-      workspace: snapshot.config.workspace,
-      runtime: {
-        memory: snapshot.config.runtime.memory,
-        heartbeat: snapshot.config.runtime.heartbeat,
-        agentHeartbeats: snapshot.config.runtime.agentHeartbeats,
-        cron: snapshot.config.runtime.cron,
-      },
-    },
+    config: snapshot.config,
   };
 }
 
@@ -152,7 +144,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
           pinnedWorkspace: snapshot.config.workspace.pinnedDirectory,
           opencode: {
             baseUrl: snapshot.config.runtime.opencode.baseUrl,
-            workspaceDirectory: snapshot.config.runtime.opencode.directory,
+            workspaceDirectory: storage.workspaceDirectory,
             configDirectory: storage.configDirectory,
             effectiveConfigPath: storage.configFilePath,
             timeoutMs: snapshot.config.runtime.opencode.timeoutMs,

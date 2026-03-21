@@ -108,8 +108,7 @@ function canonicalOpencodeConfigPath(baseDir: string) {
   return path.join(baseDir, "opencode.jsonc");
 }
 
-function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissing = true) {
-  const configDirectory = resolveOpencodeConfigDir(config);
+function resolveOpencodeConfigFileFromDir(configDirectory: string, createIfMissing = true) {
   const fallback = canonicalOpencodeConfigPath(configDirectory);
   if (!createIfMissing) {
     return fallback;
@@ -121,13 +120,17 @@ function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissi
   return fallback;
 }
 
+function resolveOpencodeConfigFile(config: AgentMockingbirdConfig, createIfMissing = true) {
+  return resolveOpencodeConfigFileFromDir(resolveOpencodeConfigDir(config), createIfMissing);
+}
+
 export function getOpencodeAgentStorageInfo(config: AgentMockingbirdConfig = getConfigSnapshot().config): OpencodeAgentStorageInfo {
   const workspaceDirectory = resolveOpencodeWorkspaceDir(config);
   const configDirectory = resolveOpencodeConfigDir(config);
   return {
     workspaceDirectory,
     configDirectory,
-    configFilePath: resolveOpencodeConfigFile(config, false),
+    configFilePath: resolveOpencodeConfigFileFromDir(configDirectory, false),
     persistenceMode: "managed-config-dir",
   };
 }
@@ -191,16 +194,16 @@ function hashAgentTypes(agentTypes: AgentTypeDefinition[]): string {
     .digest("hex");
 }
 
-function createOpencodeConfigClient(config: AgentMockingbirdConfig) {
+function createOpencodeConfigClient(config: AgentMockingbirdConfig, directory = resolveOpencodeConfigDir(config)) {
   return createOpencodeClientFromConnection({
     baseUrl: config.runtime.opencode.baseUrl,
-    directory: config.runtime.opencode.directory,
+    directory,
   });
 }
 
 async function disposeOpencodeInstance(config: AgentMockingbirdConfig) {
   try {
-    await createOpencodeConfigClient(config).instance.dispose({
+    await createOpencodeConfigClient(config, resolveOpencodeConfigDir(config)).instance.dispose({
       responseStyle: "data",
       throwOnError: true,
       signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),
@@ -211,7 +214,7 @@ async function disposeOpencodeInstance(config: AgentMockingbirdConfig) {
 }
 
 async function getOpencodeConfig(config: AgentMockingbirdConfig) {
-  const client = createOpencodeConfigClient(config);
+  const client = createOpencodeConfigClient(config, resolveOpencodeConfigDir(config));
   return unwrapSdkData<Config>(
     await client.config.get({
       responseStyle: "data",
@@ -222,7 +225,7 @@ async function getOpencodeConfig(config: AgentMockingbirdConfig) {
 }
 
 async function loadProviderModelMap(config: AgentMockingbirdConfig) {
-  const client = createOpencodeConfigClient(config);
+  const client = createOpencodeConfigClient(config, resolveOpencodeConfigDir(config));
   const payload = unwrapSdkData<ConfigProvidersResponse>(
     await client.config.providers({
       responseStyle: "data",
