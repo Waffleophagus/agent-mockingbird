@@ -185,10 +185,14 @@ export function createRunRoutes(runService: RunService) {
         let streamController: ReadableStreamDefaultController<string> | null = null;
         let unsubscribe: (() => void) | null = null;
         let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+        let replayTimer: ReturnType<typeof setInterval> | null = null;
         let outboundQueue: BoundedQueue<string> | null = null;
         let closed = false;
         let cursor = initialAfterSeq;
         let closeAfterDrainPromise: Promise<void> | null = null;
+        let replayPollInFlight = false;
+
+        const isTerminalType = (event: AgentRunEvent) => event.type === "run.completed" || event.type === "run.failed";
 
         const close = () => {
           if (closed) return;
@@ -198,6 +202,10 @@ export function createRunRoutes(runService: RunService) {
           if (heartbeatTimer) {
             clearInterval(heartbeatTimer);
             heartbeatTimer = null;
+          }
+          if (replayTimer) {
+            clearInterval(replayTimer);
+            replayTimer = null;
           }
           if (unsubscribe) {
             unsubscribe();
@@ -238,13 +246,53 @@ export function createRunRoutes(runService: RunService) {
           if (event.seq <= cursor) return;
           cursor = event.seq;
           outboundQueue.enqueue(toRunEventFrame(event));
-          if (event.type === "run.completed" || event.type === "run.failed") {
+          if (isTerminalType(event)) {
             if (outboundQueue.size() === 0) {
               close();
               return;
             }
             void closeAfterDrain();
           }
+        };
+
+        const pumpReplay = async (deadlineAt: number) => {
+          while (!closed) {
+            const replay = runService.listRunEvents({
+              runId,
+              afterSeq: cursor,
+              limit: runStreamConfig().replayPageSize,
+            });
+            for (const event of replay.events) {
+              emit(event);
+              if (closed) return true;
+              if (isTerminalType(event)) {
+                await closeAfterDrain();
+                return true;
+              }
+            }
+            if (replay.hasMore) {
+              continue;
+            }
+            const latestRun = runService.getRunById(runId);
+            if (latestRun?.state === "completed" || latestRun?.state === "failed") {
+              if (Date.now() >= deadlineAt) {
+                await closeAfterDrain();
+                return true;
+              }
+              await new Promise(resolve => setTimeout(resolve, RUN_STREAM_DRAIN_DELAY_MS));
+              continue;
+            }
+            return false;
+          }
+          return true;
+        };
+
+        const pollReplay = (deadlineAt: number) => {
+          if (replayPollInFlight || closed) return;
+          replayPollInFlight = true;
+          void pumpReplay(deadlineAt).finally(() => {
+            replayPollInFlight = false;
+          });
         };
 
         const stream = new ReadableStream<string>({
@@ -280,55 +328,14 @@ export function createRunRoutes(runService: RunService) {
               emit(event);
             });
 
-            while (!closed) {
-              const replay = runService.listRunEvents({
-                runId,
-                afterSeq: cursor,
-                limit: runStreamConfig().replayPageSize,
-              });
-              if (!replay.events.length) break;
-              for (const event of replay.events) {
-                emit(event);
-                if (closed) return;
-              }
-              if (!replay.hasMore) break;
-            }
-
-            if (closed) return;
-            const latestRun = runService.getRunById(runId);
-            if (latestRun?.state === "completed" || latestRun?.state === "failed") {
-              const deadlineAt = Date.now() + RUN_STREAM_TERMINAL_REPLAY_WAIT_MS;
-              while (!closed) {
-                if (Date.now() >= deadlineAt) {
-                  break;
-                }
-                const finalReplay = runService.listRunEvents({
-                  runId,
-                  afterSeq: cursor,
-                  limit: runStreamConfig().replayPageSize,
-                });
-                for (const event of finalReplay.events) {
-                  emit(event);
-                  if (closed) return;
-                }
-                if (finalReplay.events.length > 0) {
-                  cursor = finalReplay.events[finalReplay.events.length - 1]?.seq ?? cursor;
-                  if (finalReplay.hasMore) {
-                    continue;
-                  }
-                  if (finalReplay.events.some(event => event.type === "run.completed" || event.type === "run.failed")) {
-                    break;
-                  }
-                }
-                const latestReplayRun = runService.getRunById(runId);
-                if (latestReplayRun?.state !== "completed" && latestReplayRun?.state !== "failed") {
-                  break;
-                }
-                await new Promise(resolve => setTimeout(resolve, RUN_STREAM_DRAIN_DELAY_MS));
-              }
-              await closeAfterDrain();
+            const settledDuringStartup = await pumpReplay(Date.now() + RUN_STREAM_TERMINAL_REPLAY_WAIT_MS);
+            if (closed || settledDuringStartup) {
               return;
             }
+
+            replayTimer = setInterval(() => {
+              pollReplay(Date.now() + RUN_STREAM_TERMINAL_REPLAY_WAIT_MS);
+            }, RUN_STREAM_DRAIN_DELAY_MS);
 
             heartbeatTimer = setInterval(() => {
               if (closed || !outboundQueue) return;
