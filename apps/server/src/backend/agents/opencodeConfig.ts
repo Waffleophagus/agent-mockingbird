@@ -3,7 +3,7 @@ import {
   normalizeAgentTypeDraft as normalizeSharedAgentTypeDraft,
   normalizeAgentTypeMode,
 } from "@agent-mockingbird/contracts/agentTypes";
-import type { Config, ConfigProvidersResponse } from "@opencode-ai/sdk/client";
+import type { ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -13,6 +13,7 @@ import type { AgentTypeDefinition, AgentMockingbirdConfig } from "../config/sche
 import { agentTypeDefinitionSchema } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
 import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
+import { BUILTIN_PRIMARY_AGENT_IDS, BUILTIN_SUBAGENT_IDS } from "../runtime/opencodeRuntime/shared";
 import { resolveOpencodeConfigDir, resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
 type OpenCodeAgentConfigRecord = Record<string, unknown>;
@@ -65,26 +66,117 @@ function normalizeAgentTypeDraft(input: AgentTypeDefinition): AgentTypeDefinitio
   return normalizeSharedAgentTypeDraft(parsed) as AgentTypeDefinition;
 }
 
-function toAgentTypeDefinition(id: string, config: OpenCodeAgentConfigRecord): AgentTypeDefinition {
+function builtinAgentTypeDefinition(id: string): AgentTypeDefinition | null {
+  switch (id) {
+    case "build":
+      return normalizeAgentTypeDraft({
+        id,
+        description: "The default agent. Executes tools based on configured permissions.",
+        mode: "primary",
+        hidden: false,
+        disable: false,
+        options: {},
+      });
+    case "plan":
+      return normalizeAgentTypeDraft({
+        id,
+        description: "Plan mode. Disallows all edit tools.",
+        mode: "primary",
+        hidden: false,
+        disable: false,
+        options: {},
+      });
+    case "general":
+      return normalizeAgentTypeDraft({
+        id,
+        description: "General-purpose subagent for delegated tasks.",
+        mode: "subagent",
+        hidden: false,
+        disable: false,
+        options: {},
+      });
+    case "explore":
+      return normalizeAgentTypeDraft({
+        id,
+        description: "Fast subagent specialized for codebase exploration.",
+        mode: "subagent",
+        hidden: false,
+        disable: false,
+        options: {},
+      });
+    case "title":
+    case "summary":
+    case "compaction":
+      return normalizeAgentTypeDraft({
+        id,
+        mode: "primary",
+        hidden: true,
+        disable: false,
+        options: {},
+      });
+    default:
+      return null;
+  }
+}
+
+function toAgentTypeDefinition(
+  id: string,
+  config: OpenCodeAgentConfigRecord,
+  base?: AgentTypeDefinition | null,
+): AgentTypeDefinition {
   const permission =
     isPlainObject(config.permission) ? (config.permission as AgentTypeDefinition["permission"]) : undefined;
   return normalizeAgentTypeDraft({
+    ...(base ?? {
+      id,
+      mode: "all",
+      hidden: false,
+      disable: false,
+      options: {},
+    }),
     id,
-    name: typeof config.name === "string" ? config.name : undefined,
-    description: typeof config.description === "string" ? config.description : undefined,
-    prompt: typeof config.prompt === "string" ? config.prompt : undefined,
-    model: typeof config.model === "string" ? config.model : undefined,
-    variant: typeof config.variant === "string" ? config.variant : undefined,
-    mode: normalizeAgentTypeMode(config.mode),
-    hidden: config.hidden === true,
-    disable: config.disable === true,
+    name: typeof config.name === "string" ? config.name : base?.name,
+    description: typeof config.description === "string" ? config.description : base?.description,
+    prompt: typeof config.prompt === "string" ? config.prompt : base?.prompt,
+    model: typeof config.model === "string" ? config.model : base?.model,
+    variant: typeof config.variant === "string" ? config.variant : base?.variant,
+    mode:
+      typeof config.mode === "string"
+        ? normalizeAgentTypeMode(config.mode)
+        : (base?.mode ?? "all"),
+    hidden: typeof config.hidden === "boolean" ? config.hidden : base?.hidden === true,
+    disable: typeof config.disable === "boolean" ? config.disable : base?.disable === true,
     temperature: typeof config.temperature === "number" ? config.temperature : undefined,
     topP: typeof config.top_p === "number" ? config.top_p : undefined,
     steps: typeof config.steps === "number" ? config.steps : undefined,
     permission,
-    options: isPlainObject(config.options) ? (config.options as Record<string, unknown>) : {},
+    options: {
+      ...(isPlainObject(base?.options) ? base.options : {}),
+      ...(isPlainObject(config.options) ? (config.options as Record<string, unknown>) : {}),
+    },
     queueMode: normalizeAgentQueueMode(config.queueMode),
   });
+}
+
+function readEffectiveAgentTypeDefinitions(config: AgentMockingbirdConfig) {
+  const configPath = resolveOpencodeConfigFile(config);
+  const currentMap = readFileAgentConfigMap(configPath);
+  const agentTypes = new Map<string, AgentTypeDefinition>();
+
+  for (const id of [...BUILTIN_PRIMARY_AGENT_IDS, ...BUILTIN_SUBAGENT_IDS]) {
+    const builtin = builtinAgentTypeDefinition(id);
+    if (builtin) {
+      agentTypes.set(id, builtin);
+    }
+  }
+
+  for (const [id, agentConfig] of Object.entries(currentMap)) {
+    agentTypes.set(id, toAgentTypeDefinition(id, agentConfig, agentTypes.get(id) ?? builtinAgentTypeDefinition(id)));
+  }
+
+  return [...agentTypes.values()]
+    .filter(agentType => agentType.disable !== true)
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function toOpenCodeAgentConfig(
@@ -219,17 +311,6 @@ async function disposeOpencodeInstance(config: AgentMockingbirdConfig) {
   }
 }
 
-async function getOpencodeConfig(config: AgentMockingbirdConfig) {
-  const client = createOpencodeConfigClient(config, resolveOpencodeConfigDir(config));
-  return unwrapSdkData<Config>(
-    await client.config.get({
-      responseStyle: "data",
-      throwOnError: true,
-      signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),
-    }),
-  );
-}
-
 async function loadProviderModelMap(config: AgentMockingbirdConfig) {
   const client = createOpencodeConfigClient(config, resolveOpencodeConfigDir(config));
   const payload = unwrapSdkData<ConfigProvidersResponse>(
@@ -267,12 +348,7 @@ function parseModelRef(rawRef: string, defaultProviderId: string) {
 export async function listOpencodeAgentTypes() {
   const config = getConfigSnapshot().config;
   const storage = getOpencodeAgentStorageInfo(config);
-  const runtimeConfig = await getOpencodeConfig(config);
-  const currentMap = normalizeRuntimeAgentConfigMap((runtimeConfig as Record<string, unknown>).agent);
-  const agentTypes = Object.entries(currentMap)
-    .map(([id, agentConfig]) => toAgentTypeDefinition(id, agentConfig))
-    .filter(agentType => agentType.disable !== true)
-    .sort((left, right) => left.id.localeCompare(right.id));
+  const agentTypes = readEffectiveAgentTypeDefinitions(config);
   return {
     agentTypes,
     hash: hashAgentTypes(agentTypes),
@@ -375,11 +451,7 @@ export async function patchOpencodeAgentTypes(input: {
 }) {
   const config = getConfigSnapshot().config;
   const storage = getOpencodeAgentStorageInfo(config);
-  const currentConfig = await getOpencodeConfig(config);
-  const currentMap = normalizeRuntimeAgentConfigMap((currentConfig as Record<string, unknown>).agent);
-  const currentAgentTypes = Object.entries(currentMap)
-    .map(([id, entry]) => toAgentTypeDefinition(id, entry))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const currentAgentTypes = readEffectiveAgentTypeDefinitions(config);
   const currentHash = hashAgentTypes(currentAgentTypes);
   if (currentHash !== input.expectedHash.trim()) {
     return {

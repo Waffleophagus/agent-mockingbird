@@ -110,6 +110,16 @@ test("listOpencodeAgentTypes preserves queueMode from managed OpenCode config", 
   expect(payload.agentTypes).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
+        id: "build",
+        mode: "primary",
+        hidden: false,
+      }),
+      expect.objectContaining({
+        id: "plan",
+        mode: "primary",
+        hidden: false,
+      }),
+      expect.objectContaining({
         id: "worker",
         queueMode: "followup",
       }),
