@@ -18,13 +18,14 @@ bun run dev
 bun run build:cli
 ```
 
-Canonical install flow for end users on Linux:
+Recommended install flow for end users on Linux:
 
 ```bash
-npx --yes --package agent-mockingbird@latest agent-mockingbird -- install
+npm i -g agent-mockingbird
+agent-mockingbird install
 ```
 
-That command installs the packaged CLI `agent-mockingbird` from npm, installs and starts the `opencode` and `agent-mockingbird` user services, and then launches the interactive onboarding wizard on TTY installs.
+This keeps the public command simple and memorable. `agent-mockingbird install` provisions and starts the `opencode` and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
 
 Local development installs a git `pre-commit` hook automatically via `core.hooksPath=.githooks`. The hook runs:
 
@@ -334,7 +335,20 @@ Detailed install instructions are in `deploy/RELEASE_INSTALL.md`.
 
 ## Linux Onboarding (GitHub + npm)
 
-Primary path (interactive by default):
+Primary path:
+
+```bash
+npm i -g agent-mockingbird
+agent-mockingbird install
+```
+
+Rerun the interactive setup later without reinstalling:
+
+```bash
+agent-mockingbird onboard
+```
+
+Optional curl bootstrap wrapper:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
@@ -349,24 +363,21 @@ curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/ma
 Install from a feature branch preview:
 
 ```bash
-BRANCH="<branch-name>"
 VERSION="<published-preview-version>"
-AGENT_MOCKINGBIRD_TAG="${VERSION}" \
-  curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/${BRANCH}/scripts/onboard/bootstrap.sh" | bash
+npm i -g "agent-mockingbird@${VERSION}"
+agent-mockingbird install
 ```
 
-Branch preview installs should pin `AGENT_MOCKINGBIRD_TAG` to the exact published `next` version so the bootstrap script and installed package stay aligned.
+Branch preview installs should pin the exact published `next` version.
 
-Direct package execution from npm:
+Direct package execution from npm is still available if you do not want a global install:
 
 ```bash
-npx --yes --package agent-mockingbird@latest agent-mockingbird -- install
+npm exec --yes --package agent-mockingbird@latest agent-mockingbird -- install
 ```
 
 ```bash
-bunx --bun npm exec --yes \
-  --package agent-mockingbird@latest \
-  agent-mockingbird -- install
+bunx --bun npm exec --yes --package agent-mockingbird@latest agent-mockingbird -- install
 ```
 
 Agent Mockingbird commands:

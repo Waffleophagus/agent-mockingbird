@@ -7,6 +7,15 @@ This project is published to npm and source-hosted on GitHub.
 Recommended first-run flow on Linux:
 
 ```bash
+npm i -g agent-mockingbird
+agent-mockingbird install
+```
+
+That is the main public install path. `agent-mockingbird install` handles service setup and launches interactive onboarding on TTY installs.
+
+Optional curl bootstrap wrapper:
+
+```bash
 curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
 ```
 
@@ -28,19 +37,12 @@ agent-mockingbird restart
 agent-mockingbird update
 ```
 
-Fallback bootstrap wrapper:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/main/scripts/onboard/bootstrap.sh" | bash
-```
-
 Feature branch preview install:
 
 ```bash
-BRANCH="<branch-name>"
 VERSION="<published-preview-version>"
-AGENT_MOCKINGBIRD_TAG="${VERSION}" \
-  curl -fsSL "https://raw.githubusercontent.com/waffleophagus/agent-mockingbird/${BRANCH}/scripts/onboard/bootstrap.sh" | bash
+npm i -g "agent-mockingbird@${VERSION}"
+agent-mockingbird install
 ```
 
 ## Maintainer flow (build + publish)
