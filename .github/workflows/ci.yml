@@ -65,7 +65,7 @@ jobs:
             should_publish="false"
           elif [[ "${event}" == "push" && "${ref}" == "refs/heads/main" ]]; then
             should_publish="true"
-          elif [[ "${event}" == "push" && "${ref}" == refs/heads/* && "${ref}" != "refs/heads/main" && "${actor}" == "waffleophagus" ]]; then
+          elif [[ "${event}" == "push" && "${ref}" == refs/heads/* && "${ref}" != "refs/heads/main" ]]; then
             should_publish="true"
             npm_tag="next"
             bootstrap_ref="${ref_name}"
@@ -127,6 +127,8 @@ jobs:
               package_version="${NEXT_PACKAGE_VERSION}"
             fi
           fi
+
+          echo "Publish decision: event=${event} ref=${ref} ref_name=${ref_name} actor=${actor} should_publish=${should_publish} npm_tag=${npm_tag}"
 
           echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
           echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
