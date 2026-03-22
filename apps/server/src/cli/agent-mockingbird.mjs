@@ -527,6 +527,20 @@ function resolveExecutorRuntimeCommand(agentMockingbirdAppDir, paths, bunBin) {
   };
 }
 
+function ensurePackagedExecutorDependencies(agentMockingbirdAppDir, bunBin) {
+  const packagedExecutorDir = path.join(agentMockingbirdAppDir, "vendor", "executor");
+  const packagedExecutorEntrypoint = path.join(packagedExecutorDir, "apps", "executor", "src", "cli", "main.ts");
+  const packagedExecutorNodeModules = path.join(packagedExecutorDir, "node_modules");
+  if (!fs.existsSync(packagedExecutorEntrypoint) || fs.existsSync(packagedExecutorNodeModules)) {
+    return;
+  }
+  const installArgs = ["install"];
+  if (fs.existsSync(path.join(packagedExecutorDir, "bun.lock"))) {
+    installArgs.push("--frozen-lockfile");
+  }
+  must(bunBin, installArgs, { cwd: packagedExecutorDir, env: { ...process.env, GITHUB_SERVER_URL: "https://github.com", GITHUB_API_URL: "https://api.github.com" } });
+}
+
 function resolveBunBinary(paths) {
   if (commandExists("bun")) {
     const out = shell("bash", ["-lc", "command -v bun"]);
@@ -2205,6 +2219,7 @@ async function installOrUpdate(args, mode) {
     }
     must(bunBin, installArgs, { cwd: paths.opencodeConfigDir });
   }
+  ensurePackagedExecutorDependencies(agentMockingbirdAppDir, bunBin);
   const agentMockingbirdRuntime = resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin);
   if (!agentMockingbirdRuntime) {
     throw new Error(
