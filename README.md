@@ -110,9 +110,14 @@ Agent Mockingbird can inject workspace markdown context files into runtime syste
 - `BOOTSTRAP.md`
 - `MEMORY.md`
 
-## Current State
+## FAQ
 
-This is a non-production personal project. Breaking changes are acceptable, internal systems can be refactored aggressively, and the README should be read as a guide to the current shape of the project rather than a long-term compatibility promise.
+- Q: Isn't your UI just Opencode's UI with some patches to _remove_ things?
+  A: Yes! I'm not gonna lie, I suck at UI and Opencode's webUI is kinda awesome. My thought process is that Opencode is made for developers though, and Agent Mockingbird is designed for everyone. So my goal is to remove things that won't be super useful for non-developers. There's a roadmap item (in my brain) to enable all the Opencode functionality back again.
+- Q: Aren't you just taking multiple projects and shoving them together and calling it something special?
+  A: Yep!
+- Q: The way you're doing patches is insanely dumb.
+  A: Not really a question... but I wanted to see how this would work. My thought process is this will, in the long run, will be easier to maintain the integrated solutions. I could be wrong and give up on this process next week, but for now its working.
 
 ## Development
 
