@@ -10,6 +10,7 @@ import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
+import { ensureExecutorMcpServerConfigured } from "./backend/opencode/managedConfig";
 import { resolveAppDistDir } from "./backend/paths";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
@@ -46,9 +47,15 @@ function isOpenCodeServerPath(pathname: string) {
   return OPENCODE_SERVER_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
+function isMountedPath(pathname: string, mountPath: string) {
+  const normalized = mountPath === "/" ? "/" : mountPath.replace(/\/+$/, "");
+  return pathname === normalized || pathname.startsWith(`${normalized}/`);
+}
+
 ensureSeedData();
 ensureConfigFile();
 const configSnapshot = getConfigSnapshot();
+await ensureExecutorMcpServerConfigured(configSnapshot.config);
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
 const heartbeatService = new HeartbeatRuntimeService();
@@ -83,6 +90,24 @@ async function proxyOpenCodeSidecar(req: Request) {
   });
 }
 
+async function proxyExecutorSidecar(req: Request) {
+  const snapshot = getConfigSnapshot();
+  const sidecarBaseUrl = snapshot.config.runtime.executor.baseUrl;
+  const incoming = new URL(req.url);
+  const target = new URL(`${incoming.pathname}${incoming.search}`, sidecarBaseUrl);
+  const headers = new Headers(req.headers);
+  headers.delete("host");
+  headers.set("x-forwarded-host", incoming.host);
+  headers.set("x-forwarded-proto", incoming.protocol.replace(/:$/, ""));
+  headers.set("x-forwarded-prefix", snapshot.config.runtime.executor.uiMountPath);
+  return fetch(target, {
+    method: req.method,
+    headers,
+    body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+    redirect: "manual",
+  });
+}
+
 async function serveOpenCodeApp(req: Request) {
   if (!appDistDir) {
     return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
@@ -90,6 +115,10 @@ async function serveOpenCodeApp(req: Request) {
 
   const url = new URL(req.url);
   const pathname = decodeURIComponent(url.pathname);
+  const executorMountPath = getConfigSnapshot().config.runtime.executor.uiMountPath;
+  if (isMountedPath(pathname, executorMountPath)) {
+    return proxyExecutorSidecar(req);
+  }
   if (isOpenCodeServerPath(pathname)) {
     return proxyOpenCodeSidecar(req);
   }
@@ -168,6 +197,7 @@ console.log("[startup] agent-mockingbird runtime", {
   workspace: {
     pinnedDirectory: configSnapshot.config.workspace.pinnedDirectory,
   },
+  executor: runtimeInfo.executor,
   opencode: runtimeInfo.opencode,
   cron: {
     enabled: env.AGENT_MOCKINGBIRD_CRON_ENABLED,

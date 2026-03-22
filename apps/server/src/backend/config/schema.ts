@@ -135,6 +135,16 @@ const runtimeSmokeTestSchema = z
   })
   .strict();
 
+const runtimeExecutorSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    baseUrl: z.string().url(),
+    workspaceDir: z.string().min(1),
+    dataDir: z.string().min(1),
+    uiMountPath: z.string().min(1).default("/executor"),
+  })
+  .strict();
+
 const runtimeRunStreamSchema = z
   .object({
     heartbeatMs: z.number().int().min(1_000).default(15_000),
@@ -258,6 +268,7 @@ const runtimeConfigPolicySchema = z
       "runtime.opencode.childSessionHideAfterDays",
       "runtime.opencode.bootstrap",
       "runtime.opencode.imageModel",
+      "runtime.executor",
       "runtime.runStream",
       "runtime.memory",
       "runtime.heartbeat",
@@ -287,6 +298,7 @@ export const agentMockingbirdConfigSchema = z
     runtime: z
       .object({
         opencode: runtimeOpencodeSchema,
+        executor: runtimeExecutorSchema,
         smokeTest: runtimeSmokeTestSchema,
         runStream: runtimeRunStreamSchema.default({
           heartbeatMs: 15_000,
@@ -361,6 +373,7 @@ export const agentMockingbirdConfigSchema = z
             "runtime.opencode.childSessionHideAfterDays",
             "runtime.opencode.bootstrap",
             "runtime.opencode.imageModel",
+            "runtime.executor",
             "runtime.runStream",
             "runtime.memory",
             "runtime.heartbeat",

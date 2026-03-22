@@ -22,6 +22,7 @@ const DEFAULT_TAG = "latest";
 const PACKAGE_NAME = "agent-mockingbird";
 const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".agent-mockingbird");
 const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
+const UNIT_EXECUTOR = "executor.service";
 const UNIT_OPENCODE = "opencode.service";
 const UNIT_AGENT_MOCKINGBIRD = "agent-mockingbird.service";
 const AGENT_MOCKINGBIRD_API_BASE_URL = "http://127.0.0.1:3001";
@@ -498,6 +499,14 @@ function resolveOpencodeBin(paths) {
   return firstExistingPath([paths.opencodeBinGlobal, paths.opencodeBinLocal]);
 }
 
+function resolveExecutorBin(paths) {
+  const localVendorCandidates = [
+    path.resolve(MODULE_DIR, "../../../../vendor/executor/apps/executor/bin/executor"),
+    path.resolve(MODULE_DIR, "../vendor/executor/apps/executor/bin/executor"),
+  ];
+  return firstExistingPath([...localVendorCandidates, paths.executorBinGlobal, paths.executorBinLocal]);
+}
+
 function resolveBunBinary(paths) {
   if (commandExists("bun")) {
     const out = shell("bash", ["-lc", "command -v bun"]);
@@ -666,12 +675,13 @@ function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   return null;
 }
 
-function unitContents(paths, opencodeBin, agentMockingbirdExecStart, runtimeMode) {
+function unitContents(paths, executorBin, opencodeBin, agentMockingbirdExecStart, runtimeMode) {
+  const executor = `[Unit]\nDescription=Executor Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.executorWorkspaceDir}\nEnvironment=EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=EXECUTOR_LOCAL_DATA_DIR=${paths.executorLocalDataDir}\nEnvironment=EXECUTOR_SERVER_PID_FILE=${path.join(paths.executorRunDir, "server.pid")}\nEnvironment=EXECUTOR_SERVER_LOG_FILE=${path.join(paths.executorRunDir, "server.log")}\nEnvironment=EXECUTOR_SERVER_BASE_PATH=/executor\nExecStart=${executorBin} server start --port 8788\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
   const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\nWants=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=${paths.executorWorkspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  return { opencode, agentMockingbird };
+  return { executor, opencode, agentMockingbird };
 }
 
 function ensureSystemdUserAvailable() {
@@ -859,6 +869,7 @@ async function verifyFrontendAssetsWithRetry(baseUrl, input = {}) {
 
 async function runPostInstallVerification() {
   const agentMockingbirdStatus = shell("systemctl", ["--user", "status", UNIT_AGENT_MOCKINGBIRD, "--no-pager"]);
+  const executorStatus = shell("systemctl", ["--user", "status", UNIT_EXECUTOR, "--no-pager"]);
   const opencodeStatus = shell("systemctl", ["--user", "status", UNIT_OPENCODE, "--no-pager"]);
   const linger = shell("loginctl", ["show-user", userName(), "-p", "Linger"]);
   const frontendAssets = await verifyFrontendAssetsWithRetry("http://127.0.0.1:3001/", {
@@ -867,12 +878,14 @@ async function runPostInstallVerification() {
   });
   return {
     agentMockingbirdServiceOk: agentMockingbirdStatus.code === 0,
+    executorServiceOk: executorStatus.code === 0,
     opencodeServiceOk: opencodeStatus.code === 0,
     lingerOk: linger.code === 0 && linger.stdout.toLowerCase().includes("linger=yes"),
     frontendAssetsOk: frontendAssets.ok,
     frontendAssets,
     commandOutput: {
       agentMockingbirdStatus: (agentMockingbirdStatus.stdout || agentMockingbirdStatus.stderr).trim(),
+      executorStatus: (executorStatus.stdout || executorStatus.stderr).trim(),
       opencodeStatus: (opencodeStatus.stdout || opencodeStatus.stderr).trim(),
       linger: (linger.stdout || linger.stderr).trim(),
     },
@@ -930,7 +943,7 @@ function buildInstallSummary({ args, paths }) {
   return summarizeActionPlan("Install plan", [
     `- Target package: ${PACKAGE_NAME} (${target})`,
     `- Private registry scope: @${args.scope.replace(/^@/, "")} -> ${args.registryUrl}`,
-    `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, opencode-ai)`,
+    `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, executor, opencode-ai)`,
     `- Install root: ${paths.rootDir}`,
     "",
     "What will happen:",
@@ -941,17 +954,18 @@ function buildInstallSummary({ args, paths }) {
     hasBun
       ? `   - bun: ${success(`found at ${resolveBunBinary(paths)}`)}`
       : `   - bun: ${warn(`not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`)}`,
-    `3. Install/refresh OpenCode CLI dependency (\`opencode-ai@${opencodePackageVersion}\`) from npmjs.`,
-    `4. Install Agent Mockingbird package (${PACKAGE_NAME}) from npm.`,
-    "5. Create/refresh runtime directories under the install root.",
-    `6. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
-    `7. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
-    `8. Write user services: ${paths.opencodeUnitPath} and ${paths.agentMockingbirdUnitPath}.`,
-    "9. Reload systemd user daemon and enable/start both services.",
+    `3. Install/refresh executor sidecar dependency (\`executor@${readExecutorPackageVersion()}\`) from npmjs.`,
+    `4. Install/refresh OpenCode CLI dependency (\`opencode-ai@${opencodePackageVersion}\`) from npmjs.`,
+    `5. Install Agent Mockingbird package (${PACKAGE_NAME}) from npm.`,
+    "6. Create/refresh runtime directories under the install root.",
+    `7. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
+    `8. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
+    `9. Write user services: ${paths.executorUnitPath}, ${paths.opencodeUnitPath}, and ${paths.agentMockingbirdUnitPath}.`,
+    "10. Reload systemd user daemon and enable/start all three services.",
     args.skipLinger
-      ? "10. Skip linger configuration (--skip-linger set)."
-      : `10. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
-    "11. Run health checks, and initialize default enabled skills if config has none.",
+      ? "11. Skip linger configuration (--skip-linger set)."
+      : `11. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "12. Run health checks, and initialize default enabled skills if config has none.",
     "",
     info("After install (interactive only), a provider onboarding wizard can launch OpenCode auth and set a default model."),
   ]);
@@ -968,12 +982,12 @@ function buildUpdateSummary({ args, paths }) {
     `- Install root: ${paths.rootDir}`,
     "",
     "What this update does:",
-    "1. Refresh Agent Mockingbird package + OpenCode CLI dependency.",
+    "1. Refresh Agent Mockingbird package + executor + OpenCode sidecar dependencies.",
     `2. Ensure Bun runtime is available${hasBun ? ` (${success("already present")})` : ` (${warn(`will install${hasCurl ? " with curl fallback" : ""}`)})`}.`,
     "3. Re-seed workspace skills from bundled package.",
     "4. Re-write CLI shim + systemd user units to current paths/entrypoint.",
     "   - Includes agent-mockingbird + opencode shims in ~/.local/bin",
-    "5. Reload daemon, enable/start services, then force restart both units.",
+    "5. Reload daemon, enable/start services, then force restart all sidecars.",
     args.skipLinger
       ? "6. Skip linger configuration (--skip-linger set)."
       : `6. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
@@ -997,14 +1011,15 @@ function buildUpdateDryRun({ args, paths }) {
 
   const actions = [
     `Refresh package ${PACKAGE_NAME} (${target})`,
+    "Refresh executor dependency",
     "Refresh opencode-ai dependency",
     hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
     "Reseed workspace skills from bundled package",
     "Rewrite agent-mockingbird CLI shim",
     "Rewrite opencode CLI shim",
-    "Rewrite systemd user unit files for opencode + agent-mockingbird",
-    "systemctl --user daemon-reload + enable --now opencode.service agent-mockingbird.service",
-    "systemctl --user restart opencode.service agent-mockingbird.service",
+    "Rewrite systemd user unit files for executor + opencode + agent-mockingbird",
+    "systemctl --user daemon-reload + enable --now executor.service opencode.service agent-mockingbird.service",
+    "systemctl --user restart executor.service opencode.service agent-mockingbird.service",
     args.skipLinger
       ? "Skip loginctl linger step (--skip-linger)"
       : "Check/enable loginctl linger when needed",
@@ -1137,6 +1152,14 @@ function readInstalledVersion(paths) {
 
 function readInstalledOpenCodeVersion(paths) {
   const pkgPath = path.join(paths.npmPrefix, "lib", "node_modules", "opencode-ai", "package.json");
+  if (!fs.existsSync(pkgPath)) {
+    return null;
+  }
+  return readJson(pkgPath).version ?? null;
+}
+
+function readInstalledExecutorVersion(paths) {
+  const pkgPath = path.join(paths.npmPrefix, "lib", "node_modules", "executor", "package.json");
   if (!fs.existsSync(pkgPath)) {
     return null;
   }
@@ -1942,7 +1965,7 @@ export const testing = {
 /**
  * @param {ReadOpenCodePackageVersionOptions} [options]
  */
-function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
+function candidateLockPaths(lockFileName, { paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
   const candidates = [];
   const seen = new Set();
   const add = (value) => {
@@ -1953,16 +1976,16 @@ function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv
     candidates.push(resolved);
   };
 
-  add(path.resolve(moduleDir, "../../../../opencode.lock.json"));
-  add(path.resolve(moduleDir, "../opencode.lock.json"));
+  add(path.resolve(moduleDir, `../../../../${lockFileName}`));
+  add(path.resolve(moduleDir, `../${lockFileName}`));
 
   const invokedScript = argv[1];
   if (typeof invokedScript === "string" && invokedScript.trim()) {
-    add(path.resolve(path.dirname(invokedScript), "../opencode.lock.json"));
+    add(path.resolve(path.dirname(invokedScript), `../${lockFileName}`));
     try {
       const realScript = fs.realpathSync(invokedScript);
-      add(path.resolve(path.dirname(realScript), "../opencode.lock.json"));
-      add(path.resolve(path.dirname(realScript), "../../opencode.lock.json"));
+      add(path.resolve(path.dirname(realScript), `../${lockFileName}`));
+      add(path.resolve(path.dirname(realScript), `../../${lockFileName}`));
     } catch {
       // Ignore missing or unreadable realpaths.
     }
@@ -1970,16 +1993,16 @@ function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv
 
   if (paths) {
     if (typeof paths.agentMockingbirdAppDirGlobal === "string") {
-      add(path.join(paths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
+      add(path.join(paths.agentMockingbirdAppDirGlobal, lockFileName));
     }
     if (typeof paths.agentMockingbirdAppDirLocal === "string") {
-      add(path.join(paths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
+      add(path.join(paths.agentMockingbirdAppDirLocal, lockFileName));
     }
     if (typeof paths.agentMockingbirdAppDirScopedGlobal === "string") {
-      add(path.join(paths.agentMockingbirdAppDirScopedGlobal, "opencode.lock.json"));
+      add(path.join(paths.agentMockingbirdAppDirScopedGlobal, lockFileName));
     }
     if (typeof paths.agentMockingbirdAppDirScopedLocal === "string") {
-      add(path.join(paths.agentMockingbirdAppDirScopedLocal, "opencode.lock.json"));
+      add(path.join(paths.agentMockingbirdAppDirScopedLocal, lockFileName));
     }
   }
 
@@ -1991,10 +2014,10 @@ function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv
       scope: explicitScope,
       userUnitDir: USER_UNIT_DIR,
     });
-    add(path.join(derivedPaths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
-    add(path.join(derivedPaths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
-    add(path.join(derivedPaths.agentMockingbirdAppDirScopedGlobal, "opencode.lock.json"));
-    add(path.join(derivedPaths.agentMockingbirdAppDirScopedLocal, "opencode.lock.json"));
+    add(path.join(derivedPaths.agentMockingbirdAppDirGlobal, lockFileName));
+    add(path.join(derivedPaths.agentMockingbirdAppDirLocal, lockFileName));
+    add(path.join(derivedPaths.agentMockingbirdAppDirScopedGlobal, lockFileName));
+    add(path.join(derivedPaths.agentMockingbirdAppDirScopedLocal, lockFileName));
   }
 
   return candidates;
@@ -2008,7 +2031,7 @@ function readOpenCodePackageVersion({ paths, moduleDir = MODULE_DIR, argv = proc
   if (envVersion) {
     return envVersion
   }
-  const candidatePaths = candidateLockPaths({ paths, moduleDir, argv, env });
+  const candidatePaths = candidateLockPaths("opencode.lock.json", { paths, moduleDir, argv, env });
   for (const candidatePath of candidatePaths) {
     if (!fs.existsSync(candidatePath)) {
       continue;
@@ -2022,6 +2045,25 @@ function readOpenCodePackageVersion({ paths, moduleDir = MODULE_DIR, argv = proc
   throw new Error("Unable to locate opencode.lock.json for installer version pinning.");
 }
 
+function readExecutorPackageVersion({ paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
+  const envVersion = env.AGENT_MOCKINGBIRD_EXECUTOR_VERSION?.trim();
+  if (envVersion) {
+    return envVersion;
+  }
+  const candidatePaths = candidateLockPaths("executor.lock.json", { paths, moduleDir, argv, env });
+  for (const candidatePath of candidatePaths) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+    if (typeof parsed.packageVersion !== "string" || parsed.packageVersion.length === 0) {
+      throw new Error(`Invalid packageVersion in ${candidatePath}`);
+    }
+    return parsed.packageVersion;
+  }
+  throw new Error("Unable to locate executor.lock.json for installer version pinning.");
+}
+
 async function installOrUpdate(args, mode) {
   if (!commandExists("npm")) {
     throw new Error("npm is required. Please install npm and run again.");
@@ -2029,11 +2071,16 @@ async function installOrUpdate(args, mode) {
 
   const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
   const opencodePackageVersion = readOpenCodePackageVersion({ paths });
+  const executorPackageVersion = readExecutorPackageVersion({ paths });
   await confirmInstall(args, paths, mode);
   ensureDir(paths.rootDir);
   ensureDir(paths.npmPrefix);
   ensureDir(paths.dataDir);
   ensureDir(paths.workspaceDir);
+  ensureDir(paths.executorWorkspaceDir);
+  ensureDir(paths.executorDataDir);
+  ensureDir(paths.executorLocalDataDir);
+  ensureDir(paths.executorRunDir);
   ensureDir(paths.opencodeConfigDir);
   ensureDir(paths.logsDir);
   ensureDir(paths.etcDir);
@@ -2044,6 +2091,12 @@ async function installOrUpdate(args, mode) {
   if (!resolveBunBinary(paths)) {
     tryInstallBun(paths);
   }
+
+  npmInstall(
+    paths.npmPrefix,
+    [`executor@${executorPackageVersion}`],
+    ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+  );
 
   npmInstall(
     paths.npmPrefix,
@@ -2117,16 +2170,23 @@ async function installOrUpdate(args, mode) {
       `opencode binary missing: looked in ${paths.opencodeBinGlobal} and ${paths.opencodeBinLocal}`,
     );
   }
+  const executorBin = resolveExecutorBin(paths);
+  if (!executorBin) {
+    throw new Error(
+      `executor binary missing: looked in ${paths.executorBinGlobal} and ${paths.executorBinLocal}`,
+    );
+  }
   const opencodeShimPath = writeOpencodeShim(paths, opencodeBin);
 
-  const units = unitContents(paths, opencodeBin, agentMockingbirdRuntime.execStart, agentMockingbirdRuntime.mode);
+  const units = unitContents(paths, executorBin, opencodeBin, agentMockingbirdRuntime.execStart, agentMockingbirdRuntime.mode);
+  writeFile(paths.executorUnitPath, units.executor);
   writeFile(paths.opencodeUnitPath, units.opencode);
   writeFile(paths.agentMockingbirdUnitPath, units.agentMockingbird);
 
   must("systemctl", ["--user", "daemon-reload"]);
-  must("systemctl", ["--user", "enable", "--now", UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
+  must("systemctl", ["--user", "enable", "--now", UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
   if (mode === "update") {
-    must("systemctl", ["--user", "restart", UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
+    must("systemctl", ["--user", "restart", UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
   }
 
   const linger = ensureLinger(args.skipLinger);
@@ -2165,12 +2225,13 @@ async function installOrUpdate(args, mode) {
     rootDir: paths.rootDir,
     registryUrl: args.registryUrl,
     agentMockingbirdVersion: readInstalledVersion(paths),
+    executorVersion: readInstalledExecutorVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
     runtimeMode: agentMockingbirdRuntime.mode,
     shimPath,
     opencodeShimPath,
     pathSetup,
-    units: [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
+    units: [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
     runtimeAssets: {
       workspace: workspaceRuntimeAssets,
       opencodeConfig: opencodeRuntimeAssets,
@@ -2186,7 +2247,7 @@ async function installOrUpdate(args, mode) {
 async function status(args) {
   const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
   const unitStates = {};
-  for (const unit of [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]) {
+  for (const unit of [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]) {
     const result = shell("systemctl", ["--user", "is-active", unit]);
     unitStates[unit] = result.code === 0 ? result.stdout.trim() : "inactive";
   }
@@ -2196,6 +2257,7 @@ async function status(args) {
     mode: "status",
     rootDir: paths.rootDir,
     agentMockingbirdVersion: readInstalledVersion(paths),
+    executorVersion: readInstalledExecutorVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
     runtimeMode: readInstalledRuntimeMode(paths),
     unitStates,
@@ -2204,7 +2266,7 @@ async function status(args) {
 }
 
 function serviceCommand(action) {
-  must("systemctl", ["--user", action, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
+  must("systemctl", ["--user", action, UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
 }
 
 async function manageService(args, action) {
@@ -2231,7 +2293,7 @@ async function uninstall(args) {
       rl.close();
       throw new Error("Aborted by user.");
     }
-    const purgeAnswer = (await rl.question("Purge data/workspace under ~/.agent-mockingbird/data and ~/.agent-mockingbird/workspace? [y/N] ")).trim().toLowerCase();
+    const purgeAnswer = (await rl.question("Purge data/workspaces under ~/.agent-mockingbird/data, ~/.agent-mockingbird/workspace, and ~/.agent-mockingbird/executor-workspace? [y/N] ")).trim().toLowerCase();
     args.purgeData = purgeAnswer === "y" || purgeAnswer === "yes";
     rl.close();
   } else if (!args.yes) {
@@ -2242,12 +2304,15 @@ async function uninstall(args) {
     args.keepData = true;
   }
 
-  shell("systemctl", ["--user", "disable", "--now", UNIT_AGENT_MOCKINGBIRD, UNIT_OPENCODE]);
+  shell("systemctl", ["--user", "disable", "--now", UNIT_AGENT_MOCKINGBIRD, UNIT_OPENCODE, UNIT_EXECUTOR]);
   if (fs.existsSync(paths.agentMockingbirdUnitPath)) {
     fs.rmSync(paths.agentMockingbirdUnitPath, { force: true });
   }
   if (fs.existsSync(paths.opencodeUnitPath)) {
     fs.rmSync(paths.opencodeUnitPath, { force: true });
+  }
+  if (fs.existsSync(paths.executorUnitPath)) {
+    fs.rmSync(paths.executorUnitPath, { force: true });
   }
   shell("systemctl", ["--user", "daemon-reload"]);
   const removedShim = removeAgentMockingbirdShim(paths);
@@ -2258,7 +2323,7 @@ async function uninstall(args) {
       fs.rmSync(paths.rootDir, { recursive: true, force: true });
     }
   } else {
-    const preserve = [paths.dataDir, paths.workspaceDir, paths.logsDir];
+    const preserve = [paths.dataDir, paths.workspaceDir, paths.executorWorkspaceDir, paths.logsDir];
     for (const target of preserve) {
       ensureDir(target);
     }
@@ -2273,7 +2338,7 @@ async function uninstall(args) {
   return {
     mode: "uninstall",
     rootDir: paths.rootDir,
-    unitsRemoved: [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
+    unitsRemoved: [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
     removedShim,
     removedOpencodeShim,
     removed: true,
@@ -2293,6 +2358,7 @@ function printResult(result, asJson) {
     console.log(`root: ${result.rootDir}`);
     console.log(`registry: ${result.registryUrl}`);
     console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "unknown"}`);
+    console.log(`executor: ${result.executorVersion ?? "unknown"}`);
     console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "unknown"}`);
     console.log(`cli: ${result.shimPath ?? "unavailable"}`);
@@ -2336,6 +2402,7 @@ function printResult(result, asJson) {
     }
     if (result.verify) {
       console.log(`verify: agent-mockingbird.service=${result.verify.agentMockingbirdServiceOk ? "ok" : "failed"}`);
+      console.log(`verify: executor.service=${result.verify.executorServiceOk ? "ok" : "failed"}`);
       console.log(`verify: opencode.service=${result.verify.opencodeServiceOk ? "ok" : "failed"}`);
       console.log(`verify: linger=${result.verify.lingerOk ? "yes" : "no"}`);
       console.log(`verify: frontend-assets=${result.verify.frontendAssetsOk ? "ok" : "failed"}`);
@@ -2344,12 +2411,14 @@ function printResult(result, asJson) {
       }
       if (
         !result.verify.agentMockingbirdServiceOk ||
+        !result.verify.executorServiceOk ||
         !result.verify.opencodeServiceOk ||
         !result.verify.lingerOk ||
         !result.verify.frontendAssetsOk
       ) {
         console.log("verify-details:");
         console.log(result.verify.commandOutput.agentMockingbirdStatus || "(no output)");
+        console.log(result.verify.commandOutput.executorStatus || "(no output)");
         console.log(result.verify.commandOutput.opencodeStatus || "(no output)");
         console.log(result.verify.commandOutput.linger || "(no output)");
         if (result.verify.frontendAssets?.error) {
@@ -2417,9 +2486,10 @@ function printResult(result, asJson) {
     console.log("status");
     console.log(`root: ${result.rootDir}`);
     console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`);
+    console.log(`executor: ${result.executorVersion ?? "not installed"}`);
     console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
-    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
+    console.log(`units: ${UNIT_EXECUTOR}=${result.unitStates[UNIT_EXECUTOR]}, ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
     console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
     return;
   }
@@ -2428,9 +2498,10 @@ function printResult(result, asJson) {
     console.log(`${result.mode} complete`);
     console.log(`root: ${result.rootDir}`);
     console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`);
+    console.log(`executor: ${result.executorVersion ?? "not installed"}`);
     console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
-    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
+    console.log(`units: ${UNIT_EXECUTOR}=${result.unitStates[UNIT_EXECUTOR]}, ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
     console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
     return;
   }
@@ -2506,11 +2577,14 @@ function printResult(result, asJson) {
 
 function evaluateResult(result) {
   const isActive =
-    result?.unitStates?.[UNIT_OPENCODE] === "active" && result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] === "active";
+    result?.unitStates?.[UNIT_EXECUTOR] === "active" &&
+    result?.unitStates?.[UNIT_OPENCODE] === "active" &&
+    result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] === "active";
   if (result.mode === "install" || result.mode === "update") {
     if (
       !result.health?.ok ||
       !result.verify?.agentMockingbirdServiceOk ||
+      !result.verify?.executorServiceOk ||
       !result.verify?.opencodeServiceOk ||
       !result.verify?.frontendAssetsOk
     ) {
@@ -2526,7 +2600,9 @@ function evaluateResult(result) {
   }
   if (result.mode === "stop") {
     const stopped =
-      result?.unitStates?.[UNIT_OPENCODE] !== "active" && result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] !== "active";
+      result?.unitStates?.[UNIT_EXECUTOR] !== "active" &&
+      result?.unitStates?.[UNIT_OPENCODE] !== "active" &&
+      result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] !== "active";
     return stopped ? 0 : 2;
   }
   if (result.mode === "onboard") {

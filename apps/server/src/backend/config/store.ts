@@ -32,6 +32,9 @@ const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
 const DEFAULT_OPENCODE_BASE_URL =
   process.env.AGENT_MOCKINGBIRD_OPENCODE_BASE_URL?.trim() ||
   `http://127.0.0.1:${process.env.OPENCODE_PORT?.trim() || "4096"}`;
+const DEFAULT_EXECUTOR_BASE_URL =
+  process.env.AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL?.trim() ||
+  `http://127.0.0.1:${process.env.EXECUTOR_PORT?.trim() || "8788"}`;
 const DEFAULT_OPENCODE_PROVIDER_ID = "opencode";
 const DEFAULT_OPENCODE_MODEL_ID = "big-pickle";
 const DEFAULT_OPENCODE_SMALL_MODEL = "opencode/big-pickle";
@@ -119,6 +122,18 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
   const opencodeRunWaitTimeoutMs = readExplicitEnvNumber("AGENT_MOCKINGBIRD_OPENCODE_RUN_WAIT_TIMEOUT_MS");
   if (typeof opencodeRunWaitTimeoutMs === "number") opencodePatch.runWaitTimeoutMs = opencodeRunWaitTimeoutMs;
 
+  const executorPatch: Record<string, unknown> = {};
+  const executorEnabled = readExplicitEnvBoolean("AGENT_MOCKINGBIRD_EXECUTOR_ENABLED");
+  if (typeof executorEnabled === "boolean") executorPatch.enabled = executorEnabled;
+  const executorBaseUrl = readExplicitEnvString("AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL");
+  if (executorBaseUrl) executorPatch.baseUrl = executorBaseUrl;
+  const executorWorkspaceDir = readExplicitEnvString("AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR");
+  if (executorWorkspaceDir) executorPatch.workspaceDir = executorWorkspaceDir;
+  const executorDataDir = readExplicitEnvString("AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR");
+  if (executorDataDir) executorPatch.dataDir = executorDataDir;
+  const executorUiMountPath = readExplicitEnvString("AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH");
+  if (executorUiMountPath) executorPatch.uiMountPath = executorUiMountPath;
+
   const memoryPatch: Record<string, unknown> = {};
 
   const memoryEnabled = readExplicitEnvBoolean("AGENT_MOCKINGBIRD_MEMORY_ENABLED");
@@ -156,7 +171,7 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
     memoryPatch.injectionDedupeMaxTracked = memoryInjectionDedupeMaxTracked;
   }
 
-  if (!Object.keys(opencodePatch).length && !Object.keys(memoryPatch).length) {
+  if (!Object.keys(opencodePatch).length && !Object.keys(executorPatch).length && !Object.keys(memoryPatch).length) {
     return {};
   }
   return {
@@ -169,6 +184,7 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
       : {}),
     runtime: {
       ...(Object.keys(opencodePatch).length ? { opencode: opencodePatch } : {}),
+      ...(Object.keys(executorPatch).length ? { executor: executorPatch } : {}),
       ...(Object.keys(memoryPatch).length ? { memory: memoryPatch } : {}),
     },
   };
@@ -251,6 +267,13 @@ function buildLegacyBootstrappedConfig() {
           includeAgentPrompt: true,
         },
       },
+      executor: {
+        enabled: env.AGENT_MOCKINGBIRD_EXECUTOR_ENABLED,
+        baseUrl: DEFAULT_EXECUTOR_BASE_URL,
+        workspaceDir: env.AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR,
+        dataDir: env.AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR,
+        uiMountPath: env.AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH,
+      },
       smokeTest: {
         prompt: DEFAULT_SMOKE_TEST_PROMPT,
         expectedResponsePattern: DEFAULT_SMOKE_TEST_PATTERN,
@@ -326,6 +349,7 @@ function buildLegacyBootstrappedConfig() {
           "runtime.opencode.runWaitTimeoutMs",
           "runtime.opencode.childSessionHideAfterDays",
           "runtime.opencode.bootstrap",
+          "runtime.executor",
           "runtime.runStream",
           "runtime.memory",
           "runtime.heartbeat",
@@ -357,13 +381,11 @@ function buildLegacyBootstrappedConfig() {
 
 function migrateConfigShape(raw: unknown): unknown {
   if (!isPlainObject(raw)) return raw;
-  if (raw.version === CONFIG_VERSION && isPlainObject(raw.workspace)) {
-    return raw;
-  }
 
   const root = { ...raw };
   const runtime = isPlainObject(root.runtime) ? root.runtime : {};
   const opencode = isPlainObject(runtime.opencode) ? runtime.opencode : {};
+  const executor = isPlainObject(runtime.executor) ? runtime.executor : {};
   const memory = isPlainObject(runtime.memory) ? runtime.memory : {};
   const pinnedDirectory =
     (typeof root.workspace === "object" &&
@@ -381,6 +403,31 @@ function migrateConfigShape(raw: unknown): unknown {
     version: CONFIG_VERSION,
     workspace: {
       pinnedDirectory,
+    },
+    runtime: {
+      ...runtime,
+      executor: {
+        enabled:
+          typeof executor.enabled === "boolean"
+            ? executor.enabled
+            : env.AGENT_MOCKINGBIRD_EXECUTOR_ENABLED,
+        baseUrl:
+          typeof executor.baseUrl === "string" && executor.baseUrl.trim()
+            ? executor.baseUrl
+            : DEFAULT_EXECUTOR_BASE_URL,
+        workspaceDir:
+          typeof executor.workspaceDir === "string" && executor.workspaceDir.trim()
+            ? executor.workspaceDir
+            : env.AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR,
+        dataDir:
+          typeof executor.dataDir === "string" && executor.dataDir.trim()
+            ? executor.dataDir
+            : env.AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR,
+        uiMountPath:
+          typeof executor.uiMountPath === "string" && executor.uiMountPath.trim()
+            ? executor.uiMountPath
+            : env.AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH,
+      },
     },
   };
 }

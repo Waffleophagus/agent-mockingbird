@@ -1,0 +1,16 @@
+{
+  "upstream": {
+    "remote": "https://github.com/RhysSullivan/executor.git",
+    "tag": "v1.2.4-beta.4",
+    "commit": "0309aa49e5265c894b9dab2c78811585ac8931cb"
+  },
+  "packageVersion": "1.2.4-beta.4",
+  "paths": {
+    "cleanroom": "cleanroom/executor",
+    "vendor": "vendor/executor",
+    "patches": "patches/executor"
+  },
+  "branch": {
+    "name": "agent-mockingbird/executor"
+  }
+}

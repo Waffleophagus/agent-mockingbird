@@ -8,6 +8,13 @@ import { listManagedSkillCatalog } from "../skills/service";
 let runtimeInstance: RuntimeEngine | null = null;
 
 interface RuntimeStartupInfo {
+  executor: {
+    enabled: boolean;
+    baseUrl: string;
+    workspaceDir: string;
+    dataDir: string;
+    uiMountPath: string;
+  };
   opencode: {
     baseUrl: string;
     providerId: string;
@@ -51,6 +58,13 @@ export function getRuntimeStartupInfo(): RuntimeStartupInfo {
     directory: config.runtime.opencode.directory,
   });
   return {
+    executor: {
+      enabled: config.runtime.executor.enabled,
+      baseUrl: config.runtime.executor.baseUrl,
+      workspaceDir: config.runtime.executor.workspaceDir,
+      dataDir: config.runtime.executor.dataDir,
+      uiMountPath: config.runtime.executor.uiMountPath,
+    },
     opencode: {
       baseUrl: connection.baseUrl,
       providerId: config.runtime.opencode.providerId,

@@ -24,6 +24,7 @@
     "setup:hooks": "bun run ./scripts/setup-git-hooks.ts",
     "check:ship": "bun run ./scripts/check-ship.ts",
     "opencode:sync": "bun run ./scripts/opencode-sync.ts",
+    "executor:sync": "bun run ./scripts/executor-sync.ts",
     "opencode:swap": "bun run ./scripts/opencode-swap.ts",
     "dev": "turbo run dev --filter=@agent-mockingbird/server",
     "dev:opencode": "bash scripts/dev-opencode.sh",

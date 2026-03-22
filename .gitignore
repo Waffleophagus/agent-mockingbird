@@ -6,7 +6,9 @@ out
 dist/
 *.tgz
 cleanroom/opencode
+cleanroom/executor
 vendor/opencode
+vendor/executor
 data/*
 bin/*
 !bin/agent-mockingbird

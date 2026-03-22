@@ -1,7 +1,7 @@
 From d92a8edad721d9de5de1f0cde8a66421ab3842a7 Mon Sep 17 00:00:00 2001
-From: Matt Campbell <npm@d6software.com>
+From: Matt Campbell <matt@battleshopper.com>
 Date: Sat, 21 Mar 2026 16:03:29 -0500
-Subject: [PATCH 11/11] feat(heartbeat): add session title and link to
+Subject: [PATCH 11/13] feat(heartbeat): add session title and link to
  heartbeat session
 
 ---
