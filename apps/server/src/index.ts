@@ -142,6 +142,19 @@ function requestTargetsExecutorFromReferer(req: Request, mountPath: string) {
   }
 }
 
+function shouldFallbackToExecutorAsset(req: Request, pathname: string, mountPath: string) {
+  if (!pathname.includes(".")) {
+    return false;
+  }
+  if (pathname.startsWith("/api/")) {
+    return false;
+  }
+  if (pathname.startsWith(`${mountPath}/`)) {
+    return true;
+  }
+  return requestTargetsExecutorFromReferer(req, mountPath);
+}
+
 async function serveOpenCodeApp(req: Request) {
   if (!appDistDir) {
     return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
@@ -175,10 +188,7 @@ async function serveOpenCodeApp(req: Request) {
     return new Response(candidate);
   }
 
-  if (
-    pathname.startsWith("/assets/") &&
-    requestTargetsExecutorFromReferer(req, executorMountPath)
-  ) {
+  if (shouldFallbackToExecutorAsset(req, pathname, executorMountPath)) {
     return proxyExecutorSidecar(req);
   }
 
