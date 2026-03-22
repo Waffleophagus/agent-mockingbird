@@ -447,30 +447,7 @@ function firstExistingPath(candidates) {
   return null;
 }
 
-function localRepoRootCandidates() {
-  return [
-    path.resolve(MODULE_DIR, "../../../../"),
-    path.resolve(MODULE_DIR, ".."),
-  ];
-}
-
-function resolveLocalRepoRoot() {
-  for (const candidate of localRepoRootCandidates()) {
-    if (
-      fs.existsSync(path.join(candidate, "package.json")) &&
-      fs.existsSync(path.join(candidate, "apps", "server", "src", "cli", "agent-mockingbird.mjs"))
-    ) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
 function resolveAgentMockingbirdAppDir(paths) {
-  const localRepoRoot = resolveLocalRepoRoot();
-  if (localRepoRoot) {
-    return localRepoRoot;
-  }
   return firstExistingPath([
     paths.agentMockingbirdAppDirGlobal,
     paths.agentMockingbirdAppDirLocal,
@@ -523,25 +500,19 @@ function resolveOpencodeBin(paths) {
 }
 
 function resolveExecutorBin(paths) {
-  const localVendorCandidates = [
-    path.resolve(MODULE_DIR, "../../../../vendor/executor/apps/executor/bin/executor"),
-    path.resolve(MODULE_DIR, "../vendor/executor/apps/executor/bin/executor"),
-  ];
-  return firstExistingPath([...localVendorCandidates, paths.executorBinGlobal, paths.executorBinLocal]);
+  return firstExistingPath([paths.executorBinGlobal, paths.executorBinLocal]);
 }
 
-function resolveExecutorRuntimeCommand(paths, bunBin) {
-  const localEntrypointCandidates = [
-    path.resolve(MODULE_DIR, "../../../../vendor/executor/apps/executor/src/cli/main.ts"),
-    path.resolve(MODULE_DIR, "../vendor/executor/apps/executor/src/cli/main.ts"),
-  ];
-  const localEntrypoint = firstExistingPath(localEntrypointCandidates);
-  if (localEntrypoint) {
+function resolveExecutorRuntimeCommand(agentMockingbirdAppDir, paths, bunBin) {
+  const packagedExecutorDir = path.join(agentMockingbirdAppDir, "vendor", "executor");
+  const packagedExecutorEntrypoint = path.join(packagedExecutorDir, "apps", "executor", "src", "cli", "main.ts");
+  const packagedExecutorNodeModules = path.join(packagedExecutorDir, "node_modules");
+  if (fs.existsSync(packagedExecutorEntrypoint) && fs.existsSync(packagedExecutorNodeModules)) {
     if (!bunBin) {
-      throw new Error("bun binary was not found for local vendored executor runtime.");
+      throw new Error("bun binary was not found for packaged vendored executor runtime.");
     }
     return {
-      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(localEntrypoint)} server start --port 8788`,
+      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(packagedExecutorEntrypoint)} server start --port 8788`,
       mode: "source",
     };
   }
@@ -2219,7 +2190,7 @@ async function installOrUpdate(args, mode) {
       `opencode binary missing: looked in ${paths.opencodeBinGlobal} and ${paths.opencodeBinLocal}`,
     );
   }
-  const executorRuntime = resolveExecutorRuntimeCommand(paths, bunBin);
+  const executorRuntime = resolveExecutorRuntimeCommand(agentMockingbirdAppDir, paths, bunBin);
   if (!executorRuntime) {
     throw new Error(
       `executor runtime missing: looked in vendored executor checkout and ${paths.executorBinGlobal} / ${paths.executorBinLocal}`,

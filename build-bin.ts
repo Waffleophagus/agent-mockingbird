@@ -9,6 +9,11 @@ const outdir = path.join(repoRoot, "dist");
 const outfile = path.join(outdir, "agent-mockingbird");
 const drizzleOutdir = path.join(outdir, "drizzle");
 
+console.log("Refreshing vendored Executor worktree...");
+await Bun.$`bun run executor:sync --rebuild-only`.cwd(repoRoot);
+console.log("Installing vendored Executor dependencies...");
+await Bun.$`bun install --cwd vendor/executor --frozen-lockfile`.cwd(repoRoot);
+
 mkdirSync(outdir, { recursive: true });
 if (existsSync(outfile)) {
   rmSync(outfile, { force: true });
