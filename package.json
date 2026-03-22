@@ -15,6 +15,10 @@
   "bin": {
     "agent-mockingbird": "bin/agent-mockingbird"
   },
+  "agentMockingbirdInstall": {
+    "opencodeVersion": "1.2.27",
+    "executorVersion": "1.2.4-beta.4"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"

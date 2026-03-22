@@ -2043,6 +2043,25 @@ function candidateLockPaths(lockFileName, { paths, moduleDir = MODULE_DIR, argv 
   return candidates;
 }
 
+function candidatePackageJsonPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
+  return candidateLockPaths("package.json", { paths, moduleDir, argv, env });
+}
+
+function readPinnedInstallVersion(fieldName, { paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
+  const candidatePaths = candidatePackageJsonPaths({ paths, moduleDir, argv, env });
+  for (const candidatePath of candidatePaths) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+    const version = parsed?.agentMockingbirdInstall?.[fieldName];
+    if (typeof version === "string" && version.trim()) {
+      return version.trim();
+    }
+  }
+  return null;
+}
+
 /**
  * @param {ReadOpenCodePackageVersionOptions} [options]
  */
@@ -2062,6 +2081,10 @@ function readOpenCodePackageVersion({ paths, moduleDir = MODULE_DIR, argv = proc
     }
     return parsed.packageVersion;
   }
+  const pinnedVersion = readPinnedInstallVersion("opencodeVersion", { paths, moduleDir, argv, env });
+  if (pinnedVersion) {
+    return pinnedVersion;
+  }
   throw new Error("Unable to locate opencode.lock.json for installer version pinning.");
 }
 
@@ -2080,6 +2103,10 @@ function readExecutorPackageVersion({ paths, moduleDir = MODULE_DIR, argv = proc
       throw new Error(`Invalid packageVersion in ${candidatePath}`);
     }
     return parsed.packageVersion;
+  }
+  const pinnedVersion = readPinnedInstallVersion("executorVersion", { paths, moduleDir, argv, env });
+  if (pinnedVersion) {
+    return pinnedVersion;
   }
   throw new Error("Unable to locate executor.lock.json for installer version pinning.");
 }
