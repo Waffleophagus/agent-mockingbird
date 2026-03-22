@@ -530,6 +530,32 @@ function resolveExecutorBin(paths) {
   return firstExistingPath([...localVendorCandidates, paths.executorBinGlobal, paths.executorBinLocal]);
 }
 
+function resolveExecutorRuntimeCommand(paths, bunBin) {
+  const localEntrypointCandidates = [
+    path.resolve(MODULE_DIR, "../../../../vendor/executor/apps/executor/src/cli/main.ts"),
+    path.resolve(MODULE_DIR, "../vendor/executor/apps/executor/src/cli/main.ts"),
+  ];
+  const localEntrypoint = firstExistingPath(localEntrypointCandidates);
+  if (localEntrypoint) {
+    if (!bunBin) {
+      throw new Error("bun binary was not found for local vendored executor runtime.");
+    }
+    return {
+      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(localEntrypoint)} server start --port 8788`,
+      mode: "source",
+    };
+  }
+
+  const executorBin = resolveExecutorBin(paths);
+  if (!executorBin) {
+    return null;
+  }
+  return {
+    execStart: `${shellEscapeSystemdArg(executorBin)} server start --port 8788`,
+    mode: "installed",
+  };
+}
+
 function resolveBunBinary(paths) {
   if (commandExists("bun")) {
     const out = shell("bash", ["-lc", "command -v bun"]);
@@ -698,8 +724,8 @@ function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   return null;
 }
 
-function unitContents(paths, executorBin, opencodeBin, agentMockingbirdExecStart, runtimeMode) {
-  const executor = `[Unit]\nDescription=Executor Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.executorWorkspaceDir}\nEnvironment=EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=EXECUTOR_LOCAL_DATA_DIR=${paths.executorLocalDataDir}\nEnvironment=EXECUTOR_SERVER_PID_FILE=${path.join(paths.executorRunDir, "server.pid")}\nEnvironment=EXECUTOR_SERVER_LOG_FILE=${path.join(paths.executorRunDir, "server.log")}\nEnvironment=EXECUTOR_SERVER_BASE_PATH=/executor\nExecStart=${executorBin} server start --port 8788\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+function unitContents(paths, executorExecStart, opencodeBin, agentMockingbirdExecStart, runtimeMode) {
+  const executor = `[Unit]\nDescription=Executor Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.executorWorkspaceDir}\nEnvironment=EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=EXECUTOR_LOCAL_DATA_DIR=${paths.executorLocalDataDir}\nEnvironment=EXECUTOR_SERVER_PID_FILE=${path.join(paths.executorRunDir, "server.pid")}\nEnvironment=EXECUTOR_SERVER_LOG_FILE=${path.join(paths.executorRunDir, "server.log")}\nEnvironment=EXECUTOR_SERVER_BASE_PATH=/executor\nExecStart=${executorExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
   const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\nWants=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=${paths.executorWorkspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
@@ -2193,15 +2219,15 @@ async function installOrUpdate(args, mode) {
       `opencode binary missing: looked in ${paths.opencodeBinGlobal} and ${paths.opencodeBinLocal}`,
     );
   }
-  const executorBin = resolveExecutorBin(paths);
-  if (!executorBin) {
+  const executorRuntime = resolveExecutorRuntimeCommand(paths, bunBin);
+  if (!executorRuntime) {
     throw new Error(
-      `executor binary missing: looked in ${paths.executorBinGlobal} and ${paths.executorBinLocal}`,
+      `executor runtime missing: looked in vendored executor checkout and ${paths.executorBinGlobal} / ${paths.executorBinLocal}`,
     );
   }
   const opencodeShimPath = writeOpencodeShim(paths, opencodeBin);
 
-  const units = unitContents(paths, executorBin, opencodeBin, agentMockingbirdRuntime.execStart, agentMockingbirdRuntime.mode);
+  const units = unitContents(paths, executorRuntime.execStart, opencodeBin, agentMockingbirdRuntime.execStart, agentMockingbirdRuntime.mode);
   writeFile(paths.executorUnitPath, units.executor);
   writeFile(paths.opencodeUnitPath, units.opencode);
   writeFile(paths.agentMockingbirdUnitPath, units.agentMockingbird);
