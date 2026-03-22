@@ -108,6 +108,14 @@ async function proxyExecutorSidecar(req: Request) {
   });
 }
 
+function rewriteExecutorHtml(html: string, mountPath: string) {
+  const normalizedMountPath = mountPath === "/" ? "/" : mountPath.replace(/\/+$/, "");
+  return html.replace(
+    /(["'=])\/(assets|v1|mcp)(\/[^"'<>]*)/g,
+    `$1${normalizedMountPath}/$2$3`,
+  );
+}
+
 async function serveOpenCodeApp(req: Request) {
   if (!appDistDir) {
     return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
@@ -117,7 +125,19 @@ async function serveOpenCodeApp(req: Request) {
   const pathname = decodeURIComponent(url.pathname);
   const executorMountPath = getConfigSnapshot().config.runtime.executor.uiMountPath;
   if (isMountedPath(pathname, executorMountPath)) {
-    return proxyExecutorSidecar(req);
+    const executorResponse = await proxyExecutorSidecar(req);
+    const contentType = executorResponse.headers.get("content-type") || "";
+    if (contentType.includes("text/html")) {
+      const html = await executorResponse.text();
+      const headers = new Headers(executorResponse.headers);
+      headers.delete("content-length");
+      return new Response(rewriteExecutorHtml(html, executorMountPath), {
+        status: executorResponse.status,
+        statusText: executorResponse.statusText,
+        headers,
+      });
+    }
+    return executorResponse;
   }
   if (isOpenCodeServerPath(pathname)) {
     return proxyOpenCodeSidecar(req);
