@@ -447,7 +447,30 @@ function firstExistingPath(candidates) {
   return null;
 }
 
+function localRepoRootCandidates() {
+  return [
+    path.resolve(MODULE_DIR, "../../../../"),
+    path.resolve(MODULE_DIR, ".."),
+  ];
+}
+
+function resolveLocalRepoRoot() {
+  for (const candidate of localRepoRootCandidates()) {
+    if (
+      fs.existsSync(path.join(candidate, "package.json")) &&
+      fs.existsSync(path.join(candidate, "apps", "server", "src", "cli", "agent-mockingbird.mjs"))
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function resolveAgentMockingbirdAppDir(paths) {
+  const localRepoRoot = resolveLocalRepoRoot();
+  if (localRepoRoot) {
+    return localRepoRoot;
+  }
   return firstExistingPath([
     paths.agentMockingbirdAppDirGlobal,
     paths.agentMockingbirdAppDirLocal,
