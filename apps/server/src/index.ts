@@ -94,7 +94,20 @@ async function proxyExecutorSidecar(req: Request) {
   const snapshot = getConfigSnapshot();
   const sidecarBaseUrl = snapshot.config.runtime.executor.baseUrl;
   const incoming = new URL(req.url);
-  const target = new URL(`${incoming.pathname}${incoming.search}`, sidecarBaseUrl);
+  const mountPath = snapshot.config.runtime.executor.uiMountPath.replace(/\/+$/, "");
+  const forwardedPath = (() => {
+    if (incoming.pathname === `${mountPath}/mcp` || incoming.pathname.startsWith(`${mountPath}/mcp/`)) {
+      return incoming.pathname.slice(mountPath.length) || "/mcp";
+    }
+    if (incoming.pathname.startsWith(`${mountPath}/assets/`)) {
+      return incoming.pathname.slice(mountPath.length) || "/";
+    }
+    if (incoming.pathname.startsWith(`${mountPath}/v1/`)) {
+      return incoming.pathname.slice(mountPath.length) || "/";
+    }
+    return incoming.pathname;
+  })();
+  const target = new URL(`${forwardedPath}${incoming.search}`, sidecarBaseUrl);
   const headers = new Headers(req.headers);
   headers.delete("host");
   headers.set("x-forwarded-host", incoming.host);
