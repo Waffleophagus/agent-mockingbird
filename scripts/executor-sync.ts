@@ -41,6 +41,7 @@ type ParsedArgs = {
 
 type ExecOptions = {
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
   allowFailure?: boolean;
 };
 
@@ -238,7 +239,7 @@ function sanitizedEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessE
 function run(command: string[], options: ExecOptions = {}) {
   const result = spawnSync(command[0]!, command.slice(1), {
     cwd: options.cwd ?? repoRoot,
-    env: sanitizedEnv(process.env),
+    env: sanitizedEnv(options.env ?? process.env),
     encoding: "utf8",
     stdio: ["inherit", "pipe", "pipe"],
   });
@@ -336,7 +337,7 @@ function recreateVendorWorktree(lock: LockFile, baseCommit: string) {
 
   const patchFiles = listPatchFiles(patchesPath);
   if (patchFiles.length > 0) {
-    run(["git", "am", "--3way", ...patchFiles], { cwd: vendorPath });
+    run(["git", "am", "--3way", ...patchFiles], { cwd: vendorPath, env: gitAmEnv() });
   }
 }
 
@@ -476,8 +477,18 @@ function recreateVendorWorktreeIn(lock: LockFile, baseCommit: string, targetPath
   run(["git", "checkout", "-B", lock.branch.name, baseCommit], { cwd: targetPath });
   const patchFiles = listPatchFiles(patchesPath);
   if (patchFiles.length > 0) {
-    run(["git", "am", "--3way", ...patchFiles], { cwd: targetPath });
+    run(["git", "am", "--3way", ...patchFiles], { cwd: targetPath, env: gitAmEnv() });
   }
+}
+
+function gitAmEnv() {
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME ?? "Agent Mockingbird CI",
+    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL ?? "agent-mockingbird-ci@example.invalid",
+    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME ?? "Agent Mockingbird CI",
+    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL ?? "agent-mockingbird-ci@example.invalid",
+  };
 }
 
 function verifyPatchReproducibility(lock: LockFile, baseCommit: string) {
