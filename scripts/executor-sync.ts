@@ -216,9 +216,29 @@ function stripLeadingV(tag: string) {
   return tag.replace(/^v/, "");
 }
 
+function sanitizedEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...baseEnv };
+  for (const key of Object.keys(env)) {
+    if (
+      key === "GIT_DIR" ||
+      key === "GIT_WORK_TREE" ||
+      key === "GIT_INDEX_FILE" ||
+      key === "GIT_OBJECT_DIRECTORY" ||
+      key === "GIT_ALTERNATE_OBJECT_DIRECTORIES" ||
+      key === "GIT_COMMON_DIR" ||
+      key === "GIT_PREFIX" ||
+      key === "GIT_SUPER_PREFIX"
+    ) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 function run(command: string[], options: ExecOptions = {}) {
   const result = spawnSync(command[0]!, command.slice(1), {
     cwd: options.cwd ?? repoRoot,
+    env: sanitizedEnv(process.env),
     encoding: "utf8",
     stdio: ["inherit", "pipe", "pipe"],
   });
@@ -282,12 +302,24 @@ function ensureVendorClean(lock: LockFile) {
 }
 
 function removeWorktreeIfPresent(lock: LockFile, targetPath: string) {
+  const cleanroomPath = path.resolve(repoRoot, lock.paths.cleanroom);
+  run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
   if (!existsSync(targetPath)) {
     return;
   }
-  git(lock, ["worktree", "remove", "--force", targetPath], {
+  const worktrees = run(["git", "worktree", "list", "--porcelain"], {
+    cwd: cleanroomPath,
     allowFailure: true,
-  });
+  }).stdout.split("\n");
+  const registered = worktrees.some(line => line === `worktree ${targetPath}`);
+  if (registered) {
+    git(lock, ["worktree", "remove", "--force", targetPath], {
+      cwd: cleanroomPath,
+      allowFailure: true,
+    });
+    run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
+    return;
+  }
   rmSync(targetPath, { recursive: true, force: true });
 }
 
@@ -297,10 +329,10 @@ function recreateVendorWorktree(lock: LockFile, baseCommit: string) {
   const patchesPath = path.resolve(repoRoot, lock.paths.patches);
 
   removeWorktreeIfPresent(lock, vendorPath);
-  git(lock, ["branch", "-f", lock.branch.name, baseCommit], { cwd: cleanroomPath });
-  git(lock, ["worktree", "add", "--force", vendorPath, lock.branch.name], { cwd: cleanroomPath });
-  run(["git", "reset", "--hard", baseCommit], { cwd: vendorPath });
-  run(["git", "clean", "-fdx"], { cwd: vendorPath });
+  run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
+  mkdirSync(path.dirname(vendorPath), { recursive: true });
+  git(lock, ["worktree", "add", "--detach", vendorPath, baseCommit], { cwd: cleanroomPath });
+  run(["git", "checkout", "-B", lock.branch.name, baseCommit], { cwd: vendorPath });
 
   const patchFiles = listPatchFiles(patchesPath);
   if (patchFiles.length > 0) {
@@ -437,7 +469,11 @@ function runCheck(lock: LockFile) {
 function recreateVendorWorktreeIn(lock: LockFile, baseCommit: string, targetPath: string) {
   const cleanroomPath = path.resolve(repoRoot, lock.paths.cleanroom);
   const patchesPath = path.resolve(repoRoot, lock.paths.patches);
+  removeWorktreeIfPresent(lock, targetPath);
+  run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
+  mkdirSync(path.dirname(targetPath), { recursive: true });
   git(lock, ["worktree", "add", "--detach", targetPath, baseCommit], { cwd: cleanroomPath });
+  run(["git", "checkout", "-B", lock.branch.name, baseCommit], { cwd: targetPath });
   const patchFiles = listPatchFiles(patchesPath);
   if (patchFiles.length > 0) {
     run(["git", "am", "--3way", ...patchFiles], { cwd: targetPath });
