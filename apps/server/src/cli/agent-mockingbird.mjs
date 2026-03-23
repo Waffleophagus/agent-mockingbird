@@ -1533,39 +1533,63 @@ function readInstalledVersion(paths) {
   if (!appDir) {
     return null;
   }
-  const pkgPath = path.join(appDir, "package.json");
+  return readPackageVersion(path.join(appDir, "package.json"));
+}
+
+function readPackageVersion(pkgPath) {
   if (!fs.existsSync(pkgPath)) {
     return null;
   }
   return readJson(pkgPath).version ?? null;
 }
 
+function readPackagedOpenCodeVersion(paths) {
+  const appDir = resolveAgentMockingbirdAppDir(paths);
+  if (!appDir) {
+    return null;
+  }
+  return readPackageVersion(
+    path.join(appDir, "vendor", "opencode", "packages", "opencode", "package.json"),
+  );
+}
+
+function readPackagedExecutorVersion(paths) {
+  const appDir = resolveAgentMockingbirdAppDir(paths);
+  if (!appDir) {
+    return null;
+  }
+  return readPackageVersion(
+    path.join(appDir, "vendor", "executor", "apps", "executor", "package.json"),
+  );
+}
+
 function readInstalledOpenCodeVersion(paths) {
-  const pkgPath = path.join(
+  const installedVersion = readPackageVersion(path.join(
     paths.npmPrefix,
     "lib",
     "node_modules",
     "opencode-ai",
     "package.json",
-  );
-  if (!fs.existsSync(pkgPath)) {
-    return null;
-  }
-  return readJson(pkgPath).version ?? null;
+  ));
+  return installedVersion ?? readPackagedOpenCodeVersion(paths);
 }
 
 function readInstalledExecutorVersion(paths) {
-  const pkgPath = path.join(
+  if (readInstalledExecutorMode(paths) === "embedded-patched") {
+    const packagedVersion = readPackagedExecutorVersion(paths);
+    if (packagedVersion) {
+      return packagedVersion;
+    }
+  }
+
+  const installedVersion = readPackageVersion(path.join(
     paths.npmPrefix,
     "lib",
     "node_modules",
     "executor",
     "package.json",
-  );
-  if (!fs.existsSync(pkgPath)) {
-    return null;
-  }
-  return readJson(pkgPath).version ?? null;
+  ));
+  return installedVersion ?? readPackagedExecutorVersion(paths);
 }
 
 function readInstalledExecutorMode(paths) {
@@ -2537,6 +2561,9 @@ async function runInteractiveProviderOnboarding(input) {
 export const testing = {
   applyDefaultInstallTarget,
   buildEmptyModelDiscoveryDiagnostics,
+  readInstalledExecutorMode,
+  readInstalledExecutorVersion,
+  readInstalledOpenCodeVersion,
   readRunningPackageVersion,
   readOpenCodePackageVersion,
   resolveManagedCliDelegationTarget,

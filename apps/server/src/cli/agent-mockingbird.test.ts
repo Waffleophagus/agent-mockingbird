@@ -203,6 +203,86 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
 });
 
 describe("agent-mockingbird CLI packaged executor runtime", () => {
+  test("reports packaged executor version for embedded-patched runtime", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-version-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const packagedExecutorPkg = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "executor",
+      "package.json",
+    );
+    const installedExecutorPkg = path.join(
+      tempRoot,
+      "npm",
+      "lib",
+      "node_modules",
+      "executor",
+      "package.json",
+    );
+    const executorUnitPath = path.join(tempRoot, "executor.service");
+
+    fs.mkdirSync(path.dirname(packagedExecutorPkg), { recursive: true });
+    fs.mkdirSync(path.dirname(installedExecutorPkg), { recursive: true });
+    fs.writeFileSync(packagedExecutorPkg, JSON.stringify({ name: "executor", version: "1.2.5" }), "utf8");
+    fs.writeFileSync(installedExecutorPkg, JSON.stringify({ name: "executor", version: "1.2.4-beta.4" }), "utf8");
+    fs.writeFileSync(
+      executorUnitPath,
+      'ExecStart="/tmp/app/vendor/executor/apps/executor/src/cli/main.ts" server start --port 8788\n',
+      "utf8",
+    );
+
+    try {
+      expect(
+        testing.readInstalledExecutorMode({
+          executorUnitPath,
+        }),
+      ).toBe("embedded-patched");
+      expect(
+        testing.readInstalledExecutorVersion({
+          agentMockingbirdAppDirGlobal: appDir,
+          npmPrefix: path.join(tempRoot, "npm"),
+          executorUnitPath,
+        }),
+      ).toBe("1.2.5");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to packaged opencode version when installed package metadata is unavailable", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-version-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const packagedOpencodePkg = path.join(
+      appDir,
+      "vendor",
+      "opencode",
+      "packages",
+      "opencode",
+      "package.json",
+    );
+
+    fs.mkdirSync(path.dirname(packagedOpencodePkg), { recursive: true });
+    fs.writeFileSync(
+      packagedOpencodePkg,
+      JSON.stringify({ name: "opencode", version: "1.2.27" }),
+      "utf8",
+    );
+
+    try {
+      expect(
+        testing.readInstalledOpenCodeVersion({
+          agentMockingbirdAppDirGlobal: appDir,
+          npmPrefix: path.join(tempRoot, "npm"),
+        }),
+      ).toBe("1.2.27");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test("rejects embedded-patched executor when bundled web assets are missing", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-missing-assets-"));
     const appDir = path.join(tempRoot, "agent-mockingbird");
