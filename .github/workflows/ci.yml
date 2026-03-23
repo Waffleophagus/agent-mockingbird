@@ -73,9 +73,15 @@ jobs:
           fi
 
           if [[ "${should_publish}" == "true" ]]; then
-            registry_json="$(curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true)"
-            version_info="$(REGISTRY_JSON="${registry_json}" node -e '
-              const raw = process.env.REGISTRY_JSON || "";
+            version_info="$({
+              curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true
+            } | node -e '
+              let raw = "";
+              process.stdin.setEncoding("utf8");
+              process.stdin.on("data", (chunk) => {
+                raw += chunk;
+              });
+              process.stdin.on("end", () => {
               let latest = "";
               let next = "";
 
@@ -112,10 +118,11 @@ jobs:
                   ? currentNext.prerelease + 1
                   : 1;
 
-              console.log(`LATEST_VERSION=${latest}`);
-              console.log(`NEXT_VERSION=${next}`);
-              console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
-              console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
+                console.log(`LATEST_VERSION=${latest}`);
+                console.log(`NEXT_VERSION=${next}`);
+                console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
+                console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
+              });
             ')"
             eval "${version_info}"
             latest_version="${LATEST_VERSION}"
