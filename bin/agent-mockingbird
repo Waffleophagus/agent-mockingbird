@@ -10,6 +10,7 @@ const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".agent-mockingbird");
 const PACKAGE_NAME = "agent-mockingbird";
 const DEFAULT_TAG = "latest";
 const MODULE_PATH = fileURLToPath(import.meta.url);
+const MODULE_DIR = path.dirname(MODULE_PATH);
 
 function readRootDirArg(argv = process.argv.slice(2)) {
   for (let index = 0; index < argv.length; index += 1) {
@@ -46,6 +47,29 @@ function managedCliExists(rootDir) {
   return fs.existsSync(resolveManagedCliPath(rootDir));
 }
 
+function readRunningPackageVersion(moduleDir = MODULE_DIR) {
+  const candidatePaths = [
+    path.resolve(moduleDir, "../package.json"),
+    path.resolve(moduleDir, "../../../../package.json"),
+  ];
+
+  for (const candidatePath of candidatePaths) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+      if (typeof parsed.version === "string" && parsed.version.trim()) {
+        return parsed.version.trim();
+      }
+    } catch {
+      // Ignore unreadable package metadata and continue searching.
+    }
+  }
+
+  return "";
+}
+
 function currentPackageOwnsManagedCli(rootDir, modulePath = MODULE_PATH) {
   const managedCliPath = resolveManagedCliPath(rootDir);
   if (!fs.existsSync(managedCliPath) || !fs.existsSync(modulePath)) {
@@ -77,7 +101,10 @@ function commandExists(command, env = process.env) {
   return (result.status ?? 1) === 0;
 }
 
-function parseBootstrapInstallTarget(argv = process.argv.slice(2)) {
+function parseBootstrapInstallTarget(
+  argv = process.argv.slice(2),
+  moduleDir = MODULE_DIR,
+) {
   let tag = DEFAULT_TAG;
   let version;
   let tagExplicit = false;
@@ -113,7 +140,14 @@ function parseBootstrapInstallTarget(argv = process.argv.slice(2)) {
   if (versionExplicit) {
     return version;
   }
-  return `${PACKAGE_NAME}@${tagExplicit ? tag : DEFAULT_TAG}`;
+  if (tagExplicit) {
+    return `${PACKAGE_NAME}@${tag}`;
+  }
+  const runningVersion = readRunningPackageVersion(moduleDir);
+  if (runningVersion) {
+    return `${PACKAGE_NAME}@${runningVersion}`;
+  }
+  return `${PACKAGE_NAME}@${DEFAULT_TAG}`;
 }
 
 function bootstrapManagedInstall(rootDir, argv = process.argv, env = process.env) {
@@ -157,17 +191,19 @@ function bootstrapManagedInstall(rootDir, argv = process.argv, env = process.env
 }
 
 function main() {
+  const command = process.argv[2] || "";
   const rootDir = resolveRootDir();
   if (currentPackageOwnsManagedCli(rootDir)) {
     execManagedCli(rootDir);
   }
-  if (!managedCliExists(rootDir)) {
+  if (!managedCliExists(rootDir) || command === "install") {
     bootstrapManagedInstall(rootDir);
   }
   execManagedCli(rootDir);
 }
 
 export const testing = {
+  readRunningPackageVersion,
   currentPackageOwnsManagedCli,
   managedCliExists,
   parseBootstrapInstallTarget,

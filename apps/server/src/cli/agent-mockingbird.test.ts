@@ -309,6 +309,27 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
 });
 
 describe("agent-mockingbird CLI delegation", () => {
+  test("bootstrap install target defaults to the running package version", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bootstrap-version-"));
+    const binDir = path.join(tempRoot, "package", "bin");
+    const originalArgv = process.argv;
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, "package", "package.json"),
+      JSON.stringify({ version: "0.0.4-next.99" }),
+      "utf8",
+    );
+
+    try {
+      process.argv = ["node", path.join(binDir, "agent-mockingbird"), "install"];
+      const target = bootstrapTesting.parseBootstrapInstallTarget(["install"], binDir);
+      expect(target).toBe("agent-mockingbird@0.0.4-next.99");
+    } finally {
+      process.argv = originalArgv;
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test("delegates from a shadowing global install to the managed root CLI", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-delegate-"));
     const managedCli = path.join(
