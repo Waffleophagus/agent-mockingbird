@@ -12,6 +12,29 @@
     "type": "git",
     "url": "https://github.com/Waffleophagus/agent-mockingbird"
   },
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "agent-mockingbird.config.example.json",
+    "apps",
+    "bin",
+    "build-bin.ts",
+    "build-cli.mjs",
+    "build.ts",
+    "docs",
+    "drizzle",
+    "executor.lock.json",
+    "opencode.lock.json",
+    "package.json",
+    "packages",
+    "patches",
+    "runtime-assets",
+    "scripts",
+    "tsconfig.json",
+    "turbo.json",
+    "vendor/executor"
+  ],
   "bin": {
     "agent-mockingbird": "bin/agent-mockingbird"
   },

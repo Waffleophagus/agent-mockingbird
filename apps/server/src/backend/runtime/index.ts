@@ -14,6 +14,8 @@ interface RuntimeStartupInfo {
     workspaceDir: string;
     dataDir: string;
     uiMountPath: string;
+    embeddedMode: "embedded-patched" | "upstream-fallback";
+    healthcheckPath: string;
   };
   opencode: {
     baseUrl: string;
@@ -64,6 +66,8 @@ export function getRuntimeStartupInfo(): RuntimeStartupInfo {
       workspaceDir: config.runtime.executor.workspaceDir,
       dataDir: config.runtime.executor.dataDir,
       uiMountPath: config.runtime.executor.uiMountPath,
+      embeddedMode: config.runtime.embeddedServices.executor.mode,
+      healthcheckPath: config.runtime.embeddedServices.executor.healthcheckPath,
     },
     opencode: {
       baseUrl: connection.baseUrl,

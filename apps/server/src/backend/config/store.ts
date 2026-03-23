@@ -133,6 +133,15 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
   if (executorDataDir) executorPatch.dataDir = executorDataDir;
   const executorUiMountPath = readExplicitEnvString("AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH");
   if (executorUiMountPath) executorPatch.uiMountPath = executorUiMountPath;
+  const executorHealthcheckPath = readExplicitEnvString("AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH");
+  const executorMode = readExplicitEnvString("AGENT_MOCKINGBIRD_EXECUTOR_MODE");
+
+  const embeddedExecutorPatch: Record<string, unknown> = {};
+  if (typeof executorEnabled === "boolean") embeddedExecutorPatch.enabled = executorEnabled;
+  if (executorBaseUrl) embeddedExecutorPatch.baseUrl = executorBaseUrl;
+  if (executorUiMountPath) embeddedExecutorPatch.mountPath = executorUiMountPath;
+  if (executorHealthcheckPath) embeddedExecutorPatch.healthcheckPath = executorHealthcheckPath;
+  if (executorMode) embeddedExecutorPatch.mode = executorMode;
 
   const memoryPatch: Record<string, unknown> = {};
 
@@ -171,7 +180,12 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
     memoryPatch.injectionDedupeMaxTracked = memoryInjectionDedupeMaxTracked;
   }
 
-  if (!Object.keys(opencodePatch).length && !Object.keys(executorPatch).length && !Object.keys(memoryPatch).length) {
+  if (
+    !Object.keys(opencodePatch).length &&
+    !Object.keys(executorPatch).length &&
+    !Object.keys(embeddedExecutorPatch).length &&
+    !Object.keys(memoryPatch).length
+  ) {
     return {};
   }
   return {
@@ -185,6 +199,13 @@ function buildExplicitEnvConfigDefaultsPatch(): Record<string, unknown> {
     runtime: {
       ...(Object.keys(opencodePatch).length ? { opencode: opencodePatch } : {}),
       ...(Object.keys(executorPatch).length ? { executor: executorPatch } : {}),
+      ...(Object.keys(embeddedExecutorPatch).length
+        ? {
+            embeddedServices: {
+              executor: embeddedExecutorPatch,
+            },
+          }
+        : {}),
       ...(Object.keys(memoryPatch).length ? { memory: memoryPatch } : {}),
     },
   };
@@ -274,6 +295,15 @@ function buildLegacyBootstrappedConfig() {
         dataDir: env.AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR,
         uiMountPath: env.AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH,
       },
+      embeddedServices: {
+        executor: {
+          enabled: env.AGENT_MOCKINGBIRD_EXECUTOR_ENABLED,
+          mountPath: env.AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH,
+          baseUrl: DEFAULT_EXECUTOR_BASE_URL,
+          healthcheckPath: env.AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH,
+          mode: env.AGENT_MOCKINGBIRD_EXECUTOR_MODE,
+        },
+      },
       smokeTest: {
         prompt: DEFAULT_SMOKE_TEST_PROMPT,
         expectedResponsePattern: DEFAULT_SMOKE_TEST_PATTERN,
@@ -350,6 +380,7 @@ function buildLegacyBootstrappedConfig() {
           "runtime.opencode.childSessionHideAfterDays",
           "runtime.opencode.bootstrap",
           "runtime.executor",
+          "runtime.embeddedServices",
           "runtime.runStream",
           "runtime.memory",
           "runtime.heartbeat",
@@ -386,6 +417,8 @@ function migrateConfigShape(raw: unknown): unknown {
   const runtime = isPlainObject(root.runtime) ? root.runtime : {};
   const opencode = isPlainObject(runtime.opencode) ? runtime.opencode : {};
   const executor = isPlainObject(runtime.executor) ? runtime.executor : {};
+  const embeddedServices = isPlainObject(runtime.embeddedServices) ? runtime.embeddedServices : {};
+  const embeddedExecutor = isPlainObject(embeddedServices.executor) ? embeddedServices.executor : {};
   const memory = isPlainObject(runtime.memory) ? runtime.memory : {};
   const pinnedDirectory =
     (typeof root.workspace === "object" &&
@@ -395,6 +428,7 @@ function migrateConfigShape(raw: unknown): unknown {
       ? (root.workspace as { pinnedDirectory: string }).pinnedDirectory
       : undefined) ??
     (typeof opencode.directory === "string" ? opencode.directory : undefined) ??
+    readExplicitEnvString("AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY") ??
     (typeof memory.workspaceDir === "string" ? memory.workspaceDir : undefined) ??
     env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
 
@@ -410,10 +444,14 @@ function migrateConfigShape(raw: unknown): unknown {
         enabled:
           typeof executor.enabled === "boolean"
             ? executor.enabled
+            : typeof embeddedExecutor.enabled === "boolean"
+              ? embeddedExecutor.enabled
             : env.AGENT_MOCKINGBIRD_EXECUTOR_ENABLED,
         baseUrl:
           typeof executor.baseUrl === "string" && executor.baseUrl.trim()
             ? executor.baseUrl
+            : typeof embeddedExecutor.baseUrl === "string" && embeddedExecutor.baseUrl.trim()
+              ? embeddedExecutor.baseUrl
             : DEFAULT_EXECUTOR_BASE_URL,
         workspaceDir:
           typeof executor.workspaceDir === "string" && executor.workspaceDir.trim()
@@ -426,7 +464,40 @@ function migrateConfigShape(raw: unknown): unknown {
         uiMountPath:
           typeof executor.uiMountPath === "string" && executor.uiMountPath.trim()
             ? executor.uiMountPath
+            : typeof embeddedExecutor.mountPath === "string" && embeddedExecutor.mountPath.trim()
+              ? embeddedExecutor.mountPath
             : env.AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH,
+      },
+      embeddedServices: {
+        ...embeddedServices,
+        executor: {
+          enabled:
+            typeof embeddedExecutor.enabled === "boolean"
+              ? embeddedExecutor.enabled
+              : typeof executor.enabled === "boolean"
+                ? executor.enabled
+                : env.AGENT_MOCKINGBIRD_EXECUTOR_ENABLED,
+          mountPath:
+            typeof embeddedExecutor.mountPath === "string" && embeddedExecutor.mountPath.trim()
+              ? embeddedExecutor.mountPath
+              : typeof executor.uiMountPath === "string" && executor.uiMountPath.trim()
+                ? executor.uiMountPath
+                : env.AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH,
+          baseUrl:
+            typeof embeddedExecutor.baseUrl === "string" && embeddedExecutor.baseUrl.trim()
+              ? embeddedExecutor.baseUrl
+              : typeof executor.baseUrl === "string" && executor.baseUrl.trim()
+                ? executor.baseUrl
+                : DEFAULT_EXECUTOR_BASE_URL,
+          healthcheckPath:
+            typeof embeddedExecutor.healthcheckPath === "string" && embeddedExecutor.healthcheckPath.trim()
+              ? embeddedExecutor.healthcheckPath
+              : env.AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH,
+          mode:
+            embeddedExecutor.mode === "embedded-patched" || embeddedExecutor.mode === "upstream-fallback"
+              ? embeddedExecutor.mode
+              : env.AGENT_MOCKINGBIRD_EXECUTOR_MODE,
+        },
       },
     },
   };
@@ -546,6 +617,9 @@ export function parseConfig(raw: unknown) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }
   const config = parsed.data;
+  config.runtime.embeddedServices.executor.enabled = config.runtime.executor.enabled;
+  config.runtime.embeddedServices.executor.baseUrl = config.runtime.executor.baseUrl;
+  config.runtime.embeddedServices.executor.mountPath = config.runtime.executor.uiMountPath;
   config.runtime.opencode.baseUrl = normalizeOpencodeBaseUrl(config.runtime.opencode.baseUrl);
   const workspaceAlignment = resolveWorkspaceAlignment(config);
   const normalizedMemoryWorkspaceDir = workspaceAlignment.memoryWorkspaceDir;

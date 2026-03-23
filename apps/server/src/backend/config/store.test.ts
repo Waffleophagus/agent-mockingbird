@@ -89,6 +89,25 @@ test("parseConfig aligns runtime workspace paths to workspace.pinnedDirectory", 
   expect(parsed.runtime.memory.workspaceDir).toBe(expected);
 });
 
+test("parseConfig backfills embedded executor config from legacy runtime.executor", () => {
+  const filePath = resolveExampleConfigPath();
+  const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    runtime?: { executor?: Record<string, unknown>; embeddedServices?: { executor?: Record<string, unknown> } };
+  };
+  if (!raw.runtime?.executor || !raw.runtime.embeddedServices?.executor) {
+    throw new Error("Test fixture missing executor settings");
+  }
+
+  raw.runtime.executor.uiMountPath = "/custom-executor";
+  raw.runtime.executor.baseUrl = "http://127.0.0.1:9999";
+  delete raw.runtime.embeddedServices.executor.mountPath;
+  delete raw.runtime.embeddedServices.executor.baseUrl;
+
+  const parsed = parseConfig(raw);
+  expect(parsed.runtime.embeddedServices.executor.mountPath).toBe("/custom-executor");
+  expect(parsed.runtime.embeddedServices.executor.baseUrl).toBe("http://127.0.0.1:9999");
+});
+
 test("parseConfig ignores legacy mismatched runtime workspace fields in favor of workspace.pinnedDirectory", () => {
   const filePath = resolveExampleConfigPath();
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {

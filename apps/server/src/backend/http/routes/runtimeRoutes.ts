@@ -22,6 +22,7 @@ const runtimePatchSchema = z
     runtime: z
       .object({
         executor: z.record(z.string(), z.unknown()).optional(),
+        embeddedServices: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
         memory: z.record(z.string(), z.unknown()).optional(),
         heartbeat: z.record(z.string(), z.unknown()).optional(),
         agentHeartbeats: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
@@ -146,6 +147,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
           path: snapshot.path,
           pinnedWorkspace: snapshot.config.workspace.pinnedDirectory,
           executor: snapshot.config.runtime.executor,
+          embeddedServices: snapshot.config.runtime.embeddedServices,
           opencode: {
             baseUrl: snapshot.config.runtime.opencode.baseUrl,
             workspaceDirectory: storage.workspaceDirectory,

@@ -46,10 +46,16 @@ rm -rf "${STAGE_DIR:?}/${PREFIX}/dist"
 cp -R "${ROOT_DIR}/dist" "${STAGE_DIR}/${PREFIX}/dist"
 rm -rf "${STAGE_DIR:?}/${PREFIX}/dist/release-stage"
 
+echo "Embedding vendored Executor runtime..."
+rm -rf "${STAGE_DIR:?}/${PREFIX}/vendor/executor"
+mkdir -p "${STAGE_DIR}/${PREFIX}/vendor"
+cp -R "${ROOT_DIR}/vendor/executor" "${STAGE_DIR}/${PREFIX}/vendor/executor"
+
 test -f "${STAGE_DIR}/${PREFIX}/dist/agent-mockingbird"
 test -f "${STAGE_DIR}/${PREFIX}/dist/drizzle/meta/_journal.json"
 test -f "${STAGE_DIR}/${PREFIX}/dist/app/index.html"
 test -f "${STAGE_DIR}/${PREFIX}/drizzle/meta/_journal.json"
+test -f "${STAGE_DIR}/${PREFIX}/vendor/executor/apps/executor/src/cli/main.ts"
 
 echo "Packing release bundle..."
 tar -C "${STAGE_DIR}" -czf "${ARCHIVE_PATH}" "${PREFIX}"

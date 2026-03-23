@@ -14,6 +14,8 @@ const envSchema = {
   AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR: z.string().default("./data/executor-workspace"),
   AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR: z.string().default("./data/executor"),
   AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH: z.string().default("/executor"),
+  AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH: z.string().default("/executor"),
+  AGENT_MOCKINGBIRD_EXECUTOR_MODE: z.enum(["embedded-patched", "upstream-fallback"]).default("embedded-patched"),
   AGENT_MOCKINGBIRD_EXPO_PUSH_API_URL: z.string().url().default("https://exp.host/--/api/v2/push/send"),
   AGENT_MOCKINGBIRD_CRON_ENABLED: z.coerce.boolean().default(true),
   AGENT_MOCKINGBIRD_CRON_SCHEDULER_POLL_MS: z.coerce.number().int().min(250).default(1_000),

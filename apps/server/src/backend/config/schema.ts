@@ -145,6 +145,30 @@ const runtimeExecutorSchema = z
   })
   .strict();
 
+const embeddedServiceModeSchema = z.enum(["embedded-patched", "upstream-fallback"]);
+
+const runtimeEmbeddedExecutorSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    mountPath: z.string().min(1).default("/executor"),
+    baseUrl: z.string().url(),
+    healthcheckPath: z.string().min(1).default("/executor"),
+    mode: embeddedServiceModeSchema.default("embedded-patched"),
+  })
+  .strict();
+
+const runtimeEmbeddedServicesSchema = z
+  .object({
+    executor: runtimeEmbeddedExecutorSchema.default({
+      enabled: true,
+      mountPath: "/executor",
+      baseUrl: "http://127.0.0.1:8788",
+      healthcheckPath: "/executor",
+      mode: "embedded-patched",
+    }),
+  })
+  .strict();
+
 const runtimeRunStreamSchema = z
   .object({
     heartbeatMs: z.number().int().min(1_000).default(15_000),
@@ -269,6 +293,7 @@ const runtimeConfigPolicySchema = z
       "runtime.opencode.bootstrap",
       "runtime.opencode.imageModel",
       "runtime.executor",
+      "runtime.embeddedServices",
       "runtime.runStream",
       "runtime.memory",
       "runtime.heartbeat",
@@ -299,6 +324,15 @@ export const agentMockingbirdConfigSchema = z
       .object({
         opencode: runtimeOpencodeSchema,
         executor: runtimeExecutorSchema,
+        embeddedServices: runtimeEmbeddedServicesSchema.default({
+          executor: {
+            enabled: true,
+            mountPath: "/executor",
+            baseUrl: "http://127.0.0.1:8788",
+            healthcheckPath: "/executor",
+            mode: "embedded-patched",
+          },
+        }),
         smokeTest: runtimeSmokeTestSchema,
         runStream: runtimeRunStreamSchema.default({
           heartbeatMs: 15_000,
@@ -374,6 +408,7 @@ export const agentMockingbirdConfigSchema = z
             "runtime.opencode.bootstrap",
             "runtime.opencode.imageModel",
             "runtime.executor",
+            "runtime.embeddedServices",
             "runtime.runStream",
             "runtime.memory",
             "runtime.heartbeat",

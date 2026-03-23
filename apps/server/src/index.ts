@@ -4,6 +4,7 @@ import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { CronService } from "./backend/cron/service";
 import "./backend/db/migrate";
 import { ensureSeedData, getHeartbeatSnapshot, getUsageSnapshot } from "./backend/db/repository";
+import { proxyEmbeddedExternalRequest, proxyEmbeddedServiceRequest } from "./backend/embed/gateway";
 import { env } from "./backend/env";
 import { HeartbeatRuntimeService } from "./backend/heartbeat/runtimeService";
 import { dispatchRoute } from "./backend/http/router";
@@ -47,11 +48,6 @@ function isOpenCodeServerPath(pathname: string) {
   return OPENCODE_SERVER_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-function isMountedPath(pathname: string, mountPath: string) {
-  const normalized = mountPath === "/" ? "/" : mountPath.replace(/\/+$/, "");
-  return pathname === normalized || pathname.startsWith(`${normalized}/`);
-}
-
 ensureSeedData();
 ensureConfigFile();
 const configSnapshot = getConfigSnapshot();
@@ -90,71 +86,6 @@ async function proxyOpenCodeSidecar(req: Request) {
   });
 }
 
-async function proxyExecutorSidecar(req: Request) {
-  const snapshot = getConfigSnapshot();
-  const sidecarBaseUrl = snapshot.config.runtime.executor.baseUrl;
-  const incoming = new URL(req.url);
-  const mountPath = snapshot.config.runtime.executor.uiMountPath.replace(/\/+$/, "");
-  const forwardedPath = (() => {
-    if (incoming.pathname === `${mountPath}/mcp` || incoming.pathname.startsWith(`${mountPath}/mcp/`)) {
-      return incoming.pathname.slice(mountPath.length) || "/mcp";
-    }
-    if (incoming.pathname.startsWith(`${mountPath}/assets/`)) {
-      return incoming.pathname.slice(mountPath.length) || "/";
-    }
-    if (incoming.pathname.startsWith(`${mountPath}/v1/`)) {
-      return incoming.pathname.slice(mountPath.length) || "/";
-    }
-    return incoming.pathname;
-  })();
-  const target = new URL(`${forwardedPath}${incoming.search}`, sidecarBaseUrl);
-  const headers = new Headers(req.headers);
-  headers.delete("host");
-  headers.set("x-forwarded-host", incoming.host);
-  headers.set("x-forwarded-proto", incoming.protocol.replace(/:$/, ""));
-  headers.set("x-forwarded-prefix", snapshot.config.runtime.executor.uiMountPath);
-  return fetch(target, {
-    method: req.method,
-    headers,
-    body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
-    redirect: "manual",
-  });
-}
-
-function rewriteExecutorHtml(html: string, mountPath: string) {
-  const normalizedMountPath = mountPath === "/" ? "/" : mountPath.replace(/\/+$/, "");
-  return html.replace(
-    /(["'=])\/(assets|v1|mcp)(\/[^"'<>]*)/g,
-    `$1${normalizedMountPath}/$2$3`,
-  );
-}
-
-function requestTargetsExecutorFromReferer(req: Request, mountPath: string) {
-  const referer = req.headers.get("referer");
-  if (!referer) {
-    return false;
-  }
-  try {
-    const refererUrl = new URL(referer);
-    return isMountedPath(decodeURIComponent(refererUrl.pathname), mountPath);
-  } catch {
-    return false;
-  }
-}
-
-function shouldFallbackToExecutorAsset(req: Request, pathname: string, mountPath: string) {
-  if (!pathname.includes(".")) {
-    return false;
-  }
-  if (pathname.startsWith("/api/")) {
-    return false;
-  }
-  if (pathname.startsWith(`${mountPath}/`)) {
-    return true;
-  }
-  return requestTargetsExecutorFromReferer(req, mountPath);
-}
-
 async function serveOpenCodeApp(req: Request) {
   if (!appDistDir) {
     return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
@@ -162,21 +93,14 @@ async function serveOpenCodeApp(req: Request) {
 
   const url = new URL(req.url);
   const pathname = decodeURIComponent(url.pathname);
-  const executorMountPath = getConfigSnapshot().config.runtime.executor.uiMountPath;
-  if (isMountedPath(pathname, executorMountPath)) {
-    const executorResponse = await proxyExecutorSidecar(req);
-    const contentType = executorResponse.headers.get("content-type") || "";
-    if (contentType.includes("text/html")) {
-      const html = await executorResponse.text();
-      const headers = new Headers(executorResponse.headers);
-      headers.delete("content-length");
-      return new Response(rewriteExecutorHtml(html, executorMountPath), {
-        status: executorResponse.status,
-        statusText: executorResponse.statusText,
-        headers,
-      });
-    }
-    return executorResponse;
+  const config = getConfigSnapshot().config;
+  const embeddedServiceResponse = await proxyEmbeddedServiceRequest(req, config);
+  if (embeddedServiceResponse) {
+    return embeddedServiceResponse;
+  }
+  const embeddedExternalResponse = await proxyEmbeddedExternalRequest(req, config);
+  if (embeddedExternalResponse) {
+    return embeddedExternalResponse;
   }
   if (isOpenCodeServerPath(pathname)) {
     return proxyOpenCodeSidecar(req);
@@ -186,10 +110,6 @@ async function serveOpenCodeApp(req: Request) {
   const candidate = Bun.file(`${appDistDir}/${relativePath}`);
   if (await candidate.exists()) {
     return new Response(candidate);
-  }
-
-  if (shouldFallbackToExecutorAsset(req, pathname, executorMountPath)) {
-    return proxyExecutorSidecar(req);
   }
 
   if (relativePath.includes(".")) {
