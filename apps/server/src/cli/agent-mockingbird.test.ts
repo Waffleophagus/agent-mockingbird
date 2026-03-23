@@ -306,3 +306,113 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
     }
   });
 });
+
+describe("agent-mockingbird CLI embedded executor verification", () => {
+  test("accepts embedded executor HTML without a local stylesheet asset", async () => {
+    const responses = new Map([
+      [
+        "http://127.0.0.1:3001/executor",
+        new Response(
+          `<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans" />
+    <script type="module" crossorigin src="/executor/assets/index-HC_ohraG.js"></script>
+    <link rel="modulepreload" crossorigin href="/executor/assets/index-DkZ8Vi7-.js">
+  </head>
+  <body></body>
+</html>`,
+          { status: 200, headers: { "content-type": "text/html" } },
+        ),
+      ],
+      [
+        "http://127.0.0.1:3001/executor/assets/index-HC_ohraG.js",
+        new Response("console.log('ok');", {
+          status: 200,
+          headers: { "content-type": "text/javascript" },
+        }),
+      ],
+    ]);
+    const fetchImpl = Object.assign(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const response = responses.get(url);
+        if (!response) {
+          throw new Error(`unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+        }
+        return response.clone();
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    );
+
+    const result = await testing.verifyEmbeddedExecutorGateway(
+      "http://127.0.0.1:3001/executor",
+      fetchImpl,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.pageOk).toBe(true);
+    expect(result.scriptOk).toBe(true);
+    expect(result.cssOk).toBe(true);
+    expect(result.cssUrl).toBe("");
+    expect(result.scriptUrl).toBe(
+      "http://127.0.0.1:3001/executor/assets/index-HC_ohraG.js",
+    );
+  });
+
+  test("rejects embedded executor HTML that still leaks root assets", async () => {
+    const responses = new Map([
+      [
+        "http://127.0.0.1:3001/executor",
+        new Response(
+          `<!doctype html>
+<html>
+  <head>
+    <script type="module" crossorigin src="/executor/assets/index-HC_ohraG.js"></script>
+    <img src="/assets/leak.png" />
+  </head>
+  <body></body>
+</html>`,
+          { status: 200, headers: { "content-type": "text/html" } },
+        ),
+      ],
+      [
+        "http://127.0.0.1:3001/executor/assets/index-HC_ohraG.js",
+        new Response("console.log('ok');", {
+          status: 200,
+          headers: { "content-type": "text/javascript" },
+        }),
+      ],
+    ]);
+    const fetchImpl = Object.assign(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const response = responses.get(url);
+        if (!response) {
+          throw new Error(`unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+        }
+        return response.clone();
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    );
+
+    const result = await testing.verifyEmbeddedExecutorGateway(
+      "http://127.0.0.1:3001/executor",
+      fetchImpl,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.rootAssetLeakage).toBe(true);
+    expect(result.error).toBe("executor HTML still references root /assets/");
+  });
+});

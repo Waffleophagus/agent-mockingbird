@@ -987,13 +987,19 @@ async function healthCheckWithRetry(url, input = {}) {
   return last;
 }
 
-async function verifyEmbeddedExecutorGateway(baseUrl) {
+async function verifyEmbeddedExecutorGateway(baseUrl, fetchImpl = fetch) {
   try {
-    const htmlResponse = await fetch(baseUrl, { method: "GET" });
+    const htmlResponse = await fetchImpl(baseUrl, { method: "GET" });
     const html = await htmlResponse.text();
-    const stylesheetMatch = html.match(
-      /<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/i,
-    );
+    const stylesheetMatches = [
+      ...html.matchAll(
+        /<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/gi,
+      ),
+    ];
+    const stylesheetHref =
+      stylesheetMatches
+        .map((match) => match[1])
+        .find((href) => href.startsWith("/executor/assets/")) ?? "";
     const scriptMatch = html.match(
       /<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i,
     );
@@ -1012,25 +1018,10 @@ async function verifyEmbeddedExecutorGateway(baseUrl) {
         error: `dashboard page returned ${htmlResponse.status}`,
       };
     }
-    if (!stylesheetMatch) {
-      return {
-        ok: false,
-        pageOk: true,
-        cssOk: false,
-        scriptOk: false,
-        pageStatus: htmlResponse.status,
-        cssStatus: 0,
-        scriptStatus: 0,
-        cssUrl: "",
-        scriptUrl: "",
-        referencedFontCount: 0,
-        error: "dashboard HTML did not include a stylesheet link",
-      };
-    }
     if (!scriptMatch) {
       return {
         ok: false,
-        pageOk: true,
+        pageOk: htmlResponse.ok,
         cssOk: false,
         scriptOk: false,
         pageStatus: htmlResponse.status,
@@ -1043,29 +1034,36 @@ async function verifyEmbeddedExecutorGateway(baseUrl) {
       };
     }
 
-    const cssUrl = new globalThis.URL(stylesheetMatch[1], baseUrl).toString();
+    const cssUrl = stylesheetHref
+      ? new globalThis.URL(stylesheetHref, baseUrl).toString()
+      : "";
     const scriptUrl = new globalThis.URL(scriptMatch[1], baseUrl).toString();
-    const cssResponse = await fetch(cssUrl, { method: "GET" });
-    const cssText = await cssResponse.text();
-    const scriptResponse = await fetch(scriptUrl, { method: "GET" });
-    const referencedFontUrls = [
-      ...cssText.matchAll(/url\((['"]?)([^'")]*\.woff2)\1\)/gi),
-    ].map((match) => new globalThis.URL(match[2], cssUrl).toString());
+    const scriptResponse = await fetchImpl(scriptUrl, { method: "GET" });
+    let cssResponse = { ok: true, status: 200 };
+    let referencedFontUrls = [];
+    if (cssUrl) {
+      const response = await fetchImpl(cssUrl, { method: "GET" });
+      const cssText = await response.text();
+      cssResponse = response;
+      referencedFontUrls = [
+        ...cssText.matchAll(/url\((['"]?)([^'")]*\.woff2)\1\)/gi),
+      ].map((match) => new globalThis.URL(match[2], cssUrl).toString());
+    }
+    const cssRequired = Boolean(cssUrl);
+    const cssOk = !cssRequired || (cssResponse.ok && cssUrl.includes("/executor/assets/"));
     return {
       ok:
         htmlResponse.ok &&
-        cssResponse.ok &&
         scriptResponse.ok &&
-        cssUrl.includes("/executor/assets/") &&
+        cssOk &&
         scriptUrl.includes("/executor/assets/") &&
         !html.includes('"/assets/') &&
-        !html.includes("'/assets/") &&
-        referencedFontUrls.length > 0,
+        !html.includes("'/assets/"),
       pageOk: htmlResponse.ok,
-      cssOk: cssResponse.ok && cssUrl.includes("/executor/assets/"),
+      cssOk,
       scriptOk: scriptResponse.ok && scriptUrl.includes("/executor/assets/"),
       pageStatus: htmlResponse.status,
-      cssStatus: cssResponse.status,
+      cssStatus: cssRequired ? cssResponse.status : 0,
       scriptStatus: scriptResponse.status,
       cssUrl,
       scriptUrl,
@@ -1076,15 +1074,13 @@ async function verifyEmbeddedExecutorGateway(baseUrl) {
         ? `stylesheet returned ${cssResponse.status}`
         : !scriptResponse.ok
           ? `module script returned ${scriptResponse.status}`
-          : !cssUrl.includes("/executor/assets/")
+          : cssRequired && !cssUrl.includes("/executor/assets/")
             ? "stylesheet is not served from /executor/assets/"
-            : !scriptUrl.includes("/executor/assets/")
+          : !scriptUrl.includes("/executor/assets/")
               ? "module script is not served from /executor/assets/"
-              : html.includes('"/assets/') || html.includes("'/assets/")
+            : html.includes('"/assets/') || html.includes("'/assets/")
                 ? "executor HTML still references root /assets/"
-                : referencedFontUrls.length === 0
-                  ? "stylesheet did not reference any .woff2 assets"
-                  : "",
+                : "",
     };
   } catch (error) {
     return {
@@ -2474,6 +2470,7 @@ export const testing = {
   resolvePackagedExecutorWebAssetsDir,
   resolveExecutorRuntimeCommand,
   unitContents,
+  verifyEmbeddedExecutorGateway,
 };
 
 /**
