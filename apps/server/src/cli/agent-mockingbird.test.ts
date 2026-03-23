@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { testing as bootstrapTesting } from "./agent-mockingbird-bootstrap.mjs";
 import { testing } from "./agent-mockingbird.mjs";
-import { testing as bootstrapTesting } from "../../../../bin/agent-mockingbird-bootstrap";
 
 describe("agent-mockingbird CLI onboarding diagnostics", () => {
   test("builds actionable diagnostics when runtime model discovery is empty", () => {
@@ -330,7 +330,6 @@ describe("agent-mockingbird CLI delegation", () => {
       const target = testing.resolveManagedCliDelegationTarget({
         argv: ["node", globalCli, "update", "--next", "--root-dir", tempRoot],
         env: {},
-        modulePath: globalCli,
       });
 
       expect(target).toBe(managedCli);

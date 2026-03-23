@@ -7,7 +7,7 @@ const { console } = globalThis;
 
 const repoRoot = import.meta.dir;
 const src = path.join(repoRoot, "apps", "server", "src", "cli", "agent-mockingbird.mjs");
-const bootstrapSrc = path.join(repoRoot, "bin", "agent-mockingbird-bootstrap");
+const bootstrapSrc = path.join(repoRoot, "apps", "server", "src", "cli", "agent-mockingbird-bootstrap.mjs");
 const runtimeAssetsSrc = path.join(repoRoot, "apps", "server", "src", "cli", "runtime-assets.mjs");
 const runtimeLayoutSrc = path.join(repoRoot, "apps", "server", "src", "cli", "runtime-layout.mjs");
 const outDir = path.join(repoRoot, "bin");
