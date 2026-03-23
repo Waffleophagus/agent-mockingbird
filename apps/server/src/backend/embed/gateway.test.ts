@@ -51,6 +51,34 @@ test("gateway preserves mount path for embedded patched executor", () => {
   expect(target.toString()).toBe("http://127.0.0.1:8788/executor/assets/app.js");
 });
 
+test("gateway retries stripped asset paths when embedded-patched upstream still serves root assets", async () => {
+  const config = buildConfig("embedded-patched");
+  const requestedUrls: string[] = [];
+  globalThis.fetch = ((async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    requestedUrls.push(url);
+    if (url.endsWith("/executor/assets/app.js")) {
+      return new Response("Not found", { status: 404 });
+    }
+    return new Response("asset-body", {
+      headers: {
+        "content-type": "application/javascript",
+      },
+    });
+  }) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedServiceRequest(
+    new Request("http://127.0.0.1:3001/executor/assets/app.js"),
+    config,
+  );
+
+  expect(requestedUrls).toEqual([
+    "http://127.0.0.1:8788/executor/assets/app.js",
+    "http://127.0.0.1:8788/assets/app.js",
+  ]);
+  expect(await response?.text()).toBe("asset-body");
+});
+
 test("gateway rewrites redirect locations under the mount path", () => {
   const config = buildConfig("upstream-fallback");
   const definition = testing.buildEmbeddedServiceDefinition(config, "executor");

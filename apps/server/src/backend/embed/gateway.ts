@@ -210,11 +210,15 @@ function buildEmbeddedServiceDefinition(config: AgentMockingbirdConfig, id: Embe
   };
 }
 
-function buildForwardTarget(req: Request, definition: EmbeddedServiceDefinition) {
+function buildForwardTarget(
+  req: Request,
+  definition: EmbeddedServiceDefinition,
+  forwardedPrefixMode: ForwardedPrefixMode = definition.forwardedPrefixMode,
+) {
   const incoming = new URL(req.url);
   const prefixes = [...definition.assetPrefixes, ...definition.apiPrefixes];
   const forwardedPath =
-    definition.forwardedPrefixMode === "strip-known-prefixes"
+    forwardedPrefixMode === "strip-known-prefixes"
       ? stripKnownEmbeddedPrefixes(incoming.pathname, definition.mountPath, prefixes)
       : incoming.pathname;
   return new URL(`${forwardedPath}${incoming.search}`, definition.upstreamBaseUrl);
@@ -236,6 +240,18 @@ function findEmbeddedService(config: AgentMockingbirdConfig, pathname: string) {
     return executor;
   }
   return null;
+}
+
+function shouldRetryWithStrippedPrefixes(pathname: string, definition: EmbeddedServiceDefinition) {
+  if (!isMountedPath(pathname, definition.mountPath)) {
+    return false;
+  }
+  const normalizedMountPath = normalizeMountPath(definition.mountPath);
+  const suffix = pathname === normalizedMountPath ? "/" : pathname.slice(normalizedMountPath.length) || "/";
+  return [...definition.assetPrefixes, ...definition.apiPrefixes].some(prefix => {
+    const normalizedPrefix = normalizePrefix(prefix);
+    return suffix === normalizedPrefix || suffix.startsWith(`${normalizedPrefix}/`);
+  });
 }
 
 function parseExternalProxyRequest(pathname: string) {
@@ -295,12 +311,25 @@ export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMoc
     return null;
   }
 
-  const upstream = await fetch(buildForwardTarget(req, definition), {
+  let upstream = await fetch(buildForwardTarget(req, definition), {
     method: req.method,
     headers: buildForwardHeaders(req, definition),
     body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
     redirect: "manual",
   });
+
+  if (
+    upstream.status === 404 &&
+    definition.forwardedPrefixMode === "preserve" &&
+    shouldRetryWithStrippedPrefixes(pathname, definition)
+  ) {
+    upstream = await fetch(buildForwardTarget(req, definition, "strip-known-prefixes"), {
+      method: req.method,
+      headers: buildForwardHeaders(req, definition),
+      body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+      redirect: "manual",
+    });
+  }
 
   const headers = copyResponseHeaders(upstream, definition, new URL(req.url));
   if (!shouldRewriteTextResponse(upstream, definition)) {

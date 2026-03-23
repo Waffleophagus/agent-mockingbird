@@ -165,9 +165,11 @@ jobs:
             pkg.files = [
               "bin",
               "runtime-assets",
+              "vendor/executor",
               "dist",
               "deploy",
               "scripts",
+              "executor.lock.json",
               "opencode.lock.json",
               "README.md",
               "bun.lock",
@@ -194,10 +196,13 @@ jobs:
           grep -Fqx -- "package/bin/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-assets.mjs" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-layout.mjs" <<<"${tar_contents}"
+          grep -Fqx -- "package/executor.lock.json" <<<"${tar_contents}"
           grep -Fqx -- "package/opencode.lock.json" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/app/index.html" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/drizzle/meta/_journal.json" <<<"${tar_contents}"
+          grep -Fqx -- "package/vendor/executor/apps/executor/src/cli/main.ts" <<<"${tar_contents}"
+          grep -Fqx -- "package/vendor/executor/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/workspace/AGENTS.md" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/opencode-config/opencode.jsonc" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/opencode-config/plugins/agent-mockingbird.ts" <<<"${tar_contents}"
