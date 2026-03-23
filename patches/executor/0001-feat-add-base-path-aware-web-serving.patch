@@ -1,4 +1,4 @@
-From 31aea8f10a2f69df4d5a1165052ca59c708cadc6 Mon Sep 17 00:00:00 2001
+From 028210a8741871a5aaae30847a8ccfa71c0b2b7f Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sun, 22 Mar 2026 00:14:20 -0500
 Subject: [PATCH] feat: add base-path aware web serving
@@ -45,6 +45,32 @@ index 9992853380c61bfb4f412e6f98efbab27a47c825..9841d101ccdcdacb065ae08141ea406d
    }, []);
  
    const command = useMemo(
+diff --git a/apps/web/src/components/shell.tsx b/apps/web/src/components/shell.tsx
+index 311b17379e05454d7f520871f1e0aa7ea1ad4d78..9fcd1dc7edf15937e417d552567f294e0ae2e71a 100644
+--- a/apps/web/src/components/shell.tsx
++++ b/apps/web/src/components/shell.tsx
+@@ -27,6 +27,12 @@ const { VITE_APP_VERSION, VITE_GITHUB_URL } = (import.meta as ImportMeta & {
+ 
+ type UpdateChannel = "latest" | "beta";
+ 
++const executorBasePath = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") || "/";
++const embeddedDistTagsUrl =
++  executorBasePath === "/"
++    ? "https://registry.npmjs.org/-/package/executor/dist-tags"
++    : "/api/embed/external/executor/npm-registry/-/package/executor/dist-tags";
++
+ type ParsedVersion = {
+   readonly major: number;
+   readonly minor: number;
+@@ -139,7 +145,7 @@ function useLatestVersion(currentVersion: string) {
+ 
+   useEffect(() => {
+     let cancelled = false;
+-    fetch("https://registry.npmjs.org/-/package/executor/dist-tags")
++    fetch(embeddedDistTagsUrl)
+       .then((res) => res.json())
+       .then((data: Partial<Record<UpdateChannel, string>>) => {
+         if (!cancelled) {
 diff --git a/apps/web/src/dev.ts b/apps/web/src/dev.ts
 index 5868a3a98611c5f8c2571c2c25ce8c388f96cb75..31ed03465cadbde4ab39dc47375fcaed5ac6db1c 100644
 --- a/apps/web/src/dev.ts
@@ -412,33 +438,8 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
 -    const baseUrl = `http://${host}:${resolvedAddress.port}`;
 +    const baseUrl = `http://${host}:${resolvedAddress.port}${basePath}`;
      requestHandler.setBaseUrl(baseUrl);
-
+ 
      return {
-diff --git a/apps/web/src/components/shell.tsx b/apps/web/src/components/shell.tsx
-index 2d331f560c0af06aa2b4dc48f34e4dc1544196f4..2f7c575bf20d5f6fa6314cb649ab94340af324fc 100644
---- a/apps/web/src/components/shell.tsx
-+++ b/apps/web/src/components/shell.tsx
-@@ -23,6 +23,12 @@ const { VITE_APP_VERSION, VITE_GITHUB_URL } = (import.meta as ImportMeta & {
- 
- type UpdateChannel = "latest" | "beta";
- 
-+const executorBasePath = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") || "/";
-+const embeddedDistTagsUrl =
-+  executorBasePath === "/"
-+    ? "https://registry.npmjs.org/-/package/executor/dist-tags"
-+    : "/api/embed/external/executor/npm-registry/-/package/executor/dist-tags";
-+
- type ParsedVersion = {
-   readonly major: number;
-   readonly minor: number;
-@@ -139,7 +144,7 @@ function useLatestVersion(currentVersion: string) {
- 
-   useEffect(() => {
-     let cancelled = false;
--    fetch("https://registry.npmjs.org/-/package/executor/dist-tags")
-+    fetch(embeddedDistTagsUrl)
-       .then((res) => res.json())
-       .then((data: Partial<Record<UpdateChannel, string>>) => {
-         if (!cancelled) {
 -- 
 2.53.0
+
