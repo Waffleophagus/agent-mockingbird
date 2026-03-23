@@ -19,6 +19,8 @@
   - Export committed executor changes from the patch branch back into `patches/executor`.
 - `bun run executor:sync --ref vX.Y.Z`
   - Fetch a new upstream release tag, apply the tracked patch series, validate it, and update the lock only after success.
+- `bun run executor:sync --hard-ref vX.Y.Z`
+  - Force-reset the vendor patch branch onto a new upstream tag before exporting patches again. Use this when the upgrade requires a manual patch rebase instead of a clean apply.
 - `bun run executor:sync --check`
   - CI-safe validation that reproduces the generated tree from the lock and patches in temporary state.
 
@@ -29,6 +31,23 @@
 3. Commit those changes inside the `vendor/executor` worktree on branch `agent-mockingbird/executor`.
 4. Run `bun run executor:sync --export-patches`.
 5. Run ship validation.
+
+## Upgrade Loop
+
+For a normal upstream bump:
+
+1. Run `bun run executor:sync --status`.
+2. Run `bun run executor:sync --ref vX.Y.Z`.
+3. If patch application succeeds, review the result in `vendor/executor`.
+4. Run `bun run executor:sync --check`.
+
+If the patch stack needs a manual rebase:
+
+1. Run `bun run executor:sync --hard-ref vX.Y.Z`.
+2. Re-apply or rewrite the required changes in `vendor/executor`.
+3. Commit those changes inside the `vendor/executor` worktree.
+4. Run `bun run executor:sync --export-patches`.
+5. Run `bun run executor:sync --check`.
 
 ## Rules
 

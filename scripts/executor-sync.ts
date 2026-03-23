@@ -31,12 +31,14 @@ type LockFile = {
 };
 
 type ParsedArgs = {
+  help: boolean;
   status: boolean;
   json: boolean;
   rebuildOnly: boolean;
   exportPatches: boolean;
   check: boolean;
   ref?: string;
+  hardRef?: string;
 };
 
 type ExecOptions = {
@@ -80,6 +82,10 @@ const lockPath = path.join(repoRoot, "executor.lock.json");
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    printHelp();
+    return;
+  }
   const lock = readLock();
 
   if (args.status) {
@@ -137,11 +143,36 @@ async function main() {
     return;
   }
 
-  throw new Error("Specify one of --status, --rebuild-only, --export-patches, --check, or --ref <tag>.");
+  if (args.hardRef) {
+    const targetTag = normalizeTag(args.hardRef);
+    ensureCleanroomClone(lock);
+    ensureCleanroomPristine(lock);
+    const targetCommit = resolveUpstreamCommit(lock, targetTag);
+    ensureCleanroomAtCommit(lock, targetCommit);
+    recreateVendorWorktree(lock, targetCommit, { force: true });
+    exportPatches(lock, targetCommit);
+    verifyPatchReproducibility(lock, targetCommit);
+    writeLock({
+      ...lock,
+      upstream: {
+        remote: lock.upstream.remote,
+        tag: targetTag,
+        commit: targetCommit,
+      },
+      packageVersion: stripLeadingV(targetTag),
+    });
+    console.log(`Force-updated executor.lock.json to ${targetTag} (${targetCommit}).`);
+    return;
+  }
+
+  throw new Error(
+    "Specify one of --status, --rebuild-only, --export-patches, --check, --ref <tag>, --hard-ref <tag>, or --help.",
+  );
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
   const parsed: ParsedArgs = {
+    help: false,
     status: false,
     json: false,
     rebuildOnly: false,
@@ -151,6 +182,10 @@ function parseArgs(argv: string[]): ParsedArgs {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === "--help" || arg === "-h") {
+      parsed.help = true;
+      continue;
+    }
     if (arg === "--status") {
       parsed.status = true;
       continue;
@@ -180,15 +215,26 @@ function parseArgs(argv: string[]): ParsedArgs {
       index += 1;
       continue;
     }
+    if (arg === "--hard-ref") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("Missing value after --hard-ref.");
+      }
+      parsed.hardRef = value;
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
 
   const selected = [
+    parsed.help,
     parsed.status,
     parsed.rebuildOnly,
     parsed.exportPatches,
     parsed.check,
     Boolean(parsed.ref),
+    Boolean(parsed.hardRef),
   ].filter(Boolean);
   if (selected.length !== 1) {
     throw new Error("Exactly one primary operation is required.");
@@ -198,6 +244,35 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   return parsed;
+}
+
+function printHelp() {
+  console.log(`Executor workflow helper
+
+Usage:
+  bun run executor:sync --status [--json]
+  bun run executor:sync --rebuild-only
+  bun run executor:sync --export-patches
+  bun run executor:sync --check
+  bun run executor:sync --ref <tag>
+  bun run executor:sync --hard-ref <tag>
+
+Commands:
+  --status        Show lock, cleanroom, vendor, and patch status.
+  --rebuild-only  Recreate vendor/executor from executor.lock.json and patches.
+  --export-patches
+                  Export committed vendor/executor changes into patches/executor.
+  --check         Reproduce vendor/executor from lock + patches in temp state.
+  --ref <tag>     Upgrade to a new upstream tag while requiring a clean vendor tree.
+  --hard-ref <tag>
+                  Force-reset the vendor worktree to a new upstream tag before exporting patches.
+
+Typical upgrade flow:
+  1. bun run executor:sync --status
+  2. bun run executor:sync --ref vX.Y.Z
+  3. If the patch stack needs a manual rebase, resolve it in vendor/executor and commit there.
+  4. bun run executor:sync --export-patches
+  5. bun run executor:sync --check`);
 }
 
 function readLock(): LockFile {
@@ -302,7 +377,7 @@ function ensureVendorClean(lock: LockFile) {
   }
 }
 
-function removeWorktreeIfPresent(lock: LockFile, targetPath: string) {
+function removeWorktreeIfPresent(lock: LockFile, targetPath: string, options?: { force?: boolean }) {
   const cleanroomPath = path.resolve(repoRoot, lock.paths.cleanroom);
   run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
   if (!existsSync(targetPath)) {
@@ -314,22 +389,36 @@ function removeWorktreeIfPresent(lock: LockFile, targetPath: string) {
   }).stdout.split("\n");
   const registered = worktrees.some(line => line === `worktree ${targetPath}`);
   if (registered) {
-    git(lock, ["worktree", "remove", "--force", targetPath], {
+    const removeArgs = ["worktree", "remove"];
+    if (options?.force) {
+      removeArgs.push("--force");
+    }
+    removeArgs.push(targetPath);
+    git(lock, removeArgs, {
       cwd: cleanroomPath,
       allowFailure: true,
     });
     run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
     return;
   }
+  if (!options?.force) {
+    const dirty = run(["git", "status", "--porcelain"], {
+      cwd: targetPath,
+      allowFailure: true,
+    }).stdout.trim();
+    if (dirty.length > 0) {
+      throw new Error(`${path.relative(repoRoot, targetPath)} is dirty.`);
+    }
+  }
   rmSync(targetPath, { recursive: true, force: true });
 }
 
-function recreateVendorWorktree(lock: LockFile, baseCommit: string) {
+function recreateVendorWorktree(lock: LockFile, baseCommit: string, options?: { force?: boolean }) {
   const cleanroomPath = path.resolve(repoRoot, lock.paths.cleanroom);
   const vendorPath = path.resolve(repoRoot, lock.paths.vendor);
   const patchesPath = path.resolve(repoRoot, lock.paths.patches);
 
-  removeWorktreeIfPresent(lock, vendorPath);
+  removeWorktreeIfPresent(lock, vendorPath, options);
   run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
   mkdirSync(path.dirname(vendorPath), { recursive: true });
   git(lock, ["worktree", "add", "--detach", vendorPath, baseCommit], { cwd: cleanroomPath });

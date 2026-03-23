@@ -167,10 +167,22 @@ bun run opencode:sync --check
 
 The repo treats `cleanroom/opencode` as a pristine upstream clone, `vendor/opencode` as the editable worktree, and `patches/opencode/*.patch` as the tracked patch stack.
 
+Executor source workflow:
+
+```bash
+bun run executor:sync --status
+bun run executor:sync --rebuild-only
+bun run executor:sync --check
+bun run executor:sync --ref vX.Y.Z
+```
+
+The repo treats `cleanroom/executor` as a pristine upstream clone, `vendor/executor` as the editable worktree, and `patches/executor/*.patch` as the tracked patch stack.
+
 ## Docs And References
 
 - `docs/memory-ops.md`
 - `docs/memory-runtime-contract.md`
+- `docs/vendor-executor.md`
 - `docs/vendor-opencode.md`
 - `docs/opencode-rebase-workflow-plan.md`
 - `docs/opencode-startup-sync-plan.md`
