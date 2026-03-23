@@ -32,7 +32,8 @@ const DEFAULT_ENABLED_SKILLS = [
   "runtime-diagnose",
   "memory-ops",
 ];
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const MODULE_PATH = fileURLToPath(import.meta.url);
+const MODULE_DIR = path.dirname(MODULE_PATH);
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -190,6 +191,56 @@ function parseArgs(argv) {
 
   args.registryUrl = normalizeRegistryUrl(args.registryUrl);
   return args;
+}
+
+function readRootDirArg(argv = process.argv.slice(2)) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--root-dir" && argv[index + 1]) {
+      return path.resolve(argv[index + 1]);
+    }
+  }
+  return null;
+}
+
+function resolveManagedCliDelegationTarget({
+  argv = process.argv,
+  env = process.env,
+  modulePath = MODULE_PATH,
+} = {}) {
+  const rootDir =
+    readRootDirArg(argv.slice(2)) ||
+    (env.AGENT_MOCKINGBIRD_ROOT_DIR || "").trim() ||
+    DEFAULT_ROOT_DIR;
+  const managedCliPath = path.join(rootDir, "npm", "bin", "agent-mockingbird");
+  if (!fs.existsSync(managedCliPath)) {
+    return null;
+  }
+
+  const currentRealPath = fs.existsSync(modulePath)
+    ? fs.realpathSync(modulePath)
+    : path.resolve(modulePath);
+  const managedRealPath = fs.realpathSync(managedCliPath);
+  if (currentRealPath === managedRealPath) {
+    return null;
+  }
+  return managedCliPath;
+}
+
+function maybeDelegateToManagedCli() {
+  const managedCliPath = resolveManagedCliDelegationTarget();
+  if (!managedCliPath) {
+    return false;
+  }
+
+  const delegated = spawnSync(managedCliPath, process.argv.slice(2), {
+    stdio: "inherit",
+    env: process.env,
+  });
+  if (delegated.error) {
+    throw delegated.error;
+  }
+  process.exit(delegated.status ?? 1);
 }
 
 function normalizeRegistryUrl(url) {
@@ -793,6 +844,30 @@ function ensureLocalBinPath(paths) {
   return { inPath: false, updatedFiles };
 }
 
+function resolveShadowingAgentMockingbirdCommandPath(paths) {
+  const resolvedCommand = shell("bash", ["-lc", "command -v agent-mockingbird"]);
+  if (resolvedCommand.code !== 0) {
+    return null;
+  }
+  const commandPath = resolvedCommand.stdout.trim();
+  if (!commandPath) {
+    return null;
+  }
+  const resolvedCommandPath = path.resolve(commandPath);
+  const managedShimPath = path.resolve(paths.agentMockingbirdShimPath);
+  if (resolvedCommandPath === managedShimPath) {
+    return null;
+  }
+  const homeDir = path.resolve(process.env.HOME || os.homedir());
+  if (
+    resolvedCommandPath !== homeDir &&
+    !resolvedCommandPath.startsWith(`${homeDir}${path.sep}`)
+  ) {
+    return null;
+  }
+  return resolvedCommandPath;
+}
+
 function writeAgentMockingbirdShim(
   paths,
   agentMockingbirdBin,
@@ -807,6 +882,12 @@ exec "${agentMockingbirdBin}" "$@"
 `;
   writeFile(paths.agentMockingbirdShimPath, shim);
   fs.chmodSync(paths.agentMockingbirdShimPath, 0o755);
+  const shadowingCommandPath =
+    resolveShadowingAgentMockingbirdCommandPath(paths);
+  if (shadowingCommandPath) {
+    writeFile(shadowingCommandPath, shim);
+    fs.chmodSync(shadowingCommandPath, 0o755);
+  }
   return paths.agentMockingbirdShimPath;
 }
 
@@ -2467,6 +2548,8 @@ export const testing = {
   buildEmptyModelDiscoveryDiagnostics,
   readRunningPackageVersion,
   readOpenCodePackageVersion,
+  resolveManagedCliDelegationTarget,
+  resolveShadowingAgentMockingbirdCommandPath,
   resolvePackagedExecutorWebAssetsDir,
   resolveExecutorRuntimeCommand,
   unitContents,
@@ -3501,6 +3584,7 @@ async function main() {
 }
 
 if (import.meta.main) {
+  maybeDelegateToManagedCli();
   await main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

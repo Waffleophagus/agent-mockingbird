@@ -307,6 +307,80 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
   });
 });
 
+describe("agent-mockingbird CLI delegation", () => {
+  test("delegates from a shadowing global install to the managed root CLI", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-delegate-"));
+    const managedCli = path.join(tempRoot, "npm", "bin", "agent-mockingbird");
+    const globalCli = path.join(tempRoot, "global", "bin", "agent-mockingbird");
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.mkdirSync(path.dirname(globalCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(globalCli, "#!/usr/bin/env bash\n", "utf8");
+
+    try {
+      const target = testing.resolveManagedCliDelegationTarget({
+        argv: ["node", globalCli, "update", "--next", "--root-dir", tempRoot],
+        env: {},
+        modulePath: globalCli,
+      });
+
+      expect(target).toBe(managedCli);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not delegate when already running from the managed root CLI", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-no-delegate-"));
+    const managedCli = path.join(tempRoot, "npm", "bin", "agent-mockingbird");
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env bash\n", "utf8");
+
+    try {
+      const target = testing.resolveManagedCliDelegationTarget({
+        argv: ["node", managedCli, "status", "--root-dir", tempRoot],
+        env: {},
+        modulePath: managedCli,
+      });
+
+      expect(target).toBeNull();
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("detects a shadowing home-directory agent-mockingbird command", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-shadow-"));
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PATH;
+    const localBinDir = path.join(tempRoot, ".local", "bin");
+    const globalBinDir = path.join(tempRoot, ".npm-global", "bin");
+    const shadowingCli = path.join(globalBinDir, "agent-mockingbird");
+    const managedShim = path.join(localBinDir, "agent-mockingbird");
+    fs.mkdirSync(localBinDir, { recursive: true });
+    fs.mkdirSync(globalBinDir, { recursive: true });
+    fs.writeFileSync(shadowingCli, "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(managedShim, "#!/usr/bin/env bash\n", "utf8");
+    fs.chmodSync(shadowingCli, 0o755);
+    fs.chmodSync(managedShim, 0o755);
+
+    process.env.HOME = tempRoot;
+    process.env.PATH = `${globalBinDir}:${localBinDir}:${originalPath ?? ""}`;
+
+    try {
+      const shadowPath = testing.resolveShadowingAgentMockingbirdCommandPath({
+        agentMockingbirdShimPath: managedShim,
+      });
+
+      expect(shadowPath).toBe(shadowingCli);
+    } finally {
+      process.env.HOME = originalHome;
+      process.env.PATH = originalPath;
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("agent-mockingbird CLI embedded executor verification", () => {
   test("accepts embedded executor HTML without a local stylesheet asset", async () => {
     const responses = new Map([
