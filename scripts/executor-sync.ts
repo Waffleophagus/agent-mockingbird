@@ -541,13 +541,7 @@ function runCheck(lock: LockFile) {
     recreateVendorWorktreeIn(lock, lock.upstream.commit, compareDir);
     const actualVendorPath = path.resolve(repoRoot, lock.paths.vendor);
     if (existsSync(path.join(actualVendorPath, ".git"))) {
-      const diff = run(["git", "diff", "--no-index", "--stat", compareDir, actualVendorPath], {
-        cwd: repoRoot,
-        allowFailure: true,
-      });
-      if (diff.status !== 0) {
-        throw new Error(`Executor vendor tree does not match lock + patches.\n${diff.stdout}${diff.stderr}`);
-      }
+      compareGitTrees(compareDir, actualVendorPath, "Executor vendor tree does not match lock + patches.");
     }
     console.log("executor:sync --check passed.");
   } finally {
@@ -563,7 +557,6 @@ function recreateVendorWorktreeIn(lock: LockFile, baseCommit: string, targetPath
   run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
   mkdirSync(path.dirname(targetPath), { recursive: true });
   git(lock, ["worktree", "add", "--detach", targetPath, baseCommit], { cwd: cleanroomPath });
-  run(["git", "checkout", "-B", lock.branch.name, baseCommit], { cwd: targetPath });
   const patchFiles = listPatchFiles(patchesPath);
   if (patchFiles.length > 0) {
     run(["git", "am", "--3way", ...patchFiles], { cwd: targetPath, env: gitAmEnv() });
@@ -586,16 +579,36 @@ function verifyPatchReproducibility(lock: LockFile, baseCommit: string) {
   const vendorPath = path.resolve(repoRoot, lock.paths.vendor);
   try {
     recreateVendorWorktreeIn(lock, baseCommit, compareDir);
-    const diff = run(["git", "diff", "--no-index", "--stat", compareDir, vendorPath], {
-      cwd: repoRoot,
-      allowFailure: true,
-    });
-    if (diff.status !== 0) {
-      throw new Error(`Exported patches are not reproducible.\n${diff.stdout}${diff.stderr}`);
-    }
+    compareGitTrees(compareDir, vendorPath, "Exported patches are not reproducible.");
   } finally {
     removeWorktreeIfPresent(lock, compareDir);
     rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+function compareGitTrees(leftPath: string, rightPath: string, message: string) {
+  const leftDirty = run(["git", "status", "--porcelain", "--untracked-files=no"], {
+    cwd: leftPath,
+    allowFailure: true,
+  }).stdout.trim();
+  const rightDirty = run(["git", "status", "--porcelain", "--untracked-files=no"], {
+    cwd: rightPath,
+    allowFailure: true,
+  }).stdout.trim();
+  if (leftDirty || rightDirty) {
+    throw new Error(`${message}\nTracked file changes detected while verifying patch reproducibility.`);
+  }
+
+  const leftTree = run(["git", "rev-parse", "HEAD^{tree}"], {
+    cwd: leftPath,
+    allowFailure: true,
+  }).stdout.trim();
+  const rightTree = run(["git", "rev-parse", "HEAD^{tree}"], {
+    cwd: rightPath,
+    allowFailure: true,
+  }).stdout.trim();
+  if (leftTree !== rightTree) {
+    throw new Error(`${message}\nTree mismatch: ${leftTree} != ${rightTree}`);
   }
 }
 

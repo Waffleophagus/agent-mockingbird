@@ -1,14 +1,14 @@
-From 028210a8741871a5aaae30847a8ccfa71c0b2b7f Mon Sep 17 00:00:00 2001
+From 0f0fdc765319e176777ae71316861fdbeed07743 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sun, 22 Mar 2026 00:14:20 -0500
 Subject: [PATCH] feat: add base-path aware web serving
 
 
 diff --git a/apps/executor/src/cli/main.ts b/apps/executor/src/cli/main.ts
-index a6b712b88ee41213ca2d34cb70a0624af23ee9af..25f44152e0f71f4cfc1271ca6cd2442539590e5e 100644
+index a29ba8a4dee2b595d212e92bfb13ae5c418e5635..3c5c69a53b495be99b6d8250c69319e175c7dabb 100644
 --- a/apps/executor/src/cli/main.ts
 +++ b/apps/executor/src/cli/main.ts
-@@ -171,6 +171,7 @@ const CLI_VERSION = (() => {
+@@ -186,6 +186,7 @@ const CLI_VERSION = (() => {
    return "0.0.0-local";
  })();
  const HELP_TOKENS = ["--help", "-h", "help"] as const;
@@ -16,7 +16,7 @@ index a6b712b88ee41213ca2d34cb70a0624af23ee9af..25f44152e0f71f4cfc1271ca6cd24425
  
  const isHelpToken = (value: string | undefined): boolean =>
    value !== undefined && HELP_TOKENS.includes(value as (typeof HELP_TOKENS)[number]);
-@@ -410,13 +411,14 @@ const isServerReachable = (baseUrl: string) =>
+@@ -436,13 +437,14 @@ const isServerReachable = (baseUrl: string) =>
  
  const getDefaultServerOptions = (port: number = DEFAULT_SERVER_PORT) => {
    const assetsDir = resolveRuntimeWebAssetsDir();
@@ -33,44 +33,32 @@ index a6b712b88ee41213ca2d34cb70a0624af23ee9af..25f44152e0f71f4cfc1271ca6cd24425
  };
  
 diff --git a/apps/web/src/components/local-mcp-install-card.tsx b/apps/web/src/components/local-mcp-install-card.tsx
-index 9992853380c61bfb4f412e6f98efbab27a47c825..9841d101ccdcdacb065ae08141ea406d6e7ae21a 100644
+index 2b2bb79a2373445ac7f4481a15d34f4c95e4fb58..d5071c077e5ec1bacfc8c8a3a3880724281adf70 100644
 --- a/apps/web/src/components/local-mcp-install-card.tsx
 +++ b/apps/web/src/components/local-mcp-install-card.tsx
-@@ -9,7 +9,7 @@ export function LocalMcpInstallCard(props: {
-   const [origin, setOrigin] = useState<string | null>(null);
+@@ -13,7 +13,7 @@ export function LocalMcpInstallCard(props: {
+   const [mode, setMode] = useState<LocalMcpInstallMode>("stdio");
  
    useEffect(() => {
 -    setOrigin(window.location.origin);
 +    setOrigin(new URL(import.meta.env.BASE_URL ?? "/", window.location.origin).toString().replace(/\/+$/, ""));
    }, []);
  
-   const command = useMemo(
+   const command = mode === "stdio"
 diff --git a/apps/web/src/components/shell.tsx b/apps/web/src/components/shell.tsx
-index 311b17379e05454d7f520871f1e0aa7ea1ad4d78..9fcd1dc7edf15937e417d552567f294e0ae2e71a 100644
+index 7ee05a65150ba0d614b99374e6905c7c2a15bc17..f13cccb5eaaa15bb8ccb827e87c5bf85055325e2 100644
 --- a/apps/web/src/components/shell.tsx
 +++ b/apps/web/src/components/shell.tsx
-@@ -27,6 +27,12 @@ const { VITE_APP_VERSION, VITE_GITHUB_URL } = (import.meta as ImportMeta & {
+@@ -27,7 +27,8 @@ const { VITE_APP_VERSION, VITE_GITHUB_URL } = (import.meta as ImportMeta & {
  
  type UpdateChannel = "latest" | "beta";
  
+-const EXECUTOR_DIST_TAGS_PATH = "/v1/app/npm/dist-tags";
 +const executorBasePath = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") || "/";
-+const embeddedDistTagsUrl =
-+  executorBasePath === "/"
-+    ? "https://registry.npmjs.org/-/package/executor/dist-tags"
-+    : "/api/embed/external/executor/npm-registry/-/package/executor/dist-tags";
-+
++const EXECUTOR_DIST_TAGS_PATH = `${executorBasePath === "/" ? "" : executorBasePath}/v1/app/npm/dist-tags`;
+ 
  type ParsedVersion = {
    readonly major: number;
-   readonly minor: number;
-@@ -139,7 +145,7 @@ function useLatestVersion(currentVersion: string) {
- 
-   useEffect(() => {
-     let cancelled = false;
--    fetch("https://registry.npmjs.org/-/package/executor/dist-tags")
-+    fetch(embeddedDistTagsUrl)
-       .then((res) => res.json())
-       .then((data: Partial<Record<UpdateChannel, string>>) => {
-         if (!cancelled) {
 diff --git a/apps/web/src/dev.ts b/apps/web/src/dev.ts
 index 5868a3a98611c5f8c2571c2c25ce8c388f96cb75..31ed03465cadbde4ab39dc47375fcaed5ac6db1c 100644
 --- a/apps/web/src/dev.ts
@@ -210,11 +198,11 @@ index 1cbc961839bf0c63a4e6a73fd567e6cd3144010b..3b86c14ae0a85a552c094c144faaabae
          /^\/(src|node_modules|@vite|@id|@react-refresh)/,
          /\.(css|ts|tsx|js|jsx|svg|png|jpg|gif|ico|woff2?|json|map)(\?.*)?$/,
        ],
-diff --git a/packages/platform/control-plane/src/api/oauth/http.ts b/packages/platform/control-plane/src/api/oauth/http.ts
-index e6903b17f8e54689db069ecc8cdb33443f1a9b48..0041995e6bd1aa7ea47526d6339ab0d0bf7fd5d8 100644
---- a/packages/platform/control-plane/src/api/oauth/http.ts
-+++ b/packages/platform/control-plane/src/api/oauth/http.ts
-@@ -74,16 +74,26 @@ const readHeader = (headers: unknown, name: string): string | null => {
+diff --git a/packages/platform/api/src/oauth/http.ts b/packages/platform/api/src/oauth/http.ts
+index cc9b0a256a2da0d1f5a77b1252e144120b8a79f5..94e89c690c5450b82e72e9b75b11c416f5081cdf 100644
+--- a/packages/platform/api/src/oauth/http.ts
++++ b/packages/platform/api/src/oauth/http.ts
+@@ -76,16 +76,26 @@ const readHeader = (headers: unknown, name: string): string | null => {
  };
  
  const resolveRequestOrigin = (request: { url: string; headers: unknown }): string | null => {
@@ -244,14 +232,19 @@ index e6903b17f8e54689db069ecc8cdb33443f1a9b48..0041995e6bd1aa7ea47526d6339ab0d0
      const protocol = forwardedProto && forwardedProto.length > 0 ? forwardedProto : "http";
      return `${protocol}://${host}`;
    }
-diff --git a/packages/platform/control-plane/src/api/sources/http.ts b/packages/platform/control-plane/src/api/sources/http.ts
-index 0de731d7a54980fd155f13ac5b5315872167ba4a..c626070a09d9bf5ccdcd720ed82426c447a177e5 100644
---- a/packages/platform/control-plane/src/api/sources/http.ts
-+++ b/packages/platform/control-plane/src/api/sources/http.ts
-@@ -59,16 +59,26 @@ const readHeader = (headers: unknown, name: string): string | null => {
+diff --git a/packages/platform/api/src/sources/http.ts b/packages/platform/api/src/sources/http.ts
+index 85aa5438a734e9afd7b1d4a2ea7601fa34145854..06922cb9fb96e615d0829c6111c08c0be18507c1 100644
+--- a/packages/platform/api/src/sources/http.ts
++++ b/packages/platform/api/src/sources/http.ts
+@@ -51,22 +51,27 @@ const readHeader = (headers: unknown, name: string): string | null => {
+   return null;
  };
  
- const resolveRequestOrigin = (request: { url: string; headers: unknown }): string | null => {
+-const resolveRequestOrigin = (request: {
+-  url: string;
+-  headers: unknown;
+-}): string | null => {
++const resolveRequestOrigin = (request: { url: string; headers: unknown }): string | null => {
 +  const forwardedHost = readHeader(request.headers, "x-forwarded-host");
 +  const forwardedProto = readHeader(request.headers, "x-forwarded-proto");
 +  const forwardedPrefix = readHeader(request.headers, "x-forwarded-prefix");
@@ -263,7 +256,6 @@ index 0de731d7a54980fd155f13ac5b5315872167ba4a..c626070a09d9bf5ccdcd720ed82426c4
 +        : "";
 +    return `${protocol}://${forwardedHost}${normalizedPrefix}`;
 +  }
-+
    try {
      return new URL(request.url).origin;
    } catch {
@@ -275,14 +267,17 @@ index 0de731d7a54980fd155f13ac5b5315872167ba4a..c626070a09d9bf5ccdcd720ed82426c4
      }
  
 -    const forwardedProto = readHeader(request.headers, "x-forwarded-proto");
-     const protocol = forwardedProto && forwardedProto.length > 0 ? forwardedProto : "http";
+-    const protocol =
+-      forwardedProto && forwardedProto.length > 0 ? forwardedProto : "http";
++    const protocol = forwardedProto && forwardedProto.length > 0 ? forwardedProto : "http";
      return `${protocol}://${host}`;
    }
+ };
 diff --git a/packages/platform/server/src/index.ts b/packages/platform/server/src/index.ts
-index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb72285fb2eae 100644
+index 6b5baac6f1a4f1e0090310547a024c865b6b6222..dbf65b5aa963bd13c74082eef0ca4c4fd400192c 100644
 --- a/packages/platform/server/src/index.ts
 +++ b/packages/platform/server/src/index.ts
-@@ -65,6 +65,7 @@ export {
+@@ -72,6 +72,7 @@ export {
  type StaticUiOptions = {
    readonly assetsDir?: string;
    readonly devServerUrl?: string;
@@ -290,9 +285,9 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
  };
  
  export type LocalExecutorServer = {
-@@ -95,6 +96,50 @@ export type LocalExecutorRequestHandler = {
- type ControlPlaneWebHandler = ReturnType<typeof HttpApiBuilder.toWebHandler>;
- type ExecutorMcpHandler = ReturnType<typeof createExecutorMcpRequestHandler>;
+@@ -108,6 +109,50 @@ const EXECUTOR_NPM_DIST_TAGS_PATHNAME = "/v1/app/npm/dist-tags";
+ const EXECUTOR_NPM_DIST_TAGS_URL =
+   "https://registry.npmjs.org/-/package/executor/dist-tags";
  
 +const normalizeBasePath = (value?: string): string => {
 +  const trimmed = value?.trim();
@@ -338,10 +333,10 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
 +  return new Request(url.toString(), init);
 +};
 +
- const disposeRuntime = (runtime: ControlPlaneRuntime) =>
+ const disposeExecutor = (executor: Executor) =>
    Effect.tryPromise({
-     try: () => runtime.close(),
-@@ -265,9 +310,15 @@ const serveUiAsset = async (
+     try: () => executor.close(),
+@@ -281,9 +326,15 @@ const serveUiAsset = async (
    ui: StaticUiOptions,
  ): Promise<Response | null> => {
    const url = new URL(request.url);
@@ -358,7 +353,7 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
      return fetch(new Request(proxyUrl.toString(), request));
    }
  
-@@ -275,14 +326,14 @@ const serveUiAsset = async (
+@@ -291,14 +342,14 @@ const serveUiAsset = async (
      return null;
    }
  
@@ -376,7 +371,7 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
      || wantsHtml(request);
  
    if (!shouldServeIndex) {
-@@ -297,8 +348,7 @@ const serveUiAsset = async (
+@@ -313,8 +364,7 @@ const serveUiAsset = async (
    return readResponseFile(fileSystem, indexPath, "text/html; charset=utf-8");
  };
  
@@ -386,7 +381,7 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
    return pathname === "/mcp" || pathname === "/v1" || pathname.startsWith("/v1/");
  };
  
-@@ -308,6 +358,7 @@ export const createLocalExecutorRequestHandler = (
+@@ -352,6 +402,7 @@ export const createLocalExecutorRequestHandler = (
    Effect.gen(function* () {
      const fileSystem = yield* FileSystem.FileSystem;
      const requestedLocalDataDir = options.localDataDir ?? DEFAULT_LOCAL_DATA_DIR;
@@ -394,17 +389,21 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
  
      if (requestedLocalDataDir !== ":memory:") {
        yield* fileSystem.makeDirectory(dirname(requestedLocalDataDir), {
-@@ -355,9 +406,15 @@ export const createLocalExecutorRequestHandler = (
-       runtime,
+@@ -403,12 +454,18 @@ export const createLocalExecutorRequestHandler = (
+       runtime: executor.runtime,
        handleApiRequest: (request) => {
          const pathname = new URL(request.url).pathname;
--        return pathname === "/mcp"
--          ? mcpHandler.handleRequest(request)
--          : apiHandler.handler(request);
+-        if (pathname === EXECUTOR_NPM_DIST_TAGS_PATHNAME) {
 +        const resolvedPathname = stripBasePath(pathname, basePath);
 +        if (resolvedPathname === null) {
 +          return Promise.resolve(new Response("Not Found", { status: 404 }));
 +        }
++        if (resolvedPathname === EXECUTOR_NPM_DIST_TAGS_PATHNAME) {
+           return handleExecutorNpmDistTagsRequest();
+         }
+-        return pathname === "/mcp"
+-          ? mcpHandler.handleRequest(request)
+-          : apiHandler.handler(request);
 +
 +        const rebasedRequest = rebaseRequest(request, resolvedPathname, basePath);
 +        return resolvedPathname === "/mcp"
@@ -413,7 +412,7 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
        },
        getBaseUrl: () => baseUrlRef,
        setBaseUrl: (baseUrl) => {
-@@ -373,6 +430,7 @@ export const createLocalExecutorServer = (
+@@ -424,6 +481,7 @@ export const createLocalExecutorServer = (
      const fileSystem = yield* FileSystem.FileSystem;
      const host = options.host ?? DEFAULT_SERVER_HOST;
      const port = options.port ?? DEFAULT_SERVER_PORT;
@@ -421,7 +420,7 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
      const requestHandler = yield* createLocalExecutorRequestHandler(options);
  
      const server = yield* Effect.acquireRelease(
-@@ -382,7 +440,8 @@ export const createLocalExecutorServer = (
+@@ -433,7 +491,8 @@ export const createLocalExecutorServer = (
              const server = createNodeServer((nodeRequest, nodeResponse) => {
                void (async () => {
                  const request = toWebRequest(nodeRequest);
@@ -431,7 +430,7 @@ index ffa50ed54b7c873828f88aab6bf6a0d4291a8796..c3476b49e3482c78f0772081840fb722
                    ? await requestHandler.handleApiRequest(request)
                    : await serveUiAsset(fileSystem, request, options.ui ?? {}) ?? new Response("Not Found", { status: 404 });
                  await writeNodeResponse(nodeResponse, response);
-@@ -422,7 +481,7 @@ export const createLocalExecutorServer = (
+@@ -473,7 +532,7 @@ export const createLocalExecutorServer = (
      }
  
      const resolvedAddress = address as AddressInfo;
