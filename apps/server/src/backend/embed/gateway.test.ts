@@ -143,8 +143,8 @@ test("gateway rewrites fallback html root-relative references", () => {
   expect(testing.rewriteRootRelativeContent(html, definition)).toContain('/executor/v1/status');
 });
 
-test("gateway rewrites leaked root-relative js/css references even in embedded-patched mode", async () => {
-  const config = buildConfig("embedded-patched");
+test("gateway rewrites root-relative js references in upstream fallback mode", async () => {
+  const config = buildConfig("upstream-fallback");
   globalThis.fetch = ((async () =>
     new Response('fetch("/assets/app.js")', {
       headers: {
@@ -159,6 +159,42 @@ test("gateway rewrites leaked root-relative js/css references even in embedded-p
 
   expect(response).not.toBeNull();
   expect(await response?.text()).toBe('fetch("/executor/assets/app.js")');
+});
+
+test("gateway leaves embedded-patched js assets untouched", async () => {
+  const config = buildConfig("embedded-patched");
+  globalThis.fetch = ((async () =>
+    new Response('fetch("/executor/assets/app.js")', {
+      headers: {
+        "content-type": "application/javascript",
+      },
+    })) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedServiceRequest(
+    new Request("http://127.0.0.1:3001/executor/assets/app.js"),
+    config,
+  );
+
+  expect(response).not.toBeNull();
+  expect(await response?.text()).toBe('fetch("/executor/assets/app.js")');
+});
+
+test("gateway does not rewrite json payloads", async () => {
+  const config = buildConfig("upstream-fallback");
+  globalThis.fetch = ((async () =>
+    new Response('{"next":"/v1/local/installation"}', {
+      headers: {
+        "content-type": "application/json",
+      },
+    })) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedServiceRequest(
+    new Request("http://127.0.0.1:3001/executor/v1/local/installation"),
+    config,
+  );
+
+  expect(response).not.toBeNull();
+  expect(await response?.text()).toBe('{"next":"/v1/local/installation"}');
 });
 
 test("gateway enforces the external allowlist", async () => {

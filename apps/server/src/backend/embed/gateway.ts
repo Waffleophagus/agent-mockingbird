@@ -164,7 +164,7 @@ function shouldRewriteTextResponse(response: Response, definition: EmbeddedServi
   }
   if (
     definition.jsCssRewrite === "root-relative" &&
-    (contentType.includes("javascript") || contentType.includes("text/css") || contentType.includes("application/json"))
+    (contentType.includes("javascript") || contentType.includes("text/css"))
   ) {
     return true;
   }
@@ -189,11 +189,11 @@ function buildEmbeddedServiceDefinition(config: AgentMockingbirdConfig, id: Embe
     forwardedPrefixMode: mode === "embedded-patched" ? "preserve" : "strip-mount-path",
     apiPrefixes: ["/v1", "/mcp"],
     assetPrefixes: ["/assets"],
-    // Executor gets an explicit compatibility rewrite even in embedded-patched mode.
-    // If a deployed host is accidentally still serving a root-relative build, we
-    // normalize the leaked /assets, /v1, and /mcp references instead of hard-failing.
+    // Keep HTML compatibility rewriting on for mixed deployments. JS/CSS rewriting
+    // stays fallback-only because mutating shipped bundles in embedded-patched mode
+    // can corrupt otherwise valid assets.
     htmlRewrite: "root-relative",
-    jsCssRewrite: "root-relative",
+    jsCssRewrite: mode === "upstream-fallback" ? "root-relative" : "none",
     rewriteCookies: true,
     rewriteRedirects: true,
     thirdPartyBrowserProxy: {
