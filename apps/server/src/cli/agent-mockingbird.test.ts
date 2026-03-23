@@ -200,3 +200,109 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
     }
   });
 });
+
+describe("agent-mockingbird CLI packaged executor runtime", () => {
+  test("rejects embedded-patched executor when bundled web assets are missing", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-missing-assets-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const entrypoint = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "executor",
+      "src",
+      "cli",
+      "main.ts",
+    );
+    const nodeModulesDir = path.join(appDir, "vendor", "executor", "node_modules");
+
+    fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+    fs.mkdirSync(nodeModulesDir, { recursive: true });
+    fs.writeFileSync(entrypoint, 'console.log("executor");\n', "utf8");
+
+    try {
+      expect(() =>
+        testing.resolveExecutorRuntimeCommand(
+          appDir,
+          {
+            executorBinGlobal: path.join(tempRoot, "missing-executor-global"),
+            executorBinLocal: path.join(tempRoot, "missing-executor-local"),
+          },
+          "/tmp/bun",
+        ))
+        .toThrow(/embedded executor web assets missing/);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("wires explicit web assets dir into embedded executor systemd unit", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-assets-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const entrypoint = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "executor",
+      "src",
+      "cli",
+      "main.ts",
+    );
+    const nodeModulesDir = path.join(appDir, "vendor", "executor", "node_modules");
+    const webIndex = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "web",
+      "dist",
+      "index.html",
+    );
+
+    fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+    fs.mkdirSync(nodeModulesDir, { recursive: true });
+    fs.mkdirSync(path.dirname(webIndex), { recursive: true });
+    fs.writeFileSync(entrypoint, 'console.log("executor");\n', "utf8");
+    fs.writeFileSync(webIndex, "<!doctype html>\n", "utf8");
+
+    try {
+      const runtime = testing.resolveExecutorRuntimeCommand(
+        appDir,
+        {
+          executorBinGlobal: path.join(tempRoot, "missing-executor-global"),
+          executorBinLocal: path.join(tempRoot, "missing-executor-local"),
+        },
+        "/tmp/bun",
+      );
+      expect(runtime).not.toBeNull();
+      const units = testing.unitContents(
+        {
+          rootDir: "/tmp/agent-mockingbird",
+          dataDir: "/tmp/agent-mockingbird/data",
+          workspaceDir: "/tmp/agent-mockingbird/workspace",
+          executorWorkspaceDir: "/tmp/agent-mockingbird/executor-workspace",
+          executorDataDir: "/tmp/agent-mockingbird/data/executor",
+          executorLocalDataDir: "/tmp/agent-mockingbird/data/executor/control-plane",
+          executorRunDir: "/tmp/agent-mockingbird/data/executor/run",
+          opencodeConfigDir: "/tmp/agent-mockingbird/data/opencode-config",
+        },
+        runtime!.execStart,
+        runtime!.mode,
+        runtime!.webAssetsDir,
+        "/tmp/opencode",
+        "/tmp/agent-mockingbird",
+        "source",
+      );
+
+      expect(runtime!.mode).toBe("embedded-patched");
+      expect(runtime!.webAssetsDir).toBe(path.dirname(webIndex));
+      expect(units.executor).toContain(
+        `Environment=EXECUTOR_WEB_ASSETS_DIR=${path.dirname(webIndex)}`,
+      );
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});

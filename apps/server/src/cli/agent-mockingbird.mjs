@@ -544,12 +544,7 @@ function resolveRequestedExecutorMode() {
     : "embedded-patched";
 }
 
-function resolveExecutorRuntimeCommand(
-  agentMockingbirdAppDir,
-  paths,
-  bunBin,
-  requestedMode = resolveRequestedExecutorMode(),
-) {
+function resolvePackagedExecutorLayout(agentMockingbirdAppDir) {
   const packagedExecutorDir = path.join(
     agentMockingbirdAppDir,
     "vendor",
@@ -567,10 +562,57 @@ function resolveExecutorRuntimeCommand(
     packagedExecutorDir,
     "node_modules",
   );
+  const packagedExecutorWebDir = path.join(
+    packagedExecutorDir,
+    "apps",
+    "web",
+  );
+  const packagedExecutorWebAssetsDir = path.join(
+    packagedExecutorWebDir,
+    "dist",
+  );
+
+  return {
+    packagedExecutorDir,
+    packagedExecutorEntrypoint,
+    packagedExecutorNodeModules,
+    packagedExecutorWebDir,
+    packagedExecutorWebAssetsDir,
+    packagedExecutorWebIndex: path.join(
+      packagedExecutorWebAssetsDir,
+      "index.html",
+    ),
+  };
+}
+
+function resolvePackagedExecutorWebAssetsDir(agentMockingbirdAppDir) {
+  const layout = resolvePackagedExecutorLayout(agentMockingbirdAppDir);
+  return fs.existsSync(layout.packagedExecutorWebIndex)
+    ? layout.packagedExecutorWebAssetsDir
+    : null;
+}
+
+function resolveExecutorRuntimeCommand(
+  agentMockingbirdAppDir,
+  paths,
+  bunBin,
+  requestedMode = resolveRequestedExecutorMode(),
+) {
+  const {
+    packagedExecutorEntrypoint,
+    packagedExecutorNodeModules,
+    packagedExecutorWebAssetsDir,
+    packagedExecutorWebIndex,
+  } = resolvePackagedExecutorLayout(agentMockingbirdAppDir);
   if (
     fs.existsSync(packagedExecutorEntrypoint) &&
     fs.existsSync(packagedExecutorNodeModules)
   ) {
+    if (!fs.existsSync(packagedExecutorWebIndex)) {
+      throw new Error(
+        `embedded executor web assets missing: expected ${packagedExecutorWebIndex}. Install/update must build the vendored Executor web bundle before starting embedded mode.`,
+      );
+    }
     if (!bunBin) {
       throw new Error(
         "bun binary was not found for packaged vendored executor runtime.",
@@ -579,6 +621,7 @@ function resolveExecutorRuntimeCommand(
     return {
       execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(packagedExecutorEntrypoint)} server start --port 8788`,
       mode: "embedded-patched",
+      webAssetsDir: packagedExecutorWebAssetsDir,
     };
   }
 
@@ -595,45 +638,52 @@ function resolveExecutorRuntimeCommand(
   return {
     execStart: `${shellEscapeSystemdArg(executorBin)} server start --port 8788`,
     mode: "upstream-fallback",
+    webAssetsDir: null,
   };
 }
 
-function ensurePackagedExecutorDependencies(agentMockingbirdAppDir, bunBin) {
-  const packagedExecutorDir = path.join(
-    agentMockingbirdAppDir,
-    "vendor",
-    "executor",
-  );
-  const packagedExecutorEntrypoint = path.join(
-    packagedExecutorDir,
-    "apps",
-    "executor",
-    "src",
-    "cli",
-    "main.ts",
-  );
-  const packagedExecutorNodeModules = path.join(
-    packagedExecutorDir,
-    "node_modules",
-  );
-  if (
-    !fs.existsSync(packagedExecutorEntrypoint) ||
-    fs.existsSync(packagedExecutorNodeModules)
-  ) {
-    return;
+function ensurePackagedExecutorRuntime(agentMockingbirdAppDir, bunBin) {
+  const layout = resolvePackagedExecutorLayout(agentMockingbirdAppDir);
+  if (!fs.existsSync(layout.packagedExecutorEntrypoint)) {
+    return null;
   }
-  const installArgs = ["install"];
-  if (fs.existsSync(path.join(packagedExecutorDir, "bun.lock"))) {
-    installArgs.push("--frozen-lockfile");
+
+  if (!fs.existsSync(layout.packagedExecutorNodeModules)) {
+    const installArgs = ["install"];
+    if (fs.existsSync(path.join(layout.packagedExecutorDir, "bun.lock"))) {
+      installArgs.push("--frozen-lockfile");
+    }
+    must(bunBin, installArgs, {
+      cwd: layout.packagedExecutorDir,
+      env: {
+        ...process.env,
+        GITHUB_SERVER_URL: "https://github.com",
+        GITHUB_API_URL: "https://api.github.com",
+      },
+    });
   }
-  must(bunBin, installArgs, {
-    cwd: packagedExecutorDir,
+
+  must(bunBin, ["x", "vite", "build", "--config", "vite.config.ts"], {
+    cwd: layout.packagedExecutorWebDir,
     env: {
       ...process.env,
+      EXECUTOR_WEB_BASE_PATH: "/executor",
+      EXECUTOR_SERVER_BASE_PATH: "/executor",
       GITHUB_SERVER_URL: "https://github.com",
       GITHUB_API_URL: "https://api.github.com",
     },
   });
+
+  const packagedExecutorWebAssetsDir = resolvePackagedExecutorWebAssetsDir(
+    agentMockingbirdAppDir,
+  );
+  if (!packagedExecutorWebAssetsDir) {
+    throw new Error(
+      `embedded executor web asset build did not produce ${layout.packagedExecutorWebIndex}`,
+    );
+  }
+
+  return packagedExecutorWebAssetsDir;
 }
 
 function resolveBunBinary(paths) {
@@ -847,11 +897,15 @@ function unitContents(
   paths,
   executorExecStart,
   executorMode,
+  executorWebAssetsDir,
   opencodeBin,
   agentMockingbirdExecStart,
   runtimeMode,
 ) {
-  const executor = `[Unit]\nDescription=Executor Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.executorWorkspaceDir}\nEnvironment=EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=EXECUTOR_LOCAL_DATA_DIR=${paths.executorLocalDataDir}\nEnvironment=EXECUTOR_SERVER_PID_FILE=${path.join(paths.executorRunDir, "server.pid")}\nEnvironment=EXECUTOR_SERVER_LOG_FILE=${path.join(paths.executorRunDir, "server.log")}\nEnvironment=EXECUTOR_SERVER_BASE_PATH=/executor\nExecStart=${executorExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const executorWebAssetsEnvLine = executorWebAssetsDir
+    ? `Environment=EXECUTOR_WEB_ASSETS_DIR=${executorWebAssetsDir}\n`
+    : "";
+  const executor = `[Unit]\nDescription=Executor Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.executorWorkspaceDir}\nEnvironment=EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=EXECUTOR_LOCAL_DATA_DIR=${paths.executorLocalDataDir}\nEnvironment=EXECUTOR_SERVER_PID_FILE=${path.join(paths.executorRunDir, "server.pid")}\nEnvironment=EXECUTOR_SERVER_LOG_FILE=${path.join(paths.executorRunDir, "server.log")}\nEnvironment=EXECUTOR_SERVER_BASE_PATH=/executor\n${executorWebAssetsEnvLine}ExecStart=${executorExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
   const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\nWants=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=${paths.executorWorkspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_MODE=${executorMode}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH=/executor\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
@@ -1194,12 +1248,13 @@ function buildInstallSummary({ args, paths }) {
     "6. Create/refresh runtime directories under the install root.",
     `7. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
     `8. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
-    `9. Write user services: ${paths.executorUnitPath}, ${paths.opencodeUnitPath}, and ${paths.agentMockingbirdUnitPath}.`,
-    "10. Reload systemd user daemon and enable/start all three services.",
+    "9. Build the packaged Executor embedded web bundle for /executor.",
+    `10. Write user services: ${paths.executorUnitPath}, ${paths.opencodeUnitPath}, and ${paths.agentMockingbirdUnitPath}.`,
+    "11. Reload systemd user daemon and enable/start all three services.",
     args.skipLinger
-      ? "11. Skip linger configuration (--skip-linger set)."
-      : `11. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
-    "12. Run health checks, and initialize default enabled skills if config has none.",
+      ? "12. Skip linger configuration (--skip-linger set)."
+      : `12. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "13. Run health checks, and initialize default enabled skills if config has none.",
     "",
     info(
       "After install (interactive only), a provider onboarding wizard can launch OpenCode auth and set a default model.",
@@ -1221,13 +1276,14 @@ function buildUpdateSummary({ args, paths }) {
     "1. Refresh Agent Mockingbird package + executor + OpenCode sidecar dependencies.",
     `2. Ensure Bun runtime is available${hasBun ? ` (${success("already present")})` : ` (${warn(`will install${hasCurl ? " with curl fallback" : ""}`)})`}.`,
     "3. Re-seed workspace skills from bundled package.",
-    "4. Re-write CLI shim + systemd user units to current paths/entrypoint.",
+    "4. Rebuild the packaged Executor embedded web bundle for /executor.",
+    "5. Re-write CLI shim + systemd user units to current paths/entrypoint.",
     "   - Includes agent-mockingbird + opencode shims in ~/.local/bin",
-    "5. Reload daemon, enable/start services, then force restart all sidecars.",
+    "6. Reload daemon, enable/start services, then force restart all sidecars.",
     args.skipLinger
-      ? "6. Skip linger configuration (--skip-linger set)."
-      : `6. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
-    "7. Run health + service verification, and initialize default enabled skills if config has none.",
+      ? "7. Skip linger configuration (--skip-linger set)."
+      : `7. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "8. Run health + service verification, and initialize default enabled skills if config has none.",
     "",
     "What this update does not do:",
     `- It does not wipe ${paths.dataDir} or ${paths.workspaceDir}.`,
@@ -1251,6 +1307,7 @@ function buildUpdateDryRun({ args, paths }) {
     "Refresh opencode-ai dependency",
     hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
     "Reseed workspace skills from bundled package",
+    "Build packaged Executor embedded web bundle for /executor",
     "Rewrite agent-mockingbird CLI shim",
     "Rewrite opencode CLI shim",
     "Rewrite systemd user unit files for executor + opencode + agent-mockingbird",
@@ -2414,6 +2471,9 @@ export const testing = {
   buildEmptyModelDiscoveryDiagnostics,
   readRunningPackageVersion,
   readOpenCodePackageVersion,
+  resolvePackagedExecutorWebAssetsDir,
+  resolveExecutorRuntimeCommand,
+  unitContents,
 };
 
 /**
@@ -2753,7 +2813,7 @@ async function installOrUpdate(args, mode) {
     }
     must(bunBin, installArgs, { cwd: paths.opencodeConfigDir });
   }
-  ensurePackagedExecutorDependencies(agentMockingbirdAppDir, bunBin);
+  ensurePackagedExecutorRuntime(agentMockingbirdAppDir, bunBin);
   const agentMockingbirdRuntime = resolveAgentMockingbirdRuntimeCommand(
     agentMockingbirdAppDir,
     bunBin,
@@ -2785,6 +2845,7 @@ async function installOrUpdate(args, mode) {
     paths,
     executorRuntime.execStart,
     executorRuntime.mode,
+    executorRuntime.webAssetsDir,
     opencodeBin,
     agentMockingbirdRuntime.execStart,
     agentMockingbirdRuntime.mode,
