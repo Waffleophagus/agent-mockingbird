@@ -83,7 +83,7 @@ test("gateway rewrites fallback html root-relative references", () => {
   expect(testing.rewriteRootRelativeContent(html, definition)).toContain('/executor/v1/status');
 });
 
-test("gateway leaves embedded-patched js/css references untouched", async () => {
+test("gateway rewrites leaked root-relative js/css references even in embedded-patched mode", async () => {
   const config = buildConfig("embedded-patched");
   globalThis.fetch = ((async () =>
     new Response('fetch("/assets/app.js")', {
@@ -98,7 +98,7 @@ test("gateway leaves embedded-patched js/css references untouched", async () => 
   );
 
   expect(response).not.toBeNull();
-  expect(await response?.text()).toBe('fetch("/assets/app.js")');
+  expect(await response?.text()).toBe('fetch("/executor/assets/app.js")');
 });
 
 test("gateway enforces the external allowlist", async () => {

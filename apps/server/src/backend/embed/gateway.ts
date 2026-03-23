@@ -190,8 +190,11 @@ function buildEmbeddedServiceDefinition(config: AgentMockingbirdConfig, id: Embe
     forwardedPrefixMode: mode === "embedded-patched" ? "preserve" : "strip-known-prefixes",
     apiPrefixes: ["/v1", "/mcp"],
     assetPrefixes: ["/assets"],
-    htmlRewrite: mode === "embedded-patched" ? "none" : "root-relative",
-    jsCssRewrite: mode === "embedded-patched" ? "none" : "root-relative",
+    // Executor gets an explicit compatibility rewrite even in embedded-patched mode.
+    // If a deployed host is accidentally still serving a root-relative build, we
+    // normalize the leaked /assets, /v1, and /mcp references instead of hard-failing.
+    htmlRewrite: "root-relative",
+    jsCssRewrite: "root-relative",
     rewriteCookies: true,
     rewriteRedirects: true,
     thirdPartyBrowserProxy: {
