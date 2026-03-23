@@ -34,8 +34,8 @@ type Diagnostic = {
 };
 
 const repoRoot = path.resolve(import.meta.dir, "..");
-const cleanroomRoot = path.join(repoRoot, "cleanroom", "opencode");
-const vendorRoot = path.join(repoRoot, "vendor", "opencode");
+const opencodeCleanroomRoot = path.join(repoRoot, "cleanroom", "opencode");
+const opencodeVendorRoot = path.join(repoRoot, "vendor", "opencode");
 const trackedArtifactPaths = [
   "bin/agent-mockingbird",
   "bin/agent-mockingbird-managed",
@@ -44,12 +44,20 @@ const trackedArtifactPaths = [
 main();
 
 function main() {
-  ensureOpencodeWorktree();
-  const initialStatus = readSyncStatus();
-  if (!initialStatus) {
+  ensureVendorWorktree("opencode");
+  ensureVendorWorktree("executor");
+
+  const opencodeStatus = readSyncStatus("opencode");
+  if (!opencodeStatus) {
     fail("Unable to read OpenCode sync status after worktree setup.");
   }
-  assertShipState(initialStatus);
+  assertShipState("opencode", opencodeStatus);
+
+  const executorStatus = readSyncStatus("executor");
+  if (!executorStatus) {
+    fail("Unable to read Executor sync status after worktree setup.");
+  }
+  assertShipState("executor", executorStatus);
 
   runStep("Build CLI", ["bun", "run", "build:cli"]);
   assertTrackedArtifactsSynced(trackedArtifactPaths);
@@ -58,6 +66,7 @@ function main() {
   runStep("Typecheck", ["bun", "run", "typecheck"]);
 
   runStep("OpenCode Patch Check", ["bun", "run", "opencode:sync", "--check"]);
+  runStep("Executor Patch Check", ["bun", "run", "executor:sync", "--check"]);
   runFilteredOpencodeTypecheck();
 
   runStep("Build", ["bun", "run", "build"]);
@@ -70,36 +79,42 @@ function main() {
   console.log("\nShip check passed.");
 }
 
-function ensureOpencodeWorktree() {
-  const status = readSyncStatus({ allowFailure: true });
+function ensureVendorWorktree(target: "opencode" | "executor") {
+  const status = readSyncStatus(target, { allowFailure: true });
   if (status && status.vendor.exists) {
     return;
   }
 
-  console.log("\n== Materialize OpenCode Worktree ==");
-  runCommand(["bun", "run", "opencode:sync", "--rebuild-only"]);
+  const label = target === "opencode" ? "OpenCode" : "Executor";
+  console.log(`\n== Materialize ${label} Worktree ==`);
+  runCommand(["bun", "run", `${target}:sync`, "--rebuild-only"]);
 }
 
-function assertShipState(status: SyncStatus) {
+function assertShipState(target: "opencode" | "executor", status: SyncStatus) {
   const problems: string[] = [];
+  const cleanroomPath = `cleanroom/${target}`;
+  const vendorPath = `vendor/${target}`;
+  const lockPath = `${target}.lock.json`;
+  const patchesPath = `patches/${target}`;
+  const label = target === "opencode" ? "OpenCode" : "Executor";
 
   if (!status.cleanroom.exists) {
-    problems.push("cleanroom/opencode is missing");
+    problems.push(`${cleanroomPath} is missing`);
   }
   if (status.cleanroom.pristine !== true) {
-    problems.push("cleanroom/opencode is not pristine");
+    problems.push(`${cleanroomPath} is not pristine`);
   }
   if (status.cleanroom.matchesLock !== true) {
-    problems.push("cleanroom/opencode does not match opencode.lock.json");
+    problems.push(`${cleanroomPath} does not match ${lockPath}`);
   }
   if (!status.vendor.exists) {
-    problems.push("vendor/opencode is missing");
+    problems.push(`${vendorPath} is missing`);
   }
   if (status.vendor.state !== "clean") {
-    problems.push(`vendor/opencode is ${status.vendor.state}`);
+    problems.push(`${vendorPath} is ${status.vendor.state}`);
   }
   if (status.patches.matchesBranch !== true) {
-    problems.push("patches/opencode does not match the vendor patch branch");
+    problems.push(`${patchesPath} does not match the vendor patch branch`);
   }
 
   if (problems.length === 0) {
@@ -107,27 +122,27 @@ function assertShipState(status: SyncStatus) {
   }
 
   const detail = problems.map((item) => `- ${item}`).join("\n");
-  fail(`OpenCode ship state is not clean:\n${detail}\n\nCommit/export vendor changes or rebuild the worktree before shipping.`);
+  fail(`${label} ship state is not clean:\n${detail}\n\nCommit/export vendor changes or rebuild the worktree before shipping.`);
 }
 
 function runFilteredOpencodeTypecheck() {
   console.log("\n== OpenCode Dependency Install ==");
-  runCommand(["bun", "install", "--cwd", cleanroomRoot, "--frozen-lockfile"], {
+  runCommand(["bun", "install", "--cwd", opencodeCleanroomRoot, "--frozen-lockfile"], {
     quietLabel: "cleanroom/opencode",
     env: bunInstallEnv(),
   });
-  runCommand(["bun", "install", "--cwd", vendorRoot, "--frozen-lockfile"], {
+  runCommand(["bun", "install", "--cwd", opencodeVendorRoot, "--frozen-lockfile"], {
     quietLabel: "vendor/opencode",
     env: bunInstallEnv(),
   });
 
   console.log("\n== OpenCode Full Typecheck ==");
   const cleanroomResult = runCommand(
-    ["bun", "run", "--cwd", cleanroomRoot, "typecheck"],
+    ["bun", "run", "--cwd", opencodeCleanroomRoot, "typecheck"],
     { allowFailure: true, quietLabel: "cleanroom/opencode" },
   );
   const vendorResult = runCommand(
-    ["bun", "run", "--cwd", vendorRoot, "typecheck"],
+    ["bun", "run", "--cwd", opencodeVendorRoot, "typecheck"],
     { allowFailure: true, quietLabel: "vendor/opencode" },
   );
 
@@ -143,8 +158,8 @@ function runFilteredOpencodeTypecheck() {
     );
   }
 
-  const cleanroomDiagnostics = collectDiagnostics(cleanroomResult.combined, cleanroomRoot);
-  const vendorDiagnostics = collectDiagnostics(vendorResult.combined, vendorRoot);
+  const cleanroomDiagnostics = collectDiagnostics(cleanroomResult.combined, opencodeCleanroomRoot);
+  const vendorDiagnostics = collectDiagnostics(vendorResult.combined, opencodeVendorRoot);
   const cleanroomKeys = new Set(cleanroomDiagnostics.map((item) => item.key));
   const vendorOnlyDiagnostics = vendorDiagnostics.filter((item) => !cleanroomKeys.has(item.key));
 
@@ -154,8 +169,8 @@ function runFilteredOpencodeTypecheck() {
   }
 
   if (vendorDiagnostics.length === 0 && cleanroomDiagnostics.length === 0) {
-    const cleanroomComparable = normalizeComparableOutput(cleanroomResult.combined, cleanroomRoot);
-    const vendorComparable = normalizeComparableOutput(vendorResult.combined, vendorRoot);
+    const cleanroomComparable = normalizeComparableOutput(cleanroomResult.combined, opencodeCleanroomRoot);
+    const vendorComparable = normalizeComparableOutput(vendorResult.combined, opencodeVendorRoot);
     if (cleanroomComparable !== vendorComparable) {
       fail(
         "OpenCode workspace typecheck failed in both cleanroom and vendor, but the failures do not normalize to the same output.\n\nVendor output:\n" +
@@ -284,9 +299,9 @@ function assertTrackedArtifactsSynced(pathsToCheck: string[]) {
   fail(`Generated artifacts are out of sync:\n${detail}\n\nRebuild and commit the generated outputs before shipping.`);
 }
 
-function readSyncStatus(options?: { allowFailure?: boolean }): SyncStatus | null {
+function readSyncStatus(target: "opencode" | "executor", options?: { allowFailure?: boolean }): SyncStatus | null {
   const result = runCommand(
-    ["bun", "run", "opencode:sync", "--status", "--json"],
+    ["bun", "run", `${target}:sync`, "--status", "--json"],
     { allowFailure: options?.allowFailure ?? false, printCommand: false, suppressOutput: true },
   );
   if (result.status !== 0) {
@@ -297,7 +312,7 @@ function readSyncStatus(options?: { allowFailure?: boolean }): SyncStatus | null
     return JSON.parse(result.stdout) as SyncStatus;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    fail(`Failed to parse opencode sync status JSON: ${message}`);
+    fail(`Failed to parse ${target} sync status JSON: ${message}`);
   }
 }
 

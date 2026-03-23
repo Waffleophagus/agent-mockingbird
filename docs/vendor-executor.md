@@ -54,4 +54,5 @@ If the patch stack needs a manual rebase:
 - Never edit `cleanroom/executor` directly.
 - Never hand-maintain a copied `vendor/executor` tree.
 - If `vendor/executor` is dirty, do not run `--ref` or `--export-patches`.
+- `bun run check:ship` validates clean, exported vendor state for both OpenCode and Executor. Dirty `vendor/executor` is a hard failure.
 - Treat `patches/executor` as exported artifacts of the patch branch, not as the primary editing surface.

@@ -37,5 +37,5 @@
 - Never edit `cleanroom/opencode` directly.
 - Never hand-maintain a copied `vendor/opencode` tree.
 - If `vendor/opencode` is dirty, do not run `--ref` or `--export-patches`.
-- `bun run check:ship` only validates clean, exported vendor state. Dirty `vendor/opencode` is a hard failure.
+- `bun run check:ship` validates clean, exported vendor state for both OpenCode and Executor. Dirty `vendor/opencode` is a hard failure.
 - Treat `patches/opencode` as exported artifacts of the patch branch, not as the primary editing surface.
