@@ -2,7 +2,7 @@ import type { AgentMockingbirdConfig } from "../config/schema";
 
 export type EmbeddedServiceId = "executor";
 export type EmbeddedServiceMode = "embedded-patched" | "upstream-fallback";
-type ForwardedPrefixMode = "preserve" | "strip-known-prefixes";
+type ForwardedPrefixMode = "preserve" | "strip-mount-path";
 type RewritePolicy = "none" | "root-relative";
 
 interface EmbeddedExternalAllowlistEntry {
@@ -69,14 +69,13 @@ function normalizePrefix(prefix: string) {
   return prefix.startsWith("/") ? prefix : `/${prefix}`;
 }
 
-function stripKnownEmbeddedPrefixes(pathname: string, mountPath: string, prefixes: Array<string>) {
+function stripMountPath(pathname: string, mountPath: string) {
   const normalizedMountPath = normalizeMountPath(mountPath);
-  const suffix = pathname === normalizedMountPath ? "/" : pathname.slice(normalizedMountPath.length) || "/";
-  for (const prefix of prefixes) {
-    const normalizedPrefix = normalizePrefix(prefix);
-    if (suffix === normalizedPrefix || suffix.startsWith(`${normalizedPrefix}/`)) {
-      return suffix;
-    }
+  if (pathname === normalizedMountPath) {
+    return "/";
+  }
+  if (pathname.startsWith(`${normalizedMountPath}/`)) {
+    return pathname.slice(normalizedMountPath.length) || "/";
   }
   return pathname;
 }
@@ -187,7 +186,7 @@ function buildEmbeddedServiceDefinition(config: AgentMockingbirdConfig, id: Embe
     mountPath: normalizeMountPath(embeddedExecutor.mountPath),
     upstreamBaseUrl: embeddedExecutor.baseUrl.replace(/\/+$/, ""),
     healthcheckPath: embeddedExecutor.healthcheckPath,
-    forwardedPrefixMode: mode === "embedded-patched" ? "preserve" : "strip-known-prefixes",
+    forwardedPrefixMode: mode === "embedded-patched" ? "preserve" : "strip-mount-path",
     apiPrefixes: ["/v1", "/mcp"],
     assetPrefixes: ["/assets"],
     // Executor gets an explicit compatibility rewrite even in embedded-patched mode.
@@ -216,10 +215,9 @@ function buildForwardTarget(
   forwardedPrefixMode: ForwardedPrefixMode = definition.forwardedPrefixMode,
 ) {
   const incoming = new URL(req.url);
-  const prefixes = [...definition.assetPrefixes, ...definition.apiPrefixes];
   const forwardedPath =
-    forwardedPrefixMode === "strip-known-prefixes"
-      ? stripKnownEmbeddedPrefixes(incoming.pathname, definition.mountPath, prefixes)
+    forwardedPrefixMode === "strip-mount-path"
+      ? stripMountPath(incoming.pathname, definition.mountPath)
       : incoming.pathname;
   return new URL(`${forwardedPath}${incoming.search}`, definition.upstreamBaseUrl);
 }
@@ -240,18 +238,6 @@ function findEmbeddedService(config: AgentMockingbirdConfig, pathname: string) {
     return executor;
   }
   return null;
-}
-
-function shouldRetryWithStrippedPrefixes(pathname: string, definition: EmbeddedServiceDefinition) {
-  if (!isMountedPath(pathname, definition.mountPath)) {
-    return false;
-  }
-  const normalizedMountPath = normalizeMountPath(definition.mountPath);
-  const suffix = pathname === normalizedMountPath ? "/" : pathname.slice(normalizedMountPath.length) || "/";
-  return [...definition.assetPrefixes, ...definition.apiPrefixes].some(prefix => {
-    const normalizedPrefix = normalizePrefix(prefix);
-    return suffix === normalizedPrefix || suffix.startsWith(`${normalizedPrefix}/`);
-  });
 }
 
 function parseExternalProxyRequest(pathname: string) {
@@ -321,9 +307,9 @@ export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMoc
   if (
     upstream.status === 404 &&
     definition.forwardedPrefixMode === "preserve" &&
-    shouldRetryWithStrippedPrefixes(pathname, definition)
+    isMountedPath(pathname, definition.mountPath)
   ) {
-    upstream = await fetch(buildForwardTarget(req, definition, "strip-known-prefixes"), {
+    upstream = await fetch(buildForwardTarget(req, definition, "strip-mount-path"), {
       method: req.method,
       headers: buildForwardHeaders(req, definition),
       body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
@@ -395,5 +381,5 @@ export const testing = {
   parseExternalProxyRequest,
   rewriteCookiePath,
   rewriteRootRelativeContent,
-  stripKnownEmbeddedPrefixes,
+  stripMountPath,
 };

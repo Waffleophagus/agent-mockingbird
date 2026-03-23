@@ -79,6 +79,38 @@ test("gateway retries stripped asset paths when embedded-patched upstream still 
   expect(await response?.text()).toBe("asset-body");
 });
 
+test("gateway retries stripped mount root when embedded-patched upstream still serves root html", async () => {
+  const config = buildConfig("embedded-patched");
+  const requestedUrls: string[] = [];
+  globalThis.fetch = ((async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    requestedUrls.push(url);
+    if (url.endsWith("/executor")) {
+      return new Response("Not found", { status: 404 });
+    }
+    return new Response("<html>ok</html>", {
+      headers: {
+        "content-type": "text/html",
+      },
+    });
+  }) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedServiceRequest(
+    new Request("http://127.0.0.1:3001/executor", {
+      headers: {
+        accept: "text/html",
+      },
+    }),
+    config,
+  );
+
+  expect(requestedUrls).toEqual([
+    "http://127.0.0.1:8788/executor",
+    "http://127.0.0.1:8788/",
+  ]);
+  expect(await response?.text()).toContain("<html>ok</html>");
+});
+
 test("gateway rewrites redirect locations under the mount path", () => {
   const config = buildConfig("upstream-fallback");
   const definition = testing.buildEmbeddedServiceDefinition(config, "executor");
