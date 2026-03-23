@@ -206,41 +206,16 @@ function readRootDirArg(argv = process.argv.slice(2)) {
 function resolveManagedCliDelegationTarget({
   argv = process.argv,
   env = process.env,
-  modulePath = MODULE_PATH,
 } = {}) {
   const rootDir =
     readRootDirArg(argv.slice(2)) ||
     (env.AGENT_MOCKINGBIRD_ROOT_DIR || "").trim() ||
     DEFAULT_ROOT_DIR;
-  const managedCliPath = path.join(rootDir, "npm", "bin", "agent-mockingbird");
+  const managedCliPath = resolveManagedCliPathForRoot(rootDir);
   if (!fs.existsSync(managedCliPath)) {
     return null;
   }
-
-  const currentRealPath = fs.existsSync(modulePath)
-    ? fs.realpathSync(modulePath)
-    : path.resolve(modulePath);
-  const managedRealPath = fs.realpathSync(managedCliPath);
-  if (currentRealPath === managedRealPath) {
-    return null;
-  }
   return managedCliPath;
-}
-
-function maybeDelegateToManagedCli() {
-  const managedCliPath = resolveManagedCliDelegationTarget();
-  if (!managedCliPath) {
-    return false;
-  }
-
-  const delegated = spawnSync(managedCliPath, process.argv.slice(2), {
-    stdio: "inherit",
-    env: process.env,
-  });
-  if (delegated.error) {
-    throw delegated.error;
-  }
-  process.exit(delegated.status ?? 1);
 }
 
 function normalizeRegistryUrl(url) {
@@ -538,11 +513,24 @@ function resolveAgentMockingbirdAppDir(paths) {
   ]);
 }
 
-function resolveAgentMockingbirdBin(paths) {
+function resolveManagedCliPathForAppDir(agentMockingbirdAppDir) {
   return firstExistingPath([
-    paths.agentMockingbirdBinGlobal,
-    paths.agentMockingbirdBinLocal,
+    path.join(agentMockingbirdAppDir, "bin", "agent-mockingbird-managed"),
+    path.join(agentMockingbirdAppDir, "apps", "server", "src", "cli", "agent-mockingbird.mjs"),
   ]);
+}
+
+function resolveManagedCliPathForRoot(rootDir, scope = DEFAULT_SCOPE) {
+  const paths = pathsFor({
+    rootDir,
+    scope,
+    userUnitDir: USER_UNIT_DIR,
+  });
+  const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
+  if (!agentMockingbirdAppDir) {
+    return null;
+  }
+  return resolveManagedCliPathForAppDir(agentMockingbirdAppDir);
 }
 
 function resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir) {
@@ -844,33 +832,42 @@ function ensureLocalBinPath(paths) {
   return { inPath: false, updatedFiles };
 }
 
-function resolveShadowingAgentMockingbirdCommandPath(paths) {
+function resolveCurrentAgentMockingbirdCommandPath() {
   const resolvedCommand = shell("bash", ["-lc", "command -v agent-mockingbird"]);
   if (resolvedCommand.code !== 0) {
-    return null;
+    return "";
   }
-  const commandPath = resolvedCommand.stdout.trim();
-  if (!commandPath) {
-    return null;
+  return resolvedCommand.stdout.trim();
+}
+
+function collectCommandResolution({ rootDir, scope }) {
+  const managedCliPath = resolveManagedCliPathForRoot(rootDir, scope);
+  const commandPath = resolveCurrentAgentMockingbirdCommandPath();
+  const normalizedCommandPath = commandPath ? path.resolve(commandPath) : "";
+  const normalizedManagedCliPath = managedCliPath ? path.resolve(managedCliPath) : "";
+  let mode = "unresolved";
+  if (normalizedCommandPath && normalizedManagedCliPath) {
+    mode =
+      normalizedCommandPath === normalizedManagedCliPath
+        ? "managed-direct"
+        : "bootstrap-wrapper";
+  } else if (normalizedManagedCliPath) {
+    mode = "managed-only";
+  } else if (normalizedCommandPath) {
+    mode = "bootstrap-only";
   }
-  const resolvedCommandPath = path.resolve(commandPath);
-  const managedShimPath = path.resolve(paths.agentMockingbirdShimPath);
-  if (resolvedCommandPath === managedShimPath) {
-    return null;
-  }
-  const homeDir = path.resolve(process.env.HOME || os.homedir());
-  if (
-    resolvedCommandPath !== homeDir &&
-    !resolvedCommandPath.startsWith(`${homeDir}${path.sep}`)
-  ) {
-    return null;
-  }
-  return resolvedCommandPath;
+
+  return {
+    rootDir,
+    managedCliPath: managedCliPath ?? "",
+    commandPath,
+    mode,
+  };
 }
 
 function writeAgentMockingbirdShim(
   paths,
-  agentMockingbirdBin,
+  managedCliPath,
   opencodePackageVersion,
 ) {
   ensureDir(paths.localBinDir);
@@ -878,16 +875,10 @@ function writeAgentMockingbirdShim(
 set -euo pipefail
 # managed-by: agent-mockingbird-installer
 export AGENT_MOCKINGBIRD_OPENCODE_VERSION=${JSON.stringify(opencodePackageVersion)}
-exec "${agentMockingbirdBin}" "$@"
+exec "${managedCliPath}" "$@"
 `;
   writeFile(paths.agentMockingbirdShimPath, shim);
   fs.chmodSync(paths.agentMockingbirdShimPath, 0o755);
-  const shadowingCommandPath =
-    resolveShadowingAgentMockingbirdCommandPath(paths);
-  if (shadowingCommandPath) {
-    writeFile(shadowingCommandPath, shim);
-    fs.chmodSync(shadowingCommandPath, 0o755);
-  }
   return paths.agentMockingbirdShimPath;
 }
 
@@ -2549,7 +2540,8 @@ export const testing = {
   readRunningPackageVersion,
   readOpenCodePackageVersion,
   resolveManagedCliDelegationTarget,
-  resolveShadowingAgentMockingbirdCommandPath,
+  resolveManagedCliPathForAppDir,
+  resolveManagedCliPathForRoot,
   resolvePackagedExecutorWebAssetsDir,
   resolveExecutorRuntimeCommand,
   unitContents,
@@ -2832,15 +2824,21 @@ async function installOrUpdate(args, mode) {
     env,
   );
 
-  const agentMockingbirdBin = resolveAgentMockingbirdBin(paths);
-  if (!agentMockingbirdBin) {
+  const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
+  if (!agentMockingbirdAppDir) {
     throw new Error(
-      `agent-mockingbird binary missing: looked in ${paths.agentMockingbirdBinGlobal} and ${paths.agentMockingbirdBinLocal}`,
+      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal}, ${paths.agentMockingbirdAppDirLocal}, ${paths.agentMockingbirdAppDirScopedGlobal}, and ${paths.agentMockingbirdAppDirScopedLocal}`,
+    );
+  }
+  const managedCliPath = resolveManagedCliPathForAppDir(agentMockingbirdAppDir);
+  if (!managedCliPath) {
+    throw new Error(
+      `agent-mockingbird managed CLI missing in ${agentMockingbirdAppDir}: expected bin/agent-mockingbird-managed or source CLI fallback`,
     );
   }
   const shimPath = writeAgentMockingbirdShim(
     paths,
-    agentMockingbirdBin,
+    managedCliPath,
     opencodePackageVersion,
   );
   const pathSetup = ensureLocalBinPath(paths);
@@ -2848,13 +2846,6 @@ async function installOrUpdate(args, mode) {
   const bunBin = resolveBunBinary(paths);
   if (!bunBin) {
     throw new Error("bun binary was not found after install.");
-  }
-
-  const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
-  if (!agentMockingbirdAppDir) {
-    throw new Error(
-      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal}, ${paths.agentMockingbirdAppDirLocal}, ${paths.agentMockingbirdAppDirScopedGlobal}, and ${paths.agentMockingbirdAppDirScopedLocal}`,
-    );
   }
   const runtimeAssetsSource = prepareRuntimeAssetSources(
     agentMockingbirdAppDir,
@@ -3177,6 +3168,12 @@ function printResult(result, asJson) {
     if (result.opencodeShimPath) {
       console.log(`opencode-cli: ${result.opencodeShimPath}`);
     }
+    if (result.commandResolution) {
+      console.log(`managed-root: ${result.commandResolution.rootDir}`);
+      console.log(`managed-cli: ${result.commandResolution.managedCliPath || "unavailable"}`);
+      console.log(`command: ${result.commandResolution.commandPath || "unresolved"}`);
+      console.log(`command-mode: ${result.commandResolution.mode}`);
+    }
     if (result.pathSetup) {
       if (result.pathSetup.inPath) {
         console.log(`path: ${localBinDir} already in PATH`);
@@ -3362,6 +3359,12 @@ function printResult(result, asJson) {
     console.log(
       `health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`,
     );
+    if (result.commandResolution) {
+      console.log(`managed-root: ${result.commandResolution.rootDir}`);
+      console.log(`managed-cli: ${result.commandResolution.managedCliPath || "unavailable"}`);
+      console.log(`command: ${result.commandResolution.commandPath || "unresolved"}`);
+      console.log(`command-mode: ${result.commandResolution.mode}`);
+    }
     return;
   }
 
@@ -3385,6 +3388,12 @@ function printResult(result, asJson) {
     console.log(
       `health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`,
     );
+    if (result.commandResolution) {
+      console.log(`managed-root: ${result.commandResolution.rootDir}`);
+      console.log(`managed-cli: ${result.commandResolution.managedCliPath || "unavailable"}`);
+      console.log(`command: ${result.commandResolution.commandPath || "unresolved"}`);
+      console.log(`command-mode: ${result.commandResolution.mode}`);
+    }
     return;
   }
 
@@ -3579,12 +3588,23 @@ async function main() {
     throw new Error(`Unknown command: ${args.command}`);
   }
 
+  if (
+    result &&
+    typeof result === "object" &&
+    "rootDir" in result &&
+    typeof result.rootDir === "string"
+  ) {
+    result.commandResolution = collectCommandResolution({
+      rootDir: result.rootDir,
+      scope: args.scope,
+    });
+  }
+
   printResult(result, args.json);
   process.exitCode = evaluateResult(result);
 }
 
 if (import.meta.main) {
-  maybeDelegateToManagedCli();
   await main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

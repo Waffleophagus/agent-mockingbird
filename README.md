@@ -2,6 +2,9 @@
 
 # Agent Mockingbird
 
+> ⚠️ **WARNING: Not Production Ready**
+> This project is currently in early development and is **not quite ready** for general use. It may receive **breaking changes** at any time as we iterate on the design and architecture. Use at your own risk!
+
 Agent Mockingbird is a personal assistant built around OpenCode. It gives you a long-running local agent with persistent memory, scheduled jobs, workspace bootstrap context, and a web API/UI layer for managing runs and configuration.
 
 As OpenClaw is to Pi, the goal is that Agent Mockingbird will be to OpenCode.
@@ -40,7 +43,9 @@ bun install -g agent-mockingbird
 agent-mockingbird install
 ```
 
-`agent-mockingbird install` provisions and starts the `opencode` and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
+The npm/Bun global `agent-mockingbird` command is a bootstrap wrapper. On first install it creates the managed runtime under `~/.agent-mockingbird`, then future `agent-mockingbird` commands delegate into that managed install regardless of npm global prefix or PATH ordering.
+
+`agent-mockingbird install` provisions and starts the `executor`, `opencode`, and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
 
 If you are working from source:
 

@@ -194,6 +194,7 @@ jobs:
           tar_contents="$(tar -tzf "${tarball}")"
           grep -Fqx -- "package/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/agent-mockingbird" <<<"${tar_contents}"
+          grep -Fqx -- "package/bin/agent-mockingbird-managed" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-assets.mjs" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-layout.mjs" <<<"${tar_contents}"
           grep -Fqx -- "package/executor.lock.json" <<<"${tar_contents}"
@@ -249,7 +250,7 @@ jobs:
           tmpdir="$(mktemp -d)"
           trap 'rm -rf "${tmpdir}"' EXIT
           tar -xzf "${AGENT_MOCKINGBIRD_TARBALL}" -C "${tmpdir}"
-          RUNTIME_IMPL_PATH="${tmpdir}/package/bin/agent-mockingbird" bun -e '
+          RUNTIME_IMPL_PATH="${tmpdir}/package/bin/agent-mockingbird-managed" bun -e '
             const fs = require("fs");
             const path = process.env.RUNTIME_IMPL_PATH;
             if (!path || !fs.existsSync(path)) {

@@ -11,7 +11,9 @@ npm i -g agent-mockingbird
 agent-mockingbird install
 ```
 
-That is the main public install path. `agent-mockingbird install` handles service setup and launches interactive onboarding on TTY installs.
+That is the main public install path. The npm global `agent-mockingbird` command is a permanent bootstrap wrapper: it installs the managed runtime into `~/.agent-mockingbird` on first run, then delegates future commands into that managed install regardless of whether npm global lives under `$HOME`, `/usr/local`, or another prefix.
+
+`agent-mockingbird install` handles service setup and launches interactive onboarding on TTY installs.
 
 Optional curl bootstrap wrapper:
 
@@ -23,7 +25,8 @@ This installs:
 
 - `agent-mockingbird` from npmjs
 - `opencode-ai` from npmjs
-- user services (`opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
+- `executor` from npmjs
+- user services (`executor.service`, `opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
 - automatic service start and health verification
 - interactive onboarding on TTY installs (`provider auth`, default model, memory/Ollama, optional OpenClaw import)
 

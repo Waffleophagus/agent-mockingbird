@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
 
 type CommandResult = {
   status: number;
@@ -36,7 +36,10 @@ type Diagnostic = {
 const repoRoot = path.resolve(import.meta.dir, "..");
 const cleanroomRoot = path.join(repoRoot, "cleanroom", "opencode");
 const vendorRoot = path.join(repoRoot, "vendor", "opencode");
-const trackedArtifactPaths = ["bin/agent-mockingbird"];
+const trackedArtifactPaths = [
+  "bin/agent-mockingbird",
+  "bin/agent-mockingbird-managed",
+];
 
 main();
 
@@ -49,7 +52,7 @@ function main() {
   assertShipState(initialStatus);
 
   runStep("Build CLI", ["bun", "run", "build:cli"]);
-  assertTrackedArtifactsSynced(["bin/agent-mockingbird"]);
+  assertTrackedArtifactsSynced(trackedArtifactPaths);
 
   runStep("Lint", ["bun", "run", "lint"]);
   runStep("Typecheck", ["bun", "run", "typecheck"]);
@@ -62,7 +65,7 @@ function main() {
   assertTrackedArtifactsSynced(trackedArtifactPaths);
 
   runStep("Build Standalone Runtime", ["bun", "run", "build:bin"]);
-  assertTrackedArtifactsSynced(["bin/agent-mockingbird"]);
+  assertTrackedArtifactsSynced(trackedArtifactPaths);
 
   console.log("\nShip check passed.");
 }
@@ -366,7 +369,7 @@ function indentBlock(value: string) {
 }
 
 function stripAnsi(value: string) {
-  return value.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  return value.replaceAll("\u001b", "");
 }
 
 function bunInstallEnv() {
