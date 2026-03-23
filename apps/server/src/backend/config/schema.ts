@@ -430,7 +430,9 @@ export const agentMockingbirdConfigSchema = z
     ui: z
       .object({
         skills: stringListSchema.default([]),
+        // Deprecated. Operational MCP state lives in the managed OpenCode config.
         mcps: stringListSchema.default([]),
+        // Deprecated. Operational MCP state lives in the managed OpenCode config.
         mcpServers: configuredMcpServerListSchema.default([]),
         agents: z.array(specialistAgentSchema).default([]),
         agentTypes: agentTypeDefinitionListSchema.default([]),

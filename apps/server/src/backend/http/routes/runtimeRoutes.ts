@@ -154,6 +154,7 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
             configDirectory: storage.configDirectory,
             effectiveConfigPath: storage.configFilePath,
             timeoutMs: snapshot.config.runtime.opencode.timeoutMs,
+            mcpSource: "opencode-managed-config",
           },
         });
       },

@@ -31,6 +31,14 @@ interface RuntimeMcp {
   error?: string;
 }
 
+export interface EffectiveMcpConfigSnapshot {
+  source: "opencode-managed-config";
+  servers: Array<ConfiguredMcpServer>;
+  enabled: Array<string>;
+  status?: Array<RuntimeMcp>;
+  statusError?: string;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -257,6 +265,41 @@ export function resolveConfiguredMcpIds(config: AgentMockingbirdConfig) {
       .filter((server) => server.enabled)
       .map((server) => server.id),
   );
+}
+
+export async function loadEffectiveMcpConfig(
+  config: AgentMockingbirdConfig,
+  input?: { includeStatus?: boolean },
+): Promise<EffectiveMcpConfigSnapshot> {
+  const servers = resolveConfiguredMcpServers(config);
+  const enabled = normalizeMcpIds(
+    servers.filter((server) => server.enabled).map((server) => server.id),
+  );
+  if (input?.includeStatus !== true) {
+    return {
+      source: "opencode-managed-config",
+      servers,
+      enabled,
+    };
+  }
+
+  try {
+    const status = await listRuntimeMcps(config);
+    return {
+      source: "opencode-managed-config",
+      servers,
+      enabled,
+      status,
+    };
+  } catch (error) {
+    return {
+      source: "opencode-managed-config",
+      servers,
+      enabled,
+      statusError:
+        error instanceof Error ? error.message : "Failed to load runtime MCP status",
+    };
+  }
 }
 
 async function getWorkspaceMcpConfig(config: AgentMockingbirdConfig) {

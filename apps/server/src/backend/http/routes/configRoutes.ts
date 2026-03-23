@@ -25,6 +25,7 @@ import {
   replaceConfigSafe,
   type ApplyConfigResult,
 } from "../../config/service";
+import { assertExpectedHashMatches } from "../../config/store";
 import {
   createConfigRolledBackEvent,
   createConfigUpdateFailedEvent,
@@ -32,11 +33,12 @@ import {
   createSkillsCatalogUpdatedEvent,
 } from "../../contracts/events";
 import {
+  loadEffectiveMcpConfig,
   normalizeMcpIds,
-  resolveConfiguredMcpIds,
-  resolveConfiguredMcpServers,
+  serializeConfiguredMcpServersToOpencodeConfig,
 } from "../../mcp/service";
 import { syncMemoryIndex } from "../../memory/service";
+import { patchManagedOpencodeConfig } from "../../opencode/managedConfig";
 import { parseJsonWithSchema, parseStringListBody } from "../parsers";
 import type { RuntimeEventStream } from "../sse";
 
@@ -208,6 +210,16 @@ function publishSkillsCatalogUpdated(eventStream: RuntimeEventStream, revision: 
   eventStream.publish(createSkillsCatalogUpdatedEvent({ revision }, "api"));
 }
 
+async function buildConfigPayload() {
+  const snapshot = getConfigSnapshot();
+  return {
+    ...snapshot,
+    effective: {
+      mcp: await loadEffectiveMcpConfig(snapshot.config, { includeStatus: true }),
+    },
+  };
+}
+
 async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Request) {
   const parsedBody = await parseJsonWithSchema(req, configMcpsBodySchema);
   if (!parsedBody.ok) {
@@ -217,23 +229,27 @@ async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Reques
   const parsedServers = z.array(configuredMcpServerSchema).safeParse(body.servers);
   if (parsedServers.success) {
     const servers = parsedServers.data;
-    const enabledIds = normalizeMcpIds(servers.filter(server => server.enabled).map(server => server.id));
-    return respondWithConfigMutation(
-      eventStream,
-      () =>
-        applyConfigPatch({
-          patch: { ui: { mcpServers: servers, mcps: enabledIds } },
-          expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-          runSmokeTest: true,
-        }),
-      result =>
-        Response.json({
-          mcps: resolveConfiguredMcpIds(result.snapshot.config),
-          servers: resolveConfiguredMcpServers(result.snapshot.config),
-          hash: result.snapshot.hash,
-          smokeTest: result.smokeTest,
-        }),
-    );
+    const snapshot = getConfigSnapshot();
+    try {
+      assertExpectedHashMatches(
+        snapshot.hash,
+        typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+      );
+      await patchManagedOpencodeConfig(snapshot.config, {
+        mcp: serializeConfiguredMcpServersToOpencodeConfig(servers),
+      });
+      const effective = await loadEffectiveMcpConfig(snapshot.config, { includeStatus: true });
+      return Response.json({
+        mcps: effective.enabled,
+        servers: effective.servers,
+        status: effective.status ?? [],
+        source: effective.source,
+        ...(effective.statusError ? { statusError: effective.statusError } : {}),
+        hash: snapshot.hash,
+      });
+    } catch (error) {
+      return configErrorResponse(eventStream, error);
+    }
   }
 
   const values = parseStringListBody(body, "mcps");
@@ -242,27 +258,32 @@ async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Reques
   }
 
   const current = getConfigSnapshot();
-  const enabled = new Set(values);
-  const updatedServers = current.config.ui.mcpServers.map(server => ({
-    ...server,
-    enabled: enabled.has(server.id),
-  }));
-  return respondWithConfigMutation(
-    eventStream,
-    () =>
-      applyConfigPatch({
-        patch: { ui: { mcps: values, mcpServers: updatedServers } },
-        expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-        runSmokeTest: true,
-      }),
-    result =>
-      Response.json({
-        mcps: resolveConfiguredMcpIds(result.snapshot.config),
-        servers: resolveConfiguredMcpServers(result.snapshot.config),
-        hash: result.snapshot.hash,
-        smokeTest: result.smokeTest,
-      }),
-  );
+  try {
+    assertExpectedHashMatches(
+      current.hash,
+      typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+    );
+    const effective = await loadEffectiveMcpConfig(current.config);
+    const enabled = new Set(normalizeMcpIds(values));
+    const updatedServers = effective.servers.map(server => ({
+      ...server,
+      enabled: enabled.has(server.id),
+    }));
+    await patchManagedOpencodeConfig(current.config, {
+      mcp: serializeConfiguredMcpServersToOpencodeConfig(updatedServers),
+    });
+    const nextEffective = await loadEffectiveMcpConfig(current.config, { includeStatus: true });
+    return Response.json({
+      mcps: nextEffective.enabled,
+      servers: nextEffective.servers,
+      status: nextEffective.status ?? [],
+      source: nextEffective.source,
+      ...(nextEffective.statusError ? { statusError: nextEffective.statusError } : {}),
+      hash: current.hash,
+    });
+  } catch (error) {
+    return configErrorResponse(eventStream, error);
+  }
 }
 
 async function getOpencodeAgents() {
@@ -432,10 +453,7 @@ async function importOpenclawBootstrap(req: Request) {
 export function createConfigRoutes(eventStream: RuntimeEventStream) {
   return {
     "/api/config": {
-      GET: () => {
-        const snapshot = getConfigSnapshot();
-        return Response.json(snapshot);
-      },
+      GET: async () => Response.json(await buildConfigPayload()),
       PATCH: async (req: Request) => {
         const parsedBody = await parseJsonWithSchema(req, configPatchRequestSchema);
         if (!parsedBody.ok) {
@@ -560,11 +578,15 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
     },
 
     "/api/config/mcps": {
-      GET: () => {
+      GET: async () => {
         const snapshot = getConfigSnapshot();
+        const effective = await loadEffectiveMcpConfig(snapshot.config, { includeStatus: true });
         return Response.json({
-          mcps: resolveConfiguredMcpIds(snapshot.config),
-          servers: resolveConfiguredMcpServers(snapshot.config),
+          mcps: effective.enabled,
+          servers: effective.servers,
+          status: effective.status ?? [],
+          source: effective.source,
+          ...(effective.statusError ? { statusError: effective.statusError } : {}),
           hash: snapshot.hash,
         });
       },

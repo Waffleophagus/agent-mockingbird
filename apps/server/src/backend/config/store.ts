@@ -388,8 +388,6 @@ function buildLegacyBootstrappedConfig() {
           "runtime.cron",
           "runtime.queue",
           "ui.skills",
-          "ui.mcps",
-          "ui.mcpServers",
           "ui.agents",
           "ui.agentTypes",
         ],
@@ -400,7 +398,9 @@ function buildLegacyBootstrappedConfig() {
     },
     ui: {
       skills: readLegacyStringListConfig("skills", DEFAULT_SKILLS),
+      // Parse-only compatibility for older stored configs.
       mcps: readLegacyStringListConfig("mcps", DEFAULT_MCPS),
+      // Parse-only compatibility for older stored configs.
       mcpServers: [],
       agents: readLegacyAgentConfig(DEFAULT_AGENTS),
       agentTypes: readLegacyAgentTypeConfig(DEFAULT_AGENT_TYPES),

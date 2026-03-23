@@ -155,6 +155,8 @@ function buildConfigPolicyLines() {
     "- Prefer patch_config with expectedHash from get_config to avoid conflicts.",
     "- Safe config writes enforce policy checks and may reject protected paths.",
     "- Keep runSmokeTest enabled unless explicitly instructed otherwise.",
+    "- MCP source of truth lives in managed OpenCode config, not config.ui.mcpServers.",
+    "- Inspect MCP state through get_config effective.mcp or the MCP APIs instead of relying on legacy ui MCP fields.",
   ];
 }
 

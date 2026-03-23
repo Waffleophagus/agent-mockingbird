@@ -119,8 +119,6 @@
         "runtime.heartbeat",
         "runtime.cron",
         "ui.skills",
-        "ui.mcps",
-        "ui.mcpServers",
         "ui.agents",
         "ui.agentTypes"
       ],

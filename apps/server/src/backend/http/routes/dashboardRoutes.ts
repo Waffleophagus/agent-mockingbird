@@ -146,6 +146,7 @@ export function createDashboardRoutes(runtime: RuntimeEngine) {
             projection: {
               source: "agent-mockingbird-config-json",
               syncs: ["small_model", "skills.paths", "mcp", "agent"],
+              mcpSource: "opencode-managed-config",
             },
             identity: bootstrap.identity,
             bootstrap: {
