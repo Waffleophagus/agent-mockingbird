@@ -1,4 +1,4 @@
-From 0f0fdc765319e176777ae71316861fdbeed07743 Mon Sep 17 00:00:00 2001
+From aec53a065c24d0a7381c1401238e476d8632bac9 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sun, 22 Mar 2026 00:14:20 -0500
 Subject: [PATCH] feat: add base-path aware web serving

@@ -1,10 +1,10 @@
 {
   "upstream": {
     "remote": "https://github.com/RhysSullivan/executor.git",
-    "tag": "v1.2.5",
-    "commit": "a5a74a1f8deee4ec9da5915a4cec2b67696a03f6"
+    "tag": "v1.2.6",
+    "commit": "8f11ac492eaeff3703d86e8397a0c19c3b988d10"
   },
-  "packageVersion": "1.2.5",
+  "packageVersion": "1.2.6",
   "paths": {
     "cleanroom": "cleanroom/executor",
     "vendor": "vendor/executor",
