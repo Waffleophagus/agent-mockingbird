@@ -34,6 +34,8 @@ When using cron tools:
 4. Use `agentPromptTemplate` as optional fallback prompt; per-run overrides can come from `invokeAgent.prompt`.
 5. Use `run_job_now` + `list_instances` + `list_steps` to validate behavior after create/update.
 6. Use `disable_job` to pause without deleting, and `enable_job` to resume.
+7. Conditional modules only receive `ctx = { nowMs, payload, job, instance }`; they do not get a `tools` global.
+8. Conditional modules must return `{ status: "ok" | "error", summary?, data?, invokeAgent? }`. Use `invokeAgent.shouldInvoke` to escalate.
 
 ## Memory Behavior
 

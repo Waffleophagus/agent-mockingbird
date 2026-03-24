@@ -59,13 +59,13 @@ export class CronService {
   start() {
     if (!env.AGENT_MOCKINGBIRD_CRON_ENABLED) return;
     this.schedulerTimer = setInterval(() => {
-      void this.schedulerTick();
+      void this.runSchedulerTick();
     }, env.AGENT_MOCKINGBIRD_CRON_SCHEDULER_POLL_MS);
     this.workerTimer = setInterval(() => {
-      void this.workerTick();
+      void this.runWorkerTick();
     }, env.AGENT_MOCKINGBIRD_CRON_WORKER_POLL_MS);
-    void this.schedulerTick();
-    void this.workerTick();
+    void this.runSchedulerTick();
+    void this.runWorkerTick();
   }
 
   stop() {
@@ -520,6 +520,14 @@ export class CronService {
     }
   }
 
+  private async runSchedulerTick() {
+    try {
+      await this.schedulerTick();
+    } catch (error) {
+      logger.errorWithCause("scheduler tick failed", error);
+    }
+  }
+
   private reclaimExpiredLeases(now: number) {
     sqlite
       .query(
@@ -612,6 +620,14 @@ export class CronService {
       );
     } finally {
       this.workerBusy = false;
+    }
+  }
+
+  private async runWorkerTick() {
+    try {
+      await this.workerTick();
+    } catch (error) {
+      logger.errorWithCause("worker tick failed", error);
     }
   }
 

@@ -318,7 +318,14 @@ export class CronExecutor {
       }, timeoutMs);
 
       const handleMessage = (message: unknown) => {
-        finish(() => resolve(normalizeConditionalModuleResult(message)));
+        let normalized: CronHandlerResult;
+        try {
+          normalized = normalizeConditionalModuleResult(message);
+        } catch (error) {
+          finish(() => reject(error instanceof Error ? error : new Error(String(error))));
+          return;
+        }
+        finish(() => resolve(normalized));
       };
 
       const handleError = (error: Error) => {
