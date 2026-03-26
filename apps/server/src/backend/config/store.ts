@@ -617,9 +617,6 @@ export function parseConfig(raw: unknown) {
     throw new ConfigApplyError("schema", "Config schema validation failed", parsed.error.flatten());
   }
   const config = parsed.data;
-  config.runtime.embeddedServices.executor.enabled = config.runtime.executor.enabled;
-  config.runtime.embeddedServices.executor.baseUrl = config.runtime.executor.baseUrl;
-  config.runtime.embeddedServices.executor.mountPath = config.runtime.executor.uiMountPath;
   config.runtime.opencode.baseUrl = normalizeOpencodeBaseUrl(config.runtime.opencode.baseUrl);
   const workspaceAlignment = resolveWorkspaceAlignment(config);
   const normalizedMemoryWorkspaceDir = workspaceAlignment.memoryWorkspaceDir;

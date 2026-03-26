@@ -386,6 +386,60 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  test("honors explicit upstream fallback even when vendored executor is present", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-fallback-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const entrypoint = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "executor",
+      "src",
+      "cli",
+      "main.ts",
+    );
+    const nodeModulesDir = path.join(appDir, "vendor", "executor", "node_modules");
+    const webIndex = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "web",
+      "dist",
+      "index.html",
+    );
+    const executorBin = path.join(tempRoot, "bin", "executor");
+
+    fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+    fs.mkdirSync(nodeModulesDir, { recursive: true });
+    fs.mkdirSync(path.dirname(webIndex), { recursive: true });
+    fs.mkdirSync(path.dirname(executorBin), { recursive: true });
+    fs.writeFileSync(entrypoint, 'console.log("executor");\n', "utf8");
+    fs.writeFileSync(webIndex, "<!doctype html>\n", "utf8");
+    fs.writeFileSync(executorBin, "#!/usr/bin/env bash\n", "utf8");
+
+    try {
+      const runtime = testing.resolveExecutorRuntimeCommand(
+        appDir,
+        {
+          executorBinGlobal: executorBin,
+          executorBinLocal: path.join(tempRoot, "missing-executor-local"),
+        },
+        "/tmp/bun",
+        "upstream-fallback",
+      );
+
+      expect(runtime).toEqual({
+        execStart: `"${executorBin}" server start --port 8788`,
+        mode: "upstream-fallback",
+        webAssetsDir: null,
+      });
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("agent-mockingbird CLI delegation", () => {

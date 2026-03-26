@@ -637,6 +637,18 @@ function resolveExecutorRuntimeCommand(
   bunBin,
   requestedMode = resolveRequestedExecutorMode(),
 ) {
+  if (requestedMode === "upstream-fallback") {
+    const executorBin = resolveExecutorBin(paths);
+    if (!executorBin) {
+      return null;
+    }
+    return {
+      execStart: `${shellEscapeSystemdArg(executorBin)} server start --port 8788`,
+      mode: "upstream-fallback",
+      webAssetsDir: null,
+    };
+  }
+
   const {
     packagedExecutorEntrypoint,
     packagedExecutorNodeModules,
@@ -664,21 +676,9 @@ function resolveExecutorRuntimeCommand(
     };
   }
 
-  if (requestedMode !== "upstream-fallback") {
-    throw new Error(
-      `embedded executor runtime missing: expected packaged vendored executor at ${packagedExecutorEntrypoint}. Set AGENT_MOCKINGBIRD_EXECUTOR_MODE=upstream-fallback only for explicit fallback mode.`,
-    );
-  }
-
-  const executorBin = resolveExecutorBin(paths);
-  if (!executorBin) {
-    return null;
-  }
-  return {
-    execStart: `${shellEscapeSystemdArg(executorBin)} server start --port 8788`,
-    mode: "upstream-fallback",
-    webAssetsDir: null,
-  };
+  throw new Error(
+    `embedded executor runtime missing: expected packaged vendored executor at ${packagedExecutorEntrypoint}. Set AGENT_MOCKINGBIRD_EXECUTOR_MODE=upstream-fallback only for explicit fallback mode.`,
+  );
 }
 
 function ensurePackagedExecutorRuntime(agentMockingbirdAppDir, bunBin) {

@@ -108,6 +108,28 @@ test("parseConfig backfills embedded executor config from legacy runtime.executo
   expect(parsed.runtime.embeddedServices.executor.baseUrl).toBe("http://127.0.0.1:9999");
 });
 
+test("parseConfig preserves explicit embedded executor overrides", () => {
+  const filePath = resolveExampleConfigPath();
+  const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    runtime?: { executor?: Record<string, unknown>; embeddedServices?: { executor?: Record<string, unknown> } };
+  };
+  if (!raw.runtime?.executor || !raw.runtime.embeddedServices?.executor) {
+    throw new Error("Test fixture missing executor settings");
+  }
+
+  raw.runtime.executor.enabled = true;
+  raw.runtime.executor.baseUrl = "http://127.0.0.1:8788";
+  raw.runtime.executor.uiMountPath = "/executor";
+  raw.runtime.embeddedServices.executor.enabled = false;
+  raw.runtime.embeddedServices.executor.baseUrl = "http://127.0.0.1:9999";
+  raw.runtime.embeddedServices.executor.mountPath = "/embedded-custom";
+
+  const parsed = parseConfig(raw);
+  expect(parsed.runtime.embeddedServices.executor.enabled).toBe(false);
+  expect(parsed.runtime.embeddedServices.executor.baseUrl).toBe("http://127.0.0.1:9999");
+  expect(parsed.runtime.embeddedServices.executor.mountPath).toBe("/embedded-custom");
+});
+
 test("parseConfig ignores legacy mismatched runtime workspace fields in favor of workspace.pinnedDirectory", () => {
   const filePath = resolveExampleConfigPath();
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
