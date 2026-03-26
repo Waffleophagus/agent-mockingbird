@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 
-import configManager from "./config_manager";
+import configManager from "../tools/config_manager";
 
 const originalFetch = globalThis.fetch;
 
