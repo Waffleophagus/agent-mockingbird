@@ -134,7 +134,7 @@ Yep!
 <details>
 <summary><b>The way you're doing patches is insanely dumb.</b></summary>
 
-Not really a question... but I wanted to see how this would work. My thought process is this will, in the long run, will be easier to maintain the integrated solutions. I could be wrong and give up on this process next week, but for now its working.
+Not really a question... but I wanted to see how this would work. My thought process is this, in the long run, will be easier to maintain the integrated solutions. I could be wrong and give up on this process next week, but for now it's working.
 
 </details>
 

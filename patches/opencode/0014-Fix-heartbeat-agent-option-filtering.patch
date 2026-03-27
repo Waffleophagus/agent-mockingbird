@@ -1,0 +1,128 @@
+From 0aeee898d13a3943a4a37cf4ee3c41ab27442856 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Fri, 27 Mar 2026 17:42:39 -0500
+Subject: [PATCH 14/14] Fix heartbeat agent option filtering
+
+---
+ .../components/settings-heartbeat-options.ts  | 31 +++++++++++++++++++
+ .../src/components/settings-heartbeat.test.ts | 31 +++++++++++++++++++
+ .../app/src/components/settings-heartbeat.tsx | 13 +++-----
+ 3 files changed, 67 insertions(+), 8 deletions(-)
+ create mode 100644 packages/app/src/components/settings-heartbeat-options.ts
+ create mode 100644 packages/app/src/components/settings-heartbeat.test.ts
+
+diff --git a/packages/app/src/components/settings-heartbeat-options.ts b/packages/app/src/components/settings-heartbeat-options.ts
+new file mode 100644
+index 000000000..786d1f824
+--- /dev/null
++++ b/packages/app/src/components/settings-heartbeat-options.ts
+@@ -0,0 +1,31 @@
++type AgentType = {
++  id: string
++  mode?: string
++  hidden?: boolean
++  disable?: boolean
++}
++
++export const DEFAULT_HEARTBEAT_AGENT_OPTIONS = ["build", "plan"]
++
++function isSelectableHeartbeatAgent(item: AgentType) {
++  return item.mode !== "subagent" && item.hidden !== true && item.disable !== true
++}
++
++export function resolveHeartbeatAgentOptions(
++  agentTypes: AgentType[],
++  defaults: string[] = DEFAULT_HEARTBEAT_AGENT_OPTIONS,
++) {
++  const byId = new Map(agentTypes.map((item) => [item.id, item] as const))
++  const ids = new Set(agentTypes.filter(isSelectableHeartbeatAgent).map((item) => item.id))
++
++  for (const defaultId of defaults) {
++    const item = byId.get(defaultId)
++    if (!item || isSelectableHeartbeatAgent(item)) {
++      ids.add(defaultId)
++    }
++  }
++
++  return [...ids].sort((left, right) => left.localeCompare(right))
++}
++
++export type { AgentType }
+diff --git a/packages/app/src/components/settings-heartbeat.test.ts b/packages/app/src/components/settings-heartbeat.test.ts
+new file mode 100644
+index 000000000..e2fd344a8
+--- /dev/null
++++ b/packages/app/src/components/settings-heartbeat.test.ts
+@@ -0,0 +1,31 @@
++import { describe, expect, test } from "bun:test"
++import { resolveHeartbeatAgentOptions } from "./settings-heartbeat-options"
++
++describe("resolveHeartbeatAgentOptions", () => {
++  test("removes built-in defaults when the API marks them unavailable", () => {
++    const options = resolveHeartbeatAgentOptions([
++      { id: "build", disable: true },
++      { id: "plan", hidden: true },
++      { id: "review", mode: "all" },
++      { id: "worker", mode: "subagent" },
++    ])
++
++    expect(options).toEqual(["review"])
++  })
++
++  test("keeps built-in defaults when the API omits them", () => {
++    const options = resolveHeartbeatAgentOptions([{ id: "review", mode: "all" }])
++
++    expect(options).toEqual(["build", "plan", "review"])
++  })
++
++  test("keeps built-in defaults when the API explicitly allows them", () => {
++    const options = resolveHeartbeatAgentOptions([
++      { id: "plan", mode: "all" },
++      { id: "build", mode: "primary" },
++      { id: "review", mode: "all" },
++    ])
++
++    expect(options).toEqual(["build", "plan", "review"])
++  })
++})
+diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
+index 0331ae705..8d48a34bd 100644
+--- a/packages/app/src/components/settings-heartbeat.tsx
++++ b/packages/app/src/components/settings-heartbeat.tsx
+@@ -7,6 +7,10 @@ import { createStore } from "solid-js/store"
+ import { useModels } from "@/context/models"
+ import { mockingbirdJson } from "@/utils/mockingbird"
+ import { ModelSelectorPopover, type ModelSelectorState } from "./dialog-select-model"
++import {
++  DEFAULT_HEARTBEAT_AGENT_OPTIONS,
++  resolveHeartbeatAgentOptions,
++} from "./settings-heartbeat-options"
+ import {
+   MockingbirdCard,
+   MockingbirdInput,
+@@ -82,8 +86,6 @@ type HeartbeatFormState = {
+   activeTimezone: string
+ }
+ 
+-const DEFAULT_HEARTBEAT_AGENT_OPTIONS = ["build", "plan"]
+-
+ function toForm(config: HeartbeatRuntimeConfig): HeartbeatFormState {
+   return {
+     enabled: config.enabled,
+@@ -231,12 +233,7 @@ export const SettingsHeartbeat: Component = () => {
+       setState("form", toForm(heartbeat.heartbeat.config))
+       try {
+         const agents = await mockingbirdJson<AgentsPayload>("/api/mockingbird/agents")
+-        const ids = new Set(DEFAULT_HEARTBEAT_AGENT_OPTIONS)
+-        for (const item of agents.agentTypes) {
+-          if (item.mode === "subagent" || item.hidden || item.disable) continue
+-          ids.add(item.id)
+-        }
+-        setState("agentOptions", [...ids].sort((left, right) => left.localeCompare(right)))
++        setState("agentOptions", resolveHeartbeatAgentOptions(agents.agentTypes))
+       } catch {
+         const ids = new Set(DEFAULT_HEARTBEAT_AGENT_OPTIONS)
+         const configured = heartbeat.heartbeat.config.agentId.trim()
+-- 
+2.53.0
+

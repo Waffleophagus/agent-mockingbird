@@ -1,7 +1,7 @@
-From 591f4bb5032dca86d57d15fc009c7546ef493ece Mon Sep 17 00:00:00 2001
+From db2737dd044b958fb6a802d8aa70e8ae02db8c76 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sun, 22 Mar 2026 00:14:20 -0500
-Subject: [PATCH 13/13] feat: add executor sidebar entry
+Subject: [PATCH 13/14] feat: add executor sidebar entry
 
 ---
  packages/app/src/pages/layout.tsx               |  2 ++
