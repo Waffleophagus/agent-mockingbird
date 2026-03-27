@@ -171,6 +171,27 @@ function shouldRewriteTextResponse(response: Response, definition: EmbeddedServi
   return false;
 }
 
+function stripRewrittenRepresentationHeaders(headers: Headers) {
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  headers.delete("etag");
+
+  const vary = headers.get("vary");
+  if (!vary) {
+    return;
+  }
+
+  const preservedValues = vary
+    .split(",")
+    .map(value => value.trim())
+    .filter(value => value.length > 0 && value.toLowerCase() !== "accept-encoding");
+  if (preservedValues.length === 0) {
+    headers.delete("vary");
+    return;
+  }
+  headers.set("vary", preservedValues.join(", "));
+}
+
 function buildEmbeddedServiceDefinition(config: AgentMockingbirdConfig, id: EmbeddedServiceId): EmbeddedServiceDefinition | null {
   if (id !== "executor") {
     return null;
@@ -335,7 +356,7 @@ export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMoc
   }
 
   const content = await upstream.text();
-  headers.delete("content-length");
+  stripRewrittenRepresentationHeaders(headers);
   return new Response(rewriteRootRelativeContent(content, definition), {
     status: upstream.status,
     statusText: upstream.statusText,
@@ -390,5 +411,6 @@ export const testing = {
   parseExternalProxyRequest,
   rewriteCookiePath,
   rewriteRootRelativeContent,
+  stripRewrittenRepresentationHeaders,
   stripMountPath,
 };

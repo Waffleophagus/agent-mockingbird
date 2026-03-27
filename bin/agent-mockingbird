@@ -9,8 +9,13 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".agent-mockingbird");
 const PACKAGE_NAME = "agent-mockingbird";
 const DEFAULT_TAG = "latest";
+const PUBLIC_NPM_REGISTRY = "https://registry.npmjs.org/";
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const MODULE_DIR = path.dirname(MODULE_PATH);
+
+function bunInstallRoot(rootDir) {
+  return path.join(rootDir, "bun");
+}
 
 function readRootDirArg(argv = process.argv.slice(2)) {
   for (let index = 0; index < argv.length; index += 1) {
@@ -34,6 +39,7 @@ function resolveManagedCliPath(rootDir) {
   const candidates = [
     path.join(rootDir, "npm", "lib", "node_modules", PACKAGE_NAME, "bin", "agent-mockingbird-managed"),
     path.join(rootDir, "npm", "node_modules", PACKAGE_NAME, "bin", "agent-mockingbird-managed"),
+    path.join(bunInstallRoot(rootDir), "install", "global", "node_modules", PACKAGE_NAME, "bin", "agent-mockingbird-managed"),
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
@@ -101,6 +107,19 @@ function commandExists(command, env = process.env) {
   return (result.status ?? 1) === 0;
 }
 
+function resolveBootstrapPackageManager(
+  env = process.env,
+  commandExistsImpl = commandExists,
+) {
+  if (commandExistsImpl("npm", env)) {
+    return "npm";
+  }
+  if (commandExistsImpl("bun", env)) {
+    return "bun";
+  }
+  return null;
+}
+
 function parseBootstrapInstallTarget(
   argv = process.argv.slice(2),
   moduleDir = MODULE_DIR,
@@ -151,30 +170,49 @@ function parseBootstrapInstallTarget(
 }
 
 function bootstrapManagedInstall(rootDir, argv = process.argv, env = process.env) {
-  if (!commandExists("npm", env)) {
-    throw new Error("npm is required. Please install npm and run again.");
+  const packageManager = resolveBootstrapPackageManager(env);
+  if (!packageManager) {
+    throw new Error("npm or bun is required. Please install one and run again.");
   }
 
   fs.mkdirSync(rootDir, { recursive: true });
-  fs.mkdirSync(path.join(rootDir, "npm"), { recursive: true });
 
   const packageSpec = parseBootstrapInstallTarget(argv.slice(2));
-  const result = spawnSync(
-    "npm",
-    [
-      "install",
-      "--global",
-      "--no-audit",
-      "--no-fund",
-      "--prefix",
-      path.join(rootDir, "npm"),
-      packageSpec,
-    ],
-    {
-      stdio: "inherit",
-      env,
-    },
-  );
+  let result;
+  if (packageManager === "npm") {
+    const npmPrefix = path.join(rootDir, "npm");
+    fs.mkdirSync(npmPrefix, { recursive: true });
+    result = spawnSync(
+      "npm",
+      [
+        "install",
+        "--global",
+        "--no-audit",
+        "--no-fund",
+        "--prefix",
+        npmPrefix,
+        packageSpec,
+      ],
+      {
+        stdio: "inherit",
+        env,
+      },
+    );
+  } else {
+    const managedBunRoot = bunInstallRoot(rootDir);
+    fs.mkdirSync(managedBunRoot, { recursive: true });
+    result = spawnSync(
+      "bun",
+      ["install", "--global", "--registry", PUBLIC_NPM_REGISTRY, packageSpec],
+      {
+        stdio: "inherit",
+        env: {
+          ...env,
+          BUN_INSTALL: managedBunRoot,
+        },
+      },
+    );
+  }
 
   if (result.error) {
     throw result.error;
@@ -208,6 +246,7 @@ export const testing = {
   managedCliExists,
   parseBootstrapInstallTarget,
   readRootDirArg,
+  resolveBootstrapPackageManager,
   resolveManagedCliPath,
   resolveRootDir,
 };

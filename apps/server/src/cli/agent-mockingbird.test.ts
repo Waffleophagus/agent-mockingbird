@@ -464,12 +464,50 @@ describe("agent-mockingbird CLI delegation", () => {
     }
   });
 
+  test("bootstrap wrapper falls back to bun when npm is unavailable", () => {
+    expect(
+      bootstrapTesting.resolveBootstrapPackageManager({
+        PATH: process.env.PATH || "",
+      }, (command) => command === "bun"),
+    ).toBe("bun");
+  });
+
   test("delegates from a shadowing global install to the managed root CLI", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-delegate-"));
     const managedCli = path.join(
       tempRoot,
       "npm",
       "lib",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird-managed",
+    );
+    const globalCli = path.join(tempRoot, "global", "bin", "agent-mockingbird");
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.mkdirSync(path.dirname(globalCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(globalCli, "#!/usr/bin/env bash\n", "utf8");
+
+    try {
+      const target = testing.resolveManagedCliDelegationTarget({
+        argv: ["node", globalCli, "update", "--next", "--root-dir", tempRoot],
+        env: {},
+      });
+
+      expect(target).toBe(managedCli);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("delegates from a shadowing global install to a bun-managed root CLI", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bun-delegate-"));
+    const managedCli = path.join(
+      tempRoot,
+      "bun",
+      "install",
+      "global",
       "node_modules",
       "agent-mockingbird",
       "bin",
@@ -571,6 +609,29 @@ describe("agent-mockingbird CLI delegation", () => {
         argv: ["node", "/tmp/global-agent-mockingbird", "update", "--root-dir", customRoot],
         env: {},
       });
+      expect(resolved).toBe(managedCli);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("bootstrap wrapper resolves the managed CLI under the bun install root", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bootstrap-bun-root-"));
+    const managedCli = path.join(
+      tempRoot,
+      "bun",
+      "install",
+      "global",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird-managed",
+    );
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env node\n", "utf8");
+
+    try {
+      const resolved = bootstrapTesting.resolveManagedCliPath(tempRoot);
       expect(resolved).toBe(managedCli);
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });

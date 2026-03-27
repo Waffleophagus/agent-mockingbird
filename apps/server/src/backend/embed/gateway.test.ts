@@ -195,6 +195,32 @@ test("gateway rewrites root-relative js references in upstream fallback mode", a
   expect(await response?.text()).toBe('fetch("/executor/assets/app.js")');
 });
 
+test("gateway strips stale encoding metadata after rewriting upstream text responses", async () => {
+  const config = buildConfig("upstream-fallback");
+  globalThis.fetch = ((async () =>
+    new Response('<script src="/assets/app.js"></script>', {
+      headers: {
+        "content-encoding": "gzip",
+        "content-length": "999",
+        "content-type": "text/html",
+        etag: 'W/"upstream-etag"',
+        vary: "accept-encoding, origin",
+      },
+    })) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedServiceRequest(
+    new Request("http://127.0.0.1:3001/executor"),
+    config,
+  );
+
+  expect(response).not.toBeNull();
+  expect(await response?.text()).toContain('/executor/assets/app.js');
+  expect(response?.headers.get("content-encoding")).toBeNull();
+  expect(response?.headers.get("content-length")).toBeNull();
+  expect(response?.headers.get("etag")).toBeNull();
+  expect(response?.headers.get("vary")).toBe("origin");
+});
+
 test("gateway leaves embedded-patched js assets untouched", async () => {
   const config = buildConfig("embedded-patched");
   globalThis.fetch = ((async () =>

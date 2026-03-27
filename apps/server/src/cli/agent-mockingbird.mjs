@@ -298,6 +298,16 @@ function commandExists(command) {
   return result.code === 0;
 }
 
+function resolvePackageManager() {
+  if (commandExists("npm")) {
+    return "npm";
+  }
+  if (commandExists("bun")) {
+    return "bun";
+  }
+  return null;
+}
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -510,7 +520,22 @@ function resolveAgentMockingbirdAppDir(paths) {
     paths.agentMockingbirdAppDirLocal,
     paths.agentMockingbirdAppDirScopedGlobal,
     paths.agentMockingbirdAppDirScopedLocal,
+    paths.agentMockingbirdAppDirBunGlobal,
+    paths.agentMockingbirdAppDirScopedBunGlobal,
   ]);
+}
+
+function resolveInstalledPackageDir(paths, packageName) {
+  const npmGlobal = typeof paths.npmPrefix === "string"
+    ? path.join(paths.npmPrefix, "lib", "node_modules", packageName)
+    : null;
+  const npmLocal = typeof paths.npmPrefix === "string"
+    ? path.join(paths.npmPrefix, "node_modules", packageName)
+    : null;
+  const bunGlobal = typeof paths.bunInstallDir === "string"
+    ? path.join(paths.bunInstallDir, "install", "global", "node_modules", packageName)
+    : null;
+  return firstExistingPath([npmGlobal, npmLocal, bunGlobal]);
 }
 
 function resolveManagedCliPathForAppDir(agentMockingbirdAppDir) {
@@ -569,11 +594,19 @@ function resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir) {
 }
 
 function resolveOpencodeBin(paths) {
-  return firstExistingPath([paths.opencodeBinGlobal, paths.opencodeBinLocal]);
+  return firstExistingPath([
+    paths.opencodeBinGlobal,
+    paths.opencodeBinLocal,
+    paths.opencodeBinBunGlobal,
+  ]);
 }
 
 function resolveExecutorBin(paths) {
-  return firstExistingPath([paths.executorBinGlobal, paths.executorBinLocal]);
+  return firstExistingPath([
+    paths.executorBinGlobal,
+    paths.executorBinLocal,
+    paths.executorBinBunGlobal,
+  ]);
 }
 
 function resolveRequestedExecutorMode() {
@@ -792,6 +825,25 @@ function npmInstall(prefix, packages, extraArgs = [], env = process.env) {
     ...packages,
   ];
   must("npm", args, { stdio: "inherit", env });
+}
+
+function bunInstall(installDir, packages, extraArgs = [], env = process.env) {
+  const args = ["install", "--global", ...extraArgs, ...packages];
+  must("bun", args, {
+    stdio: "inherit",
+    env: {
+      ...env,
+      BUN_INSTALL: installDir,
+    },
+  });
+}
+
+function installManagedPackage(packageManager, paths, packages, extraArgs = [], env = process.env) {
+  if (packageManager === "bun") {
+    bunInstall(paths.bunInstallDir, packages, extraArgs, env);
+    return;
+  }
+  npmInstall(paths.npmPrefix, packages, extraArgs, env);
 }
 
 function ensurePathExportInFile(filePath, exportLine) {
@@ -1564,13 +1616,10 @@ function readPackagedExecutorVersion(paths) {
 }
 
 function readInstalledOpenCodeVersion(paths) {
-  const installedVersion = readPackageVersion(path.join(
-    paths.npmPrefix,
-    "lib",
-    "node_modules",
-    "opencode-ai",
-    "package.json",
-  ));
+  const installedPackageDir = resolveInstalledPackageDir(paths, "opencode-ai");
+  const installedVersion = installedPackageDir
+    ? readPackageVersion(path.join(installedPackageDir, "package.json"))
+    : null;
   return installedVersion ?? readPackagedOpenCodeVersion(paths);
 }
 
@@ -1582,13 +1631,10 @@ function readInstalledExecutorVersion(paths) {
     }
   }
 
-  const installedVersion = readPackageVersion(path.join(
-    paths.npmPrefix,
-    "lib",
-    "node_modules",
-    "executor",
-    "package.json",
-  ));
+  const installedPackageDir = resolveInstalledPackageDir(paths, "executor");
+  const installedVersion = installedPackageDir
+    ? readPackageVersion(path.join(installedPackageDir, "package.json"))
+    : null;
   return installedVersion ?? readPackagedExecutorVersion(paths);
 }
 
@@ -2795,8 +2841,9 @@ function readExecutorPackageVersion({
 }
 
 async function installOrUpdate(args, mode) {
-  if (!commandExists("npm")) {
-    throw new Error("npm is required. Please install npm and run again.");
+  const packageManager = resolvePackageManager();
+  if (!packageManager) {
+    throw new Error("npm or bun is required. Please install one and run again.");
   }
 
   const paths = pathsFor({
@@ -2809,6 +2856,7 @@ async function installOrUpdate(args, mode) {
   await confirmInstall(args, paths, mode);
   ensureDir(paths.rootDir);
   ensureDir(paths.npmPrefix);
+  ensureDir(paths.bunInstallDir);
   ensureDir(paths.dataDir);
   ensureDir(paths.workspaceDir);
   ensureDir(paths.executorWorkspaceDir);
@@ -2826,16 +2874,22 @@ async function installOrUpdate(args, mode) {
     tryInstallBun(paths);
   }
 
-  npmInstall(
-    paths.npmPrefix,
+  installManagedPackage(
+    packageManager,
+    paths,
     [`executor@${executorPackageVersion}`],
-    ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+    packageManager === "bun"
+      ? ["--registry", PUBLIC_NPM_REGISTRY]
+      : ["-g", "--registry", PUBLIC_NPM_REGISTRY],
   );
 
-  npmInstall(
-    paths.npmPrefix,
+  installManagedPackage(
+    packageManager,
+    paths,
     [`opencode-ai@${opencodePackageVersion}`],
-    ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+    packageManager === "bun"
+      ? ["--registry", PUBLIC_NPM_REGISTRY]
+      : ["-g", "--registry", PUBLIC_NPM_REGISTRY],
   );
 
   const env = {
@@ -2844,17 +2898,20 @@ async function installOrUpdate(args, mode) {
     npm_config_registry: PUBLIC_NPM_REGISTRY,
   };
 
-  npmInstall(
-    paths.npmPrefix,
+  installManagedPackage(
+    packageManager,
+    paths,
     [packageSpec(args.scope, args.version, args.tag)],
-    ["-g"],
+    packageManager === "bun"
+      ? ["--registry", args.registryUrl]
+      : ["-g", "--registry", args.registryUrl],
     env,
   );
 
   const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
   if (!agentMockingbirdAppDir) {
     throw new Error(
-      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal}, ${paths.agentMockingbirdAppDirLocal}, ${paths.agentMockingbirdAppDirScopedGlobal}, and ${paths.agentMockingbirdAppDirScopedLocal}`,
+      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal}, ${paths.agentMockingbirdAppDirLocal}, ${paths.agentMockingbirdAppDirScopedGlobal}, ${paths.agentMockingbirdAppDirScopedLocal}, ${paths.agentMockingbirdAppDirBunGlobal}, and ${paths.agentMockingbirdAppDirScopedBunGlobal}`,
     );
   }
   const managedCliPath = resolveManagedCliPathForAppDir(agentMockingbirdAppDir);
