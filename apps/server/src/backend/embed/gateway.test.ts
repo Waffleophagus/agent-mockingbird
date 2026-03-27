@@ -161,6 +161,31 @@ test("gateway rewrites redirect locations under the mount path", () => {
   expect(headers.get("location")).toBe("http://127.0.0.1:3001/executor/secrets");
 });
 
+test("gateway strips hop-by-hop headers from embedded service responses", () => {
+  const config = buildConfig("embedded-patched");
+  const definition = testing.buildEmbeddedServiceDefinition(config, "executor");
+  if (!definition) throw new Error("Missing executor definition");
+
+  const response = new Response("ok", {
+    headers: {
+      connection: "keep-alive",
+      "keep-alive": "timeout=5",
+      "transfer-encoding": "chunked",
+      upgrade: "websocket",
+      "content-type": "text/plain",
+      "x-custom-header": "present",
+    },
+  });
+
+  const headers = testing.copyResponseHeaders(response, definition, new URL("http://127.0.0.1:3001/executor"));
+  expect(headers.get("connection")).toBeNull();
+  expect(headers.get("keep-alive")).toBeNull();
+  expect(headers.get("transfer-encoding")).toBeNull();
+  expect(headers.get("upgrade")).toBeNull();
+  expect(headers.get("content-type")).toBe("text/plain");
+  expect(headers.get("x-custom-header")).toBe("present");
+});
+
 test("gateway rewrites cookie paths under the mount path", () => {
   expect(testing.rewriteCookiePath("sid=abc; Path=/; HttpOnly", "/executor")).toBe(
     "sid=abc; Path=/executor; HttpOnly",

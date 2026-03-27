@@ -139,11 +139,15 @@ function rewriteCookiePath(setCookie: string, mountPath: string) {
 function copyResponseHeaders(response: Response, definition: EmbeddedServiceDefinition, requestUrl: URL) {
   const headers = new Headers();
   response.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "location") {
+    const normalizedKey = key.toLowerCase();
+    if (HOP_BY_HOP_HEADERS.has(normalizedKey)) {
+      return;
+    }
+    if (normalizedKey === "location") {
       headers.set(key, rewriteLocationHeader(value, definition, requestUrl));
       return;
     }
-    if (key.toLowerCase() === "set-cookie") {
+    if (normalizedKey === "set-cookie") {
       return;
     }
     headers.append(key, value);

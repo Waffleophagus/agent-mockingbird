@@ -22,9 +22,21 @@ type ReleaseVersion = {
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const stateDir = path.join(moduleDir, ".state");
 
+function resolveStateFilePath(stateKey: string) {
+  const normalizedStateKey = stateKey.trim() || "default";
+  if (!/^[A-Za-z0-9_-]+$/.test(normalizedStateKey)) {
+    throw new Error('Invalid stateKey: only letters, numbers, "_" and "-" are allowed');
+  }
+  return {
+    stateKey: normalizedStateKey,
+    filePath: path.join(stateDir, `${normalizedStateKey}.json`),
+  };
+}
+
 async function loadState(stateKey: string): Promise<VersionState> {
+  const { filePath } = resolveStateFilePath(stateKey);
   try {
-    const raw = await readFile(path.join(stateDir, `${stateKey}.json`), "utf8");
+    const raw = await readFile(filePath, "utf8");
     const parsed = JSON.parse(raw) as Partial<VersionState>;
     return {
       lastChecked:
@@ -49,8 +61,9 @@ async function loadState(stateKey: string): Promise<VersionState> {
 }
 
 async function saveState(stateKey: string, state: VersionState) {
+  const { filePath } = resolveStateFilePath(stateKey);
   await mkdir(stateDir, { recursive: true });
-  await writeFile(path.join(stateDir, `${stateKey}.json`), JSON.stringify(state, null, 2));
+  await writeFile(filePath, JSON.stringify(state, null, 2));
 }
 
 async function getNpmVersion(pkg: string): Promise<string | null> {
@@ -87,12 +100,10 @@ export default async function checkWithState(ctx: {
 }) {
   const packages = Array.isArray(ctx.payload.packages) ? ctx.payload.packages : [];
   const githubRepos = Array.isArray(ctx.payload.githubRepos) ? ctx.payload.githubRepos : [];
-  const stateKey =
-    typeof ctx.payload.stateKey === "string" && ctx.payload.stateKey.trim()
-      ? ctx.payload.stateKey.trim()
-      : "default";
+  const stateKey = typeof ctx.payload.stateKey === "string" ? ctx.payload.stateKey : "default";
+  const { stateKey: resolvedStateKey } = resolveStateFilePath(stateKey);
 
-  const previousState = await loadState(stateKey);
+  const previousState = await loadState(resolvedStateKey);
   const nextVersions = { ...previousState.versions };
   const newVersions: ReleaseVersion[] = [];
 
@@ -114,7 +125,7 @@ export default async function checkWithState(ctx: {
     nextVersions[`github:${repo}`] = version;
   }
 
-  await saveState(stateKey, {
+  await saveState(resolvedStateKey, {
     lastChecked: new Date().toISOString(),
     versions: nextVersions,
   });
@@ -123,7 +134,7 @@ export default async function checkWithState(ctx: {
     return {
       status: "ok" as const,
       summary: `Release check completed with no changes since ${previousState.lastChecked}.`,
-      data: { stateKey, versions: nextVersions },
+      data: { stateKey: resolvedStateKey, versions: nextVersions },
       invokeAgent: { shouldInvoke: false },
     };
   }
@@ -139,11 +150,11 @@ export default async function checkWithState(ctx: {
   return {
     status: "ok" as const,
     summary: `Detected ${newVersions.length} new release${newVersions.length === 1 ? "" : "s"}.`,
-    data: { stateKey, newVersions, versions: nextVersions },
+    data: { stateKey: resolvedStateKey, newVersions, versions: nextVersions },
     invokeAgent: {
       shouldInvoke: true,
       prompt,
-      context: { stateKey, newVersions, versions: nextVersions },
+      context: { stateKey: resolvedStateKey, newVersions, versions: nextVersions },
     },
   };
 }
