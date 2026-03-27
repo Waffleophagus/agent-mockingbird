@@ -272,17 +272,41 @@ export async function loadEffectiveMcpConfig(
   config: AgentMockingbirdConfig,
   input?: { includeStatus?: boolean },
 ): Promise<EffectiveMcpConfigSnapshot> {
-  const servers = resolveConfiguredMcpServers(config);
-  const enabled = normalizeMcpIds(
-    servers.filter((server) => server.enabled).map((server) => server.id),
-  );
-  const hash = hashConfiguredMcpServers(servers);
+  let servers: Array<ConfiguredMcpServer> = [];
+  let enabled: Array<string> = [];
+  let hash = hashConfiguredMcpServers([]);
+  let configError: string | undefined;
+
+  try {
+    servers = resolveConfiguredMcpServers(config);
+    enabled = normalizeMcpIds(
+      servers.filter((server) => server.enabled).map((server) => server.id),
+    );
+    hash = hashConfiguredMcpServers(servers);
+  } catch (error) {
+    configError =
+      error instanceof Error
+        ? error.message
+        : "Failed to read effective MCP configuration";
+  }
+
   if (input?.includeStatus !== true) {
     return {
       source: "opencode-managed-config",
       hash,
       servers,
       enabled,
+      ...(configError ? { statusError: configError } : {}),
+    };
+  }
+
+  if (configError) {
+    return {
+      source: "opencode-managed-config",
+      hash,
+      servers,
+      enabled,
+      statusError: configError,
     };
   }
 

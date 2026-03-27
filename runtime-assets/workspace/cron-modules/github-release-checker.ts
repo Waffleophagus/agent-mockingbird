@@ -21,7 +21,7 @@ async function getLatestRelease(
   includePrereleases: boolean,
 ): Promise<GitHubRelease | null> {
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+    const response = await fetch(`https://api.github.com/repos/${repo}/releases`, {
       headers: {
         Accept: "application/vnd.github+json",
         "User-Agent": "AgentMockingbird-GitHubReleaseChecker",
@@ -29,9 +29,15 @@ async function getLatestRelease(
     });
     if (!response.ok) return null;
 
-    const data = await response.json();
-    if (!includeDrafts && data.draft) return null;
-    if (!includePrereleases && data.prerelease) return null;
+    const payload = await response.json();
+    if (!Array.isArray(payload)) return null;
+    const data = payload.find((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      if (!includeDrafts && entry.draft === true) return false;
+      if (!includePrereleases && entry.prerelease === true) return false;
+      return typeof entry.tag_name === "string" && entry.tag_name.length > 0;
+    });
+    if (!data || typeof data !== "object") return null;
     if (typeof data.tag_name !== "string" || !data.tag_name) return null;
 
     return {

@@ -180,7 +180,11 @@ function runFilteredOpencodeTypecheck() {
   }
 
   if (vendorResult.status !== 0) {
-    const baselineCount = vendorDiagnostics.length || countComparableLines(normalizeComparableOutput(vendorResult.combined, vendorRoot));
+    const baselineCount =
+      vendorDiagnostics.length ||
+      countComparableLines(
+        normalizeComparableOutput(vendorResult.combined, opencodeVendorRoot),
+      );
     console.log(`Ignoring ${baselineCount} cleanroom-matching OpenCode typecheck issue(s).`);
     if (vendorDiagnostics.length > 0) {
       console.log("Ignored baseline diagnostics:");
@@ -384,7 +388,7 @@ function indentBlock(value: string) {
 }
 
 function stripAnsi(value: string) {
-  return value.replaceAll("\u001b", "");
+  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 function bunInstallEnv() {

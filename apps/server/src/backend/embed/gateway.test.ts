@@ -186,6 +186,26 @@ test("gateway strips hop-by-hop headers from embedded service responses", () => 
   expect(headers.get("x-custom-header")).toBe("present");
 });
 
+test("gateway returns 400 for malformed embedded service URLs", async () => {
+  const config = buildConfig("embedded-patched");
+  const response = await proxyEmbeddedServiceRequest(
+    new Request("http://127.0.0.1:3001/executor/%ZZ"),
+    config,
+  );
+
+  expect(response?.status).toBe(400);
+});
+
+test("gateway ignores malformed external proxy URLs", async () => {
+  const config = buildConfig("embedded-patched");
+  const response = await proxyEmbeddedExternalRequest(
+    new Request("http://127.0.0.1:3001/api/embed/external/executor/npm-registry/%ZZ"),
+    config,
+  );
+
+  expect(response).toBeNull();
+});
+
 test("gateway rewrites cookie paths under the mount path", () => {
   expect(testing.rewriteCookiePath("sid=abc; Path=/; HttpOnly", "/executor")).toBe(
     "sid=abc; Path=/executor; HttpOnly",

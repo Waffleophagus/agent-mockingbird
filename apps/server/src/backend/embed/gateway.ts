@@ -322,7 +322,12 @@ function filterExternalResponseHeaders(headers: Headers) {
 }
 
 export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMockingbirdConfig) {
-  const pathname = decodeURIComponent(new URL(req.url).pathname);
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(new URL(req.url).pathname);
+  } catch {
+    return new Response("Malformed request URL", { status: 400 });
+  }
   const definition = findEmbeddedService(config, pathname);
   if (!definition) {
     return null;
@@ -369,7 +374,12 @@ export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMoc
 }
 
 export async function proxyEmbeddedExternalRequest(req: Request, config: AgentMockingbirdConfig) {
-  const pathname = decodeURIComponent(new URL(req.url).pathname);
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(new URL(req.url).pathname);
+  } catch {
+    return null;
+  }
   const parsed = parseExternalProxyRequest(pathname);
   if (!parsed) {
     return null;

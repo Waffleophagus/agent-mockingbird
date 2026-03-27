@@ -309,7 +309,7 @@ index 6b5baac6f1a4f1e0090310547a024c865b6b6222..dbf65b5aa963bd13c74082eef0ca4c4f
 +  if (pathname.startsWith(`${basePath}/`)) {
 +    return pathname.slice(basePath.length) || "/";
 +  }
-+  return pathname;
++  return null;
 +};
 +
 +const rebaseRequest = (
@@ -441,4 +441,3 @@ index 6b5baac6f1a4f1e0090310547a024c865b6b6222..dbf65b5aa963bd13c74082eef0ca4c4f
      return {
 -- 
 2.53.0
-

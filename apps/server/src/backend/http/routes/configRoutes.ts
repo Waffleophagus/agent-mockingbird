@@ -369,9 +369,7 @@ async function buildConfigPayload() {
   return {
     ...snapshot,
     effective: {
-      mcp: await loadEffectiveMcpConfig(snapshot.config, {
-        includeStatus: true,
-      }),
+      mcp: await loadEffectiveMcpConfig(snapshot.config),
     },
   };
 }

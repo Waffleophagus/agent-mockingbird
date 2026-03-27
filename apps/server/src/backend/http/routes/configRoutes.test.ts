@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,7 @@ import type { createConfigRoutes as CreateConfigRoutesType } from "./configRoute
 import type * as ConfigStoreModuleType from "../../config/store";
 import type * as ClientModuleType from "../../db/client";
 import type * as ManagedConfigModuleType from "../../opencode/managedConfig";
+import { resolveOpencodeConfigDir } from "../../workspace/resolve";
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
@@ -119,7 +120,33 @@ describe("config routes MCP integration", () => {
         url: "http://127.0.0.1:8788/mcp",
       },
     ]);
-    expect(typeof payload.effective.mcp.statusError).toBe("string");
+    expect(payload.effective.mcp.statusError).toBeUndefined();
+  });
+
+  test("GET /api/config degrades gracefully when managed OpenCode MCP config is malformed", async () => {
+    const snapshot = configStore.getConfigSnapshot();
+    const configDir = resolveOpencodeConfigDir(snapshot.config);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(path.join(configDir, "opencode.jsonc"), "{ invalid jsonc", "utf8");
+
+    const routes = createConfigRoutes({ publish: () => {} } as never);
+    const response = await routes["/api/config"].GET();
+    const payload = await response.json() as {
+      effective: {
+        mcp: {
+          hash: string;
+          enabled: string[];
+          servers: unknown[];
+          statusError?: string;
+        };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.effective.mcp.enabled).toEqual([]);
+    expect(payload.effective.mcp.servers).toEqual([]);
+    expect(typeof payload.effective.mcp.hash).toBe("string");
+    expect(payload.effective.mcp.statusError).toContain("Failed to read or parse workspace MCP configuration");
   });
 
   test("PUT /api/config/mcps toggles MCP state from managed OpenCode config instead of ui.mcpServers", async () => {
@@ -291,7 +318,7 @@ describe("config routes MCP integration", () => {
       stage?: string;
     };
     const reloadedSnapshot = configStore.getConfigSnapshot();
-    const reloadedManagedConfig = managedConfig.readManagedOpencodeConfig(snapshot.config) as {
+    const reloadedManagedConfig = managedConfig.readManagedOpencodeConfig(reloadedSnapshot.config) as {
       mcp?: Record<string, { url?: string }>;
     };
 

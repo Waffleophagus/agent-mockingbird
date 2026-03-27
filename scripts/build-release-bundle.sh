@@ -50,6 +50,9 @@ echo "Embedding vendored Executor runtime..."
 rm -rf "${STAGE_DIR:?}/${PREFIX}/vendor/executor"
 mkdir -p "${STAGE_DIR}/${PREFIX}/vendor"
 cp -R "${ROOT_DIR}/vendor/executor" "${STAGE_DIR}/${PREFIX}/vendor/executor"
+find "${STAGE_DIR}/${PREFIX}/vendor/executor" \
+  \( -name .git -o -name .gitmodules -o -name .gitignore -o -name .hg -o -name .svn \) \
+  -exec rm -rf {} +
 
 test -f "${STAGE_DIR}/${PREFIX}/dist/agent-mockingbird"
 test -f "${STAGE_DIR}/${PREFIX}/dist/drizzle/meta/_journal.json"

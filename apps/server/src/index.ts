@@ -87,10 +87,6 @@ async function proxyOpenCodeSidecar(req: Request) {
 }
 
 async function serveOpenCodeApp(req: Request) {
-  if (!appDistDir) {
-    return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
-  }
-
   const url = new URL(req.url);
   const pathname = decodeURIComponent(url.pathname);
   const config = getConfigSnapshot().config;
@@ -104,6 +100,9 @@ async function serveOpenCodeApp(req: Request) {
   }
   if (isOpenCodeServerPath(pathname)) {
     return proxyOpenCodeSidecar(req);
+  }
+  if (!appDistDir) {
+    return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
   }
 
   const relativePath = pathname.replace(/^\/+/, "") || "index.html";

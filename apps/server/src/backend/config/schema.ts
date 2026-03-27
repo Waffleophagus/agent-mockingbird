@@ -5,6 +5,10 @@ const stringListSchema = z.array(z.string().min(1)).transform(values => {
   return [...new Set(normalized)];
 });
 
+const absoluteUrlPathSchema = z
+  .string()
+  .regex(/^\/[^?#]*$/, "must be an absolute URL path");
+
 const mcpServerIdSchema = z.string().min(1).regex(/^[A-Za-z0-9._-]+$/);
 const mcpHeadersSchema = z.record(z.string(), z.string()).default({});
 const mcpEnvironmentSchema = z.record(z.string(), z.string()).default({});
@@ -141,7 +145,7 @@ const runtimeExecutorSchema = z
     baseUrl: z.string().url(),
     workspaceDir: z.string().min(1),
     dataDir: z.string().min(1),
-    uiMountPath: z.string().min(1).default("/executor"),
+    uiMountPath: absoluteUrlPathSchema.default("/executor"),
   })
   .strict();
 
@@ -150,9 +154,9 @@ const embeddedServiceModeSchema = z.enum(["embedded-patched", "upstream-fallback
 const runtimeEmbeddedExecutorSchema = z
   .object({
     enabled: z.boolean().default(true),
-    mountPath: z.string().min(1).default("/executor"),
+    mountPath: absoluteUrlPathSchema.default("/executor"),
     baseUrl: z.string().url(),
-    healthcheckPath: z.string().min(1).default("/executor"),
+    healthcheckPath: absoluteUrlPathSchema.default("/executor"),
     mode: embeddedServiceModeSchema.default("embedded-patched"),
   })
   .strict();

@@ -157,7 +157,7 @@ function parseBootstrapInstallTarget(
   }
 
   if (versionExplicit) {
-    return version;
+    return `${PACKAGE_NAME}@${version}`;
   }
   if (tagExplicit) {
     return `${PACKAGE_NAME}@${tag}`;

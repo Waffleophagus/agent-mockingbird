@@ -464,6 +464,11 @@ describe("agent-mockingbird CLI delegation", () => {
     }
   });
 
+  test("bootstrap install target preserves package name for explicit versions", () => {
+    const target = bootstrapTesting.parseBootstrapInstallTarget(["install", "--version", "1.2.3"], "/tmp");
+    expect(target).toBe("agent-mockingbird@1.2.3");
+  });
+
   test("bootstrap wrapper falls back to bun when npm is unavailable", () => {
     expect(
       bootstrapTesting.resolveBootstrapPackageManager({

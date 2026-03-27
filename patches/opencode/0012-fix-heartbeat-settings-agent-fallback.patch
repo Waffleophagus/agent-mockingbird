@@ -4,7 +4,7 @@ Date: Sat, 21 Mar 2026 18:34:46 -0500
 Subject: [PATCH 12/13] fix heartbeat settings agent fallback
 
 ---
- .../app/src/components/settings-heartbeat.tsx | 26 +++++++++++++------
+ packages/app/src/components/settings-heartbeat.tsx | 26 ++++++++++++++++++--------
  1 file changed, 18 insertions(+), 8 deletions(-)
 
 diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
