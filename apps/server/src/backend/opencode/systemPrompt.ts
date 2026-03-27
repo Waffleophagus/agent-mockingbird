@@ -157,6 +157,7 @@ function buildConfigPolicyLines() {
     "- Keep runSmokeTest enabled unless explicitly instructed otherwise.",
     "- MCP source of truth lives in managed OpenCode config, not config.ui.mcpServers.",
     "- Inspect MCP state through get_config effective.mcp or the MCP APIs instead of relying on legacy ui MCP fields.",
+    "- When calling /api/config/mcps, use effective.mcp.hash for expectedHash instead of the top-level config hash.",
   ];
 }
 

@@ -33,6 +33,7 @@ interface RuntimeMcp {
 
 export interface EffectiveMcpConfigSnapshot {
   source: "opencode-managed-config";
+  hash: string;
   servers: Array<ConfiguredMcpServer>;
   enabled: Array<string>;
   status?: Array<RuntimeMcp>;
@@ -275,9 +276,11 @@ export async function loadEffectiveMcpConfig(
   const enabled = normalizeMcpIds(
     servers.filter((server) => server.enabled).map((server) => server.id),
   );
+  const hash = hashConfiguredMcpServers(servers);
   if (input?.includeStatus !== true) {
     return {
       source: "opencode-managed-config",
+      hash,
       servers,
       enabled,
     };
@@ -287,6 +290,7 @@ export async function loadEffectiveMcpConfig(
     const status = await listRuntimeMcps(config);
     return {
       source: "opencode-managed-config",
+      hash,
       servers,
       enabled,
       status,
@@ -294,6 +298,7 @@ export async function loadEffectiveMcpConfig(
   } catch (error) {
     return {
       source: "opencode-managed-config",
+      hash,
       servers,
       enabled,
       statusError:

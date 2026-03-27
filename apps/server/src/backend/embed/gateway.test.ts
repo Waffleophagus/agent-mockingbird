@@ -79,6 +79,40 @@ test("gateway retries stripped asset paths when embedded-patched upstream still 
   expect(await response?.text()).toBe("asset-body");
 });
 
+test("gateway reuses buffered request bodies for fallback retries", async () => {
+  const config = buildConfig("embedded-patched");
+  const requestedBodies: string[] = [];
+  globalThis.fetch = ((async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    requestedBodies.push(init?.body ? await new Response(init.body).text() : "");
+    if (url.endsWith("/executor/api/submit")) {
+      return new Response("Not found", { status: 404 });
+    }
+    return new Response("ok", {
+      headers: {
+        "content-type": "text/plain",
+      },
+    });
+  }) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedServiceRequest(
+    new Request("http://127.0.0.1:3001/executor/api/submit", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ hello: "world" }),
+    }),
+    config,
+  );
+
+  expect(requestedBodies).toEqual([
+    '{"hello":"world"}',
+    '{"hello":"world"}',
+  ]);
+  expect(await response?.text()).toBe("ok");
+});
+
 test("gateway retries stripped mount root when embedded-patched upstream still serves root html", async () => {
   const config = buildConfig("embedded-patched");
   const requestedUrls: string[] = [];
@@ -227,6 +261,20 @@ test("gateway proxies approved external requests", async () => {
 
   expect(response?.status).toBe(200);
   expect(requestedUrl).toBe("https://registry.npmjs.org/-/package/executor/dist-tags");
+});
+
+test("gateway rejects external targets that normalize outside the allowlist prefix", () => {
+  const config = buildConfig("embedded-patched");
+  const definition = testing.buildEmbeddedServiceDefinition(config, "executor");
+  if (!definition) throw new Error("Missing executor definition");
+
+  const target = testing.buildExternalTarget(
+    definition,
+    "npm-registry",
+    "/-/package/executor/dist-tags/../versions",
+  );
+
+  expect(target).toBeNull();
 });
 
 test("gateway passes through streaming upstream responses", async () => {

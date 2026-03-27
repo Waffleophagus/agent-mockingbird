@@ -261,10 +261,16 @@ function buildExternalTarget(definition: EmbeddedServiceDefinition, allowlistId:
   if (!allowlistEntry) {
     return null;
   }
-  if (!allowlistEntry.pathPrefixes.some(prefix => targetPath === prefix || targetPath.startsWith(`${prefix}/`))) {
+  const target = new URL(targetPath, allowlistEntry.origin);
+  const normalizedPath = target.pathname.replace(/\/+$/, "") || "/";
+  if (target.origin !== new URL(allowlistEntry.origin).origin) {
     return null;
   }
-  return new URL(targetPath, allowlistEntry.origin);
+  if (!allowlistEntry.pathPrefixes.some(prefix => normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`))) {
+    return null;
+  }
+  target.pathname = normalizedPath;
+  return target;
 }
 
 function filterExternalRequestHeaders(headers: Headers) {
@@ -296,11 +302,13 @@ export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMoc
   if (!definition) {
     return null;
   }
+  const bufferedBody =
+    req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
 
   let upstream = await fetch(buildForwardTarget(req, definition), {
     method: req.method,
     headers: buildForwardHeaders(req, definition),
-    body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+    body: bufferedBody?.slice(0),
     redirect: "manual",
   });
 
@@ -312,7 +320,7 @@ export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMoc
     upstream = await fetch(buildForwardTarget(req, definition, "strip-mount-path"), {
       method: req.method,
       headers: buildForwardHeaders(req, definition),
-      body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+      body: bufferedBody?.slice(0),
       redirect: "manual",
     });
   }
@@ -376,6 +384,7 @@ export function getEmbeddedServiceStatus(config: AgentMockingbirdConfig, id: Emb
 
 export const testing = {
   buildEmbeddedServiceDefinition,
+  buildExternalTarget,
   buildForwardTarget,
   copyResponseHeaders,
   parseExternalProxyRequest,
