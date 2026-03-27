@@ -40,7 +40,7 @@ index 47df7f298..040bd1e31 100644
            </Tooltip>
 +          <Tooltip placement={placement()} value={props.executorLabel()}>
 +            <IconButton
-+              icon="branch"
++              icon="mcp"
 +              variant="ghost"
 +              size="large"
 +              onClick={props.onOpenExecutor}
