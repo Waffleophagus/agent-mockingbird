@@ -1,7 +1,7 @@
-From aec53a065c24d0a7381c1401238e476d8632bac9 Mon Sep 17 00:00:00 2001
+From 711a5609ed7bb4b4222625ad9a044e7bd5257b15 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sun, 22 Mar 2026 00:14:20 -0500
-Subject: [PATCH] feat: add base-path aware web serving
+Subject: [PATCH 1/2] feat: add base-path aware web serving
 
 
 diff --git a/apps/executor/src/cli/main.ts b/apps/executor/src/cli/main.ts
@@ -274,7 +274,7 @@ index 85aa5438a734e9afd7b1d4a2ea7601fa34145854..06922cb9fb96e615d0829c6111c08c0b
    }
  };
 diff --git a/packages/platform/server/src/index.ts b/packages/platform/server/src/index.ts
-index 6b5baac6f1a4f1e0090310547a024c865b6b6222..dbf65b5aa963bd13c74082eef0ca4c4fd400192c 100644
+index 6b5baac6f1a4f1e0090310547a024c865b6b6222..df7b104e1e0761e1fbc59d02d4f3c57d1c8f2b67 100644
 --- a/packages/platform/server/src/index.ts
 +++ b/packages/platform/server/src/index.ts
 @@ -72,6 +72,7 @@ export {
@@ -441,3 +441,4 @@ index 6b5baac6f1a4f1e0090310547a024c865b6b6222..dbf65b5aa963bd13c74082eef0ca4c4f
      return {
 -- 
 2.53.0
+

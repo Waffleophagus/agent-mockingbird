@@ -1,0 +1,42 @@
+From ebed68f164dc378e64560b56c81bf448471f7c02 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Fri, 27 Mar 2026 17:50:46 -0500
+Subject: [PATCH 2/2] feat: add back button to navigate to primary chat
+
+
+diff --git a/apps/web/src/components/shell.tsx b/apps/web/src/components/shell.tsx
+index f13cccb5eaaa15bb8ccb827e87c5bf85055325e2..adee7eaf6e4803a0db38b05afcb7bf5a99688001 100644
+--- a/apps/web/src/components/shell.tsx
++++ b/apps/web/src/components/shell.tsx
+@@ -2,7 +2,7 @@ import { Link, Outlet, useMatchRoute } from "@tanstack/react-router";
+ import { useCallback, useEffect, useState } from "react";
+ import { useSources, type Source } from "@executor/react";
+ import { cn } from "../lib/utils";
+-import { IconPlus, IconCopy, IconCheck } from "./icons";
++import { IconPlus, IconCopy, IconCheck, IconArrowLeft } from "./icons";
+ import { LoadableBlock } from "./loadable";
+ import { SourceFavicon } from "./source-favicon";
+ 
+@@ -238,6 +238,19 @@ export function AppShell() {
+           </Link>
+         </div>
+ 
++        {/* Back to Chat */}
++        <div className="px-3 py-2.5">
++          <a
++            href="/"
++            className="group flex items-center gap-2.5 rounded-lg border border-sidebar-border/60 bg-gradient-to-r from-primary/[0.08] to-transparent px-3 py-2 text-[12px] font-medium text-foreground shadow-sm transition-all duration-200 hover:border-primary/30 hover:from-primary/[0.12] hover:shadow-md hover:-translate-y-px"
++          >
++            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 transition-all duration-200 group-hover:bg-primary/20 group-hover:scale-110">
++              <IconArrowLeft className="size-3 text-primary transition-transform duration-200 group-hover:-translate-x-0.5" />
++            </span>
++            <span className="flex-1">Back to Chat</span>
++          </a>
++        </div>
++
+         {/* Main nav */}
+         <nav className="flex flex-1 flex-col p-2 overflow-y-auto">
+           <NavItem to="/" label="Dashboard" active={!!isHome} />
+-- 
+2.53.0
+
