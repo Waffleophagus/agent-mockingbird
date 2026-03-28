@@ -203,7 +203,7 @@ describe("config routes MCP integration", () => {
     expect(reloadedSnapshot.config.ui.mcpServers).toEqual([]);
     expect(reloadedSnapshot.config.ui.mcps).toEqual([]);
     expect(reloadedManagedConfig.mcp?.executor?.enabled).toBe(false);
-    expect(events.some(event => event.type === "config.updated")).toBe(true);
+    expect(events.some(event => event.type === "config.invalidated")).toBe(true);
   });
 
   test("PUT /api/config/mcps rejects stale effective MCP hashes", async () => {
@@ -364,5 +364,55 @@ describe("config routes MCP integration", () => {
     expect(reloadedManagedConfig.mcp?.executor?.url).toBe(
       `${snapshot.config.runtime.executor.baseUrl}/executor/mcp`,
     );
+  });
+
+  test("PATCH /api/config aggregates rollback restore errors after executor MCP sync failure", async () => {
+    const snapshot = configStore.getConfigSnapshot();
+    await managedConfig.ensureExecutorMcpServerConfigured(snapshot.config);
+
+    const routes = createConfigRoutes(
+      { publish: () => {} } as never,
+      {
+        ensureExecutorMcpServerConfigured: async () => {
+          throw new Error("sync failed");
+        },
+        persistConfigSnapshot: () => {
+          throw new Error("config restore failed");
+        },
+        readManagedOpencodeConfig: managedConfig.readManagedOpencodeConfig,
+        replaceManagedOpencodeField: async () => {
+          throw new Error("managed config restore failed");
+        },
+      },
+    );
+    const response = await routes["/api/config"].PATCH(
+      new Request("http://localhost/api/config", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedHash: snapshot.hash,
+          runSmokeTest: false,
+          patch: {
+            runtime: {
+              executor: {
+                baseUrl: "http://127.0.0.1:7777",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    const payload = await response.json() as {
+      error?: string;
+      stage?: string;
+    };
+
+    expect(response.status).toBe(500);
+    expect(payload.stage).toBe("rollback");
+    expect(payload.error).toContain("sync failed");
+    expect(payload.error).toContain("config restore failed");
+    expect(payload.error).toContain("managed config restore failed");
+    expect(payload.error).toContain("non-atomic");
   });
 });

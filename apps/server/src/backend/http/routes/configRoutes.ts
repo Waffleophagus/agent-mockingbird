@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { migrateOpenclawWorkspace } from "../../agents/openclawImport";
@@ -16,6 +17,7 @@ import {
   setEnabledSkillsFromCatalog,
 } from "../../config/orchestration";
 import { configuredMcpServerSchema } from "../../config/schema";
+import { stableSerialize } from "../../config/serialization";
 import {
   applyConfigPatch,
   applyConfigPatchSafe,
@@ -30,11 +32,13 @@ import {
   persistConfigSnapshot,
 } from "../../config/store";
 import {
+  createConfigInvalidatedEvent,
   createConfigRolledBackEvent,
   createConfigUpdateFailedEvent,
   createConfigUpdatedEvent,
   createSkillsCatalogUpdatedEvent,
 } from "../../contracts/events";
+import { createLogger } from "../../logging/logger";
 import {
   loadEffectiveMcpConfig,
   normalizeMcpIds,
@@ -97,6 +101,8 @@ const configMcpsBodySchema = z
     expectedHash: z.unknown().optional(),
   })
   .strict();
+
+const logger = createLogger("config-routes");
 
 interface ConfigRouteDependencies {
   ensureExecutorMcpServerConfigured: typeof ensureExecutorMcpServerConfigured;
@@ -216,10 +222,15 @@ function publishConfigInvalidatedEvent(
   eventStream: RuntimeEventStream,
   snapshot: ReturnType<typeof getConfigSnapshot>,
 ) {
-  publishConfigUpdatedEvent(eventStream, {
-    hash: snapshot.hash,
-    path: snapshot.path,
-  });
+  eventStream.publish(
+    createConfigInvalidatedEvent(
+      {
+        hash: snapshot.hash,
+        path: snapshot.path,
+      },
+      "api",
+    ),
+  );
 }
 
 function publishConfigFailedEvent(
@@ -266,6 +277,10 @@ function publishConfigRollbackEvent(
   );
 }
 
+function hashManagedConfigSnapshot(value: unknown) {
+  return createHash("sha256").update(stableSerialize(value)).digest("hex");
+}
+
 async function respondWithConfigMutation(
   eventStream: RuntimeEventStream,
   dependencies: ConfigRouteDependencies,
@@ -274,11 +289,15 @@ async function respondWithConfigMutation(
 ) {
   try {
     const beforeSnapshot = getConfigSnapshot();
+    // Fresh installs or corrupted managed config files can legitimately omit
+    // `mcp`; downstream rollback treats an undefined snapshot as intentional.
     const previousManagedConfig = dependencies.readManagedOpencodeConfig(
       beforeSnapshot.config,
     ) as {
       mcp?: Record<string, unknown>;
     };
+    // `executor` can also be undefined in those cases, and restoration writes
+    // that exact absence back without requiring an extra runtime guard here.
     const previousExecutorMcp = previousManagedConfig.mcp?.executor;
     const result = await run();
 
@@ -295,11 +314,13 @@ async function respondWithConfigMutation(
           result.snapshot.config,
         );
       } catch (error) {
-        let restoredHash: string | null = null;
         const rollbackMessage =
           error instanceof Error
             ? error.message
             : "Failed to reconcile executor MCP config";
+        const restorationErrors: string[] = [];
+        let restoredHash: string | null = null;
+        let restoredManagedConfigHash: string | null = null;
 
         try {
           restoredHash = dependencies.persistConfigSnapshot(
@@ -307,47 +328,61 @@ async function respondWithConfigMutation(
             beforeSnapshot.config,
           ).hash;
         } catch (rollbackError) {
-          const message =
+          restorationErrors.push(
             rollbackError instanceof Error
               ? rollbackError.message
-              : "Failed to restore config file";
-          throw new ConfigApplyError(
-            "rollback",
-            `${rollbackMessage}; ${message}`,
-            {
-              attemptedHash: result.snapshot.hash,
-              originalError: rollbackMessage,
-              restoredHash: null,
-            },
+              : "Failed to restore config file",
           );
         }
 
         try {
-          await dependencies.replaceManagedOpencodeField(
-            beforeSnapshot.config,
-            ["mcp", "executor"],
-            previousExecutorMcp,
-          );
+          const restoredManagedConfig =
+            await dependencies.replaceManagedOpencodeField(
+              beforeSnapshot.config,
+              ["mcp", "executor"],
+              previousExecutorMcp,
+            );
+          restoredManagedConfigHash =
+            hashManagedConfigSnapshot(restoredManagedConfig);
         } catch (rollbackError) {
-          const message =
+          restorationErrors.push(
             rollbackError instanceof Error
               ? rollbackError.message
-              : "Failed to restore executor MCP config";
-          throw new ConfigApplyError(
-            "rollback",
-            `${rollbackMessage}; ${message}`,
-            {
-              attemptedHash: result.snapshot.hash,
-              originalError: rollbackMessage,
-              restoredHash,
-            },
+              : "Failed to restore executor MCP config",
           );
         }
 
-        throw new ConfigApplyError("rollback", rollbackMessage, {
+        if (
+          (restoredHash === null) !== (restoredManagedConfigHash === null)
+        ) {
+          logger.warn("Executor config rollback only partially restored state", {
+            attemptedHash: result.snapshot.hash,
+            restoredConfigHash: restoredHash,
+            restoredManagedConfigHash,
+            originalError: rollbackMessage,
+            restorationErrors,
+            nonAtomicManagedConfigRestore: true,
+          });
+        }
+
+        const recoveryWarning =
+          "Executor config rollback crossed non-atomic config and managed-config writes";
+        const message =
+          restorationErrors.length > 0
+            ? `${rollbackMessage}; ${recoveryWarning}; ${restorationErrors.join("; ")}`
+            : rollbackMessage;
+        throw new ConfigApplyError("rollback", message, {
           attemptedHash: result.snapshot.hash,
           originalError: rollbackMessage,
+          originalErrors: [rollbackMessage],
           restoredHash,
+          restoredHashes: {
+            config: restoredHash,
+            managedConfig: restoredManagedConfigHash,
+          },
+          restorationErrors,
+          recoveryWarning,
+          nonAtomicManagedConfigRestore: true,
         });
       }
     }

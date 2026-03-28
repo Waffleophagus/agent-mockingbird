@@ -5,7 +5,9 @@ import path from "node:path";
 
 import type * as ManagedConfigModuleType from "./managedConfig";
 import type * as ConfigStoreModuleType from "../config/store";
+import { resolveOpencodeConfigDir } from "../workspace/resolve";
 
+const originalNodeEnv = process.env.NODE_ENV;
 const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
 const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
 const originalWorkspacePath = process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
@@ -44,11 +46,12 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  configStore.persistConfigSnapshot(testConfigPath, baseConfig);
-  rmSync(path.join(testRoot, "opencode-config"), { recursive: true, force: true });
+  const snapshot = configStore.persistConfigSnapshot(testConfigPath, baseConfig);
+  rmSync(resolveOpencodeConfigDir(snapshot.config), { recursive: true, force: true });
 });
 
 afterAll(() => {
+  restoreEnv("NODE_ENV", originalNodeEnv);
   restoreEnv("AGENT_MOCKINGBIRD_CONFIG_PATH", originalConfigPath);
   restoreEnv("AGENT_MOCKINGBIRD_DB_PATH", originalDbPath);
   restoreEnv("AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR", originalWorkspacePath);

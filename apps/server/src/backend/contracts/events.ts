@@ -150,6 +150,12 @@ interface ConfigUpdatedPayload {
 }
 export type ConfigUpdatedEvent = RuntimeEventBase<"config.updated", ConfigUpdatedPayload>;
 
+interface ConfigInvalidatedPayload {
+  hash: string;
+  path: string;
+}
+export type ConfigInvalidatedEvent = RuntimeEventBase<"config.invalidated", ConfigInvalidatedPayload>;
+
 interface ConfigUpdateFailedPayload {
   stage: string;
   message: string;
@@ -184,6 +190,7 @@ export type RuntimeEvent =
   | SessionQuestionResolvedEvent
   | BackgroundRunUpdatedEvent
   | ConfigUpdatedEvent
+  | ConfigInvalidatedEvent
   | ConfigUpdateFailedEvent
   | ConfigRolledBackEvent
   | SkillsCatalogUpdatedEvent;
@@ -296,6 +303,13 @@ export function createConfigUpdatedEvent(
   source: RuntimeEventSource,
 ): ConfigUpdatedEvent {
   return baseRuntimeEvent("config.updated", payload, source);
+}
+
+export function createConfigInvalidatedEvent(
+  payload: ConfigInvalidatedPayload,
+  source: RuntimeEventSource,
+): ConfigInvalidatedEvent {
+  return baseRuntimeEvent("config.invalidated", payload, source);
 }
 
 export function createConfigUpdateFailedEvent(
