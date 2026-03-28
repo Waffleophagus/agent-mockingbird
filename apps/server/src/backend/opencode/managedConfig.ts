@@ -72,10 +72,16 @@ export function readManagedOpencodeConfig(
 }
 
 function buildExecutorMcpConfig(config: AgentMockingbirdConfig) {
+  const baseUrl = config.runtime.executor.baseUrl.replace(/\/+$/, "");
+  const rawMountPath = config.runtime.executor.uiMountPath.trim();
+  const mountPath =
+    !rawMountPath || rawMountPath === "/"
+      ? ""
+      : `/${rawMountPath.replace(/^\/+/, "").replace(/\/+$/, "")}`;
   return {
     type: "remote",
     enabled: config.runtime.executor.enabled,
-    url: `${config.runtime.executor.baseUrl.replace(/\/+$/, "")}/mcp`,
+    url: `${baseUrl}${mountPath}/mcp`,
   };
 }
 

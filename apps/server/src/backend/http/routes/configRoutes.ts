@@ -286,7 +286,9 @@ async function respondWithConfigMutation(
       beforeSnapshot.config.runtime.executor.enabled !==
         result.snapshot.config.runtime.executor.enabled ||
       beforeSnapshot.config.runtime.executor.baseUrl !==
-        result.snapshot.config.runtime.executor.baseUrl
+        result.snapshot.config.runtime.executor.baseUrl ||
+      beforeSnapshot.config.runtime.executor.uiMountPath !==
+        result.snapshot.config.runtime.executor.uiMountPath
     ) {
       try {
         await dependencies.ensureExecutorMcpServerConfigured(

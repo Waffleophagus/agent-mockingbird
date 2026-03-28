@@ -43,20 +43,21 @@ let createConfigRoutes: CreateConfigRoutesFn;
 let configStore: ConfigStoreModule;
 let client: ClientModule;
 let managedConfig: ManagedConfigModule;
+let baseConfig: ReturnType<ConfigStoreModule["getConfigSnapshot"]>["config"];
 
 beforeAll(async () => {
   ({ createConfigRoutes } = await import("./configRoutes"));
   configStore = await import("../../config/store");
   client = await import("../../db/client");
   managedConfig = await import("../../opencode/managedConfig");
+  baseConfig = configStore.getConfigSnapshot().config;
 });
 
 beforeEach(() => {
-  const snapshot = configStore.getConfigSnapshot();
-  configStore.persistConfigSnapshot(snapshot.path, {
-    ...snapshot.config,
+  configStore.persistConfigSnapshot(testConfigPath, {
+    ...baseConfig,
     ui: {
-      ...snapshot.config.ui,
+      ...baseConfig.ui,
       mcps: [],
       mcpServers: [],
     },
@@ -86,7 +87,7 @@ describe("config routes MCP integration", () => {
         executor: {
           type: "remote",
           enabled: true,
-          url: "http://127.0.0.1:8788/mcp",
+          url: "http://127.0.0.1:8788/executor/mcp",
         },
       },
     });
@@ -117,7 +118,7 @@ describe("config routes MCP integration", () => {
         id: "executor",
         type: "remote",
         enabled: true,
-        url: "http://127.0.0.1:8788/mcp",
+        url: "http://127.0.0.1:8788/executor/mcp",
       },
     ]);
     expect(payload.effective.mcp.statusError).toBeUndefined();
@@ -156,7 +157,7 @@ describe("config routes MCP integration", () => {
         executor: {
           type: "remote",
           enabled: true,
-          url: "http://127.0.0.1:8788/mcp",
+          url: "http://127.0.0.1:8788/executor/mcp",
         },
       },
     });
@@ -212,7 +213,7 @@ describe("config routes MCP integration", () => {
         executor: {
           type: "remote",
           enabled: true,
-          url: "http://127.0.0.1:8788/mcp",
+          url: "http://127.0.0.1:8788/executor/mcp",
         },
       },
     });
@@ -228,7 +229,7 @@ describe("config routes MCP integration", () => {
         executor: {
           type: "remote",
           enabled: false,
-          url: "http://127.0.0.1:8788/mcp",
+          url: "http://127.0.0.1:8788/executor/mcp",
         },
       },
     });
@@ -277,7 +278,41 @@ describe("config routes MCP integration", () => {
 
     expect(response.status).toBe(200);
     expect(reloadedSnapshot.config.runtime.executor.baseUrl).toBe("http://127.0.0.1:9999");
-    expect(reloadedManagedConfig.mcp?.executor?.url).toBe("http://127.0.0.1:9999/mcp");
+    expect(reloadedManagedConfig.mcp?.executor?.url).toBe("http://127.0.0.1:9999/executor/mcp");
+  });
+
+  test("PATCH /api/config keeps executor MCP entry aligned with a custom ui mount path", async () => {
+    const snapshot = configStore.getConfigSnapshot();
+    await managedConfig.ensureExecutorMcpServerConfigured(snapshot.config);
+
+    const routes = createConfigRoutes({ publish: () => {} } as never);
+    const response = await routes["/api/config"].PATCH(
+      new Request("http://localhost/api/config", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedHash: snapshot.hash,
+          runSmokeTest: false,
+          patch: {
+            runtime: {
+              executor: {
+                uiMountPath: "/custom",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    const reloadedSnapshot = configStore.getConfigSnapshot();
+    const reloadedManagedConfig = managedConfig.readManagedOpencodeConfig(reloadedSnapshot.config) as {
+      mcp?: Record<string, { url?: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(reloadedManagedConfig.mcp?.executor?.url).toBe(
+      `${reloadedSnapshot.config.runtime.executor.baseUrl}/custom/mcp`,
+    );
   });
 
   test("PATCH /api/config rolls back executor changes when executor MCP sync fails", async () => {
@@ -326,6 +361,8 @@ describe("config routes MCP integration", () => {
     expect(payload.stage).toBe("rollback");
     expect(payload.error).toContain("sync failed");
     expect(reloadedSnapshot.config.runtime.executor.baseUrl).toBe(snapshot.config.runtime.executor.baseUrl);
-    expect(reloadedManagedConfig.mcp?.executor?.url).toBe(`${snapshot.config.runtime.executor.baseUrl}/mcp`);
+    expect(reloadedManagedConfig.mcp?.executor?.url).toBe(
+      `${snapshot.config.runtime.executor.baseUrl}/executor/mcp`,
+    );
   });
 });
