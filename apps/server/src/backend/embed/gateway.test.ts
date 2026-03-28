@@ -334,6 +334,27 @@ test("gateway proxies approved external requests", async () => {
   expect(requestedUrl).toBe("https://registry.npmjs.org/-/package/executor/dist-tags");
 });
 
+test("gateway strips caller-supplied query params for external requests by default", async () => {
+  const config = buildConfig("embedded-patched");
+  let requestedUrl = "";
+  globalThis.fetch = ((async (input: RequestInfo | URL) => {
+    requestedUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    return new Response('{"latest":"1.2.4"}', {
+      headers: {
+        "content-type": "application/json",
+      },
+    });
+  }) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedExternalRequest(
+    new Request("http://127.0.0.1:3001/api/embed/external/executor/npm-registry/-/package/executor/dist-tags?cacheBust=1"),
+    config,
+  );
+
+  expect(response?.status).toBe(200);
+  expect(requestedUrl).toBe("https://registry.npmjs.org/-/package/executor/dist-tags");
+});
+
 test("gateway rejects external targets that normalize outside the allowlist prefix", () => {
   const config = buildConfig("embedded-patched");
   const definition = testing.buildEmbeddedServiceDefinition(config, "executor");
@@ -346,6 +367,40 @@ test("gateway rejects external targets that normalize outside the allowlist pref
   );
 
   expect(target).toBeNull();
+});
+
+test("gateway forwards only allowlisted external query params", () => {
+  const config = buildConfig("embedded-patched");
+  const definition = testing.buildEmbeddedServiceDefinition(config, "executor");
+  if (!definition) throw new Error("Missing executor definition");
+
+  definition.thirdPartyBrowserProxy.allowlist = [
+    {
+      id: "npm-registry",
+      origin: "https://registry.npmjs.org",
+      pathPrefixes: ["/-/package/executor/dist-tags"],
+      allowedQueryParams: ["view", "scope"],
+    },
+  ];
+
+  const target = testing.buildExternalTarget(
+    definition,
+    "npm-registry",
+    "/-/package/executor/dist-tags",
+  );
+  if (!target) throw new Error("Missing external target");
+  const allowlistEntry = definition.thirdPartyBrowserProxy.allowlist[0];
+  if (!allowlistEntry) throw new Error("Missing allowlist entry");
+
+  testing.applyAllowedQueryParams(
+    target,
+    new URL("http://127.0.0.1:3001/api/embed/external/executor/npm-registry/-/package/executor/dist-tags?view=full&drop=1&scope=public&view=compact"),
+    allowlistEntry,
+  );
+
+  expect(target.toString()).toBe(
+    "https://registry.npmjs.org/-/package/executor/dist-tags?view=full&scope=public&view=compact",
+  );
 });
 
 test("gateway passes through streaming upstream responses", async () => {

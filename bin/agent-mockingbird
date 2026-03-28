@@ -99,7 +99,7 @@ function execManagedCli(rootDir, argv = process.argv, env = process.env) {
 }
 
 function commandExists(command, env = process.env) {
-  const result = spawnSync("bash", ["-lc", `command -v ${command}`], {
+  const result = spawnSync("sh", ["-c", 'command -v "$1"', "--", command], {
     stdio: "pipe",
     encoding: "utf8",
     env,
@@ -241,6 +241,7 @@ function main() {
 }
 
 export const testing = {
+  commandExists,
   readRunningPackageVersion,
   currentPackageOwnsManagedCli,
   managedCliExists,

@@ -573,6 +573,14 @@ describe("agent-mockingbird CLI delegation", () => {
     ).toBe("bun");
   });
 
+  test("bootstrap command detection uses POSIX sh-compatible lookup", () => {
+    expect(
+      bootstrapTesting.commandExists("sh", {
+        PATH: process.env.PATH || "",
+      }),
+    ).toBe(true);
+  });
+
   test("delegates from a shadowing global install to the managed root CLI", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-delegate-"));
     const managedCli = path.join(

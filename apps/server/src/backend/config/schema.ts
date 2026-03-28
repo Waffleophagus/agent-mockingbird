@@ -142,12 +142,19 @@ const runtimeSmokeTestSchema = z
 const runtimeExecutorSchema = z
   .object({
     enabled: z.boolean().default(true),
-    baseUrl: z.string().url(),
-    workspaceDir: z.string().min(1),
-    dataDir: z.string().min(1),
+    baseUrl: z.string().url().default("http://127.0.0.1:8788"),
+    workspaceDir: z.string().min(1).default("./data/executor-workspace"),
+    dataDir: z.string().min(1).default("./data/executor"),
     uiMountPath: absoluteUrlPathSchema.default("/executor"),
   })
-  .strict();
+  .strict()
+  .default({
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8788",
+    workspaceDir: "./data/executor-workspace",
+    dataDir: "./data/executor",
+    uiMountPath: "/executor",
+  });
 
 const embeddedServiceModeSchema = z.enum(["embedded-patched", "upstream-fallback"]);
 

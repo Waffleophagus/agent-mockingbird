@@ -9,6 +9,7 @@ interface EmbeddedExternalAllowlistEntry {
   id: string;
   origin: string;
   pathPrefixes: Array<string>;
+  allowedQueryParams?: Array<string>;
 }
 
 interface EmbeddedServiceDefinition {
@@ -298,6 +299,29 @@ function buildExternalTarget(definition: EmbeddedServiceDefinition, allowlistId:
   return target;
 }
 
+function applyAllowedQueryParams(
+  target: URL,
+  requestUrl: URL,
+  allowlistEntry: EmbeddedExternalAllowlistEntry,
+) {
+  const allowedQueryParams = allowlistEntry.allowedQueryParams ?? [];
+  if (allowedQueryParams.length === 0) {
+    target.search = "";
+    return target;
+  }
+
+  const allowedKeys = new Set(allowedQueryParams);
+  const filteredSearch = new URLSearchParams();
+  requestUrl.searchParams.forEach((value, key) => {
+    if (!allowedKeys.has(key)) {
+      return;
+    }
+    filteredSearch.append(key, value);
+  });
+  target.search = filteredSearch.toString() ? `?${filteredSearch.toString()}` : "";
+  return target;
+}
+
 function filterExternalRequestHeaders(headers: Headers) {
   const filtered = new Headers();
   headers.forEach((value, key) => {
@@ -394,12 +418,20 @@ export async function proxyEmbeddedExternalRequest(req: Request, config: AgentMo
     return new Response("Not found", { status: 404 });
   }
 
+  const allowlistEntry = definition.thirdPartyBrowserProxy.allowlist.find(
+    entry => entry.id === parsed.allowlistId,
+  );
+  if (!allowlistEntry) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const requestUrl = new URL(req.url);
   const target = buildExternalTarget(definition, parsed.allowlistId, parsed.targetPath);
   if (!target) {
     return new Response("Forbidden", { status: 403 });
   }
 
-  target.search = new URL(req.url).search;
+  applyAllowedQueryParams(target, requestUrl, allowlistEntry);
   const upstream = await fetch(target, {
     method: req.method,
     headers: filterExternalRequestHeaders(new Headers(req.headers)),
@@ -419,6 +451,7 @@ export function getEmbeddedServiceStatus(config: AgentMockingbirdConfig, id: Emb
 
 export const testing = {
   buildEmbeddedServiceDefinition,
+  applyAllowedQueryParams,
   buildExternalTarget,
   buildForwardTarget,
   copyResponseHeaders,
