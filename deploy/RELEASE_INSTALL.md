@@ -15,6 +15,12 @@ That is the main public install path. The npm global `agent-mockingbird` command
 
 `agent-mockingbird install` handles service setup and launches interactive onboarding on TTY installs.
 
+Managed installs pin Bun to the version declared by the bundled OpenCode source of truth. At the time of writing that is `bun@1.3.10`, but the installer derives it from package metadata rather than hardcoding `latest`.
+
+Advanced escape hatch:
+
+- Set `AGENT_MOCKINGBIRD_BUN_VERSION` only if you explicitly need to override the derived Bun pin during the managed installer flow.
+
 Optional curl bootstrap wrapper:
 
 ```bash
@@ -88,13 +94,16 @@ sudo AGENT_MOCKINGBIRD_USER=agent-mockingbird \
 
 Prerequisites on host:
 
-- `bun` in `PATH`
+- `bun` in `PATH`, matching the Bun version declared by the repo's bundled OpenCode metadata
 - `opencode` in `PATH`
 - `systemd`
+
+The manual systemd installer verifies the host Bun version before continuing and exits if it does not match the pinned OpenCode Bun version.
 
 After install, verify:
 
 ```bash
+systemctl status executor.service --no-pager
 systemctl status opencode.service --no-pager
 systemctl status agent-mockingbird.service --no-pager
 curl -sS http://127.0.0.1:3001/api/health

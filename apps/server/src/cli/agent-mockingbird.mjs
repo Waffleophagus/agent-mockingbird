@@ -758,35 +758,101 @@ function ensurePackagedExecutorRuntime(agentMockingbirdAppDir, bunBin) {
   return packagedExecutorWebAssetsDir;
 }
 
-function resolveBunBinary(paths) {
+function candidateBunBinaryPaths(paths) {
+  const candidates = [];
+  const seen = new Set();
+  const add = (value) => {
+    if (!value) return;
+    const resolved = path.resolve(value);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    candidates.push(resolved);
+  };
+
   if (commandExists("bun")) {
     const out = shell("bash", ["-lc", "command -v bun"]);
-    return out.stdout.trim();
+    add(out.stdout.trim());
   }
-  return firstExistingPath([
-    paths.bunBinManagedGlobal,
-    paths.bunBinManagedLocal,
-    paths.bunBinTools,
-  ]);
+
+  add(paths.bunBinManagedGlobal);
+  add(paths.bunBinManagedLocal);
+  add(paths.bunBinTools);
+  return candidates;
 }
 
-function tryInstallBun(paths) {
+function readBunVersion(bunBin) {
+  if (!bunBin || !fs.existsSync(bunBin)) {
+    return null;
+  }
+  const result = shell(bunBin, ["--version"]);
+  if (result.code !== 0) {
+    return null;
+  }
+  const version = result.stdout.trim();
+  return version || null;
+}
+
+function resolveBunBinary(paths, expectedVersion) {
+  const candidates = candidateBunBinaryPaths(paths);
+  if (!expectedVersion) {
+    return candidates[0] ?? null;
+  }
+
+  let fallback = null;
+  for (const candidate of candidates) {
+    fallback ||= candidate;
+    if (readBunVersion(candidate) === expectedVersion) {
+      return candidate;
+    }
+  }
+  return fallback;
+}
+
+function inspectBunRuntime(paths, expectedVersion) {
+  const bunBin = resolveBunBinary(paths, expectedVersion);
+  const actualVersion = readBunVersion(bunBin);
+  return {
+    bunBin,
+    actualVersion,
+    expectedVersion,
+    present: Boolean(bunBin && actualVersion),
+    matches: actualVersion === expectedVersion,
+  };
+}
+
+function assertPinnedBunRuntime(paths, expectedVersion) {
+  const runtime = inspectBunRuntime(paths, expectedVersion);
+  if (runtime.matches && runtime.bunBin) {
+    return runtime.bunBin;
+  }
+
+  const actualLabel = runtime.actualVersion
+    ? `bun@${runtime.actualVersion} at ${runtime.bunBin}`
+    : runtime.bunBin
+      ? `unreadable bun binary at ${runtime.bunBin}`
+      : "bun not found";
+  throw new Error(
+    `Pinned Bun runtime mismatch: expected bun@${expectedVersion}, found ${actualLabel}. Set AGENT_MOCKINGBIRD_BUN_VERSION only for an explicit override.`,
+  );
+}
+
+function tryInstallBun(paths, bunVersion) {
   try {
     npmInstall(
       paths.npmPrefix,
-      ["bun@latest"],
+      [`bun@${bunVersion}`],
       ["-g", "--registry", PUBLIC_NPM_REGISTRY],
     );
   } catch {
     // Fallback below.
   }
-  if (resolveBunBinary(paths)) {
+  if (inspectBunRuntime(paths, bunVersion).matches) {
     return;
   }
 
   if (!commandExists("curl")) {
     throw new Error(
-      "bun is not installed and curl is unavailable for bun.com fallback install.",
+      `bun@${bunVersion} is required and curl is unavailable for bun.com fallback install.`,
     );
   }
 
@@ -799,9 +865,9 @@ function tryInstallBun(paths) {
     ],
     { stdio: "inherit" },
   );
-  if (fallback.code !== 0 || !resolveBunBinary(paths)) {
+  if (fallback.code !== 0 || !inspectBunRuntime(paths, bunVersion).matches) {
     throw new Error(
-      "Failed to install bun via npm and bun.com install script fallback.",
+      `Failed to install pinned bun@${bunVersion} via npm and bun.com install script fallback.`,
     );
   }
 }
@@ -827,9 +893,15 @@ function npmInstall(prefix, packages, extraArgs = [], env = process.env) {
   must("npm", args, { stdio: "inherit", env });
 }
 
-function bunInstall(installDir, packages, extraArgs = [], env = process.env) {
+function bunInstall(
+  installDir,
+  packages,
+  extraArgs = [],
+  env = process.env,
+  bunCommand = "bun",
+) {
   const args = ["install", "--global", ...extraArgs, ...packages];
-  must("bun", args, {
+  must(bunCommand, args, {
     stdio: "inherit",
     env: {
       ...env,
@@ -838,9 +910,22 @@ function bunInstall(installDir, packages, extraArgs = [], env = process.env) {
   });
 }
 
-function installManagedPackage(packageManager, paths, packages, extraArgs = [], env = process.env) {
+function installManagedPackage(
+  packageManager,
+  paths,
+  packages,
+  extraArgs = [],
+  env = process.env,
+  options = {},
+) {
   if (packageManager === "bun") {
-    bunInstall(paths.bunInstallDir, packages, extraArgs, env);
+    bunInstall(
+      paths.bunInstallDir,
+      packages,
+      extraArgs,
+      env,
+      options.bunCommand,
+    );
     return;
   }
   npmInstall(paths.npmPrefix, packages, extraArgs, env);
@@ -1344,10 +1429,16 @@ async function promptSelect(message, options, defaultIndex = 0) {
 function buildInstallSummary({ args, paths }) {
   const target = args.version ?? `tag:${args.tag}`;
   const opencodePackageVersion = readOpenCodePackageVersion();
-  const hasBun = Boolean(resolveBunBinary(paths));
+  const pinnedBunVersion = readPinnedBunVersion({ paths });
+  const bunRuntime = inspectBunRuntime(paths, pinnedBunVersion);
   const hasSystemdUser = checkSystemdUserStatus();
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
+  const bunPlan = bunRuntime.matches
+    ? `   - bun: ${success(`found bun@${pinnedBunVersion} at ${bunRuntime.bunBin}`)}`
+    : bunRuntime.present
+      ? `   - bun: ${warn(`found bun@${bunRuntime.actualVersion} at ${bunRuntime.bunBin}; will install pinned bun@${pinnedBunVersion}${hasCurl ? " with bun.com/install fallback" : ""}`)}`
+      : `   - bun: ${warn(`not found, will install pinned bun@${pinnedBunVersion}${hasCurl ? " with bun.com/install fallback" : ""}`)}`;
   return summarizeActionPlan("Install plan", [
     `- Target package: ${PACKAGE_NAME} (${target})`,
     `- Private registry scope: @${args.scope.replace(/^@/, "")} -> ${args.registryUrl}`,
@@ -1359,9 +1450,7 @@ function buildInstallSummary({ args, paths }) {
     `   - npm: ${commandExists("npm") ? success("found") : errorText("missing")}`,
     `   - systemctl --user: ${hasSystemdUser ? success("available") : errorText("unavailable")}`,
     "2. Ensure Bun runtime for service command.",
-    hasBun
-      ? `   - bun: ${success(`found at ${resolveBunBinary(paths)}`)}`
-      : `   - bun: ${warn(`not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`)}`,
+    bunPlan,
     `3. Install/refresh executor sidecar dependency (\`executor@${readExecutorPackageVersion()}\`) from npmjs.`,
     `4. Install/refresh OpenCode CLI dependency (\`opencode-ai@${opencodePackageVersion}\`) from npmjs.`,
     `5. Install Agent Mockingbird package (${PACKAGE_NAME}) from npm.`,
@@ -1384,17 +1473,23 @@ function buildInstallSummary({ args, paths }) {
 
 function buildUpdateSummary({ args, paths }) {
   const target = args.version ?? `tag:${args.tag}`;
-  const hasBun = Boolean(resolveBunBinary(paths));
+  const pinnedBunVersion = readPinnedBunVersion({ paths });
+  const bunRuntime = inspectBunRuntime(paths, pinnedBunVersion);
   const hasSystemdUser = checkSystemdUserStatus();
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
+  const bunStatus = bunRuntime.matches
+    ? success(`already present as bun@${pinnedBunVersion}`)
+    : bunRuntime.present
+      ? warn(`found bun@${bunRuntime.actualVersion}; will install pinned bun@${pinnedBunVersion}${hasCurl ? " with curl fallback" : ""}`)
+      : warn(`will install pinned bun@${pinnedBunVersion}${hasCurl ? " with curl fallback" : ""}`);
   return summarizeActionPlan("Update plan", [
     `- Update target: ${PACKAGE_NAME} (${target})`,
     `- Install root: ${paths.rootDir}`,
     "",
     "What this update does:",
     "1. Refresh Agent Mockingbird package + executor + OpenCode sidecar dependencies.",
-    `2. Ensure Bun runtime is available${hasBun ? ` (${success("already present")})` : ` (${warn(`will install${hasCurl ? " with curl fallback" : ""}`)})`}.`,
+    `2. Ensure pinned Bun runtime is available (${bunStatus}).`,
     "3. Re-seed workspace skills from bundled package.",
     "4. Rebuild the packaged Executor embedded web bundle for /executor.",
     "5. Re-write CLI shim + systemd user units to current paths/entrypoint.",
@@ -1417,7 +1512,8 @@ function buildUpdateSummary({ args, paths }) {
 
 function buildUpdateDryRun({ args, paths }) {
   const target = args.version ?? `tag:${args.tag}`;
-  const hasBun = Boolean(resolveBunBinary(paths));
+  const pinnedBunVersion = readPinnedBunVersion({ paths });
+  const bunRuntime = inspectBunRuntime(paths, pinnedBunVersion);
   const hasSystemdUser = checkSystemdUserStatus();
   const hasLoginctl = commandExists("loginctl");
 
@@ -1425,7 +1521,11 @@ function buildUpdateDryRun({ args, paths }) {
     `Refresh package ${PACKAGE_NAME} (${target})`,
     "Refresh executor dependency",
     "Refresh opencode-ai dependency",
-    hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
+    bunRuntime.matches
+      ? `Reuse existing pinned Bun runtime (bun@${pinnedBunVersion})`
+      : bunRuntime.present
+        ? `Install pinned Bun runtime bun@${pinnedBunVersion} because bun@${bunRuntime.actualVersion} is not accepted`
+        : `Install pinned Bun runtime bun@${pinnedBunVersion}`,
     "Reseed workspace skills from bundled package",
     "Build packaged Executor embedded web bundle for /executor",
     "Rewrite agent-mockingbird CLI shim",
@@ -1456,7 +1556,10 @@ function buildUpdateDryRun({ args, paths }) {
       npm: commandExists("npm"),
       systemdUser: hasSystemdUser,
       loginctl: hasLoginctl,
-      bunPresent: hasBun,
+      bunExpectedVersion: pinnedBunVersion,
+      bunPresent: bunRuntime.present,
+      bunVersionMatch: bunRuntime.matches,
+      bunActualVersion: bunRuntime.actualVersion,
     },
     actions,
     nonActions,
@@ -2610,6 +2713,7 @@ export const testing = {
   readInstalledExecutorMode,
   readInstalledExecutorVersion,
   readInstalledOpenCodeVersion,
+  readPinnedBunVersion,
   readRunningPackageVersion,
   readOpenCodePackageVersion,
   resolveManagedCliDelegationTarget,
@@ -2637,6 +2741,15 @@ export const testing = {
  *   argv?: string[],
  *   env?: NodeJS.ProcessEnv,
  * }} ReadOpenCodePackageVersionOptions
+ */
+
+/**
+ * @typedef {{
+ *   paths?: ReadOpenCodePackageVersionPaths,
+ *   moduleDir?: string,
+ *   argv?: string[],
+ *   env?: NodeJS.ProcessEnv,
+ * }} ReadPinnedBunVersionOptions
  */
 
 /**
@@ -2723,6 +2836,54 @@ function candidatePackageJsonPaths({
   return candidateLockPaths("package.json", { paths, moduleDir, argv, env });
 }
 
+function candidateOpenCodePackageJsonPaths({
+  paths,
+  moduleDir = MODULE_DIR,
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  const candidates = [];
+  const seen = new Set();
+  const add = (value) => {
+    if (!value) return;
+    const resolved = path.resolve(value);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    candidates.push(resolved);
+  };
+
+  for (const packageJsonPath of candidatePackageJsonPaths({
+    paths,
+    moduleDir,
+    argv,
+    env,
+  })) {
+    const appRoot = path.dirname(packageJsonPath);
+    add(path.join(appRoot, "cleanroom", "opencode", "package.json"));
+    add(path.join(appRoot, "vendor", "opencode", "package.json"));
+  }
+
+  return candidates;
+}
+
+function readPackageManagerBunVersionFromPackageJsonPath(packageJsonPath) {
+  const parsed = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  const packageManager = parsed?.packageManager;
+  if (typeof packageManager !== "string" || packageManager.length === 0) {
+    throw new Error(`Invalid packageManager in ${packageJsonPath}`);
+  }
+  if (!packageManager.startsWith("bun@")) {
+    throw new Error(
+      `Expected packageManager to start with bun@ in ${packageJsonPath}, found ${packageManager}`,
+    );
+  }
+  const bunVersion = packageManager.slice(4).trim();
+  if (!bunVersion) {
+    throw new Error(`Invalid packageManager in ${packageJsonPath}`);
+  }
+  return bunVersion;
+}
+
 function readPinnedInstallVersion(
   fieldName,
   {
@@ -2749,6 +2910,49 @@ function readPinnedInstallVersion(
     }
   }
   return null;
+}
+
+/**
+ * @param {ReadPinnedBunVersionOptions} [options]
+ */
+function readPinnedBunVersion({
+  paths,
+  moduleDir = MODULE_DIR,
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  const envVersion = env.AGENT_MOCKINGBIRD_BUN_VERSION?.trim();
+  if (envVersion) {
+    return envVersion;
+  }
+
+  for (const candidatePath of candidateOpenCodePackageJsonPaths({
+    paths,
+    moduleDir,
+    argv,
+    env,
+  })) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    return readPackageManagerBunVersionFromPackageJsonPath(candidatePath);
+  }
+
+  for (const candidatePath of candidatePackageJsonPaths({
+    paths,
+    moduleDir,
+    argv,
+    env,
+  })) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    return readPackageManagerBunVersionFromPackageJsonPath(candidatePath);
+  }
+
+  throw new Error(
+    "Unable to locate package.json for Bun version pinning.",
+  );
 }
 
 /**
@@ -2853,6 +3057,7 @@ async function installOrUpdate(args, mode) {
   });
   const opencodePackageVersion = readOpenCodePackageVersion({ paths });
   const executorPackageVersion = readExecutorPackageVersion({ paths });
+  const pinnedBunVersion = readPinnedBunVersion({ paths });
   await confirmInstall(args, paths, mode);
   ensureDir(paths.rootDir);
   ensureDir(paths.npmPrefix);
@@ -2870,9 +3075,10 @@ async function installOrUpdate(args, mode) {
   ensureSystemdUserAvailable();
   writeScopedNpmrc(paths, args.scope, args.registryUrl);
 
-  if (!resolveBunBinary(paths)) {
-    tryInstallBun(paths);
+  if (!inspectBunRuntime(paths, pinnedBunVersion).matches) {
+    tryInstallBun(paths, pinnedBunVersion);
   }
+  const bunBin = assertPinnedBunRuntime(paths, pinnedBunVersion);
 
   installManagedPackage(
     packageManager,
@@ -2881,6 +3087,8 @@ async function installOrUpdate(args, mode) {
     packageManager === "bun"
       ? ["--registry", PUBLIC_NPM_REGISTRY]
       : ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+    process.env,
+    { bunCommand: bunBin },
   );
 
   installManagedPackage(
@@ -2890,6 +3098,8 @@ async function installOrUpdate(args, mode) {
     packageManager === "bun"
       ? ["--registry", PUBLIC_NPM_REGISTRY]
       : ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+    process.env,
+    { bunCommand: bunBin },
   );
 
   const env = {
@@ -2906,6 +3116,7 @@ async function installOrUpdate(args, mode) {
       ? ["--registry", args.registryUrl]
       : ["-g", "--registry", args.registryUrl],
     env,
+    { bunCommand: bunBin },
   );
 
   const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
@@ -2927,10 +3138,6 @@ async function installOrUpdate(args, mode) {
   );
   const pathSetup = ensureLocalBinPath(paths);
 
-  const bunBin = resolveBunBinary(paths);
-  if (!bunBin) {
-    throw new Error("bun binary was not found after install.");
-  }
   const runtimeAssetsSource = prepareRuntimeAssetSources(
     agentMockingbirdAppDir,
   );
@@ -3414,7 +3621,7 @@ function printResult(result, asJson) {
     console.log(`registry: ${result.registryUrl}`);
     console.log(`target: ${result.target}`);
     console.log(
-      `precheck: npm=${result.precheck.npm ? "ok" : "missing"}, systemd-user=${result.precheck.systemdUser ? "ok" : "missing"}, bun=${result.precheck.bunPresent ? "present" : "will-install"}`,
+      `precheck: npm=${result.precheck.npm ? "ok" : "missing"}, systemd-user=${result.precheck.systemdUser ? "ok" : "missing"}, bun=${result.precheck.bunVersionMatch ? `bun@${result.precheck.bunExpectedVersion}` : result.precheck.bunPresent ? `bun@${result.precheck.bunActualVersion} -> install bun@${result.precheck.bunExpectedVersion}` : `missing -> install bun@${result.precheck.bunExpectedVersion}`}`,
     );
     console.log("planned actions:");
     for (const action of result.actions) {

@@ -202,6 +202,102 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
   });
 });
 
+describe("agent-mockingbird CLI Bun version pinning", () => {
+  test("prefers explicit Bun env version override", () => {
+    const version = testing.readPinnedBunVersion({
+      env: { AGENT_MOCKINGBIRD_BUN_VERSION: "1.3.99" },
+      argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+      moduleDir: "/tmp/fake-module",
+    });
+
+    expect(version).toBe("1.3.99");
+  });
+
+  test("resolves Bun version from OpenCode source-of-truth packageManager", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bun-pin-opencode-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const opencodePkg = path.join(appDir, "cleanroom", "opencode", "package.json");
+    fs.mkdirSync(path.dirname(opencodePkg), { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "package.json"),
+      JSON.stringify({ packageManager: "bun@1.2.0" }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      opencodePkg,
+      JSON.stringify({ packageManager: "bun@1.3.10" }),
+      "utf8",
+    );
+
+    try {
+      const version = testing.readPinnedBunVersion({
+        paths: {
+          agentMockingbirdAppDirGlobal: appDir,
+        },
+        env: {},
+        argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+        moduleDir: "/tmp/fake-module",
+      });
+
+      expect(version).toBe("1.3.10");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to app packageManager when OpenCode package metadata is unavailable", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bun-pin-root-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "package.json"),
+      JSON.stringify({ packageManager: "bun@1.3.10" }),
+      "utf8",
+    );
+
+    try {
+      const version = testing.readPinnedBunVersion({
+        paths: {
+          agentMockingbirdAppDirGlobal: appDir,
+        },
+        env: {},
+        argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+        moduleDir: "/tmp/fake-module",
+      });
+
+      expect(version).toBe("1.3.10");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects invalid packageManager values while resolving Bun version", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bun-pin-invalid-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "package.json"),
+      JSON.stringify({ packageManager: "npm@10.0.0" }),
+      "utf8",
+    );
+
+    try {
+      expect(() =>
+        testing.readPinnedBunVersion({
+          paths: {
+            agentMockingbirdAppDirGlobal: appDir,
+          },
+          env: {},
+          argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+          moduleDir: "/tmp/fake-module",
+        }))
+        .toThrow(/Expected packageManager to start with bun@/);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("agent-mockingbird CLI packaged executor runtime", () => {
   test("reports packaged executor version for embedded-patched runtime", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-version-"));
