@@ -113,6 +113,7 @@ async function main() {
   }
 
   if (args.rebuildOnly) {
+    ensureVendorClean(lock);
     ensureCleanroomClone(lock);
     ensureCleanroomAtCommit(lock, lock.upstream.commit);
     recreateVendorWorktree(lock, lock.upstream.commit);
@@ -373,7 +374,7 @@ function ensureVendorClean(lock: LockFile) {
     allowFailure: true,
   }).stdout.trim();
   if (status.length > 0) {
-    throw new Error(`${lock.paths.vendor} is dirty.`);
+    throw new Error(`Vendor worktree is dirty. Commit or discard changes first: ${lock.paths.vendor}`);
   }
 }
 
@@ -394,10 +395,7 @@ function removeWorktreeIfPresent(lock: LockFile, targetPath: string, options?: {
       removeArgs.push("--force");
     }
     removeArgs.push(targetPath);
-    git(lock, removeArgs, {
-      cwd: cleanroomPath,
-      allowFailure: true,
-    });
+    git(lock, removeArgs, { cwd: cleanroomPath });
     run(["git", "worktree", "prune"], { cwd: cleanroomPath, allowFailure: true });
     return;
   }
