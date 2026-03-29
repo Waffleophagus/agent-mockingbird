@@ -1,7 +1,7 @@
-From a8c5e7494994dfd5ba79be9777a67dd9ddb6257d Mon Sep 17 00:00:00 2001
-From: Matt Campbell <npm@d6software.com>
+From e7880590e730709c36749472d656788ebcec828e Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 16 Mar 2026 14:05:14 -0500
-Subject: [PATCH 01/11] Wafflebot OpenCode baseline
+Subject: [PATCH 01/14] Wafflebot OpenCode baseline
 
 ---
  packages/app/src/app.tsx                      |   7 +-

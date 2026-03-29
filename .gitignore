@@ -6,7 +6,9 @@ out
 dist/
 *.tgz
 cleanroom/opencode
+cleanroom/executor
 vendor/opencode
+vendor/executor
 data/*
 bin/*
 !bin/agent-mockingbird
@@ -46,3 +48,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 #local test data
 apps/server/data/*
+.executor/

@@ -4,12 +4,14 @@ import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { CronService } from "./backend/cron/service";
 import "./backend/db/migrate";
 import { ensureSeedData, getHeartbeatSnapshot, getUsageSnapshot } from "./backend/db/repository";
+import { proxyEmbeddedExternalRequest, proxyEmbeddedServiceRequest } from "./backend/embed/gateway";
 import { env } from "./backend/env";
 import { HeartbeatRuntimeService } from "./backend/heartbeat/runtimeService";
 import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
+import { ensureExecutorMcpServerConfigured } from "./backend/opencode/managedConfig";
 import { resolveAppDistDir } from "./backend/paths";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
@@ -49,6 +51,7 @@ function isOpenCodeServerPath(pathname: string) {
 ensureSeedData();
 ensureConfigFile();
 const configSnapshot = getConfigSnapshot();
+await ensureExecutorMcpServerConfigured(configSnapshot.config);
 const runtime = createRuntime();
 const cronService = new CronService(runtime);
 const heartbeatService = new HeartbeatRuntimeService();
@@ -84,14 +87,22 @@ async function proxyOpenCodeSidecar(req: Request) {
 }
 
 async function serveOpenCodeApp(req: Request) {
-  if (!appDistDir) {
-    return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
-  }
-
   const url = new URL(req.url);
   const pathname = decodeURIComponent(url.pathname);
+  const config = getConfigSnapshot().config;
+  const embeddedServiceResponse = await proxyEmbeddedServiceRequest(req, config);
+  if (embeddedServiceResponse) {
+    return embeddedServiceResponse;
+  }
+  const embeddedExternalResponse = await proxyEmbeddedExternalRequest(req, config);
+  if (embeddedExternalResponse) {
+    return embeddedExternalResponse;
+  }
   if (isOpenCodeServerPath(pathname)) {
     return proxyOpenCodeSidecar(req);
+  }
+  if (!appDistDir) {
+    return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
   }
 
   const relativePath = pathname.replace(/^\/+/, "") || "index.html";
@@ -168,6 +179,7 @@ console.log("[startup] agent-mockingbird runtime", {
   workspace: {
     pinnedDirectory: configSnapshot.config.workspace.pinnedDirectory,
   },
+  executor: runtimeInfo.executor,
   opencode: runtimeInfo.opencode,
   cron: {
     enabled: env.AGENT_MOCKINGBIRD_CRON_ENABLED,

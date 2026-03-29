@@ -1761,6 +1761,90 @@ describe("cron validation and retries", () => {
     expect(updatedJob?.threadSessionId).toBeTruthy();
   });
 
+  test("invalid conditional module result shape fails the instance without breaking later worker ticks", async () => {
+    const captured: string[] = [];
+    let spawnCount = 0;
+    const runtime = {
+      ...createRuntimeStub(async input => {
+        captured.push(input.content);
+        return {
+          sessionId: input.sessionId,
+          messages: [{ id: "assistant-1", role: "assistant", content: "done", at: new Date().toISOString() }],
+        };
+      }),
+      spawnBackgroundSession: async () => {
+        spawnCount += 1;
+        const cronThread = repository.createSession({ title: `Cron Thread ${spawnCount}` });
+        return {
+          runId: `bg-cron-${spawnCount}`,
+          parentSessionId: "main",
+          parentExternalSessionId: "ext-main",
+          childExternalSessionId: `ext-cron-${spawnCount}`,
+          childSessionId: cronThread.id,
+          status: "created",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+        };
+      },
+    };
+    const cronService = new CronService(runtime);
+
+    mkdirSync(path.join(testWorkspacePath, "cron"), { recursive: true });
+    writeFileSync(
+      path.join(testWorkspacePath, "cron", "invalid-shape.ts"),
+      [
+        "export default async function run() {",
+        "  return { shouldRunAgent: true };",
+        "}",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(testWorkspacePath, "cron", "valid-follow-up.ts"),
+      [
+        "export default async function run() {",
+        "  return {",
+        "    status: 'ok',",
+        "    summary: 'follow-up succeeded',",
+        "    invokeAgent: { shouldInvoke: true, prompt: 'follow-up prompt' },",
+        "  };",
+        "}",
+      ].join("\n"),
+    );
+
+    const invalidJob = await cronService.createJob({
+      name: "invalid-shape",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "conditional_agent",
+      conditionModulePath: "cron/invalid-shape.ts",
+    });
+    const validJob = await cronService.createJob({
+      name: "valid-follow-up",
+      scheduleKind: "every",
+      everyMs: 10_000,
+      runMode: "conditional_agent",
+      conditionModulePath: "cron/valid-follow-up.ts",
+    });
+
+    await cronService.runJobNow(invalidJob.id);
+    await expect((cronService as unknown as { workerTick: () => Promise<void> }).workerTick()).resolves.toBeUndefined();
+
+    const invalidInstances = await cronService.listInstances({ jobId: invalidJob.id, limit: 1 });
+    expect(invalidInstances[0]?.state).toBe("failed");
+    expect(invalidInstances[0]?.error).toMatchObject({
+      message: "conditional module result.status must be 'ok' or 'error'",
+    });
+
+    await cronService.runJobNow(validJob.id);
+    await expect((cronService as unknown as { workerTick: () => Promise<void> }).workerTick()).resolves.toBeUndefined();
+
+    const validInstances = await cronService.listInstances({ jobId: validJob.id, limit: 1 });
+    expect(validInstances[0]?.state).toBe("completed");
+    expect(validInstances[0]?.agentInvoked).toBe(true);
+    expect(captured).toContain("follow-up prompt");
+  });
+
   test("background module jobs get a durable cron thread and stay non-agent", async () => {
     const captured: string[] = [];
     let spawnCount = 0;

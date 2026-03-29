@@ -22,11 +22,18 @@ const DEFAULT_TAG = "latest";
 const PACKAGE_NAME = "agent-mockingbird";
 const DEFAULT_ROOT_DIR = path.join(os.homedir(), ".agent-mockingbird");
 const USER_UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
+const UNIT_EXECUTOR = "executor.service";
 const UNIT_OPENCODE = "opencode.service";
 const UNIT_AGENT_MOCKINGBIRD = "agent-mockingbird.service";
 const AGENT_MOCKINGBIRD_API_BASE_URL = "http://127.0.0.1:3001";
-const DEFAULT_ENABLED_SKILLS = ["config-editor", "config-auditor", "runtime-diagnose", "memory-ops"];
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_ENABLED_SKILLS = [
+  "config-editor",
+  "config-auditor",
+  "runtime-diagnose",
+  "memory-ops",
+];
+const MODULE_PATH = fileURLToPath(import.meta.url);
+const MODULE_DIR = path.dirname(MODULE_PATH);
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -186,6 +193,31 @@ function parseArgs(argv) {
   return args;
 }
 
+function readRootDirArg(argv = process.argv.slice(2)) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--root-dir" && argv[index + 1]) {
+      return path.resolve(argv[index + 1]);
+    }
+  }
+  return null;
+}
+
+function resolveManagedCliDelegationTarget({
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  const rootDir =
+    readRootDirArg(argv.slice(2)) ||
+    (env.AGENT_MOCKINGBIRD_ROOT_DIR || "").trim() ||
+    DEFAULT_ROOT_DIR;
+  const managedCliPath = resolveManagedCliPathForRoot(rootDir);
+  if (!fs.existsSync(managedCliPath)) {
+    return null;
+  }
+  return managedCliPath;
+}
+
 function normalizeRegistryUrl(url) {
   const trimmed = (url || "").trim();
   if (!trimmed) {
@@ -195,7 +227,9 @@ function normalizeRegistryUrl(url) {
 }
 
 function printHelp() {
-  console.log(`agent-mockingbird\n\nUsage:\n  agent-mockingbird <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: installed package version, otherwise ${DEFAULT_TAG})\n  --next                 Shortcut for --tag next\n  --latest               Shortcut for --tag latest\n  --version <version>    Exact agent-mockingbird version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`);
+  console.log(
+    `agent-mockingbird\n\nUsage:\n  agent-mockingbird <install|update|onboard|status|restart|start|stop|uninstall> [flags]\n\nFlags:\n  --registry-url <url>   Scoped npm registry (default: ${DEFAULT_REGISTRY_URL})\n  --scope <scope>        Package scope (default: ${DEFAULT_SCOPE})\n  --tag <tag>            Dist-tag when --version not set (default: installed package version, otherwise ${DEFAULT_TAG})\n  --next                 Shortcut for --tag next\n  --latest               Shortcut for --tag latest\n  --version <version>    Exact agent-mockingbird version\n  --root-dir <path>      Install root (default: ${DEFAULT_ROOT_DIR})\n  --yes, -y              Non-interactive\n  --json                 JSON output\n  --dry-run              Preview update actions without mutating (update only)\n  --skip-linger          Skip loginctl enable-linger\n  --purge-data           Uninstall: remove ${DEFAULT_ROOT_DIR}/data and workspace\n  --keep-data            Uninstall: keep data/workspace even when --yes\n  --help, -h             Show help`,
+  );
 }
 
 function colorEnabled() {
@@ -228,14 +262,11 @@ function errorText(text) {
 }
 
 function summarizeActionPlan(title, lines) {
-  return [
-    heading(title),
-    ...lines,
-  ];
+  return [heading(title), ...lines];
 }
 
 function sleep(ms) {
-  return new Promise(resolve => globalThis.setTimeout(resolve, ms));
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 function shell(command, args, options = {}) {
@@ -255,7 +286,9 @@ function shell(command, args, options = {}) {
 function must(command, args, options = {}) {
   const result = shell(command, args, options);
   if (result.code !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim()}`);
+    throw new Error(
+      `${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim()}`,
+    );
   }
   return result;
 }
@@ -263,6 +296,16 @@ function must(command, args, options = {}) {
 function commandExists(command) {
   const result = shell("bash", ["-lc", `command -v ${command}`]);
   return result.code === 0;
+}
+
+function resolvePackageManager() {
+  if (commandExists("npm")) {
+    return "npm";
+  }
+  if (commandExists("bun")) {
+    return "bun";
+  }
+  return null;
 }
 
 function ensureDir(dir) {
@@ -318,7 +361,10 @@ async function promptRuntimeAssetConflictDecision(conflict) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return "use-packaged";
   }
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   try {
     while (true) {
       const answer = (
@@ -341,18 +387,27 @@ async function promptRuntimeAssetConflictDecision(conflict) {
 }
 
 async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
-  const retries = typeof input.retries === "number" ? Math.max(1, input.retries) : 5;
-  const delayMs = typeof input.delayMs === "number" ? Math.max(100, input.delayMs) : 750;
+  const retries =
+    typeof input.retries === "number" ? Math.max(1, input.retries) : 5;
+  const delayMs =
+    typeof input.delayMs === "number" ? Math.max(100, input.delayMs) : 750;
 
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
-      const skillsResponse = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills`, { method: "GET" });
+      const skillsResponse = await fetch(
+        `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills`,
+        { method: "GET" },
+      );
       if (!skillsResponse.ok) {
-        throw new Error(`GET /api/config/skills failed (${skillsResponse.status})`);
+        throw new Error(
+          `GET /api/config/skills failed (${skillsResponse.status})`,
+        );
       }
       const payload = await skillsResponse.json();
       const currentSkills = Array.isArray(payload?.skills)
-        ? payload.skills.filter((value) => typeof value === "string" && value.trim().length > 0)
+        ? payload.skills.filter(
+            (value) => typeof value === "string" && value.trim().length > 0,
+          )
         : [];
       if (currentSkills.length > 0) {
         return {
@@ -363,17 +418,26 @@ async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
         };
       }
 
-      const catalogResponse = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills/catalog`, { method: "GET" });
+      const catalogResponse = await fetch(
+        `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills/catalog`,
+        { method: "GET" },
+      );
       if (!catalogResponse.ok) {
-        throw new Error(`GET /api/config/skills/catalog failed (${catalogResponse.status})`);
+        throw new Error(
+          `GET /api/config/skills/catalog failed (${catalogResponse.status})`,
+        );
       }
       const catalogPayload = await catalogResponse.json();
       const availableSkillIds = Array.isArray(catalogPayload?.skills)
         ? catalogPayload.skills
-            .map((skill) => (skill && typeof skill.id === "string" ? skill.id.trim() : ""))
+            .map((skill) =>
+              skill && typeof skill.id === "string" ? skill.id.trim() : "",
+            )
             .filter((value) => value.length > 0)
         : [];
-      const defaultsToEnable = DEFAULT_ENABLED_SKILLS.filter((id) => availableSkillIds.includes(id));
+      const defaultsToEnable = DEFAULT_ENABLED_SKILLS.filter((id) =>
+        availableSkillIds.includes(id),
+      );
       if (defaultsToEnable.length === 0) {
         return {
           attempted: true,
@@ -383,16 +447,20 @@ async function ensureDefaultRuntimeSkillsWhenEmpty(input = {}) {
         };
       }
 
-      const expectedHash = typeof payload?.hash === "string" ? payload.hash.trim() : "";
+      const expectedHash =
+        typeof payload?.hash === "string" ? payload.hash.trim() : "";
 
-      const updateResponse = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          skills: defaultsToEnable,
-          expectedHash: expectedHash || undefined,
-        }),
-      });
+      const updateResponse = await fetch(
+        `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/skills`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            skills: defaultsToEnable,
+            expectedHash: expectedHash || undefined,
+          }),
+        },
+      );
 
       const updatePayload = await updateResponse.json().catch(() => ({}));
       if (!updateResponse.ok) {
@@ -452,11 +520,42 @@ function resolveAgentMockingbirdAppDir(paths) {
     paths.agentMockingbirdAppDirLocal,
     paths.agentMockingbirdAppDirScopedGlobal,
     paths.agentMockingbirdAppDirScopedLocal,
+    paths.agentMockingbirdAppDirBunGlobal,
+    paths.agentMockingbirdAppDirScopedBunGlobal,
   ]);
 }
 
-function resolveAgentMockingbirdBin(paths) {
-  return firstExistingPath([paths.agentMockingbirdBinGlobal, paths.agentMockingbirdBinLocal]);
+function resolveInstalledPackageDir(paths, packageName) {
+  const npmGlobal = typeof paths.npmPrefix === "string"
+    ? path.join(paths.npmPrefix, "lib", "node_modules", packageName)
+    : null;
+  const npmLocal = typeof paths.npmPrefix === "string"
+    ? path.join(paths.npmPrefix, "node_modules", packageName)
+    : null;
+  const bunGlobal = typeof paths.bunInstallDir === "string"
+    ? path.join(paths.bunInstallDir, "install", "global", "node_modules", packageName)
+    : null;
+  return firstExistingPath([npmGlobal, npmLocal, bunGlobal]);
+}
+
+function resolveManagedCliPathForAppDir(agentMockingbirdAppDir) {
+  return firstExistingPath([
+    path.join(agentMockingbirdAppDir, "bin", "agent-mockingbird-managed"),
+    path.join(agentMockingbirdAppDir, "apps", "server", "src", "cli", "agent-mockingbird.mjs"),
+  ]);
+}
+
+function resolveManagedCliPathForRoot(rootDir, scope = DEFAULT_SCOPE) {
+  const paths = pathsFor({
+    rootDir,
+    scope,
+    userUnitDir: USER_UNIT_DIR,
+  });
+  const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
+  if (!agentMockingbirdAppDir) {
+    return null;
+  }
+  return resolveManagedCliPathForAppDir(agentMockingbirdAppDir);
 }
 
 function resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir) {
@@ -495,29 +594,266 @@ function resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir) {
 }
 
 function resolveOpencodeBin(paths) {
-  return firstExistingPath([paths.opencodeBinGlobal, paths.opencodeBinLocal]);
+  return firstExistingPath([
+    paths.opencodeBinGlobal,
+    paths.opencodeBinLocal,
+    paths.opencodeBinBunGlobal,
+  ]);
 }
 
-function resolveBunBinary(paths) {
+function resolveExecutorBin(paths) {
+  return firstExistingPath([
+    paths.executorBinGlobal,
+    paths.executorBinLocal,
+    paths.executorBinBunGlobal,
+  ]);
+}
+
+function resolveRequestedExecutorMode() {
+  const configured = process.env.AGENT_MOCKINGBIRD_EXECUTOR_MODE?.trim();
+  return configured === "upstream-fallback"
+    ? "upstream-fallback"
+    : "embedded-patched";
+}
+
+function resolvePackagedExecutorLayout(agentMockingbirdAppDir) {
+  const packagedExecutorDir = path.join(
+    agentMockingbirdAppDir,
+    "vendor",
+    "executor",
+  );
+  const packagedExecutorEntrypoint = path.join(
+    packagedExecutorDir,
+    "apps",
+    "executor",
+    "src",
+    "cli",
+    "main.ts",
+  );
+  const packagedExecutorNodeModules = path.join(
+    packagedExecutorDir,
+    "node_modules",
+  );
+  const packagedExecutorWebDir = path.join(
+    packagedExecutorDir,
+    "apps",
+    "web",
+  );
+  const packagedExecutorWebAssetsDir = path.join(
+    packagedExecutorWebDir,
+    "dist",
+  );
+
+  return {
+    packagedExecutorDir,
+    packagedExecutorEntrypoint,
+    packagedExecutorNodeModules,
+    packagedExecutorWebDir,
+    packagedExecutorWebAssetsDir,
+    packagedExecutorWebIndex: path.join(
+      packagedExecutorWebAssetsDir,
+      "index.html",
+    ),
+  };
+}
+
+function resolvePackagedExecutorWebAssetsDir(agentMockingbirdAppDir) {
+  const layout = resolvePackagedExecutorLayout(agentMockingbirdAppDir);
+  return fs.existsSync(layout.packagedExecutorWebIndex)
+    ? layout.packagedExecutorWebAssetsDir
+    : null;
+}
+
+function resolveExecutorRuntimeCommand(
+  agentMockingbirdAppDir,
+  paths,
+  bunBin,
+  requestedMode = resolveRequestedExecutorMode(),
+) {
+  if (requestedMode === "upstream-fallback") {
+    const executorBin = resolveExecutorBin(paths);
+    if (!executorBin) {
+      return null;
+    }
+    return {
+      execStart: `${shellEscapeSystemdArg(executorBin)} server start --port 8788`,
+      mode: "upstream-fallback",
+      webAssetsDir: null,
+    };
+  }
+
+  const {
+    packagedExecutorEntrypoint,
+    packagedExecutorNodeModules,
+    packagedExecutorWebAssetsDir,
+    packagedExecutorWebIndex,
+  } = resolvePackagedExecutorLayout(agentMockingbirdAppDir);
+  if (
+    fs.existsSync(packagedExecutorEntrypoint) &&
+    fs.existsSync(packagedExecutorNodeModules)
+  ) {
+    if (!fs.existsSync(packagedExecutorWebIndex)) {
+      throw new Error(
+        `embedded executor web assets missing: expected ${packagedExecutorWebIndex}. Install/update must build the vendored Executor web bundle before starting embedded mode.`,
+      );
+    }
+    if (!bunBin) {
+      throw new Error(
+        "bun binary was not found for packaged vendored executor runtime.",
+      );
+    }
+    return {
+      execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(packagedExecutorEntrypoint)} server start --port 8788`,
+      mode: "embedded-patched",
+      webAssetsDir: packagedExecutorWebAssetsDir,
+    };
+  }
+
+  throw new Error(
+    `embedded executor runtime missing: expected packaged vendored executor at ${packagedExecutorEntrypoint}. Set AGENT_MOCKINGBIRD_EXECUTOR_MODE=upstream-fallback only for explicit fallback mode.`,
+  );
+}
+
+function ensurePackagedExecutorRuntime(agentMockingbirdAppDir, bunBin) {
+  const layout = resolvePackagedExecutorLayout(agentMockingbirdAppDir);
+  if (!fs.existsSync(layout.packagedExecutorEntrypoint)) {
+    return null;
+  }
+
+  if (!fs.existsSync(layout.packagedExecutorNodeModules)) {
+    const installArgs = ["install"];
+    if (fs.existsSync(path.join(layout.packagedExecutorDir, "bun.lock"))) {
+      installArgs.push("--frozen-lockfile");
+    }
+    must(bunBin, installArgs, {
+      cwd: layout.packagedExecutorDir,
+      env: {
+        ...process.env,
+        GITHUB_SERVER_URL: "https://github.com",
+        GITHUB_API_URL: "https://api.github.com",
+      },
+    });
+  }
+
+  must(bunBin, ["x", "vite", "build", "--config", "vite.config.ts"], {
+    cwd: layout.packagedExecutorWebDir,
+    env: {
+      ...process.env,
+      EXECUTOR_WEB_BASE_PATH: "/executor",
+      EXECUTOR_SERVER_BASE_PATH: "/executor",
+      GITHUB_SERVER_URL: "https://github.com",
+      GITHUB_API_URL: "https://api.github.com",
+    },
+  });
+
+  const packagedExecutorWebAssetsDir = resolvePackagedExecutorWebAssetsDir(
+    agentMockingbirdAppDir,
+  );
+  if (!packagedExecutorWebAssetsDir) {
+    throw new Error(
+      `embedded executor web asset build did not produce ${layout.packagedExecutorWebIndex}`,
+    );
+  }
+
+  return packagedExecutorWebAssetsDir;
+}
+
+function candidateBunBinaryPaths(paths) {
+  const candidates = [];
+  const seen = new Set();
+  const add = (value) => {
+    if (!value) return;
+    const resolved = path.resolve(value);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    candidates.push(resolved);
+  };
+
   if (commandExists("bun")) {
     const out = shell("bash", ["-lc", "command -v bun"]);
-    return out.stdout.trim();
+    add(out.stdout.trim());
   }
-  return firstExistingPath([paths.bunBinManagedGlobal, paths.bunBinManagedLocal, paths.bunBinTools]);
+
+  add(paths.bunBinManagedGlobal);
+  add(paths.bunBinManagedLocal);
+  add(paths.bunBinTools);
+  return candidates;
 }
 
-function tryInstallBun(paths) {
+function readBunVersion(bunBin) {
+  if (!bunBin || !fs.existsSync(bunBin)) {
+    return null;
+  }
+  const result = shell(bunBin, ["--version"]);
+  if (result.code !== 0) {
+    return null;
+  }
+  const version = result.stdout.trim();
+  return version || null;
+}
+
+function resolveBunBinary(paths, expectedVersion) {
+  const candidates = candidateBunBinaryPaths(paths);
+  if (!expectedVersion) {
+    return candidates[0] ?? null;
+  }
+
+  let fallback = null;
+  for (const candidate of candidates) {
+    fallback ||= candidate;
+    if (readBunVersion(candidate) === expectedVersion) {
+      return candidate;
+    }
+  }
+  return fallback;
+}
+
+function inspectBunRuntime(paths, expectedVersion) {
+  const bunBin = resolveBunBinary(paths, expectedVersion);
+  const actualVersion = readBunVersion(bunBin);
+  return {
+    bunBin,
+    actualVersion,
+    expectedVersion,
+    present: Boolean(bunBin && actualVersion),
+    matches: actualVersion === expectedVersion,
+  };
+}
+
+function assertPinnedBunRuntime(paths, expectedVersion) {
+  const runtime = inspectBunRuntime(paths, expectedVersion);
+  if (runtime.matches && runtime.bunBin) {
+    return runtime.bunBin;
+  }
+
+  const actualLabel = runtime.actualVersion
+    ? `bun@${runtime.actualVersion} at ${runtime.bunBin}`
+    : runtime.bunBin
+      ? `unreadable bun binary at ${runtime.bunBin}`
+      : "bun not found";
+  throw new Error(
+    `Pinned Bun runtime mismatch: expected bun@${expectedVersion}, found ${actualLabel}. Set AGENT_MOCKINGBIRD_BUN_VERSION only for an explicit override.`,
+  );
+}
+
+function tryInstallBun(paths, bunVersion) {
   try {
-    npmInstall(paths.npmPrefix, ["bun@latest"], ["-g", "--registry", PUBLIC_NPM_REGISTRY]);
+    npmInstall(
+      paths.npmPrefix,
+      [`bun@${bunVersion}`],
+      ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+    );
   } catch {
     // Fallback below.
   }
-  if (resolveBunBinary(paths)) {
+  if (inspectBunRuntime(paths, bunVersion).matches) {
     return;
   }
 
   if (!commandExists("curl")) {
-    throw new Error("bun is not installed and curl is unavailable for bun.com fallback install.");
+    throw new Error(
+      `bun@${bunVersion} is required and curl is unavailable for bun.com fallback install.`,
+    );
   }
 
   ensureDir(path.join(paths.rootDir, "tools"));
@@ -529,8 +865,10 @@ function tryInstallBun(paths) {
     ],
     { stdio: "inherit" },
   );
-  if (fallback.code !== 0 || !resolveBunBinary(paths)) {
-    throw new Error("Failed to install bun via npm and bun.com install script fallback.");
+  if (fallback.code !== 0 || !inspectBunRuntime(paths, bunVersion).matches) {
+    throw new Error(
+      `Failed to install pinned bun@${bunVersion} via npm and bun.com install script fallback.`,
+    );
   }
 }
 
@@ -543,8 +881,54 @@ function writeScopedNpmrc(paths, scope, registryUrl) {
 }
 
 function npmInstall(prefix, packages, extraArgs = [], env = process.env) {
-  const args = ["install", "--no-audit", "--no-fund", "--prefix", prefix, ...extraArgs, ...packages];
+  const args = [
+    "install",
+    "--no-audit",
+    "--no-fund",
+    "--prefix",
+    prefix,
+    ...extraArgs,
+    ...packages,
+  ];
   must("npm", args, { stdio: "inherit", env });
+}
+
+function bunInstall(
+  installDir,
+  packages,
+  extraArgs = [],
+  env = process.env,
+  bunCommand = "bun",
+) {
+  const args = ["install", "--global", ...extraArgs, ...packages];
+  must(bunCommand, args, {
+    stdio: "inherit",
+    env: {
+      ...env,
+      BUN_INSTALL: installDir,
+    },
+  });
+}
+
+function installManagedPackage(
+  packageManager,
+  paths,
+  packages,
+  extraArgs = [],
+  env = process.env,
+  options = {},
+) {
+  if (packageManager === "bun") {
+    bunInstall(
+      paths.bunInstallDir,
+      packages,
+      extraArgs,
+      env,
+      options.bunCommand,
+    );
+    return;
+  }
+  npmInstall(paths.npmPrefix, packages, extraArgs, env);
 }
 
 function ensurePathExportInFile(filePath, exportLine) {
@@ -565,7 +949,9 @@ function ensureLocalBinPath(paths) {
   }
 
   const exportLine = `export PATH="${paths.localBinDir}:$PATH"`;
-  const rcFiles = [".bashrc", ".zshrc", ".profile"].map(name => path.join(os.homedir(), name));
+  const rcFiles = [".bashrc", ".zshrc", ".profile"].map((name) =>
+    path.join(os.homedir(), name),
+  );
   const updatedFiles = [];
   for (const rc of rcFiles) {
     if (fs.existsSync(rc) && ensurePathExportInFile(rc, exportLine)) {
@@ -583,13 +969,50 @@ function ensureLocalBinPath(paths) {
   return { inPath: false, updatedFiles };
 }
 
-function writeAgentMockingbirdShim(paths, agentMockingbirdBin, opencodePackageVersion) {
+function resolveCurrentAgentMockingbirdCommandPath() {
+  const resolvedCommand = shell("bash", ["-lc", "command -v agent-mockingbird"]);
+  if (resolvedCommand.code !== 0) {
+    return "";
+  }
+  return resolvedCommand.stdout.trim();
+}
+
+function collectCommandResolution({ rootDir, scope }) {
+  const managedCliPath = resolveManagedCliPathForRoot(rootDir, scope);
+  const commandPath = resolveCurrentAgentMockingbirdCommandPath();
+  const normalizedCommandPath = commandPath ? path.resolve(commandPath) : "";
+  const normalizedManagedCliPath = managedCliPath ? path.resolve(managedCliPath) : "";
+  let mode = "unresolved";
+  if (normalizedCommandPath && normalizedManagedCliPath) {
+    mode =
+      normalizedCommandPath === normalizedManagedCliPath
+        ? "managed-direct"
+        : "bootstrap-wrapper";
+  } else if (normalizedManagedCliPath) {
+    mode = "managed-only";
+  } else if (normalizedCommandPath) {
+    mode = "bootstrap-only";
+  }
+
+  return {
+    rootDir,
+    managedCliPath: managedCliPath ?? "",
+    commandPath,
+    mode,
+  };
+}
+
+function writeAgentMockingbirdShim(
+  paths,
+  managedCliPath,
+  opencodePackageVersion,
+) {
   ensureDir(paths.localBinDir);
   const shim = `#!/usr/bin/env bash
 set -euo pipefail
 # managed-by: agent-mockingbird-installer
 export AGENT_MOCKINGBIRD_OPENCODE_VERSION=${JSON.stringify(opencodePackageVersion)}
-exec "${agentMockingbirdBin}" "$@"
+exec "${managedCliPath}" "$@"
 `;
   writeFile(paths.agentMockingbirdShimPath, shim);
   fs.chmodSync(paths.agentMockingbirdShimPath, 0o755);
@@ -639,23 +1062,36 @@ function shellEscapeSystemdArg(value) {
 }
 
 function hasCompiledDashboardAssets(agentMockingbirdAppDir) {
-  return fs.existsSync(path.join(agentMockingbirdAppDir, "dist", "app", "index.html"));
+  return fs.existsSync(
+    path.join(agentMockingbirdAppDir, "dist", "app", "index.html"),
+  );
 }
 
 function hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) {
-  return fs.existsSync(path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird"));
+  return fs.existsSync(
+    path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird"),
+  );
 }
 
 function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
-  const compiledBinary = path.join(agentMockingbirdAppDir, "dist", "agent-mockingbird");
-  if (hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) && hasCompiledDashboardAssets(agentMockingbirdAppDir)) {
+  const compiledBinary = path.join(
+    agentMockingbirdAppDir,
+    "dist",
+    "agent-mockingbird",
+  );
+  if (
+    hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) &&
+    hasCompiledDashboardAssets(agentMockingbirdAppDir)
+  ) {
     return {
       execStart: compiledBinary,
       mode: "compiled",
     };
   }
 
-  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(agentMockingbirdAppDir);
+  const entrypoint = resolveAgentMockingbirdServiceEntrypoint(
+    agentMockingbirdAppDir,
+  );
   if (entrypoint && bunBin) {
     return {
       execStart: `${shellEscapeSystemdArg(bunBin)} ${shellEscapeSystemdArg(entrypoint)}`,
@@ -666,18 +1102,32 @@ function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   return null;
 }
 
-function unitContents(paths, opencodeBin, agentMockingbirdExecStart, runtimeMode) {
+function unitContents(
+  paths,
+  executorExecStart,
+  executorMode,
+  executorWebAssetsDir,
+  opencodeBin,
+  agentMockingbirdExecStart,
+  runtimeMode,
+) {
+  const executorWebAssetsEnvLine = executorWebAssetsDir
+    ? `Environment=EXECUTOR_WEB_ASSETS_DIR=${executorWebAssetsDir}\n`
+    : "";
+  const executor = `[Unit]\nDescription=Executor Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.executorWorkspaceDir}\nEnvironment=EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=EXECUTOR_LOCAL_DATA_DIR=${paths.executorLocalDataDir}\nEnvironment=EXECUTOR_SERVER_PID_FILE=${path.join(paths.executorRunDir, "server.pid")}\nEnvironment=EXECUTOR_SERVER_LOG_FILE=${path.join(paths.executorRunDir, "server.log")}\nEnvironment=EXECUTOR_SERVER_BASE_PATH=/executor\n${executorWebAssetsEnvLine}ExecStart=${executorExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
   const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_OPENCODE}\nWants=network.target ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\nWants=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=${paths.executorWorkspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_MODE=${executorMode}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH=/executor\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  return { opencode, agentMockingbird };
+  return { executor, opencode, agentMockingbird };
 }
 
 function ensureSystemdUserAvailable() {
   const result = shell("systemctl", ["--user", "status"]);
   if (result.code !== 0) {
-    throw new Error("systemd user services are unavailable (`systemctl --user status` failed)");
+    throw new Error(
+      "systemd user services are unavailable (`systemctl --user status` failed)",
+    );
   }
 }
 
@@ -688,7 +1138,11 @@ function ensureLinger(skipLinger) {
   const user = userName();
   const status = shell("loginctl", ["show-user", user, "-p", "Linger"]);
   if (status.code !== 0) {
-    return { changed: false, skipped: true, warning: "Could not read linger status via loginctl." };
+    return {
+      changed: false,
+      skipped: true,
+      warning: "Could not read linger status via loginctl.",
+    };
   }
   if (status.stdout.toLowerCase().includes("linger=yes")) {
     return { changed: false, skipped: false };
@@ -699,7 +1153,9 @@ function ensureLinger(skipLinger) {
     return { changed: true, skipped: false };
   }
 
-  const sudo = shell("sudo", ["loginctl", "enable-linger", user], { stdio: "inherit" });
+  const sudo = shell("sudo", ["loginctl", "enable-linger", user], {
+    stdio: "inherit",
+  });
   if (sudo.code === 0) {
     return { changed: true, skipped: false };
   }
@@ -721,8 +1177,12 @@ async function healthCheck(url) {
 }
 
 async function healthCheckWithRetry(url, input = {}) {
-  const attempts = Number.isFinite(input.attempts) ? Math.max(1, Math.trunc(input.attempts)) : 6;
-  const delayMs = Number.isFinite(input.delayMs) ? Math.max(50, Math.trunc(input.delayMs)) : 500;
+  const attempts = Number.isFinite(input.attempts)
+    ? Math.max(1, Math.trunc(input.attempts))
+    : 6;
+  const delayMs = Number.isFinite(input.delayMs)
+    ? Math.max(50, Math.trunc(input.delayMs))
+    : 500;
   let last = { ok: false, status: 0 };
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     last = await healthCheck(url);
@@ -736,12 +1196,22 @@ async function healthCheckWithRetry(url, input = {}) {
   return last;
 }
 
-async function verifyFrontendAssets(baseUrl) {
+async function verifyEmbeddedExecutorGateway(baseUrl, fetchImpl = fetch) {
   try {
-    const htmlResponse = await fetch(baseUrl, { method: "GET" });
+    const htmlResponse = await fetchImpl(baseUrl, { method: "GET" });
     const html = await htmlResponse.text();
-    const stylesheetMatch = html.match(/<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/i);
-    const scriptMatch = html.match(/<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i);
+    const stylesheetMatches = [
+      ...html.matchAll(
+        /<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["']/gi,
+      ),
+    ];
+    const stylesheetHref =
+      stylesheetMatches
+        .map((match) => match[1])
+        .find((href) => href.startsWith("/executor/assets/")) ?? "";
+    const scriptMatch = html.match(
+      /<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i,
+    );
     if (!htmlResponse.ok) {
       return {
         ok: false,
@@ -757,25 +1227,10 @@ async function verifyFrontendAssets(baseUrl) {
         error: `dashboard page returned ${htmlResponse.status}`,
       };
     }
-    if (!stylesheetMatch) {
-      return {
-        ok: false,
-        pageOk: true,
-        cssOk: false,
-        scriptOk: false,
-        pageStatus: htmlResponse.status,
-        cssStatus: 0,
-        scriptStatus: 0,
-        cssUrl: "",
-        scriptUrl: "",
-        referencedFontCount: 0,
-        error: "dashboard HTML did not include a stylesheet link",
-      };
-    }
     if (!scriptMatch) {
       return {
         ok: false,
-        pageOk: true,
+        pageOk: htmlResponse.ok,
         cssOk: false,
         scriptOk: false,
         pageStatus: htmlResponse.status,
@@ -788,43 +1243,53 @@ async function verifyFrontendAssets(baseUrl) {
       };
     }
 
-    const cssUrl = new globalThis.URL(stylesheetMatch[1], baseUrl).toString();
+    const cssUrl = stylesheetHref
+      ? new globalThis.URL(stylesheetHref, baseUrl).toString()
+      : "";
     const scriptUrl = new globalThis.URL(scriptMatch[1], baseUrl).toString();
-    const cssResponse = await fetch(cssUrl, { method: "GET" });
-    const cssText = await cssResponse.text();
-    const scriptResponse = await fetch(scriptUrl, { method: "GET" });
-    const referencedFontUrls = [
-      ...cssText.matchAll(/url\((['"]?)([^'")]*\.woff2)\1\)/gi),
-    ].map(match => new globalThis.URL(match[2], cssUrl).toString());
+    const scriptResponse = await fetchImpl(scriptUrl, { method: "GET" });
+    let cssResponse = { ok: true, status: 200 };
+    let referencedFontUrls = [];
+    if (cssUrl) {
+      const response = await fetchImpl(cssUrl, { method: "GET" });
+      const cssText = await response.text();
+      cssResponse = response;
+      referencedFontUrls = [
+        ...cssText.matchAll(/url\((['"]?)([^'")]*\.woff2)\1\)/gi),
+      ].map((match) => new globalThis.URL(match[2], cssUrl).toString());
+    }
+    const cssRequired = Boolean(cssUrl);
+    const cssOk = !cssRequired || (cssResponse.ok && cssUrl.includes("/executor/assets/"));
     return {
       ok:
         htmlResponse.ok &&
-        cssResponse.ok &&
         scriptResponse.ok &&
-        cssUrl.includes("/assets/") &&
-        scriptUrl.includes("/assets/") &&
-        referencedFontUrls.length > 0,
+        cssOk &&
+        scriptUrl.includes("/executor/assets/") &&
+        !html.includes('"/assets/') &&
+        !html.includes("'/assets/"),
       pageOk: htmlResponse.ok,
-      cssOk: cssResponse.ok && cssUrl.includes("/assets/"),
-      scriptOk: scriptResponse.ok && scriptUrl.includes("/assets/"),
+      cssOk,
+      scriptOk: scriptResponse.ok && scriptUrl.includes("/executor/assets/"),
       pageStatus: htmlResponse.status,
-      cssStatus: cssResponse.status,
+      cssStatus: cssRequired ? cssResponse.status : 0,
       scriptStatus: scriptResponse.status,
       cssUrl,
       scriptUrl,
       referencedFontCount: referencedFontUrls.length,
-      error:
-        !cssResponse.ok
-          ? `stylesheet returned ${cssResponse.status}`
-          : !scriptResponse.ok
-            ? `module script returned ${scriptResponse.status}`
-            : !cssUrl.includes("/assets/")
-              ? "stylesheet is not served from /assets/"
-              : !scriptUrl.includes("/assets/")
-                ? "module script is not served from /assets/"
-                : referencedFontUrls.length === 0
-                  ? "stylesheet did not reference any .woff2 assets"
-                  : "",
+      rootAssetLeakage:
+        html.includes('"/assets/') || html.includes("'/assets/"),
+      error: !cssResponse.ok
+        ? `stylesheet returned ${cssResponse.status}`
+        : !scriptResponse.ok
+          ? `module script returned ${scriptResponse.status}`
+          : cssRequired && !cssUrl.includes("/executor/assets/")
+            ? "stylesheet is not served from /executor/assets/"
+          : !scriptUrl.includes("/executor/assets/")
+              ? "module script is not served from /executor/assets/"
+            : html.includes('"/assets/') || html.includes("'/assets/")
+                ? "executor HTML still references root /assets/"
+                : "",
     };
   } catch (error) {
     return {
@@ -838,41 +1303,77 @@ async function verifyFrontendAssets(baseUrl) {
       cssUrl: "",
       scriptUrl: "",
       referencedFontCount: 0,
+      rootAssetLeakage: false,
       error: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
-async function verifyFrontendAssetsWithRetry(baseUrl, input = {}) {
-  const attempts = typeof input.attempts === "number" ? Math.max(1, Math.trunc(input.attempts)) : 10;
-  const delayMs = typeof input.delayMs === "number" ? Math.max(100, Math.trunc(input.delayMs)) : 750;
-  let last = await verifyFrontendAssets(baseUrl);
+async function verifyEmbeddedExecutorGatewayWithRetry(baseUrl, input = {}) {
+  const attempts =
+    typeof input.attempts === "number"
+      ? Math.max(1, Math.trunc(input.attempts))
+      : 10;
+  const delayMs =
+    typeof input.delayMs === "number"
+      ? Math.max(100, Math.trunc(input.delayMs))
+      : 750;
+  let last = await verifyEmbeddedExecutorGateway(baseUrl);
   for (let attempt = 1; attempt < attempts; attempt += 1) {
     if (last.ok) {
       return last;
     }
     await sleep(delayMs);
-    last = await verifyFrontendAssets(baseUrl);
+    last = await verifyEmbeddedExecutorGateway(baseUrl);
   }
   return last;
 }
 
 async function runPostInstallVerification() {
-  const agentMockingbirdStatus = shell("systemctl", ["--user", "status", UNIT_AGENT_MOCKINGBIRD, "--no-pager"]);
-  const opencodeStatus = shell("systemctl", ["--user", "status", UNIT_OPENCODE, "--no-pager"]);
+  const agentMockingbirdStatus = shell("systemctl", [
+    "--user",
+    "status",
+    UNIT_AGENT_MOCKINGBIRD,
+    "--no-pager",
+  ]);
+  const executorStatus = shell("systemctl", [
+    "--user",
+    "status",
+    UNIT_EXECUTOR,
+    "--no-pager",
+  ]);
+  const opencodeStatus = shell("systemctl", [
+    "--user",
+    "status",
+    UNIT_OPENCODE,
+    "--no-pager",
+  ]);
   const linger = shell("loginctl", ["show-user", userName(), "-p", "Linger"]);
-  const frontendAssets = await verifyFrontendAssetsWithRetry("http://127.0.0.1:3001/", {
-    attempts: 10,
-    delayMs: 750,
-  });
+  const embeddedExecutor = await verifyEmbeddedExecutorGatewayWithRetry(
+    "http://127.0.0.1:3001/executor",
+    {
+      attempts: 10,
+      delayMs: 750,
+    },
+  );
+  const externalProxy = await healthCheck(
+    "http://127.0.0.1:3001/api/embed/external/executor/npm-registry/-/package/executor/dist-tags",
+  );
   return {
     agentMockingbirdServiceOk: agentMockingbirdStatus.code === 0,
+    executorServiceOk: executorStatus.code === 0,
     opencodeServiceOk: opencodeStatus.code === 0,
-    lingerOk: linger.code === 0 && linger.stdout.toLowerCase().includes("linger=yes"),
-    frontendAssetsOk: frontendAssets.ok,
-    frontendAssets,
+    lingerOk:
+      linger.code === 0 && linger.stdout.toLowerCase().includes("linger=yes"),
+    embeddedExecutorOk: embeddedExecutor.ok,
+    embeddedExecutor,
+    externalProxyOk: externalProxy.ok,
+    externalProxy,
     commandOutput: {
-      agentMockingbirdStatus: (agentMockingbirdStatus.stdout || agentMockingbirdStatus.stderr).trim(),
+      agentMockingbirdStatus: (
+        agentMockingbirdStatus.stdout || agentMockingbirdStatus.stderr
+      ).trim(),
+      executorStatus: (executorStatus.stdout || executorStatus.stderr).trim(),
       opencodeStatus: (opencodeStatus.stdout || opencodeStatus.stderr).trim(),
       linger: (linger.stdout || linger.stderr).trim(),
     },
@@ -885,13 +1386,18 @@ function checkSystemdUserStatus() {
 }
 
 function interactivePrompt(message) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   return rl.question(message).finally(() => rl.close());
 }
 
 async function promptYesNo(message, defaultValue = false) {
   const suffix = defaultValue ? "[Y/n]" : "[y/N]";
-  const answer = (await interactivePrompt(`${message} ${suffix} `)).trim().toLowerCase();
+  const answer = (await interactivePrompt(`${message} ${suffix} `))
+    .trim()
+    .toLowerCase();
   if (!answer) return defaultValue;
   return answer === "y" || answer === "yes";
 }
@@ -923,14 +1429,20 @@ async function promptSelect(message, options, defaultIndex = 0) {
 function buildInstallSummary({ args, paths }) {
   const target = args.version ?? `tag:${args.tag}`;
   const opencodePackageVersion = readOpenCodePackageVersion();
-  const hasBun = Boolean(resolveBunBinary(paths));
+  const pinnedBunVersion = readPinnedBunVersion({ paths });
+  const bunRuntime = inspectBunRuntime(paths, pinnedBunVersion);
   const hasSystemdUser = checkSystemdUserStatus();
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
+  const bunPlan = bunRuntime.matches
+    ? `   - bun: ${success(`found bun@${pinnedBunVersion} at ${bunRuntime.bunBin}`)}`
+    : bunRuntime.present
+      ? `   - bun: ${warn(`found bun@${bunRuntime.actualVersion} at ${bunRuntime.bunBin}; will install pinned bun@${pinnedBunVersion}${hasCurl ? " with bun.com/install fallback" : ""}`)}`
+      : `   - bun: ${warn(`not found, will install pinned bun@${pinnedBunVersion}${hasCurl ? " with bun.com/install fallback" : ""}`)}`;
   return summarizeActionPlan("Install plan", [
     `- Target package: ${PACKAGE_NAME} (${target})`,
     `- Private registry scope: @${args.scope.replace(/^@/, "")} -> ${args.registryUrl}`,
-    `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, opencode-ai)`,
+    `- Public registry fallback: ${PUBLIC_NPM_REGISTRY} (for non-scope deps, bun, executor, opencode-ai)`,
     `- Install root: ${paths.rootDir}`,
     "",
     "What will happen:",
@@ -938,46 +1450,55 @@ function buildInstallSummary({ args, paths }) {
     `   - npm: ${commandExists("npm") ? success("found") : errorText("missing")}`,
     `   - systemctl --user: ${hasSystemdUser ? success("available") : errorText("unavailable")}`,
     "2. Ensure Bun runtime for service command.",
-    hasBun
-      ? `   - bun: ${success(`found at ${resolveBunBinary(paths)}`)}`
-      : `   - bun: ${warn(`not found, will install (npm bun@latest${hasCurl ? " with bun.com/install fallback" : ""})`)}`,
-    `3. Install/refresh OpenCode CLI dependency (\`opencode-ai@${opencodePackageVersion}\`) from npmjs.`,
-    `4. Install Agent Mockingbird package (${PACKAGE_NAME}) from npm.`,
-    "5. Create/refresh runtime directories under the install root.",
-    `6. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
-    `7. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
-    `8. Write user services: ${paths.opencodeUnitPath} and ${paths.agentMockingbirdUnitPath}.`,
-    "9. Reload systemd user daemon and enable/start both services.",
+    bunPlan,
+    `3. Install/refresh executor sidecar dependency (\`executor@${readExecutorPackageVersion()}\`) from npmjs.`,
+    `4. Install/refresh OpenCode CLI dependency (\`opencode-ai@${opencodePackageVersion}\`) from npmjs.`,
+    `5. Install Agent Mockingbird package (${PACKAGE_NAME}) from npm.`,
+    "6. Create/refresh runtime directories under the install root.",
+    `7. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
+    `8. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
+    "9. Build the packaged Executor embedded web bundle for /executor.",
+    `10. Write user services: ${paths.executorUnitPath}, ${paths.opencodeUnitPath}, and ${paths.agentMockingbirdUnitPath}.`,
+    "11. Reload systemd user daemon and enable/start all three services.",
     args.skipLinger
-      ? "10. Skip linger configuration (--skip-linger set)."
-      : `10. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
-    "11. Run health checks, and initialize default enabled skills if config has none.",
+      ? "12. Skip linger configuration (--skip-linger set)."
+      : `12. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "13. Run health checks, and initialize default enabled skills if config has none.",
     "",
-    info("After install (interactive only), a provider onboarding wizard can launch OpenCode auth and set a default model."),
+    info(
+      "After install (interactive only), a provider onboarding wizard can launch OpenCode auth and set a default model.",
+    ),
   ]);
 }
 
 function buildUpdateSummary({ args, paths }) {
   const target = args.version ?? `tag:${args.tag}`;
-  const hasBun = Boolean(resolveBunBinary(paths));
+  const pinnedBunVersion = readPinnedBunVersion({ paths });
+  const bunRuntime = inspectBunRuntime(paths, pinnedBunVersion);
   const hasSystemdUser = checkSystemdUserStatus();
   const hasLoginctl = commandExists("loginctl");
   const hasCurl = commandExists("curl");
+  const bunStatus = bunRuntime.matches
+    ? success(`already present as bun@${pinnedBunVersion}`)
+    : bunRuntime.present
+      ? warn(`found bun@${bunRuntime.actualVersion}; will install pinned bun@${pinnedBunVersion}${hasCurl ? " with curl fallback" : ""}`)
+      : warn(`will install pinned bun@${pinnedBunVersion}${hasCurl ? " with curl fallback" : ""}`);
   return summarizeActionPlan("Update plan", [
     `- Update target: ${PACKAGE_NAME} (${target})`,
     `- Install root: ${paths.rootDir}`,
     "",
     "What this update does:",
-    "1. Refresh Agent Mockingbird package + OpenCode CLI dependency.",
-    `2. Ensure Bun runtime is available${hasBun ? ` (${success("already present")})` : ` (${warn(`will install${hasCurl ? " with curl fallback" : ""}`)})`}.`,
+    "1. Refresh Agent Mockingbird package + executor + OpenCode sidecar dependencies.",
+    `2. Ensure pinned Bun runtime is available (${bunStatus}).`,
     "3. Re-seed workspace skills from bundled package.",
-    "4. Re-write CLI shim + systemd user units to current paths/entrypoint.",
+    "4. Rebuild the packaged Executor embedded web bundle for /executor.",
+    "5. Re-write CLI shim + systemd user units to current paths/entrypoint.",
     "   - Includes agent-mockingbird + opencode shims in ~/.local/bin",
-    "5. Reload daemon, enable/start services, then force restart both units.",
+    "6. Reload daemon, enable/start services, then force restart all sidecars.",
     args.skipLinger
-      ? "6. Skip linger configuration (--skip-linger set)."
-      : `6. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
-    "7. Run health + service verification, and initialize default enabled skills if config has none.",
+      ? "7. Skip linger configuration (--skip-linger set)."
+      : `7. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
+    "8. Run health + service verification, and initialize default enabled skills if config has none.",
     "",
     "What this update does not do:",
     `- It does not wipe ${paths.dataDir} or ${paths.workspaceDir}.`,
@@ -991,20 +1512,27 @@ function buildUpdateSummary({ args, paths }) {
 
 function buildUpdateDryRun({ args, paths }) {
   const target = args.version ?? `tag:${args.tag}`;
-  const hasBun = Boolean(resolveBunBinary(paths));
+  const pinnedBunVersion = readPinnedBunVersion({ paths });
+  const bunRuntime = inspectBunRuntime(paths, pinnedBunVersion);
   const hasSystemdUser = checkSystemdUserStatus();
   const hasLoginctl = commandExists("loginctl");
 
   const actions = [
     `Refresh package ${PACKAGE_NAME} (${target})`,
+    "Refresh executor dependency",
     "Refresh opencode-ai dependency",
-    hasBun ? "Reuse existing Bun runtime" : "Install Bun runtime if missing",
+    bunRuntime.matches
+      ? `Reuse existing pinned Bun runtime (bun@${pinnedBunVersion})`
+      : bunRuntime.present
+        ? `Install pinned Bun runtime bun@${pinnedBunVersion} because bun@${bunRuntime.actualVersion} is not accepted`
+        : `Install pinned Bun runtime bun@${pinnedBunVersion}`,
     "Reseed workspace skills from bundled package",
+    "Build packaged Executor embedded web bundle for /executor",
     "Rewrite agent-mockingbird CLI shim",
     "Rewrite opencode CLI shim",
-    "Rewrite systemd user unit files for opencode + agent-mockingbird",
-    "systemctl --user daemon-reload + enable --now opencode.service agent-mockingbird.service",
-    "systemctl --user restart opencode.service agent-mockingbird.service",
+    "Rewrite systemd user unit files for executor + opencode + agent-mockingbird",
+    "systemctl --user daemon-reload + enable --now executor.service opencode.service agent-mockingbird.service",
+    "systemctl --user restart executor.service opencode.service agent-mockingbird.service",
     args.skipLinger
       ? "Skip loginctl linger step (--skip-linger)"
       : "Check/enable loginctl linger when needed",
@@ -1028,7 +1556,10 @@ function buildUpdateDryRun({ args, paths }) {
       npm: commandExists("npm"),
       systemdUser: hasSystemdUser,
       loginctl: hasLoginctl,
-      bunPresent: hasBun,
+      bunExpectedVersion: pinnedBunVersion,
+      bunPresent: bunRuntime.present,
+      bunVersionMatch: bunRuntime.matches,
+      bunActualVersion: bunRuntime.actualVersion,
     },
     actions,
     nonActions,
@@ -1039,10 +1570,18 @@ async function runOnboardingCommand(args) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("Onboarding command requires an interactive TTY.");
   }
-  const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
-  const opencodeBin = resolveOpencodeBin(paths) ?? (commandExists("opencode") ? "opencode" : null);
+  const paths = pathsFor({
+    rootDir: args.rootDir,
+    scope: args.scope,
+    userUnitDir: USER_UNIT_DIR,
+  });
+  const opencodeBin =
+    resolveOpencodeBin(paths) ??
+    (commandExists("opencode") ? "opencode" : null);
   if (!opencodeBin) {
-    throw new Error("opencode binary not found. Run `agent-mockingbird install` first.");
+    throw new Error(
+      "opencode binary not found. Run `agent-mockingbird install` first.",
+    );
   }
   const onboarding = await runInteractiveProviderOnboarding({
     opencodeBin,
@@ -1056,14 +1595,17 @@ async function runOnboardingCommand(args) {
 }
 
 async function migrateOpenclawWorkspace(input) {
-  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      source: input.source,
-      targetDirectory: input.targetDirectory || undefined,
-    }),
-  });
+  const response = await fetch(
+    `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/opencode/bootstrap/import-openclaw`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: input.source,
+        targetDirectory: input.targetDirectory || undefined,
+      }),
+    },
+  );
   let payload = {};
   try {
     payload = await response.json();
@@ -1071,21 +1613,30 @@ async function migrateOpenclawWorkspace(input) {
     payload = {};
   }
   if (!response.ok) {
-    const message = typeof payload?.error === "string" ? payload.error : "Failed to migrate OpenClaw workspace";
+    const message =
+      typeof payload?.error === "string"
+        ? payload.error
+        : "Failed to migrate OpenClaw workspace";
     throw new Error(message);
   }
   return payload.migration ?? {};
 }
 
 async function fetchMemoryStatus() {
-  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/memory/status`, { method: "GET" });
+  const response = await fetch(
+    `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/memory/status`,
+    { method: "GET" },
+  );
   if (!response.ok) return null;
   const payload = await response.json();
   return payload?.status ?? null;
 }
 
 async function syncMemoryNow() {
-  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/memory/sync`, { method: "POST" });
+  const response = await fetch(
+    `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/memory/sync`,
+    { method: "POST" },
+  );
   if (!response.ok) {
     let payload = {};
     try {
@@ -1093,7 +1644,9 @@ async function syncMemoryNow() {
     } catch {
       payload = {};
     }
-    throw new Error(typeof payload?.error === "string" ? payload.error : "Memory sync failed");
+    throw new Error(
+      typeof payload?.error === "string" ? payload.error : "Memory sync failed",
+    );
   }
 }
 
@@ -1102,17 +1655,24 @@ async function confirmInstall(args, paths, mode) {
     return;
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error("Install is interactive by default. Re-run with --yes in non-interactive environments.");
+    throw new Error(
+      "Install is interactive by default. Re-run with --yes in non-interactive environments.",
+    );
   }
 
   const summaryLines =
-    mode === "update" ? buildUpdateSummary({ args, paths }) : buildInstallSummary({ args, paths });
+    mode === "update"
+      ? buildUpdateSummary({ args, paths })
+      : buildInstallSummary({ args, paths });
   for (const line of summaryLines) {
     console.log(line);
   }
   console.log("");
 
-  const proceed = await promptYesNo(`Proceed with ${mode === "update" ? "update" : "install"}?`, false);
+  const proceed = await promptYesNo(
+    `Proceed with ${mode === "update" ? "update" : "install"}?`,
+    false,
+  );
   if (!proceed) {
     throw new Error("Aborted by user.");
   }
@@ -1128,19 +1688,73 @@ function readInstalledVersion(paths) {
   if (!appDir) {
     return null;
   }
-  const pkgPath = path.join(appDir, "package.json");
+  return readPackageVersion(path.join(appDir, "package.json"));
+}
+
+function readPackageVersion(pkgPath) {
   if (!fs.existsSync(pkgPath)) {
     return null;
   }
   return readJson(pkgPath).version ?? null;
 }
 
-function readInstalledOpenCodeVersion(paths) {
-  const pkgPath = path.join(paths.npmPrefix, "lib", "node_modules", "opencode-ai", "package.json");
-  if (!fs.existsSync(pkgPath)) {
+function readPackagedOpenCodeVersion(paths) {
+  const appDir = resolveAgentMockingbirdAppDir(paths);
+  if (!appDir) {
     return null;
   }
-  return readJson(pkgPath).version ?? null;
+  return readPackageVersion(
+    path.join(appDir, "vendor", "opencode", "packages", "opencode", "package.json"),
+  );
+}
+
+function readPackagedExecutorVersion(paths) {
+  const appDir = resolveAgentMockingbirdAppDir(paths);
+  if (!appDir) {
+    return null;
+  }
+  return readPackageVersion(
+    path.join(appDir, "vendor", "executor", "apps", "executor", "package.json"),
+  );
+}
+
+function readInstalledOpenCodeVersion(paths) {
+  const installedPackageDir = resolveInstalledPackageDir(paths, "opencode-ai");
+  const installedVersion = installedPackageDir
+    ? readPackageVersion(path.join(installedPackageDir, "package.json"))
+    : null;
+  return installedVersion ?? readPackagedOpenCodeVersion(paths);
+}
+
+function readInstalledExecutorVersion(paths) {
+  if (readInstalledExecutorMode(paths) === "embedded-patched") {
+    const packagedVersion = readPackagedExecutorVersion(paths);
+    if (packagedVersion) {
+      return packagedVersion;
+    }
+  }
+
+  const installedPackageDir = resolveInstalledPackageDir(paths, "executor");
+  const installedVersion = installedPackageDir
+    ? readPackageVersion(path.join(installedPackageDir, "package.json"))
+    : null;
+  return installedVersion ?? readPackagedExecutorVersion(paths);
+}
+
+function readInstalledExecutorMode(paths) {
+  if (!fs.existsSync(paths.executorUnitPath)) {
+    return null;
+  }
+  const execStartLine = fs
+    .readFileSync(paths.executorUnitPath, "utf8")
+    .split("\n")
+    .find((line) => line.startsWith("ExecStart="));
+  if (!execStartLine) {
+    return null;
+  }
+  return execStartLine.includes("/vendor/executor/")
+    ? "embedded-patched"
+    : "upstream-fallback";
 }
 
 function readInstalledRuntimeMode(paths) {
@@ -1150,7 +1764,7 @@ function readInstalledRuntimeMode(paths) {
   const execStartLine = fs
     .readFileSync(paths.agentMockingbirdUnitPath, "utf8")
     .split("\n")
-    .find(line => line.startsWith("ExecStart="));
+    .find((line) => line.startsWith("ExecStart="));
   if (!execStartLine) {
     return null;
   }
@@ -1170,7 +1784,10 @@ function readInstalledRuntimeMode(paths) {
 
 async function fetchRuntimeDefaultModel() {
   try {
-    const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`, { method: "GET" });
+    const response = await fetch(
+      `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`,
+      { method: "GET" },
+    );
     if (!response.ok) return "";
     const payload = await response.json();
     const providerId = payload?.config?.runtime?.opencode?.providerId;
@@ -1188,27 +1805,33 @@ async function fetchRuntimeDefaultModel() {
 
 async function fetchRuntimeModelOptions() {
   try {
-    const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/opencode/models`, { method: "GET" });
+    const response = await fetch(
+      `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/opencode/models`,
+      { method: "GET" },
+    );
     const payload = await response.json();
     if (!response.ok || !Array.isArray(payload?.models)) {
       return [];
     }
     return payload.models
-      .map(model => ({
+      .map((model) => ({
         id: typeof model?.id === "string" ? model.id.trim() : "",
-        providerId: typeof model?.providerId === "string" ? model.providerId.trim() : "",
+        providerId:
+          typeof model?.providerId === "string" ? model.providerId.trim() : "",
         modelId: typeof model?.modelId === "string" ? model.modelId.trim() : "",
         label: typeof model?.label === "string" ? model.label.trim() : "",
       }))
-      .filter(model => model.id);
+      .filter((model) => model.id);
   } catch {
     return [];
   }
 }
 
 async function fetchRuntimeModelOptionsWithRetry(input = {}) {
-  const attempts = typeof input.attempts === "number" ? Math.max(1, input.attempts) : 8;
-  const delayMs = typeof input.delayMs === "number" ? Math.max(100, input.delayMs) : 1_000;
+  const attempts =
+    typeof input.attempts === "number" ? Math.max(1, input.attempts) : 8;
+  const delayMs =
+    typeof input.delayMs === "number" ? Math.max(100, input.delayMs) : 1_000;
   let last = [];
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     last = await fetchRuntimeModelOptions();
@@ -1237,11 +1860,17 @@ function buildEmptyModelDiscoveryDiagnostics(input) {
   if (input.authRefresh) {
     lines.push(`OpenCode auth refresh: ${input.authRefresh.message}`);
   }
-  lines.push("This usually means the runtime workspace config and the saved provider credentials are still out of sync.");
+  lines.push(
+    "This usually means the runtime workspace config and the saved provider credentials are still out of sync.",
+  );
   lines.push("Recommended checks:");
-  lines.push(`- OPENCODE_CONFIG_DIR=${input.opencodeConfigDir} OPENCODE_DISABLE_PROJECT_CONFIG=1 opencode auth list`);
+  lines.push(
+    `- OPENCODE_CONFIG_DIR=${input.opencodeConfigDir} OPENCODE_DISABLE_PROJECT_CONFIG=1 opencode auth list`,
+  );
   lines.push("- curl -sS http://127.0.0.1:3001/api/opencode/models");
-  lines.push("- verify the provider you authenticated actually exposes models in this workspace configuration");
+  lines.push(
+    "- verify the provider you authenticated actually exposes models in this workspace configuration",
+  );
   return lines;
 }
 
@@ -1250,10 +1879,17 @@ async function restartOpencodeServiceForAuthRefresh() {
     return {
       attempted: false,
       ok: false,
-      message: "systemctl --user unavailable; skipping automatic OpenCode restart.",
+      message:
+        "systemctl --user unavailable; skipping automatic OpenCode restart.",
     };
   }
-  const loadState = shell("systemctl", ["--user", "show", "--property=LoadState", "--value", UNIT_OPENCODE]);
+  const loadState = shell("systemctl", [
+    "--user",
+    "show",
+    "--property=LoadState",
+    "--value",
+    UNIT_OPENCODE,
+  ]);
   if (loadState.code === 0 && loadState.stdout.trim() === "not-found") {
     return {
       attempted: false,
@@ -1263,7 +1899,8 @@ async function restartOpencodeServiceForAuthRefresh() {
   }
   const restarted = shell("systemctl", ["--user", "restart", UNIT_OPENCODE]);
   if (restarted.code !== 0) {
-    const detail = (restarted.stderr || restarted.stdout).trim() || "unknown error";
+    const detail =
+      (restarted.stderr || restarted.stdout).trim() || "unknown error";
     return {
       attempted: true,
       ok: false,
@@ -1300,7 +1937,7 @@ function matchesSearchQuery(option, query) {
   if (!normalizedQuery) return true;
   const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
   const haystack = modelOptionSearchText(option);
-  return tokens.every(token => haystack.includes(token));
+  return tokens.every((token) => haystack.includes(token));
 }
 
 async function promptSearchableModelChoice(input) {
@@ -1310,7 +1947,9 @@ async function promptSearchableModelChoice(input) {
   let page = 0;
 
   while (true) {
-    const filtered = modelOptions.filter(option => matchesSearchQuery(option, query));
+    const filtered = modelOptions.filter((option) =>
+      matchesSearchQuery(option, query),
+    );
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (page >= totalPages) page = 0;
 
@@ -1323,7 +1962,7 @@ async function promptSearchableModelChoice(input) {
     titleParts.push(`page=${page + 1}/${totalPages}`);
 
     const options = [
-      ...pageItems.map(option => ({
+      ...pageItems.map((option) => ({
         value: option.id,
         label: option.label || option.id,
         hint: option.id,
@@ -1331,14 +1970,30 @@ async function promptSearchableModelChoice(input) {
     ];
 
     if (filtered.length > 0 && page < totalPages - 1) {
-      options.push({ value: "__next__", label: "Next page", hint: "Show more results" });
+      options.push({
+        value: "__next__",
+        label: "Next page",
+        hint: "Show more results",
+      });
     }
     if (filtered.length > 0 && page > 0) {
       options.push({ value: "__prev__", label: "Previous page" });
     }
-    options.push({ value: "__search__", label: "Change search query", hint: query ? "Edit query" : "Find by provider/model name" });
-    options.push({ value: "__manual__", label: "Enter manually", hint: "Type provider/model yourself" });
-    options.push({ value: "__keep__", label: "Keep current", hint: currentModel || "No change" });
+    options.push({
+      value: "__search__",
+      label: "Change search query",
+      hint: query ? "Edit query" : "Find by provider/model name",
+    });
+    options.push({
+      value: "__manual__",
+      label: "Enter manually",
+      hint: "Type provider/model yourself",
+    });
+    options.push({
+      value: "__keep__",
+      label: "Keep current",
+      hint: currentModel || "No change",
+    });
 
     const selection = await promptSelect(titleParts.join(" | "), options, 0);
     if (selection.value === "__next__") {
@@ -1350,7 +2005,9 @@ async function promptSearchableModelChoice(input) {
       continue;
     }
     if (selection.value === "__search__") {
-      query = (await promptText("Search models (provider, model, id)", query)).trim();
+      query = (
+        await promptText("Search models (provider, model, id)", query)
+      ).trim();
       page = 0;
       continue;
     }
@@ -1359,11 +2016,14 @@ async function promptSearchableModelChoice(input) {
 }
 
 async function setRuntimeDefaultModel(modelRef) {
-  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/runtime/default-model`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: modelRef }),
-  });
+  const response = await fetch(
+    `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/runtime/default-model`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: modelRef }),
+    },
+  );
   let payload = {};
   try {
     payload = await response.json();
@@ -1371,14 +2031,20 @@ async function setRuntimeDefaultModel(modelRef) {
     payload = {};
   }
   if (!response.ok) {
-    const message = typeof payload?.error === "string" ? payload.error : "Failed to set runtime default model";
+    const message =
+      typeof payload?.error === "string"
+        ? payload.error
+        : "Failed to set runtime default model";
     throw new Error(message);
   }
 }
 
 async function fetchRuntimeMemoryConfig() {
   try {
-    const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`, { method: "GET" });
+    const response = await fetch(
+      `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`,
+      { method: "GET" },
+    );
     if (!response.ok) {
       return {
         enabled: true,
@@ -1390,12 +2056,14 @@ async function fetchRuntimeMemoryConfig() {
     const memory = payload?.config?.runtime?.memory ?? {};
     return {
       enabled: typeof memory?.enabled === "boolean" ? memory.enabled : true,
-      embedModel: typeof memory?.embedModel === "string" && memory.embedModel.trim()
-        ? memory.embedModel.trim()
-        : "qwen3-embedding:4b",
-      ollamaBaseUrl: typeof memory?.ollamaBaseUrl === "string" && memory.ollamaBaseUrl.trim()
-        ? memory.ollamaBaseUrl.trim()
-        : "http://127.0.0.1:11434",
+      embedModel:
+        typeof memory?.embedModel === "string" && memory.embedModel.trim()
+          ? memory.embedModel.trim()
+          : "qwen3-embedding:4b",
+      ollamaBaseUrl:
+        typeof memory?.ollamaBaseUrl === "string" && memory.ollamaBaseUrl.trim()
+          ? memory.ollamaBaseUrl.trim()
+          : "http://127.0.0.1:11434",
     };
   } catch {
     return {
@@ -1407,12 +2075,15 @@ async function fetchRuntimeMemoryConfig() {
 }
 
 async function fetchRuntimeConfigHash() {
-  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`, { method: "GET" });
+  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config`, {
+    method: "GET",
+  });
   if (!response.ok) {
     throw new Error(`Failed to read runtime config hash (${response.status})`);
   }
   const payload = await response.json();
-  const expectedHash = typeof payload?.hash === "string" ? payload.hash.trim() : "";
+  const expectedHash =
+    typeof payload?.hash === "string" ? payload.hash.trim() : "";
   if (!expectedHash) {
     throw new Error("Runtime config hash missing from /api/config response");
   }
@@ -1421,24 +2092,27 @@ async function fetchRuntimeConfigHash() {
 
 async function setRuntimeMemoryEmbeddingConfig(input) {
   const expectedHash = await fetchRuntimeConfigHash();
-  const response = await fetch(`${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/patch-safe`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      patch: {
-        runtime: {
-          memory: {
-            enabled: input.enabled,
-            embedProvider: "ollama",
-            embedModel: input.embedModel,
-            ollamaBaseUrl: input.ollamaBaseUrl,
+  const response = await fetch(
+    `${AGENT_MOCKINGBIRD_API_BASE_URL}/api/config/patch-safe`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        patch: {
+          runtime: {
+            memory: {
+              enabled: input.enabled,
+              embedProvider: "ollama",
+              embedModel: input.embedModel,
+              ollamaBaseUrl: input.ollamaBaseUrl,
+            },
           },
         },
-      },
-      expectedHash,
-      runSmokeTest: false,
-    }),
-  });
+        expectedHash,
+        runSmokeTest: false,
+      }),
+    },
+  );
   let payload = {};
   try {
     payload = await response.json();
@@ -1446,7 +2120,10 @@ async function setRuntimeMemoryEmbeddingConfig(input) {
     payload = {};
   }
   if (!response.ok) {
-    const message = typeof payload?.error === "string" ? payload.error : "Failed to update memory embedding config";
+    const message =
+      typeof payload?.error === "string"
+        ? payload.error
+        : "Failed to update memory embedding config";
     throw new Error(message);
   }
 }
@@ -1456,14 +2133,18 @@ async function fetchOllamaModels(ollamaBaseUrl) {
   const response = await fetch(`${base}/api/tags`, { method: "GET" });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Ollama tags request failed: ${response.status} ${text}`.trim());
+    throw new Error(
+      `Ollama tags request failed: ${response.status} ${text}`.trim(),
+    );
   }
   const payload = await response.json();
   const models = Array.isArray(payload?.models) ? payload.models : [];
   const names = models
-    .map(model => {
-      if (typeof model?.name === "string" && model.name.trim()) return model.name.trim();
-      if (typeof model?.model === "string" && model.model.trim()) return model.model.trim();
+    .map((model) => {
+      if (typeof model?.name === "string" && model.name.trim())
+        return model.name.trim();
+      if (typeof model?.model === "string" && model.model.trim())
+        return model.model.trim();
       return "";
     })
     .filter(Boolean);
@@ -1471,19 +2152,34 @@ async function fetchOllamaModels(ollamaBaseUrl) {
 }
 
 async function promptSearchableStringChoice(input) {
-  const { title = "Select value", values, currentValue, searchPrompt = "Search", manualLabel = "Enter manually", keepLabel = "Keep current" } = input;
+  const {
+    title = "Select value",
+    values,
+    currentValue,
+    searchPrompt = "Search",
+    manualLabel = "Enter manually",
+    keepLabel = "Keep current",
+  } = input;
   const pageSize = 12;
   let query = "";
   let page = 0;
 
   while (true) {
-    const filtered = values.filter(value => matchesSearchQuery({ label: value, id: value, providerId: "", modelId: "" }, query));
+    const filtered = values.filter((value) =>
+      matchesSearchQuery(
+        { label: value, id: value, providerId: "", modelId: "" },
+        query,
+      ),
+    );
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (page >= totalPages) page = 0;
-    const pageItems = filtered.slice(page * pageSize, page * pageSize + pageSize);
+    const pageItems = filtered.slice(
+      page * pageSize,
+      page * pageSize + pageSize,
+    );
 
     const options = [
-      ...pageItems.map(value => ({
+      ...pageItems.map((value) => ({
         value,
         label: value,
       })),
@@ -1494,9 +2190,17 @@ async function promptSearchableStringChoice(input) {
     if (filtered.length > 0 && page > 0) {
       options.push({ value: "__prev__", label: "Previous page" });
     }
-    options.push({ value: "__search__", label: "Change search query", hint: query ? `Current: ${query}` : "Filter the list" });
+    options.push({
+      value: "__search__",
+      label: "Change search query",
+      hint: query ? `Current: ${query}` : "Filter the list",
+    });
     options.push({ value: "__manual__", label: manualLabel });
-    options.push({ value: "__keep__", label: keepLabel, hint: currentValue || "No change" });
+    options.push({
+      value: "__keep__",
+      label: keepLabel,
+      hint: currentValue || "No change",
+    });
 
     const selection = await promptSelect(
       `${title} | matches=${filtered.length} | page=${page + 1}/${totalPages}`,
@@ -1542,14 +2246,19 @@ async function runOpenclawMigrationWizard() {
     const ref = (await promptText("Git ref (optional)", "")).trim();
     source = { mode: "git", url, ref: ref || undefined };
   } else {
-    const sourcePath = (await promptText("OpenClaw workspace directory", "")).trim();
+    const sourcePath = (
+      await promptText("OpenClaw workspace directory", "")
+    ).trim();
     if (!sourcePath) {
       return { attempted: false, skipped: true, reason: "missing-path" };
     }
     source = { mode: "local", path: path.resolve(sourcePath) };
   }
 
-  const customTarget = await promptYesNo("Use a custom migration target directory?", false);
+  const customTarget = await promptYesNo(
+    "Use a custom migration target directory?",
+    false,
+  );
   let targetDirectory;
   if (customTarget) {
     const entered = (await promptText("Target directory", "")).trim();
@@ -1564,11 +2273,17 @@ async function runOpenclawMigrationWizard() {
     targetDirectory,
   });
 
-  let memorySync = { attempted: false, completed: false, reason: "memory-disabled" };
+  let memorySync = {
+    attempted: false,
+    completed: false,
+    reason: "memory-disabled",
+  };
   try {
     const memoryStatus = await fetchMemoryStatus();
     if (memoryStatus?.enabled) {
-      console.log(info("Memory is enabled; syncing memory index after migration..."));
+      console.log(
+        info("Memory is enabled; syncing memory index after migration..."),
+      );
       await syncMemoryNow();
       memorySync = { attempted: true, completed: true };
     }
@@ -1578,7 +2293,9 @@ async function runOpenclawMigrationWizard() {
       completed: false,
       reason: error instanceof Error ? error.message : String(error),
     };
-    console.log(warn(`Post-migration memory sync failed: ${memorySync.reason}`));
+    console.log(
+      warn(`Post-migration memory sync failed: ${memorySync.reason}`),
+    );
   }
 
   return {
@@ -1597,7 +2314,11 @@ async function runInteractiveProviderOnboarding(input) {
 
   console.log("");
   console.log(heading("Agent Mockingbird onboarding"));
-  console.log(info("Optional: connect inference providers through OpenCode and pick a default runtime model."));
+  console.log(
+    info(
+      "Optional: connect inference providers through OpenCode and pick a default runtime model.",
+    ),
+  );
 
   const pathChoice = await promptSelect("Choose onboarding flow", [
     {
@@ -1641,7 +2362,11 @@ async function runInteractiveProviderOnboarding(input) {
     console.log("");
     console.log(heading("Provider auth"));
     console.log(info("Current OpenCode credentials:"));
-    shell(opencodeBin, ["auth", "list"], { stdio: "inherit", cwd: workspaceDir, env: opencodeEnv });
+    shell(opencodeBin, ["auth", "list"], {
+      stdio: "inherit",
+      cwd: workspaceDir,
+      env: opencodeEnv,
+    });
 
     while (true) {
       const selection = await promptSelect(
@@ -1670,38 +2395,61 @@ async function runInteractiveProviderOnboarding(input) {
       let result;
       if (selection.value === "__picker__") {
         authAttempts += 1;
-        result = shell(opencodeBin, ["auth", "login"], { stdio: "inherit", cwd: workspaceDir, env: opencodeEnv });
+        result = shell(opencodeBin, ["auth", "login"], {
+          stdio: "inherit",
+          cwd: workspaceDir,
+          env: opencodeEnv,
+        });
       } else if (selection.value === "__manual_url__") {
         const providerUrl = (await promptText("Provider auth URL", "")).trim();
         if (!providerUrl) {
-          const continueChoice = await promptYesNo("No URL provided. Continue auth flow?", true);
+          const continueChoice = await promptYesNo(
+            "No URL provided. Continue auth flow?",
+            true,
+          );
           if (!continueChoice) break;
           continue;
         }
         if (!isValidHttpUrl(providerUrl)) {
-          console.log(warn("Invalid URL. Enter a full http(s) URL, for example https://example.com."));
+          console.log(
+            warn(
+              "Invalid URL. Enter a full http(s) URL, for example https://example.com.",
+            ),
+          );
           const continueChoice = await promptYesNo("Continue auth flow?", true);
           if (!continueChoice) break;
           continue;
         }
         authAttempts += 1;
-        result = shell(opencodeBin, ["auth", "login", providerUrl], { stdio: "inherit", cwd: workspaceDir, env: opencodeEnv });
+        result = shell(opencodeBin, ["auth", "login", providerUrl], {
+          stdio: "inherit",
+          cwd: workspaceDir,
+          env: opencodeEnv,
+        });
       } else {
         continue;
       }
 
       if (result.code === 0) {
         authSuccess = true;
-        shell(opencodeBin, ["auth", "list"], { stdio: "inherit", cwd: workspaceDir, env: opencodeEnv });
+        shell(opencodeBin, ["auth", "list"], {
+          stdio: "inherit",
+          cwd: workspaceDir,
+          env: opencodeEnv,
+        });
       } else {
-        console.log(warn("OpenCode login attempt did not complete successfully."));
+        console.log(
+          warn("OpenCode login attempt did not complete successfully."),
+        );
       }
       const addAnother = await promptYesNo("Connect another provider?", false);
       if (!addAnother) break;
     }
     if (authAttempts > 0) {
       console.log("");
-      console.log(info("Applying provider auth changes before model selection..."));
+      console.log(
+        info("Applying provider auth changes before model selection..."),
+      );
       authRefresh = await restartOpencodeServiceForAuthRefresh();
       if (authRefresh.ok) {
         console.log(success(authRefresh.message));
@@ -1713,14 +2461,19 @@ async function runInteractiveProviderOnboarding(input) {
 
   const allowModelSetup = !memoryOnly && !openclawOnly;
   const setModelNow = allowModelSetup
-    ? (modelOnly ? true : await promptYesNo("Set runtime default model now?", true))
+    ? modelOnly
+      ? true
+      : await promptYesNo("Set runtime default model now?", true)
     : false;
   let selectedModel = "";
   if (setModelNow) {
     const currentModel = await fetchRuntimeDefaultModel();
     const modelOptions =
       authAttempts > 0
-        ? await fetchRuntimeModelOptionsWithRetry({ attempts: 10, delayMs: 1_000 })
+        ? await fetchRuntimeModelOptionsWithRetry({
+            attempts: 10,
+            delayMs: 1_000,
+          })
         : await fetchRuntimeModelOptions();
     console.log("");
     console.log(heading("Default model"));
@@ -1757,7 +2510,9 @@ async function runInteractiveProviderOnboarding(input) {
         currentModel,
       });
       if (selection === "__manual__") {
-        const manual = (await promptText("Enter provider/model", currentModel || "")).trim();
+        const manual = (
+          await promptText("Enter provider/model", currentModel || "")
+        ).trim();
         if (manual) {
           await setRuntimeDefaultModel(manual);
           selectedModel = manual;
@@ -1771,9 +2526,12 @@ async function runInteractiveProviderOnboarding(input) {
 
   const configureMemoryNow = memoryOnly
     ? true
-    : (!modelOnly && !openclawOnly
-      ? await promptYesNo("Configure memory embedding model (Ollama) now?", true)
-      : false);
+    : !modelOnly && !openclawOnly
+      ? await promptYesNo(
+          "Configure memory embedding model (Ollama) now?",
+          true,
+        )
+      : false;
   let memoryEmbedding = null;
   if (configureMemoryNow) {
     const currentMemory = await fetchRuntimeMemoryConfig();
@@ -1783,7 +2541,10 @@ async function runInteractiveProviderOnboarding(input) {
     console.log(info(`Current Ollama URL: ${currentMemory.ollamaBaseUrl}`));
     console.log(info(`Current embedding model: ${currentMemory.embedModel}`));
 
-    const memoryEnabled = await promptYesNo("Enable memory features?", currentMemory.enabled);
+    const memoryEnabled = await promptYesNo(
+      "Enable memory features?",
+      currentMemory.enabled,
+    );
     if (!memoryEnabled) {
       await setRuntimeMemoryEmbeddingConfig({
         enabled: false,
@@ -1797,27 +2558,47 @@ async function runInteractiveProviderOnboarding(input) {
         embedModel: currentMemory.embedModel,
       };
     } else {
-      let ollamaBaseUrl = await promptText("Ollama base URL", currentMemory.ollamaBaseUrl);
+      let ollamaBaseUrl = await promptText(
+        "Ollama base URL",
+        currentMemory.ollamaBaseUrl,
+      );
       let models = [];
 
       while (true) {
         try {
           models = await fetchOllamaModels(ollamaBaseUrl);
           if (models.length === 0) {
-            console.log(warn("Connected to Ollama but no models were returned from /api/tags."));
+            console.log(
+              warn(
+                "Connected to Ollama but no models were returned from /api/tags.",
+              ),
+            );
           } else {
-            console.log(success(`Discovered ${models.length} model${models.length === 1 ? "" : "s"} from Ollama.`));
+            console.log(
+              success(
+                `Discovered ${models.length} model${models.length === 1 ? "" : "s"} from Ollama.`,
+              ),
+            );
           }
           break;
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.log(warn(`Could not query Ollama at ${ollamaBaseUrl}: ${message}`));
-          const retryChoice = await promptSelect("Ollama model discovery failed", [
-            { value: "retry", label: "Retry same URL" },
-            { value: "change", label: "Change Ollama URL" },
-            { value: "manual", label: "Skip discovery and enter model manually" },
-            { value: "skip", label: "Skip memory embedding setup" },
-          ]);
+          const message =
+            error instanceof Error ? error.message : String(error);
+          console.log(
+            warn(`Could not query Ollama at ${ollamaBaseUrl}: ${message}`),
+          );
+          const retryChoice = await promptSelect(
+            "Ollama model discovery failed",
+            [
+              { value: "retry", label: "Retry same URL" },
+              { value: "change", label: "Change Ollama URL" },
+              {
+                value: "manual",
+                label: "Skip discovery and enter model manually",
+              },
+              { value: "skip", label: "Skip memory embedding setup" },
+            ],
+          );
           if (retryChoice.value === "retry") continue;
           if (retryChoice.value === "change") {
             ollamaBaseUrl = await promptText("Ollama base URL", ollamaBaseUrl);
@@ -1838,7 +2619,12 @@ async function runInteractiveProviderOnboarding(input) {
       if (!memoryEmbedding) {
         let embedModel = currentMemory.embedModel;
         if (models.length === 0) {
-          const manualModel = (await promptText("Embedding model (manual)", currentMemory.embedModel)).trim();
+          const manualModel = (
+            await promptText(
+              "Embedding model (manual)",
+              currentMemory.embedModel,
+            )
+          ).trim();
           if (manualModel) {
             embedModel = manualModel;
           }
@@ -1852,7 +2638,12 @@ async function runInteractiveProviderOnboarding(input) {
             keepLabel: "Keep current model",
           });
           if (selection === "__manual__") {
-            const manualModel = (await promptText("Embedding model (manual)", currentMemory.embedModel)).trim();
+            const manualModel = (
+              await promptText(
+                "Embedding model (manual)",
+                currentMemory.embedModel,
+              )
+            ).trim();
             if (manualModel) {
               embedModel = manualModel;
             }
@@ -1880,9 +2671,9 @@ async function runInteractiveProviderOnboarding(input) {
   let openclawMigration = null;
   const runMigration = openclawOnly
     ? true
-    : (!modelOnly && !memoryOnly
+    : !modelOnly && !memoryOnly
       ? await promptYesNo("Import an OpenClaw workspace now?", false)
-      : false);
+      : false;
   if (runMigration) {
     try {
       openclawMigration = await runOpenclawMigrationWizard();
@@ -1892,7 +2683,9 @@ async function runInteractiveProviderOnboarding(input) {
         skipped: false,
         error: error instanceof Error ? error.message : String(error),
       };
-      console.log(warn(`OpenClaw migration failed: ${openclawMigration.error}`));
+      console.log(
+        warn(`OpenClaw migration failed: ${openclawMigration.error}`),
+      );
     }
   } else {
     openclawMigration = {
@@ -1917,9 +2710,20 @@ async function runInteractiveProviderOnboarding(input) {
 export const testing = {
   applyDefaultInstallTarget,
   buildEmptyModelDiscoveryDiagnostics,
+  readInstalledExecutorMode,
+  readInstalledExecutorVersion,
+  readInstalledOpenCodeVersion,
+  readPinnedBunVersion,
   readRunningPackageVersion,
   readOpenCodePackageVersion,
-}
+  resolveManagedCliDelegationTarget,
+  resolveManagedCliPathForAppDir,
+  resolveManagedCliPathForRoot,
+  resolvePackagedExecutorWebAssetsDir,
+  resolveExecutorRuntimeCommand,
+  unitContents,
+  verifyEmbeddedExecutorGateway,
+};
 
 /**
  * @typedef {{
@@ -1940,9 +2744,26 @@ export const testing = {
  */
 
 /**
+ * @typedef {{
+ *   paths?: ReadOpenCodePackageVersionPaths,
+ *   moduleDir?: string,
+ *   argv?: string[],
+ *   env?: NodeJS.ProcessEnv,
+ * }} ReadPinnedBunVersionOptions
+ */
+
+/**
  * @param {ReadOpenCodePackageVersionOptions} [options]
  */
-function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
+function candidateLockPaths(
+  lockFileName,
+  {
+    paths,
+    moduleDir = MODULE_DIR,
+    argv = process.argv,
+    env = process.env,
+  } = {},
+) {
   const candidates = [];
   const seen = new Set();
   const add = (value) => {
@@ -1953,16 +2774,16 @@ function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv
     candidates.push(resolved);
   };
 
-  add(path.resolve(moduleDir, "../../../../opencode.lock.json"));
-  add(path.resolve(moduleDir, "../opencode.lock.json"));
+  add(path.resolve(moduleDir, `../../../../${lockFileName}`));
+  add(path.resolve(moduleDir, `../${lockFileName}`));
 
   const invokedScript = argv[1];
   if (typeof invokedScript === "string" && invokedScript.trim()) {
-    add(path.resolve(path.dirname(invokedScript), "../opencode.lock.json"));
+    add(path.resolve(path.dirname(invokedScript), `../${lockFileName}`));
     try {
       const realScript = fs.realpathSync(invokedScript);
-      add(path.resolve(path.dirname(realScript), "../opencode.lock.json"));
-      add(path.resolve(path.dirname(realScript), "../../opencode.lock.json"));
+      add(path.resolve(path.dirname(realScript), `../${lockFileName}`));
+      add(path.resolve(path.dirname(realScript), `../../${lockFileName}`));
     } catch {
       // Ignore missing or unreadable realpaths.
     }
@@ -1970,70 +2791,283 @@ function candidateLockPaths({ paths, moduleDir = MODULE_DIR, argv = process.argv
 
   if (paths) {
     if (typeof paths.agentMockingbirdAppDirGlobal === "string") {
-      add(path.join(paths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
+      add(path.join(paths.agentMockingbirdAppDirGlobal, lockFileName));
     }
     if (typeof paths.agentMockingbirdAppDirLocal === "string") {
-      add(path.join(paths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
+      add(path.join(paths.agentMockingbirdAppDirLocal, lockFileName));
     }
     if (typeof paths.agentMockingbirdAppDirScopedGlobal === "string") {
-      add(path.join(paths.agentMockingbirdAppDirScopedGlobal, "opencode.lock.json"));
+      add(path.join(paths.agentMockingbirdAppDirScopedGlobal, lockFileName));
     }
     if (typeof paths.agentMockingbirdAppDirScopedLocal === "string") {
-      add(path.join(paths.agentMockingbirdAppDirScopedLocal, "opencode.lock.json"));
+      add(path.join(paths.agentMockingbirdAppDirScopedLocal, lockFileName));
     }
   }
 
   const explicitRoot = env.AGENT_MOCKINGBIRD_ROOT_DIR?.trim();
-  const explicitScope = env.AGENT_MOCKINGBIRD_INSTALLER_SCOPE?.trim() || env.AGENT_MOCKINGBIRD_SCOPE?.trim();
+  const explicitScope =
+    env.AGENT_MOCKINGBIRD_INSTALLER_SCOPE?.trim() ||
+    env.AGENT_MOCKINGBIRD_SCOPE?.trim();
   if (explicitRoot && explicitScope) {
     const derivedPaths = pathsFor({
       rootDir: path.resolve(explicitRoot),
       scope: explicitScope,
       userUnitDir: USER_UNIT_DIR,
     });
-    add(path.join(derivedPaths.agentMockingbirdAppDirGlobal, "opencode.lock.json"));
-    add(path.join(derivedPaths.agentMockingbirdAppDirLocal, "opencode.lock.json"));
-    add(path.join(derivedPaths.agentMockingbirdAppDirScopedGlobal, "opencode.lock.json"));
-    add(path.join(derivedPaths.agentMockingbirdAppDirScopedLocal, "opencode.lock.json"));
+    add(path.join(derivedPaths.agentMockingbirdAppDirGlobal, lockFileName));
+    add(path.join(derivedPaths.agentMockingbirdAppDirLocal, lockFileName));
+    add(
+      path.join(derivedPaths.agentMockingbirdAppDirScopedGlobal, lockFileName),
+    );
+    add(
+      path.join(derivedPaths.agentMockingbirdAppDirScopedLocal, lockFileName),
+    );
   }
 
   return candidates;
 }
 
-/**
- * @param {ReadOpenCodePackageVersionOptions} [options]
- */
-function readOpenCodePackageVersion({ paths, moduleDir = MODULE_DIR, argv = process.argv, env = process.env } = {}) {
-  const envVersion = env.AGENT_MOCKINGBIRD_OPENCODE_VERSION?.trim()
-  if (envVersion) {
-    return envVersion
+function candidatePackageJsonPaths({
+  paths,
+  moduleDir = MODULE_DIR,
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  return candidateLockPaths("package.json", { paths, moduleDir, argv, env });
+}
+
+function candidateOpenCodePackageJsonPaths({
+  paths,
+  moduleDir = MODULE_DIR,
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  const candidates = [];
+  const seen = new Set();
+  const add = (value) => {
+    if (!value) return;
+    const resolved = path.resolve(value);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    candidates.push(resolved);
+  };
+
+  for (const packageJsonPath of candidatePackageJsonPaths({
+    paths,
+    moduleDir,
+    argv,
+    env,
+  })) {
+    const appRoot = path.dirname(packageJsonPath);
+    add(path.join(appRoot, "cleanroom", "opencode", "package.json"));
+    add(path.join(appRoot, "vendor", "opencode", "package.json"));
   }
-  const candidatePaths = candidateLockPaths({ paths, moduleDir, argv, env });
+
+  return candidates;
+}
+
+function readPackageManagerBunVersionFromPackageJsonPath(packageJsonPath) {
+  const parsed = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  const packageManager = parsed?.packageManager;
+  if (typeof packageManager !== "string" || packageManager.length === 0) {
+    throw new Error(`Invalid packageManager in ${packageJsonPath}`);
+  }
+  if (!packageManager.startsWith("bun@")) {
+    throw new Error(
+      `Expected packageManager to start with bun@ in ${packageJsonPath}, found ${packageManager}`,
+    );
+  }
+  const bunVersion = packageManager.slice(4).trim();
+  if (!bunVersion) {
+    throw new Error(`Invalid packageManager in ${packageJsonPath}`);
+  }
+  return bunVersion;
+}
+
+function readPinnedInstallVersion(
+  fieldName,
+  {
+    paths,
+    moduleDir = MODULE_DIR,
+    argv = process.argv,
+    env = process.env,
+  } = {},
+) {
+  const candidatePaths = candidatePackageJsonPaths({
+    paths,
+    moduleDir,
+    argv,
+    env,
+  });
   for (const candidatePath of candidatePaths) {
     if (!fs.existsSync(candidatePath)) {
       continue;
     }
     const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
-    if (typeof parsed.packageVersion !== "string" || parsed.packageVersion.length === 0) {
+    const version = parsed?.agentMockingbirdInstall?.[fieldName];
+    if (typeof version === "string" && version.trim()) {
+      return version.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {ReadPinnedBunVersionOptions} [options]
+ */
+function readPinnedBunVersion({
+  paths,
+  moduleDir = MODULE_DIR,
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  const envVersion = env.AGENT_MOCKINGBIRD_BUN_VERSION?.trim();
+  if (envVersion) {
+    return envVersion;
+  }
+
+  for (const candidatePath of candidateOpenCodePackageJsonPaths({
+    paths,
+    moduleDir,
+    argv,
+    env,
+  })) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    return readPackageManagerBunVersionFromPackageJsonPath(candidatePath);
+  }
+
+  for (const candidatePath of candidatePackageJsonPaths({
+    paths,
+    moduleDir,
+    argv,
+    env,
+  })) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    return readPackageManagerBunVersionFromPackageJsonPath(candidatePath);
+  }
+
+  throw new Error(
+    "Unable to locate package.json for Bun version pinning.",
+  );
+}
+
+/**
+ * @param {ReadOpenCodePackageVersionOptions} [options]
+ */
+function readOpenCodePackageVersion({
+  paths,
+  moduleDir = MODULE_DIR,
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  const envVersion = env.AGENT_MOCKINGBIRD_OPENCODE_VERSION?.trim();
+  if (envVersion) {
+    return envVersion;
+  }
+  const candidatePaths = candidateLockPaths("opencode.lock.json", {
+    paths,
+    moduleDir,
+    argv,
+    env,
+  });
+  for (const candidatePath of candidatePaths) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+    if (
+      typeof parsed.packageVersion !== "string" ||
+      parsed.packageVersion.length === 0
+    ) {
       throw new Error(`Invalid packageVersion in ${candidatePath}`);
     }
     return parsed.packageVersion;
   }
-  throw new Error("Unable to locate opencode.lock.json for installer version pinning.");
+  const pinnedVersion = readPinnedInstallVersion("opencodeVersion", {
+    paths,
+    moduleDir,
+    argv,
+    env,
+  });
+  if (pinnedVersion) {
+    return pinnedVersion;
+  }
+  throw new Error(
+    "Unable to locate opencode.lock.json for installer version pinning.",
+  );
+}
+
+function readExecutorPackageVersion({
+  paths,
+  moduleDir = MODULE_DIR,
+  argv = process.argv,
+  env = process.env,
+} = {}) {
+  const envVersion = env.AGENT_MOCKINGBIRD_EXECUTOR_VERSION?.trim();
+  if (envVersion) {
+    return envVersion;
+  }
+  const candidatePaths = candidateLockPaths("executor.lock.json", {
+    paths,
+    moduleDir,
+    argv,
+    env,
+  });
+  for (const candidatePath of candidatePaths) {
+    if (!fs.existsSync(candidatePath)) {
+      continue;
+    }
+    const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+    if (
+      typeof parsed.packageVersion !== "string" ||
+      parsed.packageVersion.length === 0
+    ) {
+      throw new Error(`Invalid packageVersion in ${candidatePath}`);
+    }
+    return parsed.packageVersion;
+  }
+  const pinnedVersion = readPinnedInstallVersion("executorVersion", {
+    paths,
+    moduleDir,
+    argv,
+    env,
+  });
+  if (pinnedVersion) {
+    return pinnedVersion;
+  }
+  throw new Error(
+    "Unable to locate executor.lock.json for installer version pinning.",
+  );
 }
 
 async function installOrUpdate(args, mode) {
-  if (!commandExists("npm")) {
-    throw new Error("npm is required. Please install npm and run again.");
+  const packageManager = resolvePackageManager();
+  if (!packageManager) {
+    throw new Error("npm or bun is required. Please install one and run again.");
   }
 
-  const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
+  const paths = pathsFor({
+    rootDir: args.rootDir,
+    scope: args.scope,
+    userUnitDir: USER_UNIT_DIR,
+  });
   const opencodePackageVersion = readOpenCodePackageVersion({ paths });
+  const executorPackageVersion = readExecutorPackageVersion({ paths });
+  const pinnedBunVersion = readPinnedBunVersion({ paths });
   await confirmInstall(args, paths, mode);
   ensureDir(paths.rootDir);
   ensureDir(paths.npmPrefix);
+  ensureDir(paths.bunInstallDir);
   ensureDir(paths.dataDir);
   ensureDir(paths.workspaceDir);
+  ensureDir(paths.executorWorkspaceDir);
+  ensureDir(paths.executorDataDir);
+  ensureDir(paths.executorLocalDataDir);
+  ensureDir(paths.executorRunDir);
   ensureDir(paths.opencodeConfigDir);
   ensureDir(paths.logsDir);
   ensureDir(paths.etcDir);
@@ -2041,14 +3075,31 @@ async function installOrUpdate(args, mode) {
   ensureSystemdUserAvailable();
   writeScopedNpmrc(paths, args.scope, args.registryUrl);
 
-  if (!resolveBunBinary(paths)) {
-    tryInstallBun(paths);
+  if (!inspectBunRuntime(paths, pinnedBunVersion).matches) {
+    tryInstallBun(paths, pinnedBunVersion);
   }
+  const bunBin = assertPinnedBunRuntime(paths, pinnedBunVersion);
 
-  npmInstall(
-    paths.npmPrefix,
+  installManagedPackage(
+    packageManager,
+    paths,
+    [`executor@${executorPackageVersion}`],
+    packageManager === "bun"
+      ? ["--registry", PUBLIC_NPM_REGISTRY]
+      : ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+    process.env,
+    { bunCommand: bunBin },
+  );
+
+  installManagedPackage(
+    packageManager,
+    paths,
     [`opencode-ai@${opencodePackageVersion}`],
-    ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+    packageManager === "bun"
+      ? ["--registry", PUBLIC_NPM_REGISTRY]
+      : ["-g", "--registry", PUBLIC_NPM_REGISTRY],
+    process.env,
+    { bunCommand: bunBin },
   );
 
   const env = {
@@ -2057,33 +3108,46 @@ async function installOrUpdate(args, mode) {
     npm_config_registry: PUBLIC_NPM_REGISTRY,
   };
 
-  npmInstall(paths.npmPrefix, [packageSpec(args.scope, args.version, args.tag)], ["-g"], env);
-
-  const agentMockingbirdBin = resolveAgentMockingbirdBin(paths);
-  if (!agentMockingbirdBin) {
-    throw new Error(
-      `agent-mockingbird binary missing: looked in ${paths.agentMockingbirdBinGlobal} and ${paths.agentMockingbirdBinLocal}`,
-    );
-  }
-  const shimPath = writeAgentMockingbirdShim(paths, agentMockingbirdBin, opencodePackageVersion);
-  const pathSetup = ensureLocalBinPath(paths);
-
-  const bunBin = resolveBunBinary(paths);
-  if (!bunBin) {
-    throw new Error("bun binary was not found after install.");
-  }
+  installManagedPackage(
+    packageManager,
+    paths,
+    [packageSpec(args.scope, args.version, args.tag)],
+    packageManager === "bun"
+      ? ["--registry", args.registryUrl]
+      : ["-g", "--registry", args.registryUrl],
+    env,
+    { bunCommand: bunBin },
+  );
 
   const agentMockingbirdAppDir = resolveAgentMockingbirdAppDir(paths);
   if (!agentMockingbirdAppDir) {
     throw new Error(
-      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal}, ${paths.agentMockingbirdAppDirLocal}, ${paths.agentMockingbirdAppDirScopedGlobal}, and ${paths.agentMockingbirdAppDirScopedLocal}`,
+      `agent-mockingbird package directory missing: looked in ${paths.agentMockingbirdAppDirGlobal}, ${paths.agentMockingbirdAppDirLocal}, ${paths.agentMockingbirdAppDirScopedGlobal}, ${paths.agentMockingbirdAppDirScopedLocal}, ${paths.agentMockingbirdAppDirBunGlobal}, and ${paths.agentMockingbirdAppDirScopedBunGlobal}`,
     );
   }
-  const runtimeAssetsSource = prepareRuntimeAssetSources(agentMockingbirdAppDir);
+  const managedCliPath = resolveManagedCliPathForAppDir(agentMockingbirdAppDir);
+  if (!managedCliPath) {
+    throw new Error(
+      `agent-mockingbird managed CLI missing in ${agentMockingbirdAppDir}: expected bin/agent-mockingbird-managed or source CLI fallback`,
+    );
+  }
+  const shimPath = writeAgentMockingbirdShim(
+    paths,
+    managedCliPath,
+    opencodePackageVersion,
+  );
+  const pathSetup = ensureLocalBinPath(paths);
+
+  const runtimeAssetsSource = prepareRuntimeAssetSources(
+    agentMockingbirdAppDir,
+  );
   const workspaceRuntimeAssets = await syncRuntimeWorkspaceAssets({
     sourceWorkspaceDir: runtimeAssetsSource.workspaceSourceDir,
     targetWorkspaceDir: paths.workspaceDir,
-    stateFilePath: path.join(paths.dataDir, "runtime-assets-workspace-state.json"),
+    stateFilePath: path.join(
+      paths.dataDir,
+      "runtime-assets-workspace-state.json",
+    ),
     mode,
     interactive: mode === "update" && !args.yes,
     onConflict: promptRuntimeAssetConflictDecision,
@@ -2091,12 +3155,18 @@ async function installOrUpdate(args, mode) {
   const opencodeRuntimeAssets = await syncRuntimeWorkspaceAssets({
     sourceWorkspaceDir: runtimeAssetsSource.opencodeConfigSourceDir,
     targetWorkspaceDir: paths.opencodeConfigDir,
-    stateFilePath: path.join(paths.dataDir, "runtime-assets-opencode-config-state.json"),
+    stateFilePath: path.join(
+      paths.dataDir,
+      "runtime-assets-opencode-config-state.json",
+    ),
     mode,
     interactive: mode === "update" && !args.yes,
     onConflict: promptRuntimeAssetConflictDecision,
   });
-  const opencodePackagePath = path.join(paths.opencodeConfigDir, "package.json");
+  const opencodePackagePath = path.join(
+    paths.opencodeConfigDir,
+    "package.json",
+  );
   const opencodeLockPath = path.join(paths.opencodeConfigDir, "bun.lock");
   if (fs.existsSync(opencodePackagePath)) {
     const installArgs = ["install"];
@@ -2105,7 +3175,11 @@ async function installOrUpdate(args, mode) {
     }
     must(bunBin, installArgs, { cwd: paths.opencodeConfigDir });
   }
-  const agentMockingbirdRuntime = resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin);
+  ensurePackagedExecutorRuntime(agentMockingbirdAppDir, bunBin);
+  const agentMockingbirdRuntime = resolveAgentMockingbirdRuntimeCommand(
+    agentMockingbirdAppDir,
+    bunBin,
+  );
   if (!agentMockingbirdRuntime) {
     throw new Error(
       `agent-mockingbird runtime missing in ${agentMockingbirdAppDir} (checked compiled dist bundle, then package module/main entry files).`,
@@ -2117,32 +3191,66 @@ async function installOrUpdate(args, mode) {
       `opencode binary missing: looked in ${paths.opencodeBinGlobal} and ${paths.opencodeBinLocal}`,
     );
   }
+  const executorRuntime = resolveExecutorRuntimeCommand(
+    agentMockingbirdAppDir,
+    paths,
+    bunBin,
+  );
+  if (!executorRuntime) {
+    throw new Error(
+      `executor runtime missing: looked in vendored executor checkout and ${paths.executorBinGlobal} / ${paths.executorBinLocal}`,
+    );
+  }
   const opencodeShimPath = writeOpencodeShim(paths, opencodeBin);
 
-  const units = unitContents(paths, opencodeBin, agentMockingbirdRuntime.execStart, agentMockingbirdRuntime.mode);
+  const units = unitContents(
+    paths,
+    executorRuntime.execStart,
+    executorRuntime.mode,
+    executorRuntime.webAssetsDir,
+    opencodeBin,
+    agentMockingbirdRuntime.execStart,
+    agentMockingbirdRuntime.mode,
+  );
+  writeFile(paths.executorUnitPath, units.executor);
   writeFile(paths.opencodeUnitPath, units.opencode);
   writeFile(paths.agentMockingbirdUnitPath, units.agentMockingbird);
 
   must("systemctl", ["--user", "daemon-reload"]);
-  must("systemctl", ["--user", "enable", "--now", UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
+  must("systemctl", [
+    "--user",
+    "enable",
+    "--now",
+    UNIT_EXECUTOR,
+    UNIT_OPENCODE,
+    UNIT_AGENT_MOCKINGBIRD,
+  ]);
   if (mode === "update") {
-    must("systemctl", ["--user", "restart", UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
+    must("systemctl", [
+      "--user",
+      "restart",
+      UNIT_EXECUTOR,
+      UNIT_OPENCODE,
+      UNIT_AGENT_MOCKINGBIRD,
+    ]);
   }
 
   const linger = ensureLinger(args.skipLinger);
-  const health = await healthCheckWithRetry("http://127.0.0.1:3001/api/health", {
-    attempts: 8,
-    delayMs: 500,
-  });
-  const defaultSkillSync =
-    health.ok
-      ? await ensureDefaultRuntimeSkillsWhenEmpty({ retries: 6, delayMs: 800 })
-      : {
-          attempted: false,
-          updated: false,
-          reason: "skipped (runtime health failed)",
-          skills: [],
-        };
+  const health = await healthCheckWithRetry(
+    "http://127.0.0.1:3001/api/health",
+    {
+      attempts: 8,
+      delayMs: 500,
+    },
+  );
+  const defaultSkillSync = health.ok
+    ? await ensureDefaultRuntimeSkillsWhenEmpty({ retries: 6, delayMs: 800 })
+    : {
+        attempted: false,
+        updated: false,
+        reason: "skipped (runtime health failed)",
+        skills: [],
+      };
   const verify = await runPostInstallVerification();
   let onboarding = null;
   if (mode === "install" && !args.yes) {
@@ -2165,12 +3273,14 @@ async function installOrUpdate(args, mode) {
     rootDir: paths.rootDir,
     registryUrl: args.registryUrl,
     agentMockingbirdVersion: readInstalledVersion(paths),
+    executorVersion: readInstalledExecutorVersion(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
     runtimeMode: agentMockingbirdRuntime.mode,
+    executorMode: executorRuntime.mode,
     shimPath,
     opencodeShimPath,
     pathSetup,
-    units: [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
+    units: [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
     runtimeAssets: {
       workspace: workspaceRuntimeAssets,
       opencodeConfig: opencodeRuntimeAssets,
@@ -2184,9 +3294,13 @@ async function installOrUpdate(args, mode) {
 }
 
 async function status(args) {
-  const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
+  const paths = pathsFor({
+    rootDir: args.rootDir,
+    scope: args.scope,
+    userUnitDir: USER_UNIT_DIR,
+  });
   const unitStates = {};
-  for (const unit of [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]) {
+  for (const unit of [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]) {
     const result = shell("systemctl", ["--user", "is-active", unit]);
     unitStates[unit] = result.code === 0 ? result.stdout.trim() : "inactive";
   }
@@ -2196,6 +3310,8 @@ async function status(args) {
     mode: "status",
     rootDir: paths.rootDir,
     agentMockingbirdVersion: readInstalledVersion(paths),
+    executorVersion: readInstalledExecutorVersion(paths),
+    executorMode: readInstalledExecutorMode(paths),
     opencodeVersion: readInstalledOpenCodeVersion(paths),
     runtimeMode: readInstalledRuntimeMode(paths),
     unitStates,
@@ -2204,7 +3320,13 @@ async function status(args) {
 }
 
 function serviceCommand(action) {
-  must("systemctl", ["--user", action, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]);
+  must("systemctl", [
+    "--user",
+    action,
+    UNIT_EXECUTOR,
+    UNIT_OPENCODE,
+    UNIT_AGENT_MOCKINGBIRD,
+  ]);
 }
 
 async function manageService(args, action) {
@@ -2218,36 +3340,65 @@ async function manageService(args, action) {
 }
 
 async function uninstall(args) {
-  const paths = pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR });
+  const paths = pathsFor({
+    rootDir: args.rootDir,
+    scope: args.scope,
+    userUnitDir: USER_UNIT_DIR,
+  });
 
   if (args.purgeData && args.keepData) {
     throw new Error("Choose only one of --purge-data or --keep-data.");
   }
 
   if (!args.yes && process.stdin.isTTY && process.stdout.isTTY) {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const answer = (await rl.question(`Remove user services at ${paths.rootDir}? [y/N] `)).trim().toLowerCase();
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    const answer = (
+      await rl.question(`Remove user services at ${paths.rootDir}? [y/N] `)
+    )
+      .trim()
+      .toLowerCase();
     if (answer !== "y" && answer !== "yes") {
       rl.close();
       throw new Error("Aborted by user.");
     }
-    const purgeAnswer = (await rl.question("Purge data/workspace under ~/.agent-mockingbird/data and ~/.agent-mockingbird/workspace? [y/N] ")).trim().toLowerCase();
+    const purgeAnswer = (
+      await rl.question(
+        "Purge data/workspaces under ~/.agent-mockingbird/data, ~/.agent-mockingbird/workspace, and ~/.agent-mockingbird/executor-workspace? [y/N] ",
+      )
+    )
+      .trim()
+      .toLowerCase();
     args.purgeData = purgeAnswer === "y" || purgeAnswer === "yes";
     rl.close();
   } else if (!args.yes) {
-    throw new Error("Uninstall requires confirmation. Re-run with --yes in non-interactive environments.");
+    throw new Error(
+      "Uninstall requires confirmation. Re-run with --yes in non-interactive environments.",
+    );
   }
 
   if (args.yes && !args.purgeData) {
     args.keepData = true;
   }
 
-  shell("systemctl", ["--user", "disable", "--now", UNIT_AGENT_MOCKINGBIRD, UNIT_OPENCODE]);
+  shell("systemctl", [
+    "--user",
+    "disable",
+    "--now",
+    UNIT_AGENT_MOCKINGBIRD,
+    UNIT_OPENCODE,
+    UNIT_EXECUTOR,
+  ]);
   if (fs.existsSync(paths.agentMockingbirdUnitPath)) {
     fs.rmSync(paths.agentMockingbirdUnitPath, { force: true });
   }
   if (fs.existsSync(paths.opencodeUnitPath)) {
     fs.rmSync(paths.opencodeUnitPath, { force: true });
+  }
+  if (fs.existsSync(paths.executorUnitPath)) {
+    fs.rmSync(paths.executorUnitPath, { force: true });
   }
   shell("systemctl", ["--user", "daemon-reload"]);
   const removedShim = removeAgentMockingbirdShim(paths);
@@ -2258,7 +3409,12 @@ async function uninstall(args) {
       fs.rmSync(paths.rootDir, { recursive: true, force: true });
     }
   } else {
-    const preserve = [paths.dataDir, paths.workspaceDir, paths.logsDir];
+    const preserve = [
+      paths.dataDir,
+      paths.workspaceDir,
+      paths.executorWorkspaceDir,
+      paths.logsDir,
+    ];
     for (const target of preserve) {
       ensureDir(target);
     }
@@ -2273,7 +3429,7 @@ async function uninstall(args) {
   return {
     mode: "uninstall",
     rootDir: paths.rootDir,
-    unitsRemoved: [UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
+    unitsRemoved: [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
     removedShim,
     removedOpencodeShim,
     removed: true,
@@ -2292,24 +3448,44 @@ function printResult(result, asJson) {
     console.log(`${result.mode} complete`);
     console.log(`root: ${result.rootDir}`);
     console.log(`registry: ${result.registryUrl}`);
-    console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "unknown"}`);
+    console.log(
+      `agent-mockingbird: ${result.agentMockingbirdVersion ?? "unknown"}`,
+    );
+    console.log(`executor: ${result.executorVersion ?? "unknown"}`);
+    console.log(`executor-mode: ${result.executorMode ?? "unknown"}`);
     console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "unknown"}`);
     console.log(`cli: ${result.shimPath ?? "unavailable"}`);
     if (result.opencodeShimPath) {
       console.log(`opencode-cli: ${result.opencodeShimPath}`);
     }
+    if (result.commandResolution) {
+      console.log(`managed-root: ${result.commandResolution.rootDir}`);
+      console.log(`managed-cli: ${result.commandResolution.managedCliPath || "unavailable"}`);
+      console.log(`command: ${result.commandResolution.commandPath || "unresolved"}`);
+      console.log(`command-mode: ${result.commandResolution.mode}`);
+    }
     if (result.pathSetup) {
       if (result.pathSetup.inPath) {
         console.log(`path: ${localBinDir} already in PATH`);
       } else if (result.pathSetup.updatedFiles?.length > 0) {
-        console.log(`path: added ${localBinDir} to ${result.pathSetup.updatedFiles.join(", ")}`);
+        console.log(
+          `path: added ${localBinDir} to ${result.pathSetup.updatedFiles.join(", ")}`,
+        );
       } else {
-        console.log(`path: add ${localBinDir} to PATH, then restart your shell`);
+        console.log(
+          `path: add ${localBinDir} to PATH, then restart your shell`,
+        );
       }
     }
-    for (const [name, assetResult] of Object.entries(result.runtimeAssets ?? {})) {
-      if (!assetResult || typeof assetResult !== "object" || !("target" in assetResult)) {
+    for (const [name, assetResult] of Object.entries(
+      result.runtimeAssets ?? {},
+    )) {
+      if (
+        !assetResult ||
+        typeof assetResult !== "object" ||
+        !("target" in assetResult)
+      ) {
         continue;
       }
       console.log(`runtime-assets:${name}: source ${assetResult.source}`);
@@ -2318,42 +3494,71 @@ function printResult(result, asJson) {
         `runtime-assets:${name}: copied=${assetResult.copied}, overwritten=${assetResult.overwritten}, unchanged=${assetResult.unchanged}, keptLocal=${assetResult.keptLocal}, conflicts=${assetResult.conflicts}`,
       );
       if (assetResult.backupsCreated > 0) {
-        console.log(`runtime-assets:${name}: backups created=${assetResult.backupsCreated}`);
+        console.log(
+          `runtime-assets:${name}: backups created=${assetResult.backupsCreated}`,
+        );
       }
     }
     if (result.defaultSkillSync?.attempted) {
       if (result.defaultSkillSync.updated) {
-        console.log(`skills: enabled defaults (${result.defaultSkillSync.skills.join(", ")})`);
+        console.log(
+          `skills: enabled defaults (${result.defaultSkillSync.skills.join(", ")})`,
+        );
       } else {
         console.log(`skills: ${result.defaultSkillSync.reason}`);
       }
     }
-    console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
+    console.log(
+      `health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`,
+    );
     if (result.linger.warning) {
       console.log(`linger: ${result.linger.warning}`);
     } else if (result.linger.changed) {
       console.log("linger: enabled");
     }
     if (result.verify) {
-      console.log(`verify: agent-mockingbird.service=${result.verify.agentMockingbirdServiceOk ? "ok" : "failed"}`);
-      console.log(`verify: opencode.service=${result.verify.opencodeServiceOk ? "ok" : "failed"}`);
+      console.log(
+        `verify: agent-mockingbird.service=${result.verify.agentMockingbirdServiceOk ? "ok" : "failed"}`,
+      );
+      console.log(
+        `verify: executor.service=${result.verify.executorServiceOk ? "ok" : "failed"}`,
+      );
+      console.log(
+        `verify: opencode.service=${result.verify.opencodeServiceOk ? "ok" : "failed"}`,
+      );
       console.log(`verify: linger=${result.verify.lingerOk ? "yes" : "no"}`);
-      console.log(`verify: frontend-assets=${result.verify.frontendAssetsOk ? "ok" : "failed"}`);
-      if (result.verify.frontendAssets?.cssUrl) {
-        console.log(`verify: frontend-css=${result.verify.frontendAssets.cssUrl}`);
+      console.log(
+        `verify: executor-gateway=${result.verify.embeddedExecutorOk ? "ok" : "failed"}`,
+      );
+      console.log(
+        `verify: executor-external-proxy=${result.verify.externalProxyOk ? "ok" : "failed"}`,
+      );
+      if (result.verify.embeddedExecutor?.cssUrl) {
+        console.log(
+          `verify: executor-css=${result.verify.embeddedExecutor.cssUrl}`,
+        );
       }
       if (
         !result.verify.agentMockingbirdServiceOk ||
+        !result.verify.executorServiceOk ||
         !result.verify.opencodeServiceOk ||
         !result.verify.lingerOk ||
-        !result.verify.frontendAssetsOk
+        !result.verify.embeddedExecutorOk ||
+        !result.verify.externalProxyOk
       ) {
         console.log("verify-details:");
-        console.log(result.verify.commandOutput.agentMockingbirdStatus || "(no output)");
-        console.log(result.verify.commandOutput.opencodeStatus || "(no output)");
+        console.log(
+          result.verify.commandOutput.agentMockingbirdStatus || "(no output)",
+        );
+        console.log(
+          result.verify.commandOutput.executorStatus || "(no output)",
+        );
+        console.log(
+          result.verify.commandOutput.opencodeStatus || "(no output)",
+        );
         console.log(result.verify.commandOutput.linger || "(no output)");
-        if (result.verify.frontendAssets?.error) {
-          console.log(result.verify.frontendAssets.error);
+        if (result.verify.embeddedExecutor?.error) {
+          console.log(result.verify.embeddedExecutor.error);
         }
       }
     }
@@ -2361,24 +3566,38 @@ function printResult(result, asJson) {
       if (result.onboarding.status === "completed") {
         console.log(`onboarding: completed (${result.onboarding.flow})`);
         if (result.onboarding.authAttempts > 0) {
-          console.log(`onboarding: provider auth attempts=${result.onboarding.authAttempts} success=${result.onboarding.authSuccess ? "yes" : "no"}`);
+          console.log(
+            `onboarding: provider auth attempts=${result.onboarding.authAttempts} success=${result.onboarding.authSuccess ? "yes" : "no"}`,
+          );
           if (result.onboarding.authRefresh) {
-            console.log(`onboarding: auth refresh=${result.onboarding.authRefresh.ok ? "ok" : "skipped/failed"}`);
+            console.log(
+              `onboarding: auth refresh=${result.onboarding.authRefresh.ok ? "ok" : "skipped/failed"}`,
+            );
           }
         }
         if (result.onboarding.selectedModel) {
-          console.log(`onboarding: default model=${result.onboarding.selectedModel}`);
+          console.log(
+            `onboarding: default model=${result.onboarding.selectedModel}`,
+          );
         }
         if (result.onboarding.memoryEmbedding) {
           if (result.onboarding.memoryEmbedding.configured === false) {
-            console.log(`onboarding: memory embeddings=skipped (${result.onboarding.memoryEmbedding.reason ?? "not-configured"})`);
+            console.log(
+              `onboarding: memory embeddings=skipped (${result.onboarding.memoryEmbedding.reason ?? "not-configured"})`,
+            );
           } else {
-            console.log(`onboarding: memory enabled=${result.onboarding.memoryEmbedding.enabled ? "yes" : "no"}`);
+            console.log(
+              `onboarding: memory enabled=${result.onboarding.memoryEmbedding.enabled ? "yes" : "no"}`,
+            );
             if (result.onboarding.memoryEmbedding.ollamaBaseUrl) {
-              console.log(`onboarding: memory ollama=${result.onboarding.memoryEmbedding.ollamaBaseUrl}`);
+              console.log(
+                `onboarding: memory ollama=${result.onboarding.memoryEmbedding.ollamaBaseUrl}`,
+              );
             }
             if (result.onboarding.memoryEmbedding.embedModel) {
-              console.log(`onboarding: memory embedModel=${result.onboarding.memoryEmbedding.embedModel}`);
+              console.log(
+                `onboarding: memory embedModel=${result.onboarding.memoryEmbedding.embedModel}`,
+              );
             }
           }
         }
@@ -2401,7 +3620,9 @@ function printResult(result, asJson) {
     console.log(`root: ${result.rootDir}`);
     console.log(`registry: ${result.registryUrl}`);
     console.log(`target: ${result.target}`);
-    console.log(`precheck: npm=${result.precheck.npm ? "ok" : "missing"}, systemd-user=${result.precheck.systemdUser ? "ok" : "missing"}, bun=${result.precheck.bunPresent ? "present" : "will-install"}`);
+    console.log(
+      `precheck: npm=${result.precheck.npm ? "ok" : "missing"}, systemd-user=${result.precheck.systemdUser ? "ok" : "missing"}, bun=${result.precheck.bunVersionMatch ? `bun@${result.precheck.bunExpectedVersion}` : result.precheck.bunPresent ? `bun@${result.precheck.bunActualVersion} -> install bun@${result.precheck.bunExpectedVersion}` : `missing -> install bun@${result.precheck.bunExpectedVersion}`}`,
+    );
     console.log("planned actions:");
     for (const action of result.actions) {
       console.log(`- ${action}`);
@@ -2416,29 +3637,65 @@ function printResult(result, asJson) {
   if (result.mode === "status") {
     console.log("status");
     console.log(`root: ${result.rootDir}`);
-    console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`);
+    console.log(
+      `agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`,
+    );
+    console.log(`executor: ${result.executorVersion ?? "not installed"}`);
+    console.log(`executor-mode: ${result.executorMode ?? "unknown"}`);
     console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
-    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
-    console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
+    console.log(
+      `units: ${UNIT_EXECUTOR}=${result.unitStates[UNIT_EXECUTOR]}, ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`,
+    );
+    console.log(
+      `health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`,
+    );
+    if (result.commandResolution) {
+      console.log(`managed-root: ${result.commandResolution.rootDir}`);
+      console.log(`managed-cli: ${result.commandResolution.managedCliPath || "unavailable"}`);
+      console.log(`command: ${result.commandResolution.commandPath || "unresolved"}`);
+      console.log(`command-mode: ${result.commandResolution.mode}`);
+    }
     return;
   }
 
-  if (result.mode === "restart" || result.mode === "start" || result.mode === "stop") {
+  if (
+    result.mode === "restart" ||
+    result.mode === "start" ||
+    result.mode === "stop"
+  ) {
     console.log(`${result.mode} complete`);
     console.log(`root: ${result.rootDir}`);
-    console.log(`agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`);
+    console.log(
+      `agent-mockingbird: ${result.agentMockingbirdVersion ?? "not installed"}`,
+    );
+    console.log(`executor: ${result.executorVersion ?? "not installed"}`);
+    console.log(`executor-mode: ${result.executorMode ?? "unknown"}`);
     console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
-    console.log(`units: ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`);
-    console.log(`health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`);
+    console.log(
+      `units: ${UNIT_EXECUTOR}=${result.unitStates[UNIT_EXECUTOR]}, ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`,
+    );
+    console.log(
+      `health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`,
+    );
+    if (result.commandResolution) {
+      console.log(`managed-root: ${result.commandResolution.rootDir}`);
+      console.log(`managed-cli: ${result.commandResolution.managedCliPath || "unavailable"}`);
+      console.log(`command: ${result.commandResolution.commandPath || "unresolved"}`);
+      console.log(`command-mode: ${result.commandResolution.mode}`);
+    }
     return;
   }
 
   if (result.mode === "uninstall") {
-    console.log(`uninstall complete: ${result.purgeData ? `removed ${result.rootDir}` : `removed services/runtime, kept data in ${result.rootDir}`}`);
+    console.log(
+      `uninstall complete: ${result.purgeData ? `removed ${result.rootDir}` : `removed services/runtime, kept data in ${result.rootDir}`}`,
+    );
     console.log(`cli shim removed: ${result.removedShim ? "yes" : "no"}`);
-    console.log(`opencode shim removed: ${result.removedOpencodeShim ? "yes" : "no"}`);
+    console.log(
+      `opencode shim removed: ${result.removedOpencodeShim ? "yes" : "no"}`,
+    );
     return;
   }
 
@@ -2446,9 +3703,13 @@ function printResult(result, asJson) {
     if (result.onboarding?.status === "completed") {
       console.log("onboard complete");
       if (result.onboarding.authAttempts > 0) {
-        console.log(`provider auth attempts: ${result.onboarding.authAttempts}`);
+        console.log(
+          `provider auth attempts: ${result.onboarding.authAttempts}`,
+        );
         if (result.onboarding.authRefresh) {
-          console.log(`provider auth refresh: ${result.onboarding.authRefresh.ok ? "ok" : "skipped/failed"}`);
+          console.log(
+            `provider auth refresh: ${result.onboarding.authRefresh.ok ? "ok" : "skipped/failed"}`,
+          );
         }
       }
       if (result.onboarding.selectedModel) {
@@ -2456,32 +3717,48 @@ function printResult(result, asJson) {
       }
       if (result.onboarding.memoryEmbedding) {
         if (result.onboarding.memoryEmbedding.configured === false) {
-          console.log(`memory embeddings: skipped (${result.onboarding.memoryEmbedding.reason ?? "not-configured"})`);
+          console.log(
+            `memory embeddings: skipped (${result.onboarding.memoryEmbedding.reason ?? "not-configured"})`,
+          );
         } else {
-          console.log(`memory enabled: ${result.onboarding.memoryEmbedding.enabled ? "yes" : "no"}`);
+          console.log(
+            `memory enabled: ${result.onboarding.memoryEmbedding.enabled ? "yes" : "no"}`,
+          );
           if (result.onboarding.memoryEmbedding.ollamaBaseUrl) {
-            console.log(`memory ollama: ${result.onboarding.memoryEmbedding.ollamaBaseUrl}`);
+            console.log(
+              `memory ollama: ${result.onboarding.memoryEmbedding.ollamaBaseUrl}`,
+            );
           }
           if (result.onboarding.memoryEmbedding.embedModel) {
-            console.log(`memory embedModel: ${result.onboarding.memoryEmbedding.embedModel}`);
+            console.log(
+              `memory embedModel: ${result.onboarding.memoryEmbedding.embedModel}`,
+            );
           }
         }
       }
       if (result.onboarding.openclawMigration) {
         const migration = result.onboarding.openclawMigration;
-        if (migration.attempted && !migration.skipped && migration.migration?.summary) {
+        if (
+          migration.attempted &&
+          !migration.skipped &&
+          migration.migration?.summary
+        ) {
           console.log("openclaw migration: completed");
           const summary = migration.migration.summary;
           console.log(
             `openclaw summary: discovered=${summary.discovered ?? 0}, copied=${summary.copied ?? 0}, merged=${summary.merged ?? 0}, skippedExisting=${summary.skippedExisting ?? 0}, skippedIdentical=${summary.skippedIdentical ?? 0}, skippedProtected=${summary.skippedProtected ?? 0}, failed=${summary.failed ?? 0}`,
           );
           if (migration.memorySync?.attempted) {
-            console.log(`openclaw memory sync: ${migration.memorySync.completed ? "completed" : "failed"}`);
+            console.log(
+              `openclaw memory sync: ${migration.memorySync.completed ? "completed" : "failed"}`,
+            );
           }
         } else if (migration.error) {
           console.log(`openclaw migration: failed (${migration.error})`);
         } else {
-          console.log(`openclaw migration: skipped (${migration.reason ?? "not-requested"})`);
+          console.log(
+            `openclaw migration: skipped (${migration.reason ?? "not-requested"})`,
+          );
         }
       }
       return;
@@ -2506,11 +3783,14 @@ function printResult(result, asJson) {
 
 function evaluateResult(result) {
   const isActive =
-    result?.unitStates?.[UNIT_OPENCODE] === "active" && result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] === "active";
+    result?.unitStates?.[UNIT_EXECUTOR] === "active" &&
+    result?.unitStates?.[UNIT_OPENCODE] === "active" &&
+    result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] === "active";
   if (result.mode === "install" || result.mode === "update") {
     if (
       !result.health?.ok ||
       !result.verify?.agentMockingbirdServiceOk ||
+      !result.verify?.executorServiceOk ||
       !result.verify?.opencodeServiceOk ||
       !result.verify?.frontendAssetsOk
     ) {
@@ -2518,7 +3798,11 @@ function evaluateResult(result) {
     }
     return 0;
   }
-  if (result.mode === "status" || result.mode === "restart" || result.mode === "start") {
+  if (
+    result.mode === "status" ||
+    result.mode === "restart" ||
+    result.mode === "start"
+  ) {
     return isActive && result.health?.ok ? 0 : 2;
   }
   if (result.mode === "update-dry-run") {
@@ -2526,7 +3810,9 @@ function evaluateResult(result) {
   }
   if (result.mode === "stop") {
     const stopped =
-      result?.unitStates?.[UNIT_OPENCODE] !== "active" && result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] !== "active";
+      result?.unitStates?.[UNIT_EXECUTOR] !== "active" &&
+      result?.unitStates?.[UNIT_OPENCODE] !== "active" &&
+      result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] !== "active";
     return stopped ? 0 : 2;
   }
   if (result.mode === "onboard") {
@@ -2540,7 +3826,9 @@ async function main() {
   if (!args.command || args.command === "help") {
     printHelp();
     if (!args.command) {
-      console.log("\nHint: run `agent-mockingbird status` to check service health.");
+      console.log(
+        "\nHint: run `agent-mockingbird status` to check service health.",
+      );
     }
     return;
   }
@@ -2548,21 +3836,29 @@ async function main() {
   let result;
   if (args.command === "install") {
     if (args.dryRun) {
-      throw new Error("--dry-run is supported for `agent-mockingbird update` only.");
+      throw new Error(
+        "--dry-run is supported for `agent-mockingbird update` only.",
+      );
     }
     result = await installOrUpdate(args, "install");
   } else if (args.command === "update") {
     if (args.dryRun) {
       result = buildUpdateDryRun({
         args,
-        paths: pathsFor({ rootDir: args.rootDir, scope: args.scope, userUnitDir: USER_UNIT_DIR }),
+        paths: pathsFor({
+          rootDir: args.rootDir,
+          scope: args.scope,
+          userUnitDir: USER_UNIT_DIR,
+        }),
       });
     } else {
       result = await installOrUpdate(args, "update");
     }
   } else if (args.command === "onboard") {
     if (args.dryRun) {
-      throw new Error("--dry-run is not applicable to `agent-mockingbird onboard`.");
+      throw new Error(
+        "--dry-run is not applicable to `agent-mockingbird onboard`.",
+      );
     }
     result = await runOnboardingCommand(args);
   } else if (args.command === "status") {
@@ -2576,9 +3872,23 @@ async function main() {
   } else if (args.command === "uninstall") {
     result = await uninstall(args);
   } else if (args.command === "import-openclaw-legacy") {
-    throw new Error("`agent-mockingbird import openclaw ...` is deprecated. Use `agent-mockingbird onboard` and pick the OpenClaw flow.");
+    throw new Error(
+      "`agent-mockingbird import openclaw ...` is deprecated. Use `agent-mockingbird onboard` and pick the OpenClaw flow.",
+    );
   } else {
     throw new Error(`Unknown command: ${args.command}`);
+  }
+
+  if (
+    result &&
+    typeof result === "object" &&
+    "rootDir" in result &&
+    typeof result.rootDir === "string"
+  ) {
+    result.commandResolution = collectCommandResolution({
+      rootDir: result.rootDir,
+      scope: args.scope,
+    });
   }
 
   printResult(result, args.json);
@@ -2586,7 +3896,7 @@ async function main() {
 }
 
 if (import.meta.main) {
-  await main().catch(error => {
+  await main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   });

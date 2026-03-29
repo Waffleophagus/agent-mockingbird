@@ -609,7 +609,7 @@ const agentTypeManagerTool = tool({
 
 const configManagerTool = tool({
   description:
-    "Read or update Agent Mockingbird managed config through validated APIs with hash conflict detection and optional smoke tests.",
+    "Read or update Agent Mockingbird managed config through validated APIs with hash conflict detection and optional smoke tests. MCP state is exposed in get_config under effective.mcp and is sourced from managed OpenCode config.",
   args: {
     action: z.enum(["get_config", "patch_config", "replace_config"]),
     patch: z.unknown().optional(),

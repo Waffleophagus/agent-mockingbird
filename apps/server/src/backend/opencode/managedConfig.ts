@@ -71,6 +71,43 @@ export function readManagedOpencodeConfig(
   return parseManagedConfig(readManagedConfigFile(config));
 }
 
+function buildExecutorMcpConfig(config: AgentMockingbirdConfig) {
+  const baseUrl = config.runtime.executor.baseUrl.replace(/\/+$/, "");
+  const rawMountPath = config.runtime.executor.uiMountPath.trim();
+  const mountPath =
+    !rawMountPath || rawMountPath === "/"
+      ? ""
+      : `/${rawMountPath.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+  return {
+    type: "remote",
+    enabled: config.runtime.executor.enabled,
+    url: `${baseUrl}${mountPath}/mcp`,
+  };
+}
+
+export async function ensureExecutorMcpServerConfigured(
+  config: AgentMockingbirdConfig,
+): Promise<ConfigLike> {
+  const current = readManagedConfigFile(config);
+  const parsed = parseManagedConfig(current);
+  const desired = buildExecutorMcpConfig(config);
+  const currentExecutor = isPlainObject(parsed.mcp) && isPlainObject(parsed.mcp.executor) ? parsed.mcp.executor : null;
+
+  if (
+    currentExecutor &&
+    currentExecutor.type === desired.type &&
+    currentExecutor.enabled === desired.enabled &&
+    currentExecutor.url === desired.url
+  ) {
+    return parsed;
+  }
+
+  const next = patchJsoncField(current, desired, ["mcp", "executor"]);
+  writeManagedConfigFile(config, next);
+  await disposeManagedOpencodeInstance(config);
+  return parseManagedConfig(next);
+}
+
 export async function replaceManagedOpencodeField(
   config: AgentMockingbirdConfig,
   fieldPath: string[],

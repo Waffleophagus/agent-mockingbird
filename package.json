@@ -12,8 +12,35 @@
     "type": "git",
     "url": "https://github.com/Waffleophagus/agent-mockingbird"
   },
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "agent-mockingbird.config.example.json",
+    "apps",
+    "bin",
+    "build-bin.ts",
+    "build-cli.mjs",
+    "build.ts",
+    "docs",
+    "drizzle",
+    "executor.lock.json",
+    "opencode.lock.json",
+    "package.json",
+    "packages",
+    "patches",
+    "runtime-assets",
+    "scripts",
+    "tsconfig.json",
+    "turbo.json",
+    "vendor/executor"
+  ],
   "bin": {
     "agent-mockingbird": "bin/agent-mockingbird"
+  },
+  "agentMockingbirdInstall": {
+    "opencodeVersion": "1.2.27",
+    "executorVersion": "1.2.5"
   },
   "workspaces": [
     "apps/*",
@@ -24,6 +51,7 @@
     "setup:hooks": "bun run ./scripts/setup-git-hooks.ts",
     "check:ship": "bun run ./scripts/check-ship.ts",
     "opencode:sync": "bun run ./scripts/opencode-sync.ts",
+    "executor:sync": "bun run ./scripts/executor-sync.ts",
     "opencode:swap": "bun run ./scripts/opencode-swap.ts",
     "dev": "turbo run dev --filter=@agent-mockingbird/server",
     "dev:opencode": "bash scripts/dev-opencode.sh",

@@ -2,6 +2,9 @@
 
 # Agent Mockingbird
 
+> ⚠️ **WARNING: Not Production Ready**
+> This project is currently in early development and is **not quite ready** for general use. It may receive **breaking changes** at any time as we iterate on the design and architecture. Use at your own risk!
+
 Agent Mockingbird is a personal assistant built around OpenCode. It gives you a long-running local agent with persistent memory, scheduled jobs, workspace bootstrap context, and a web API/UI layer for managing runs and configuration.
 
 As OpenClaw is to Pi, the goal is that Agent Mockingbird will be to OpenCode.
@@ -40,7 +43,9 @@ bun install -g agent-mockingbird
 agent-mockingbird install
 ```
 
-`agent-mockingbird install` provisions and starts the `opencode` and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
+The npm/Bun global `agent-mockingbird` command is a bootstrap wrapper. On first install it creates the managed runtime under `~/.agent-mockingbird`, then future `agent-mockingbird` commands delegate into that managed install regardless of npm global prefix or PATH ordering.
+
+`agent-mockingbird install` provisions and starts the `executor`, `opencode`, and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
 
 If you are working from source:
 
@@ -110,9 +115,28 @@ Agent Mockingbird can inject workspace markdown context files into runtime syste
 - `BOOTSTRAP.md`
 - `MEMORY.md`
 
-## Current State
+## FAQ
 
-This is a non-production personal project. Breaking changes are acceptable, internal systems can be refactored aggressively, and the README should be read as a guide to the current shape of the project rather than a long-term compatibility promise.
+<details>
+<summary><b>Isn't your UI just Opencode's UI with some patches to <em>remove</em> things?</b></summary>
+
+Yes! I'm not gonna lie, I suck at UI and Opencode's webUI is kinda awesome. My thought process is that Opencode is made for developers though, and Agent Mockingbird is designed for everyone. So my goal is to remove things that won't be super useful for non-developers. There's a roadmap item (in my brain) to enable all the Opencode functionality back again.
+
+</details>
+
+<details>
+<summary><b>Aren't you just taking multiple projects and shoving them together and calling it something special?</b></summary>
+
+Yep!
+
+</details>
+
+<details>
+<summary><b>The way you're doing patches is insanely dumb.</b></summary>
+
+Not really a question... but I wanted to see how this would work. My thought process is this, in the long run, will be easier to maintain the integrated solutions. I could be wrong and give up on this process next week, but for now it's working.
+
+</details>
 
 ## Development
 
@@ -143,10 +167,22 @@ bun run opencode:sync --check
 
 The repo treats `cleanroom/opencode` as a pristine upstream clone, `vendor/opencode` as the editable worktree, and `patches/opencode/*.patch` as the tracked patch stack.
 
+Executor source workflow:
+
+```bash
+bun run executor:sync --status
+bun run executor:sync --rebuild-only
+bun run executor:sync --check
+bun run executor:sync --ref vX.Y.Z
+```
+
+The repo treats `cleanroom/executor` as a pristine upstream clone, `vendor/executor` as the editable worktree, and `patches/executor/*.patch` as the tracked patch stack.
+
 ## Docs And References
 
 - `docs/memory-ops.md`
 - `docs/memory-runtime-contract.md`
+- `docs/vendor-executor.md`
 - `docs/vendor-opencode.md`
 - `docs/opencode-rebase-workflow-plan.md`
 - `docs/opencode-startup-sync-plan.md`

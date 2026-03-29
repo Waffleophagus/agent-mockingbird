@@ -688,10 +688,29 @@ function gitOutput(cwd: string, args: string[]) {
   return run(["git", ...args], cwd).stdout;
 }
 
+function sanitizedEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...baseEnv };
+  for (const key of Object.keys(env)) {
+    if (
+      key === "GIT_DIR" ||
+      key === "GIT_WORK_TREE" ||
+      key === "GIT_INDEX_FILE" ||
+      key === "GIT_OBJECT_DIRECTORY" ||
+      key === "GIT_ALTERNATE_OBJECT_DIRECTORIES" ||
+      key === "GIT_COMMON_DIR" ||
+      key === "GIT_PREFIX" ||
+      key === "GIT_SUPER_PREFIX"
+    ) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 function run(command: string[], cwd: string, options: ExecOptions = {}) {
   const result = spawnSync(command[0], command.slice(1), {
     cwd: options.cwd ?? cwd,
-    env: options.env ?? process.env,
+    env: sanitizedEnv(options.env ?? process.env),
     encoding: "utf8",
   });
   if (result.status !== 0 && !options.allowFailure) {

@@ -1,20 +1,27 @@
 #!/usr/bin/env bun
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import process from "node:process";
 
 const { console } = globalThis;
 
 const repoRoot = import.meta.dir;
 const src = path.join(repoRoot, "apps", "server", "src", "cli", "agent-mockingbird.mjs");
+const bootstrapSrc = path.join(repoRoot, "apps", "server", "src", "cli", "agent-mockingbird-bootstrap.mjs");
 const runtimeAssetsSrc = path.join(repoRoot, "apps", "server", "src", "cli", "runtime-assets.mjs");
 const runtimeLayoutSrc = path.join(repoRoot, "apps", "server", "src", "cli", "runtime-layout.mjs");
 const outDir = path.join(repoRoot, "bin");
 const out = path.join(outDir, "agent-mockingbird");
+const managedOut = path.join(outDir, "agent-mockingbird-managed");
 const runtimeAssetsOut = path.join(outDir, "runtime-assets.mjs");
 const runtimeLayoutOut = path.join(outDir, "runtime-layout.mjs");
 
 if (!existsSync(src)) {
   console.error(`Missing CLI source: ${src}`);
+  process.exit(1);
+}
+if (!existsSync(bootstrapSrc)) {
+  console.error(`Missing bootstrap CLI source: ${bootstrapSrc}`);
   process.exit(1);
 }
 if (!existsSync(runtimeAssetsSrc)) {
@@ -27,11 +34,14 @@ if (!existsSync(runtimeLayoutSrc)) {
 }
 
 mkdirSync(outDir, { recursive: true });
-copyFileSync(src, out);
+copyFileSync(bootstrapSrc, out);
+copyFileSync(src, managedOut);
 copyFileSync(runtimeAssetsSrc, runtimeAssetsOut);
 copyFileSync(runtimeLayoutSrc, runtimeLayoutOut);
 chmodSync(out, 0o755);
+chmodSync(managedOut, 0o755);
 
-console.log(`Built CLI: ${out}`);
+console.log(`Built bootstrap CLI: ${out}`);
+console.log(`Built managed CLI: ${managedOut}`);
 console.log(`Built CLI helper: ${runtimeAssetsOut}`);
 console.log(`Built CLI helper: ${runtimeLayoutOut}`);

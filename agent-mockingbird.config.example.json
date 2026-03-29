@@ -24,6 +24,22 @@
         "includeAgentPrompt": true
       }
     },
+    "executor": {
+      "enabled": true,
+      "baseUrl": "http://127.0.0.1:8788",
+      "workspaceDir": "./data/executor-workspace",
+      "dataDir": "./data/executor",
+      "uiMountPath": "/executor"
+    },
+    "embeddedServices": {
+      "executor": {
+        "enabled": true,
+        "mountPath": "/executor",
+        "baseUrl": "http://127.0.0.1:8788",
+        "healthcheckPath": "/executor",
+        "mode": "embedded-patched"
+      }
+    },
     "smokeTest": {
       "prompt": "Just respond \"OK\" to this to confirm the gateway is working.",
       "expectedResponsePattern": "\\bok\\b"
@@ -96,13 +112,13 @@
         "runtime.opencode.runWaitTimeoutMs",
         "runtime.opencode.childSessionHideAfterDays",
         "runtime.opencode.bootstrap",
+        "runtime.executor",
+        "runtime.embeddedServices",
         "runtime.runStream",
         "runtime.memory",
         "runtime.heartbeat",
         "runtime.cron",
         "ui.skills",
-        "ui.mcps",
-        "ui.mcpServers",
         "ui.agents",
         "ui.agentTypes"
       ],

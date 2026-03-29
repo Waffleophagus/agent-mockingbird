@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { migrateOpenclawWorkspace } from "../../agents/openclawImport";
@@ -16,6 +17,7 @@ import {
   setEnabledSkillsFromCatalog,
 } from "../../config/orchestration";
 import { configuredMcpServerSchema } from "../../config/schema";
+import { stableSerialize } from "../../config/serialization";
 import {
   applyConfigPatch,
   applyConfigPatchSafe,
@@ -26,17 +28,29 @@ import {
   type ApplyConfigResult,
 } from "../../config/service";
 import {
+  assertExpectedHashMatches,
+  persistConfigSnapshot,
+} from "../../config/store";
+import {
+  createConfigInvalidatedEvent,
   createConfigRolledBackEvent,
   createConfigUpdateFailedEvent,
   createConfigUpdatedEvent,
   createSkillsCatalogUpdatedEvent,
 } from "../../contracts/events";
+import { createLogger } from "../../logging/logger";
 import {
+  loadEffectiveMcpConfig,
   normalizeMcpIds,
-  resolveConfiguredMcpIds,
-  resolveConfiguredMcpServers,
+  serializeConfiguredMcpServersToOpencodeConfig,
 } from "../../mcp/service";
 import { syncMemoryIndex } from "../../memory/service";
+import {
+  ensureExecutorMcpServerConfigured,
+  patchManagedOpencodeConfig,
+  readManagedOpencodeConfig,
+  replaceManagedOpencodeField,
+} from "../../opencode/managedConfig";
 import { parseJsonWithSchema, parseStringListBody } from "../parsers";
 import type { RuntimeEventStream } from "../sse";
 
@@ -88,6 +102,22 @@ const configMcpsBodySchema = z
   })
   .strict();
 
+const logger = createLogger("config-routes");
+
+interface ConfigRouteDependencies {
+  ensureExecutorMcpServerConfigured: typeof ensureExecutorMcpServerConfigured;
+  persistConfigSnapshot: typeof persistConfigSnapshot;
+  readManagedOpencodeConfig: typeof readManagedOpencodeConfig;
+  replaceManagedOpencodeField: typeof replaceManagedOpencodeField;
+}
+
+const defaultConfigRouteDependencies: ConfigRouteDependencies = {
+  ensureExecutorMcpServerConfigured,
+  persistConfigSnapshot,
+  readManagedOpencodeConfig,
+  replaceManagedOpencodeField,
+};
+
 function toErrorResponse(error: unknown) {
   if (error instanceof ConfigApplyError) {
     if (error.stage === "conflict") {
@@ -109,7 +139,11 @@ function toErrorResponse(error: unknown) {
         },
       };
     }
-    if (error.stage === "semantic" || error.stage === "smoke" || error.stage === "policy") {
+    if (
+      error.stage === "semantic" ||
+      error.stage === "smoke" ||
+      error.stage === "policy"
+    ) {
       return {
         status: 422,
         body: {
@@ -144,36 +178,83 @@ function configErrorResponse(eventStream: RuntimeEventStream, error: unknown) {
   return Response.json(details.body, { status: details.status });
 }
 
-function publishConfigUpdatedEvent(eventStream: RuntimeEventStream, result: ApplyConfigResult) {
+function publishConfigUpdatedEvent(
+  eventStream: RuntimeEventStream,
+  input: {
+    hash: string;
+    path: string;
+    providerCount?: number;
+    modelCount?: number;
+    smokeTestSessionId?: string | null;
+    smokeTestResponse?: string | null;
+  },
+) {
   eventStream.publish(
     createConfigUpdatedEvent(
       {
-        hash: result.snapshot.hash,
-        path: result.snapshot.path,
-        providerCount: result.semantic.providerCount,
-        modelCount: result.semantic.modelCount,
-        smokeTestSessionId: result.smokeTest?.sessionId ?? null,
-        smokeTestResponse: result.smokeTest?.responseText ?? null,
+        hash: input.hash,
+        path: input.path,
+        providerCount: input.providerCount ?? 0,
+        modelCount: input.modelCount ?? 0,
+        smokeTestSessionId: input.smokeTestSessionId ?? null,
+        smokeTestResponse: input.smokeTestResponse ?? null,
       },
       "api",
     ),
   );
 }
 
-function publishConfigFailedEvent(eventStream: RuntimeEventStream, error: unknown) {
+function publishApplyConfigUpdatedEvent(
+  eventStream: RuntimeEventStream,
+  result: ApplyConfigResult,
+) {
+  publishConfigUpdatedEvent(eventStream, {
+    hash: result.snapshot.hash,
+    path: result.snapshot.path,
+    providerCount: result.semantic.providerCount,
+    modelCount: result.semantic.modelCount,
+    smokeTestSessionId: result.smokeTest?.sessionId ?? null,
+    smokeTestResponse: result.smokeTest?.responseText ?? null,
+  });
+}
+
+function publishConfigInvalidatedEvent(
+  eventStream: RuntimeEventStream,
+  snapshot: ReturnType<typeof getConfigSnapshot>,
+) {
+  eventStream.publish(
+    createConfigInvalidatedEvent(
+      {
+        hash: snapshot.hash,
+        path: snapshot.path,
+      },
+      "api",
+    ),
+  );
+}
+
+function publishConfigFailedEvent(
+  eventStream: RuntimeEventStream,
+  error: unknown,
+) {
   const details = toErrorResponse(error);
   eventStream.publish(
     createConfigUpdateFailedEvent(
       {
         stage: String((details.body as { stage?: unknown }).stage ?? "unknown"),
-        message: String((details.body as { error?: unknown }).error ?? "Config update failed"),
+        message: String(
+          (details.body as { error?: unknown }).error ?? "Config update failed",
+        ),
       },
       "api",
     ),
   );
 }
 
-function publishConfigRollbackEvent(eventStream: RuntimeEventStream, error: unknown) {
+function publishConfigRollbackEvent(
+  eventStream: RuntimeEventStream,
+  error: unknown,
+) {
   if (!(error instanceof ConfigApplyError)) return;
   if (error.stage !== "smoke" && error.stage !== "rollback") return;
   const details = (error.details ?? {}) as Record<string, unknown>;
@@ -181,8 +262,14 @@ function publishConfigRollbackEvent(eventStream: RuntimeEventStream, error: unkn
   eventStream.publish(
     createConfigRolledBackEvent(
       {
-        attemptedHash: typeof details.attemptedHash === "string" ? details.attemptedHash : null,
-        restoredHash: typeof details.restoredHash === "string" ? details.restoredHash : null,
+        attemptedHash:
+          typeof details.attemptedHash === "string"
+            ? details.attemptedHash
+            : null,
+        restoredHash:
+          typeof details.restoredHash === "string"
+            ? details.restoredHash
+            : null,
         message: error.message,
       },
       "api",
@@ -190,79 +277,226 @@ function publishConfigRollbackEvent(eventStream: RuntimeEventStream, error: unkn
   );
 }
 
+function hashManagedConfigSnapshot(value: unknown) {
+  return createHash("sha256").update(stableSerialize(value)).digest("hex");
+}
+
 async function respondWithConfigMutation(
   eventStream: RuntimeEventStream,
+  dependencies: ConfigRouteDependencies,
   run: () => Promise<ApplyConfigResult>,
   onSuccess: (result: ApplyConfigResult) => Response,
 ) {
   try {
+    const beforeSnapshot = getConfigSnapshot();
+    // Fresh installs or corrupted managed config files can legitimately omit
+    // `mcp`; downstream rollback treats an undefined snapshot as intentional.
+    const previousManagedConfig = dependencies.readManagedOpencodeConfig(
+      beforeSnapshot.config,
+    ) as {
+      mcp?: Record<string, unknown>;
+    };
+    // `executor` can also be undefined in those cases, and restoration writes
+    // that exact absence back without requiring an extra runtime guard here.
+    const previousExecutorMcp = previousManagedConfig.mcp?.executor;
     const result = await run();
-    publishConfigUpdatedEvent(eventStream, result);
+
+    if (
+      beforeSnapshot.config.runtime.executor.enabled !==
+        result.snapshot.config.runtime.executor.enabled ||
+      beforeSnapshot.config.runtime.executor.baseUrl !==
+        result.snapshot.config.runtime.executor.baseUrl ||
+      beforeSnapshot.config.runtime.executor.uiMountPath !==
+        result.snapshot.config.runtime.executor.uiMountPath
+    ) {
+      try {
+        await dependencies.ensureExecutorMcpServerConfigured(
+          result.snapshot.config,
+        );
+      } catch (error) {
+        const rollbackMessage =
+          error instanceof Error
+            ? error.message
+            : "Failed to reconcile executor MCP config";
+        const restorationErrors: string[] = [];
+        let restoredHash: string | null = null;
+        let restoredManagedConfigHash: string | null = null;
+
+        try {
+          restoredHash = dependencies.persistConfigSnapshot(
+            beforeSnapshot.path,
+            beforeSnapshot.config,
+          ).hash;
+        } catch (rollbackError) {
+          restorationErrors.push(
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : "Failed to restore config file",
+          );
+        }
+
+        try {
+          const restoredManagedConfig =
+            await dependencies.replaceManagedOpencodeField(
+              beforeSnapshot.config,
+              ["mcp", "executor"],
+              previousExecutorMcp,
+            );
+          restoredManagedConfigHash =
+            hashManagedConfigSnapshot(restoredManagedConfig);
+        } catch (rollbackError) {
+          restorationErrors.push(
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : "Failed to restore executor MCP config",
+          );
+        }
+
+        if (
+          (restoredHash === null) !== (restoredManagedConfigHash === null)
+        ) {
+          logger.warn("Executor config rollback only partially restored state", {
+            attemptedHash: result.snapshot.hash,
+            restoredConfigHash: restoredHash,
+            restoredManagedConfigHash,
+            originalError: rollbackMessage,
+            restorationErrors,
+            nonAtomicManagedConfigRestore: true,
+          });
+        }
+
+        const recoveryWarning =
+          "Executor config rollback crossed non-atomic config and managed-config writes";
+        const message =
+          restorationErrors.length > 0
+            ? `${rollbackMessage}; ${recoveryWarning}; ${restorationErrors.join("; ")}`
+            : rollbackMessage;
+        throw new ConfigApplyError("rollback", message, {
+          attemptedHash: result.snapshot.hash,
+          originalError: rollbackMessage,
+          originalErrors: [rollbackMessage],
+          restoredHash,
+          restoredHashes: {
+            config: restoredHash,
+            managedConfig: restoredManagedConfigHash,
+          },
+          restorationErrors,
+          recoveryWarning,
+          nonAtomicManagedConfigRestore: true,
+        });
+      }
+    }
+
+    publishApplyConfigUpdatedEvent(eventStream, result);
     return onSuccess(result);
   } catch (error) {
     return configErrorResponse(eventStream, error);
   }
 }
 
-function publishSkillsCatalogUpdated(eventStream: RuntimeEventStream, revision: string) {
+function publishSkillsCatalogUpdated(
+  eventStream: RuntimeEventStream,
+  revision: string,
+) {
   eventStream.publish(createSkillsCatalogUpdatedEvent({ revision }, "api"));
 }
 
-async function applyMcpConfigUpdate(eventStream: RuntimeEventStream, req: Request) {
+async function buildConfigPayload() {
+  const snapshot = getConfigSnapshot();
+  return {
+    ...snapshot,
+    effective: {
+      mcp: await loadEffectiveMcpConfig(snapshot.config),
+    },
+  };
+}
+
+async function applyMcpConfigUpdate(
+  eventStream: RuntimeEventStream,
+  req: Request,
+) {
   const parsedBody = await parseJsonWithSchema(req, configMcpsBodySchema);
   if (!parsedBody.ok) {
     return parsedBody.response;
   }
   const body = parsedBody.body;
-  const parsedServers = z.array(configuredMcpServerSchema).safeParse(body.servers);
+  const parsedServers = z
+    .array(configuredMcpServerSchema)
+    .safeParse(body.servers);
   if (parsedServers.success) {
     const servers = parsedServers.data;
-    const enabledIds = normalizeMcpIds(servers.filter(server => server.enabled).map(server => server.id));
-    return respondWithConfigMutation(
-      eventStream,
-      () =>
-        applyConfigPatch({
-          patch: { ui: { mcpServers: servers, mcps: enabledIds } },
-          expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-          runSmokeTest: true,
-        }),
-      result =>
-        Response.json({
-          mcps: resolveConfiguredMcpIds(result.snapshot.config),
-          servers: resolveConfiguredMcpServers(result.snapshot.config),
-          hash: result.snapshot.hash,
-          smokeTest: result.smokeTest,
-        }),
-    );
+    const snapshot = getConfigSnapshot();
+    try {
+      const currentEffective = await loadEffectiveMcpConfig(snapshot.config);
+      assertExpectedHashMatches(
+        currentEffective.hash,
+        typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+      );
+      await patchManagedOpencodeConfig(snapshot.config, {
+        mcp: serializeConfiguredMcpServersToOpencodeConfig(servers),
+      });
+      const effective = await loadEffectiveMcpConfig(snapshot.config, {
+        includeStatus: true,
+      });
+      publishConfigInvalidatedEvent(eventStream, snapshot);
+      return Response.json({
+        mcps: effective.enabled,
+        servers: effective.servers,
+        status: effective.status ?? [],
+        source: effective.source,
+        ...(effective.statusError
+          ? { statusError: effective.statusError }
+          : {}),
+        hash: effective.hash,
+      });
+    } catch (error) {
+      return configErrorResponse(eventStream, error);
+    }
   }
 
   const values = parseStringListBody(body, "mcps");
   if (!values) {
-    return Response.json({ error: "mcps must be a string array or servers must be a valid MCP config array" }, { status: 400 });
+    return Response.json(
+      {
+        error:
+          "mcps must be a string array or servers must be a valid MCP config array",
+      },
+      { status: 400 },
+    );
   }
 
   const current = getConfigSnapshot();
-  const enabled = new Set(values);
-  const updatedServers = current.config.ui.mcpServers.map(server => ({
-    ...server,
-    enabled: enabled.has(server.id),
-  }));
-  return respondWithConfigMutation(
-    eventStream,
-    () =>
-      applyConfigPatch({
-        patch: { ui: { mcps: values, mcpServers: updatedServers } },
-        expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-        runSmokeTest: true,
-      }),
-    result =>
-      Response.json({
-        mcps: resolveConfiguredMcpIds(result.snapshot.config),
-        servers: resolveConfiguredMcpServers(result.snapshot.config),
-        hash: result.snapshot.hash,
-        smokeTest: result.smokeTest,
-      }),
-  );
+  try {
+    const effective = await loadEffectiveMcpConfig(current.config);
+    assertExpectedHashMatches(
+      effective.hash,
+      typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+    );
+    const enabled = new Set(normalizeMcpIds(values));
+    const updatedServers = effective.servers.map((server) => ({
+      ...server,
+      enabled: enabled.has(server.id),
+    }));
+    await patchManagedOpencodeConfig(current.config, {
+      mcp: serializeConfiguredMcpServersToOpencodeConfig(updatedServers),
+    });
+    const nextEffective = await loadEffectiveMcpConfig(current.config, {
+      includeStatus: true,
+    });
+    publishConfigInvalidatedEvent(eventStream, current);
+    return Response.json({
+      mcps: nextEffective.enabled,
+      servers: nextEffective.servers,
+      status: nextEffective.status ?? [],
+      source: nextEffective.source,
+      ...(nextEffective.statusError
+        ? { statusError: nextEffective.statusError }
+        : {}),
+      hash: nextEffective.hash,
+    });
+  } catch (error) {
+    return configErrorResponse(eventStream, error);
+  }
 }
 
 async function getOpencodeAgents() {
@@ -276,7 +510,10 @@ async function getOpencodeAgents() {
     });
   } catch (error) {
     const storage = getOpencodeAgentStorageInfo();
-    const message = error instanceof Error ? error.message : "Failed to load OpenCode agent definitions";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to load OpenCode agent definitions";
     return Response.json(
       {
         agentTypes: [],
@@ -304,14 +541,25 @@ async function runMcpAction(
     return Response.json(result);
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : `Failed to ${action} MCP server ${id}` },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : `Failed to ${action} MCP server ${id}`,
+      },
       { status: 502 },
     );
   }
 }
 
-async function importManagedSkill(eventStream: RuntimeEventStream, req: Request) {
-  const parsedBody = await parseJsonWithSchema(req, configManagedSkillImportBodySchema);
+async function importManagedSkill(
+  eventStream: RuntimeEventStream,
+  req: Request,
+) {
+  const parsedBody = await parseJsonWithSchema(
+    req,
+    configManagedSkillImportBodySchema,
+  );
   if (!parsedBody.ok) {
     return parsedBody.response;
   }
@@ -325,7 +573,8 @@ async function importManagedSkill(eventStream: RuntimeEventStream, req: Request)
       rawId,
       content,
       enable,
-      expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+      expectedHash:
+        typeof body.expectedHash === "string" ? body.expectedHash : undefined,
     });
     publishSkillsCatalogUpdated(eventStream, imported.hash);
 
@@ -338,7 +587,10 @@ async function importManagedSkill(eventStream: RuntimeEventStream, req: Request)
       hash: imported.hash,
     });
   } catch (error) {
-    if (error instanceof Error && error.message.includes("catalog has changed")) {
+    if (
+      error instanceof Error &&
+      error.message.includes("catalog has changed")
+    ) {
       return Response.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof Error && error.message.includes("already exists")) {
@@ -367,12 +619,17 @@ const openclawImportSchema = z.object({
 });
 
 async function importOpenclawBootstrap(req: Request) {
-  const parsedBody = await parseJsonWithSchema(req, z.record(z.string(), z.unknown()));
+  const parsedBody = await parseJsonWithSchema(
+    req,
+    z.record(z.string(), z.unknown()),
+  );
   if (!parsedBody.ok) {
     return parsedBody.response;
   }
   const body = parsedBody.body;
-  let source: { mode: "local"; path: string } | { mode: "git"; url: string; ref?: string };
+  let source:
+    | { mode: "local"; path: string }
+    | { mode: "git"; url: string; ref?: string };
   let targetDirectory: string | undefined;
 
   if (body.source && typeof body.source === "object") {
@@ -381,7 +638,7 @@ async function importOpenclawBootstrap(req: Request) {
       return Response.json(
         {
           error: "Invalid import request",
-          issues: parsed.error.issues.map(issue => ({
+          issues: parsed.error.issues.map((issue) => ({
             path: issue.path.join("."),
             message: issue.message,
           })),
@@ -392,9 +649,15 @@ async function importOpenclawBootstrap(req: Request) {
     source = parsed.data.source;
     targetDirectory = parsed.data.targetDirectory;
   } else {
-    const sourceDirectory = typeof body.sourceDirectory === "string" ? body.sourceDirectory.trim() : "";
+    const sourceDirectory =
+      typeof body.sourceDirectory === "string"
+        ? body.sourceDirectory.trim()
+        : "";
     if (!sourceDirectory) {
-      return Response.json({ error: "source.path or sourceDirectory is required" }, { status: 400 });
+      return Response.json(
+        { error: "source.path or sourceDirectory is required" },
+        { status: 400 },
+      );
     }
     source = { mode: "local", path: sourceDirectory };
   }
@@ -407,7 +670,11 @@ async function importOpenclawBootstrap(req: Request) {
           : { mode: "git", url: source.url, ref: source.ref },
       targetDirectory,
     });
-    let memorySync: { attempted: boolean; completed: boolean; error?: string | null } = {
+    let memorySync: {
+      attempted: boolean;
+      completed: boolean;
+      error?: string | null;
+    } = {
       attempted: false,
       completed: false,
       error: null,
@@ -424,90 +691,136 @@ async function importOpenclawBootstrap(req: Request) {
     }
     return Response.json({ migration, memorySync });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to import OpenClaw workspace files";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to import OpenClaw workspace files";
     return Response.json({ error: message }, { status: 422 });
   }
 }
 
-export function createConfigRoutes(eventStream: RuntimeEventStream) {
+export function createConfigRoutes(
+  eventStream: RuntimeEventStream,
+  dependencies: ConfigRouteDependencies = defaultConfigRouteDependencies,
+) {
   return {
     "/api/config": {
-      GET: () => {
-        const snapshot = getConfigSnapshot();
-        return Response.json(snapshot);
-      },
+      GET: async () => Response.json(await buildConfigPayload()),
       PATCH: async (req: Request) => {
-        const parsedBody = await parseJsonWithSchema(req, configPatchRequestSchema);
+        const parsedBody = await parseJsonWithSchema(
+          req,
+          configPatchRequestSchema,
+        );
         if (!parsedBody.ok) {
           return parsedBody.response;
         }
         const body = parsedBody.body;
         return respondWithConfigMutation(
           eventStream,
+          dependencies,
           () =>
             applyConfigPatch({
               patch: body.patch,
-              expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-              runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+              expectedHash:
+                typeof body.expectedHash === "string"
+                  ? body.expectedHash
+                  : undefined,
+              runSmokeTest:
+                typeof body.runSmokeTest === "boolean"
+                  ? body.runSmokeTest
+                  : true,
             }),
-          result => Response.json(result),
+          (result) => Response.json(result),
         );
       },
       PUT: async (req: Request) => {
-        const parsedBody = await parseJsonWithSchema(req, configReplaceRequestSchema);
+        const parsedBody = await parseJsonWithSchema(
+          req,
+          configReplaceRequestSchema,
+        );
         if (!parsedBody.ok) {
           return parsedBody.response;
         }
         const body = parsedBody.body;
         return respondWithConfigMutation(
           eventStream,
+          dependencies,
           () =>
             replaceConfig({
-              config: typeof body === "object" && body !== null && "config" in body ? body.config : body,
-              expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-              runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+              config:
+                typeof body === "object" && body !== null && "config" in body
+                  ? body.config
+                  : body,
+              expectedHash:
+                typeof body.expectedHash === "string"
+                  ? body.expectedHash
+                  : undefined,
+              runSmokeTest:
+                typeof body.runSmokeTest === "boolean"
+                  ? body.runSmokeTest
+                  : true,
             }),
-          result => Response.json(result),
+          (result) => Response.json(result),
         );
       },
     },
 
     "/api/config/patch-safe": {
       POST: async (req: Request) => {
-        const parsedBody = await parseJsonWithSchema(req, configPatchRequestSchema);
+        const parsedBody = await parseJsonWithSchema(
+          req,
+          configPatchRequestSchema,
+        );
         if (!parsedBody.ok) {
           return parsedBody.response;
         }
         const body = parsedBody.body;
         return respondWithConfigMutation(
           eventStream,
+          dependencies,
           () =>
             applyConfigPatchSafe({
               patch: body.patch,
-              expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-              runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+              expectedHash:
+                typeof body.expectedHash === "string"
+                  ? body.expectedHash
+                  : undefined,
+              runSmokeTest:
+                typeof body.runSmokeTest === "boolean"
+                  ? body.runSmokeTest
+                  : true,
             }),
-          result => Response.json(result),
+          (result) => Response.json(result),
         );
       },
     },
 
     "/api/config/replace-safe": {
       POST: async (req: Request) => {
-        const parsedBody = await parseJsonWithSchema(req, configReplaceRequestSchema);
+        const parsedBody = await parseJsonWithSchema(
+          req,
+          configReplaceRequestSchema,
+        );
         if (!parsedBody.ok) {
           return parsedBody.response;
         }
         const body = parsedBody.body;
         return respondWithConfigMutation(
           eventStream,
+          dependencies,
           () =>
             replaceConfigSafe({
               config: body.config,
-              expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
-              runSmokeTest: typeof body.runSmokeTest === "boolean" ? body.runSmokeTest : true,
+              expectedHash:
+                typeof body.expectedHash === "string"
+                  ? body.expectedHash
+                  : undefined,
+              runSmokeTest:
+                typeof body.runSmokeTest === "boolean"
+                  ? body.runSmokeTest
+                  : true,
             }),
-          result => Response.json(result),
+          (result) => Response.json(result),
         );
       },
     },
@@ -523,7 +836,10 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
         });
       },
       PUT: async (req: Request) => {
-        const parsedBody = await parseJsonWithSchema(req, configSkillsBodySchema);
+        const parsedBody = await parseJsonWithSchema(
+          req,
+          configSkillsBodySchema,
+        );
         if (!parsedBody.ok) {
           return parsedBody.response;
         }
@@ -531,15 +847,29 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
         try {
           const result = await setEnabledSkillsFromCatalog({
             skills: body.skills,
-            expectedHash: typeof body.expectedHash === "string" ? body.expectedHash : undefined,
+            expectedHash:
+              typeof body.expectedHash === "string"
+                ? body.expectedHash
+                : undefined,
           });
           publishSkillsCatalogUpdated(eventStream, result.hash);
           return Response.json(result);
         } catch (error) {
-          if (error instanceof Error && error.message.includes("catalog has changed")) {
+          if (
+            error instanceof Error &&
+            error.message.includes("catalog has changed")
+          ) {
             return Response.json({ error: error.message }, { status: 409 });
           }
-          return Response.json({ error: error instanceof Error ? error.message : "Failed to update skills" }, { status: 500 });
+          return Response.json(
+            {
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to update skills",
+            },
+            { status: 500 },
+          );
         }
       },
     },
@@ -560,12 +890,20 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
     },
 
     "/api/config/mcps": {
-      GET: () => {
+      GET: async () => {
         const snapshot = getConfigSnapshot();
+        const effective = await loadEffectiveMcpConfig(snapshot.config, {
+          includeStatus: true,
+        });
         return Response.json({
-          mcps: resolveConfiguredMcpIds(snapshot.config),
-          servers: resolveConfiguredMcpServers(snapshot.config),
-          hash: snapshot.hash,
+          mcps: effective.enabled,
+          servers: effective.servers,
+          status: effective.status ?? [],
+          source: effective.source,
+          ...(effective.statusError
+            ? { statusError: effective.statusError }
+            : {}),
+          hash: effective.hash,
         });
       },
       PUT: async (req: Request) => applyMcpConfigUpdate(eventStream, req),
@@ -579,32 +917,43 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
     },
 
     "/api/config/mcps/:id/connect": {
-      POST: async (req: Request & { params: { id: string } }) => runMcpAction(req, "connect"),
+      POST: async (req: Request & { params: { id: string } }) =>
+        runMcpAction(req, "connect"),
     },
 
     "/api/config/mcps/:id/disconnect": {
-      POST: async (req: Request & { params: { id: string } }) => runMcpAction(req, "disconnect"),
+      POST: async (req: Request & { params: { id: string } }) =>
+        runMcpAction(req, "disconnect"),
     },
 
     "/api/config/mcps/:id/auth/start": {
-      POST: async (req: Request & { params: { id: string } }) => runMcpAction(req, "authStart"),
+      POST: async (req: Request & { params: { id: string } }) =>
+        runMcpAction(req, "authStart"),
     },
 
     "/api/config/mcps/:id/auth/remove": {
-      POST: async (req: Request & { params: { id: string } }) => runMcpAction(req, "authRemove"),
+      POST: async (req: Request & { params: { id: string } }) =>
+        runMcpAction(req, "authRemove"),
     },
 
     "/api/opencode/agents": {
       GET: async () => getOpencodeAgents(),
       PATCH: async (req: Request) => {
-        const parsedBody = await parseJsonWithSchema(req, configOpenCodeAgentsBodySchema);
+        const parsedBody = await parseJsonWithSchema(
+          req,
+          configOpenCodeAgentsBodySchema,
+        );
         if (!parsedBody.ok) {
           return parsedBody.response;
         }
         const body = parsedBody.body;
-        const expectedHash = typeof body.expectedHash === "string" ? body.expectedHash.trim() : "";
+        const expectedHash =
+          typeof body.expectedHash === "string" ? body.expectedHash.trim() : "";
         if (!expectedHash) {
-          return Response.json({ error: "expectedHash is required" }, { status: 400 });
+          return Response.json(
+            { error: "expectedHash is required" },
+            { status: 400 },
+          );
         }
         const validation = await validateOpencodeAgentPatch({
           upserts: body.upserts,
@@ -644,7 +993,10 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
         } catch (error) {
           return Response.json(
             {
-              error: error instanceof Error ? error.message : "Failed to update OpenCode agent definitions",
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to update OpenCode agent definitions",
             },
             { status: 502 },
           );
@@ -654,7 +1006,10 @@ export function createConfigRoutes(eventStream: RuntimeEventStream) {
 
     "/api/opencode/agents/validate": {
       POST: async (req: Request) => {
-        const parsedBody = await parseJsonWithSchema(req, configOpenCodeAgentsBodySchema);
+        const parsedBody = await parseJsonWithSchema(
+          req,
+          configOpenCodeAgentsBodySchema,
+        );
         if (!parsedBody.ok) {
           return parsedBody.response;
         }

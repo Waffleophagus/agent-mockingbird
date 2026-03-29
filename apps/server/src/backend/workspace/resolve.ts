@@ -16,6 +16,14 @@ export function resolveOpencodeConfigDir(config: AgentMockingbirdConfig) {
   return resolveManagedOpencodeConfigDir(resolveOpencodeWorkspaceDir(config));
 }
 
+export function resolveExecutorWorkspaceDir(config: AgentMockingbirdConfig) {
+  return resolvePathFromBinaryRoot(config.runtime.executor.workspaceDir.trim());
+}
+
+export function resolveExecutorDataDir(config: AgentMockingbirdConfig) {
+  return resolvePathFromBinaryRoot(config.runtime.executor.dataDir.trim());
+}
+
 export function resolveWorkspaceAlignment(config: AgentMockingbirdConfig) {
   const pinnedWorkspaceDir = resolvePathFromBinaryRoot(config.workspace.pinnedDirectory.trim());
   return {

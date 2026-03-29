@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 
-import agentTypeManager from "./agent_type_manager";
+import agentTypeManager from "../tools/agent_type_manager";
 
 const originalFetch = globalThis.fetch;
 

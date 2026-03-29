@@ -51,6 +51,8 @@ function toSseEventName(event: RuntimeEvent): string {
       return "background-run";
     case "config.updated":
       return "config-updated";
+    case "config.invalidated":
+      return "config-invalidated";
     case "config.update.failed":
       return "config-error";
     case "config.update.rolled_back":

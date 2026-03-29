@@ -1,7 +1,8 @@
 # Systemd Deployment (Sidecar Model)
 
-This setup runs **two services on one VM**:
+This setup runs **three services on one VM**:
 
+- `executor.service` (local sidecar on `127.0.0.1:8788`)
 - `opencode.service` (local sidecar on `127.0.0.1:4096`)
 - `agent-mockingbird.service` (dashboard/API on `127.0.0.1:3001`)
 
@@ -11,6 +12,7 @@ Both are pinned to one project workspace (`/srv/agent-mockingbird/app`).
 
 ```bash
 sudo install -D -m 0644 deploy/systemd/opencode.service /etc/systemd/system/opencode.service
+sudo install -D -m 0644 deploy/systemd/executor.service /etc/systemd/system/executor.service
 sudo install -D -m 0644 deploy/systemd/agent-mockingbird.service /etc/systemd/system/agent-mockingbird.service
 sudo systemctl daemon-reload
 ```
@@ -18,12 +20,13 @@ sudo systemctl daemon-reload
 ## 2. Enable + start
 
 ```bash
-sudo systemctl enable --now opencode.service agent-mockingbird.service
+sudo systemctl enable --now executor.service opencode.service agent-mockingbird.service
 ```
 
 ## 3. Verify
 
 ```bash
+systemctl status executor.service --no-pager
 systemctl status opencode.service --no-pager
 systemctl status agent-mockingbird.service --no-pager
 curl -sS http://127.0.0.1:3001/api/health
@@ -33,6 +36,7 @@ curl -sS http://127.0.0.1:3001/api/mockingbird/runtime/info
 ## 4. Logs
 
 ```bash
+journalctl -u executor.service -f
 journalctl -u opencode.service -f
 journalctl -u agent-mockingbird.service -f
 ```

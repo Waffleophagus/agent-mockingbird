@@ -21,6 +21,8 @@ const runtimePatchSchema = z
       .optional(),
     runtime: z
       .object({
+        executor: z.record(z.string(), z.unknown()).optional(),
+        embeddedServices: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
         memory: z.record(z.string(), z.unknown()).optional(),
         heartbeat: z.record(z.string(), z.unknown()).optional(),
         agentHeartbeats: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
@@ -144,12 +146,15 @@ export function createRuntimeRoutes(input: { cronService: CronService }) {
           hash: snapshot.hash,
           path: snapshot.path,
           pinnedWorkspace: snapshot.config.workspace.pinnedDirectory,
+          executor: snapshot.config.runtime.executor,
+          embeddedServices: snapshot.config.runtime.embeddedServices,
           opencode: {
             baseUrl: snapshot.config.runtime.opencode.baseUrl,
             workspaceDirectory: storage.workspaceDirectory,
             configDirectory: storage.configDirectory,
             effectiveConfigPath: storage.configFilePath,
             timeoutMs: snapshot.config.runtime.opencode.timeoutMs,
+            mcpSource: "opencode-managed-config",
           },
         });
       },

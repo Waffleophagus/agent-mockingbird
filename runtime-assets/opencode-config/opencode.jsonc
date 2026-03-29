@@ -21,5 +21,12 @@
   "default_agent": "agent-mockingbird",
   "experimental": {
     "batch_tool": true
+  },
+  "mcp": {
+    "executor": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8788/mcp",
+      "enabled": true
+    }
   }
 }

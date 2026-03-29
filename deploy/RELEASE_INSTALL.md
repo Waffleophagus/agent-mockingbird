@@ -11,7 +11,15 @@ npm i -g agent-mockingbird
 agent-mockingbird install
 ```
 
-That is the main public install path. `agent-mockingbird install` handles service setup and launches interactive onboarding on TTY installs.
+That is the main public install path. The npm global `agent-mockingbird` command is a permanent bootstrap wrapper: it installs the managed runtime into `~/.agent-mockingbird` on first run, then delegates future commands into that managed install regardless of whether npm global lives under `$HOME`, `/usr/local`, or another prefix.
+
+`agent-mockingbird install` handles service setup and launches interactive onboarding on TTY installs.
+
+Managed installs pin Bun to the version declared by the bundled OpenCode source of truth. At the time of writing that is `bun@1.3.10`, but the installer derives it from package metadata rather than hardcoding `latest`.
+
+Advanced escape hatch:
+
+- Set `AGENT_MOCKINGBIRD_BUN_VERSION` only if you explicitly need to override the derived Bun pin during the managed installer flow.
 
 Optional curl bootstrap wrapper:
 
@@ -23,7 +31,8 @@ This installs:
 
 - `agent-mockingbird` from npmjs
 - `opencode-ai` from npmjs
-- user services (`opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
+- `executor` from npmjs
+- user services (`executor.service`, `opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
 - automatic service start and health verification
 - interactive onboarding on TTY installs (`provider auth`, default model, memory/Ollama, optional OpenClaw import)
 
@@ -85,13 +94,16 @@ sudo AGENT_MOCKINGBIRD_USER=agent-mockingbird \
 
 Prerequisites on host:
 
-- `bun` in `PATH`
+- `bun` in `PATH`, matching the Bun version declared by the repo's bundled OpenCode metadata
 - `opencode` in `PATH`
 - `systemd`
+
+The manual systemd installer verifies the host Bun version before continuing and exits if it does not match the pinned OpenCode Bun version.
 
 After install, verify:
 
 ```bash
+systemctl status executor.service --no-pager
 systemctl status opencode.service --no-pager
 systemctl status agent-mockingbird.service --no-pager
 curl -sS http://127.0.0.1:3001/api/health

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { testing as bootstrapTesting } from "./agent-mockingbird-bootstrap.mjs";
 import { testing } from "./agent-mockingbird.mjs";
 
 describe("agent-mockingbird CLI onboarding diagnostics", () => {
@@ -198,5 +199,661 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("agent-mockingbird CLI Bun version pinning", () => {
+  test("prefers explicit Bun env version override", () => {
+    const version = testing.readPinnedBunVersion({
+      env: { AGENT_MOCKINGBIRD_BUN_VERSION: "1.3.99" },
+      argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+      moduleDir: "/tmp/fake-module",
+    });
+
+    expect(version).toBe("1.3.99");
+  });
+
+  test("resolves Bun version from OpenCode source-of-truth packageManager", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bun-pin-opencode-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const opencodePkg = path.join(appDir, "cleanroom", "opencode", "package.json");
+    fs.mkdirSync(path.dirname(opencodePkg), { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "package.json"),
+      JSON.stringify({ packageManager: "bun@1.2.0" }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      opencodePkg,
+      JSON.stringify({ packageManager: "bun@1.3.10" }),
+      "utf8",
+    );
+
+    try {
+      const version = testing.readPinnedBunVersion({
+        paths: {
+          agentMockingbirdAppDirGlobal: appDir,
+        },
+        env: {},
+        argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+        moduleDir: "/tmp/fake-module",
+      });
+
+      expect(version).toBe("1.3.10");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to app packageManager when OpenCode package metadata is unavailable", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bun-pin-root-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "package.json"),
+      JSON.stringify({ packageManager: "bun@1.3.10" }),
+      "utf8",
+    );
+
+    try {
+      const version = testing.readPinnedBunVersion({
+        paths: {
+          agentMockingbirdAppDirGlobal: appDir,
+        },
+        env: {},
+        argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+        moduleDir: "/tmp/fake-module",
+      });
+
+      expect(version).toBe("1.3.10");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects invalid packageManager values while resolving Bun version", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bun-pin-invalid-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "package.json"),
+      JSON.stringify({ packageManager: "npm@10.0.0" }),
+      "utf8",
+    );
+
+    try {
+      expect(() =>
+        testing.readPinnedBunVersion({
+          paths: {
+            agentMockingbirdAppDirGlobal: appDir,
+          },
+          env: {},
+          argv: ["bun", "/tmp/fake-bin/agent-mockingbird"],
+          moduleDir: "/tmp/fake-module",
+        }))
+        .toThrow(/Expected packageManager to start with bun@/);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("agent-mockingbird CLI packaged executor runtime", () => {
+  test("reports packaged executor version for embedded-patched runtime", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-version-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const packagedExecutorPkg = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "executor",
+      "package.json",
+    );
+    const installedExecutorPkg = path.join(
+      tempRoot,
+      "npm",
+      "lib",
+      "node_modules",
+      "executor",
+      "package.json",
+    );
+    const executorUnitPath = path.join(tempRoot, "executor.service");
+
+    fs.mkdirSync(path.dirname(packagedExecutorPkg), { recursive: true });
+    fs.mkdirSync(path.dirname(installedExecutorPkg), { recursive: true });
+    fs.writeFileSync(packagedExecutorPkg, JSON.stringify({ name: "executor", version: "1.2.5" }), "utf8");
+    fs.writeFileSync(installedExecutorPkg, JSON.stringify({ name: "executor", version: "1.2.4-beta.4" }), "utf8");
+    fs.writeFileSync(
+      executorUnitPath,
+      'ExecStart="/tmp/app/vendor/executor/apps/executor/src/cli/main.ts" server start --port 8788\n',
+      "utf8",
+    );
+
+    try {
+      expect(
+        testing.readInstalledExecutorMode({
+          executorUnitPath,
+        }),
+      ).toBe("embedded-patched");
+      expect(
+        testing.readInstalledExecutorVersion({
+          agentMockingbirdAppDirGlobal: appDir,
+          npmPrefix: path.join(tempRoot, "npm"),
+          executorUnitPath,
+        }),
+      ).toBe("1.2.5");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to packaged opencode version when installed package metadata is unavailable", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-version-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const packagedOpencodePkg = path.join(
+      appDir,
+      "vendor",
+      "opencode",
+      "packages",
+      "opencode",
+      "package.json",
+    );
+
+    fs.mkdirSync(path.dirname(packagedOpencodePkg), { recursive: true });
+    fs.writeFileSync(
+      packagedOpencodePkg,
+      JSON.stringify({ name: "opencode", version: "1.2.27" }),
+      "utf8",
+    );
+
+    try {
+      expect(
+        testing.readInstalledOpenCodeVersion({
+          agentMockingbirdAppDirGlobal: appDir,
+          npmPrefix: path.join(tempRoot, "npm"),
+        }),
+      ).toBe("1.2.27");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects embedded-patched executor when bundled web assets are missing", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-missing-assets-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const entrypoint = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "executor",
+      "src",
+      "cli",
+      "main.ts",
+    );
+    const nodeModulesDir = path.join(appDir, "vendor", "executor", "node_modules");
+
+    fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+    fs.mkdirSync(nodeModulesDir, { recursive: true });
+    fs.writeFileSync(entrypoint, 'console.log("executor");\n', "utf8");
+
+    try {
+      expect(() =>
+        testing.resolveExecutorRuntimeCommand(
+          appDir,
+          {
+            executorBinGlobal: path.join(tempRoot, "missing-executor-global"),
+            executorBinLocal: path.join(tempRoot, "missing-executor-local"),
+          },
+          "/tmp/bun",
+        ))
+        .toThrow(/embedded executor web assets missing/);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("wires explicit web assets dir into embedded executor systemd unit", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-assets-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const entrypoint = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "executor",
+      "src",
+      "cli",
+      "main.ts",
+    );
+    const nodeModulesDir = path.join(appDir, "vendor", "executor", "node_modules");
+    const webIndex = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "web",
+      "dist",
+      "index.html",
+    );
+
+    fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+    fs.mkdirSync(nodeModulesDir, { recursive: true });
+    fs.mkdirSync(path.dirname(webIndex), { recursive: true });
+    fs.writeFileSync(entrypoint, 'console.log("executor");\n', "utf8");
+    fs.writeFileSync(webIndex, "<!doctype html>\n", "utf8");
+
+    try {
+      const runtime = testing.resolveExecutorRuntimeCommand(
+        appDir,
+        {
+          executorBinGlobal: path.join(tempRoot, "missing-executor-global"),
+          executorBinLocal: path.join(tempRoot, "missing-executor-local"),
+        },
+        "/tmp/bun",
+      );
+      expect(runtime).not.toBeNull();
+      const units = testing.unitContents(
+        {
+          rootDir: "/tmp/agent-mockingbird",
+          dataDir: "/tmp/agent-mockingbird/data",
+          workspaceDir: "/tmp/agent-mockingbird/workspace",
+          executorWorkspaceDir: "/tmp/agent-mockingbird/executor-workspace",
+          executorDataDir: "/tmp/agent-mockingbird/data/executor",
+          executorLocalDataDir: "/tmp/agent-mockingbird/data/executor/control-plane",
+          executorRunDir: "/tmp/agent-mockingbird/data/executor/run",
+          opencodeConfigDir: "/tmp/agent-mockingbird/data/opencode-config",
+        },
+        runtime!.execStart,
+        runtime!.mode,
+        runtime!.webAssetsDir,
+        "/tmp/opencode",
+        "/tmp/agent-mockingbird",
+        "source",
+      );
+
+      expect(runtime!.mode).toBe("embedded-patched");
+      expect(runtime!.webAssetsDir).toBe(path.dirname(webIndex));
+      expect(units.executor).toContain(
+        `Environment=EXECUTOR_WEB_ASSETS_DIR=${path.dirname(webIndex)}`,
+      );
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("honors explicit upstream fallback even when vendored executor is present", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-executor-fallback-"));
+    const appDir = path.join(tempRoot, "agent-mockingbird");
+    const entrypoint = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "executor",
+      "src",
+      "cli",
+      "main.ts",
+    );
+    const nodeModulesDir = path.join(appDir, "vendor", "executor", "node_modules");
+    const webIndex = path.join(
+      appDir,
+      "vendor",
+      "executor",
+      "apps",
+      "web",
+      "dist",
+      "index.html",
+    );
+    const executorBin = path.join(tempRoot, "bin", "executor");
+
+    fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+    fs.mkdirSync(nodeModulesDir, { recursive: true });
+    fs.mkdirSync(path.dirname(webIndex), { recursive: true });
+    fs.mkdirSync(path.dirname(executorBin), { recursive: true });
+    fs.writeFileSync(entrypoint, 'console.log("executor");\n', "utf8");
+    fs.writeFileSync(webIndex, "<!doctype html>\n", "utf8");
+    fs.writeFileSync(executorBin, "#!/usr/bin/env bash\n", "utf8");
+
+    try {
+      const runtime = testing.resolveExecutorRuntimeCommand(
+        appDir,
+        {
+          executorBinGlobal: executorBin,
+          executorBinLocal: path.join(tempRoot, "missing-executor-local"),
+        },
+        "/tmp/bun",
+        "upstream-fallback",
+      );
+
+      expect(runtime).toEqual({
+        execStart: `"${executorBin}" server start --port 8788`,
+        mode: "upstream-fallback",
+        webAssetsDir: null,
+      });
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("agent-mockingbird CLI delegation", () => {
+  test("bootstrap install target defaults to the running package version", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bootstrap-version-"));
+    const binDir = path.join(tempRoot, "package", "bin");
+    const originalArgv = process.argv;
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, "package", "package.json"),
+      JSON.stringify({ version: "0.0.4-next.99" }),
+      "utf8",
+    );
+
+    try {
+      process.argv = ["node", path.join(binDir, "agent-mockingbird"), "install"];
+      const target = bootstrapTesting.parseBootstrapInstallTarget(["install"], binDir);
+      expect(target).toBe("agent-mockingbird@0.0.4-next.99");
+    } finally {
+      process.argv = originalArgv;
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("bootstrap install target preserves package name for explicit versions", () => {
+    const target = bootstrapTesting.parseBootstrapInstallTarget(["install", "--version", "1.2.3"], "/tmp");
+    expect(target).toBe("agent-mockingbird@1.2.3");
+  });
+
+  test("bootstrap wrapper falls back to bun when npm is unavailable", () => {
+    expect(
+      bootstrapTesting.resolveBootstrapPackageManager({
+        PATH: process.env.PATH || "",
+      }, (command) => command === "bun"),
+    ).toBe("bun");
+  });
+
+  test("bootstrap command detection uses POSIX sh-compatible lookup", () => {
+    expect(
+      bootstrapTesting.commandExists("sh", {
+        PATH: process.env.PATH || "",
+      }),
+    ).toBe(true);
+  });
+
+  test("delegates from a shadowing global install to the managed root CLI", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-delegate-"));
+    const managedCli = path.join(
+      tempRoot,
+      "npm",
+      "lib",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird-managed",
+    );
+    const globalCli = path.join(tempRoot, "global", "bin", "agent-mockingbird");
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.mkdirSync(path.dirname(globalCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(globalCli, "#!/usr/bin/env bash\n", "utf8");
+
+    try {
+      const target = testing.resolveManagedCliDelegationTarget({
+        argv: ["node", globalCli, "update", "--next", "--root-dir", tempRoot],
+        env: {},
+      });
+
+      expect(target).toBe(managedCli);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("delegates from a shadowing global install to a bun-managed root CLI", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bun-delegate-"));
+    const managedCli = path.join(
+      tempRoot,
+      "bun",
+      "install",
+      "global",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird-managed",
+    );
+    const globalCli = path.join(tempRoot, "global", "bin", "agent-mockingbird");
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.mkdirSync(path.dirname(globalCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(globalCli, "#!/usr/bin/env bash\n", "utf8");
+
+    try {
+      const target = testing.resolveManagedCliDelegationTarget({
+        argv: ["node", globalCli, "update", "--next", "--root-dir", tempRoot],
+        env: {},
+      });
+
+      expect(target).toBe(managedCli);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not delegate when already running from the managed root CLI", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-own-managed-"));
+    const managedCli = path.join(
+      tempRoot,
+      "npm",
+      "lib",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird-managed",
+    );
+    const bootstrapCli = path.join(
+      tempRoot,
+      "npm",
+      "lib",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird",
+    );
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(bootstrapCli, "#!/usr/bin/env node\n", "utf8");
+
+    try {
+      expect(
+        bootstrapTesting.currentPackageOwnsManagedCli(tempRoot, bootstrapCli),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("bootstrap wrapper resolves the managed CLI under the default install root", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bootstrap-root-"));
+    const managedCli = path.join(
+      tempRoot,
+      ".agent-mockingbird",
+      "npm",
+      "lib",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird-managed",
+    );
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env node\n", "utf8");
+
+    try {
+      const resolved = bootstrapTesting.resolveManagedCliPath(
+        path.join(tempRoot, ".agent-mockingbird"),
+      );
+      expect(resolved).toBe(managedCli);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("bootstrap wrapper respects custom root-dir when resolving the managed CLI", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-custom-root-"));
+    const customRoot = path.join(tempRoot, "custom-root");
+    const managedCli = path.join(
+      customRoot,
+      "npm",
+      "lib",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird-managed",
+    );
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env node\n", "utf8");
+
+    try {
+      const resolved = testing.resolveManagedCliDelegationTarget({
+        argv: ["node", "/tmp/global-agent-mockingbird", "update", "--root-dir", customRoot],
+        env: {},
+      });
+      expect(resolved).toBe(managedCli);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("bootstrap wrapper resolves the managed CLI under the bun install root", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bootstrap-bun-root-"));
+    const managedCli = path.join(
+      tempRoot,
+      "bun",
+      "install",
+      "global",
+      "node_modules",
+      "agent-mockingbird",
+      "bin",
+      "agent-mockingbird-managed",
+    );
+    fs.mkdirSync(path.dirname(managedCli), { recursive: true });
+    fs.writeFileSync(managedCli, "#!/usr/bin/env node\n", "utf8");
+
+    try {
+      const resolved = bootstrapTesting.resolveManagedCliPath(tempRoot);
+      expect(resolved).toBe(managedCli);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("agent-mockingbird CLI embedded executor verification", () => {
+  test("accepts embedded executor HTML without a local stylesheet asset", async () => {
+    const responses = new Map([
+      [
+        "http://127.0.0.1:3001/executor",
+        new Response(
+          `<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans" />
+    <script type="module" crossorigin src="/executor/assets/index-HC_ohraG.js"></script>
+    <link rel="modulepreload" crossorigin href="/executor/assets/index-DkZ8Vi7-.js">
+  </head>
+  <body></body>
+</html>`,
+          { status: 200, headers: { "content-type": "text/html" } },
+        ),
+      ],
+      [
+        "http://127.0.0.1:3001/executor/assets/index-HC_ohraG.js",
+        new Response("console.log('ok');", {
+          status: 200,
+          headers: { "content-type": "text/javascript" },
+        }),
+      ],
+    ]);
+    const fetchImpl = Object.assign(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const response = responses.get(url);
+        if (!response) {
+          throw new Error(`unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+        }
+        return response.clone();
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    );
+
+    const result = await testing.verifyEmbeddedExecutorGateway(
+      "http://127.0.0.1:3001/executor",
+      fetchImpl,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.pageOk).toBe(true);
+    expect(result.scriptOk).toBe(true);
+    expect(result.cssOk).toBe(true);
+    expect(result.cssUrl).toBe("");
+    expect(result.scriptUrl).toBe(
+      "http://127.0.0.1:3001/executor/assets/index-HC_ohraG.js",
+    );
+  });
+
+  test("rejects embedded executor HTML that still leaks root assets", async () => {
+    const responses = new Map([
+      [
+        "http://127.0.0.1:3001/executor",
+        new Response(
+          `<!doctype html>
+<html>
+  <head>
+    <script type="module" crossorigin src="/executor/assets/index-HC_ohraG.js"></script>
+    <img src="/assets/leak.png" />
+  </head>
+  <body></body>
+</html>`,
+          { status: 200, headers: { "content-type": "text/html" } },
+        ),
+      ],
+      [
+        "http://127.0.0.1:3001/executor/assets/index-HC_ohraG.js",
+        new Response("console.log('ok');", {
+          status: 200,
+          headers: { "content-type": "text/javascript" },
+        }),
+      ],
+    ]);
+    const fetchImpl = Object.assign(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const response = responses.get(url);
+        if (!response) {
+          throw new Error(`unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+        }
+        return response.clone();
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    );
+
+    const result = await testing.verifyEmbeddedExecutorGateway(
+      "http://127.0.0.1:3001/executor",
+      fetchImpl,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.rootAssetLeakage).toBe(true);
+    expect(result.error).toBe("executor HTML still references root /assets/");
   });
 });

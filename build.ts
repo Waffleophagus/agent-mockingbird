@@ -9,16 +9,14 @@ const vendorRoot = path.join(repoRoot, "vendor", "opencode");
 const appSourceDir = path.join(repoRoot, "vendor", "opencode", "packages", "app", "dist");
 const appOutdir = path.join(outdir, "app");
 
+console.log("Refreshing vendored OpenCode worktree...");
+await Bun.$`bun run opencode:sync --rebuild-only`.cwd(repoRoot);
+console.log("Installing vendored OpenCode dependencies...");
+await Bun.$`bun install --cwd vendor/opencode --frozen-lockfile`.cwd(repoRoot);
+
 if (!existsSync(vendorRoot)) {
   console.error(
     "Missing generated OpenCode worktree at vendor/opencode. Run `bun run opencode:sync --rebuild-only` first.",
-  );
-  process.exit(1);
-}
-
-if (!existsSync(path.join(vendorRoot, "node_modules"))) {
-  console.error(
-    "Missing OpenCode dependencies at vendor/opencode/node_modules. Run `bun install --cwd vendor/opencode` first.",
   );
   process.exit(1);
 }

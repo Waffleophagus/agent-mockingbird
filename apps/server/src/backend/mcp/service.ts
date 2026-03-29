@@ -31,6 +31,15 @@ interface RuntimeMcp {
   error?: string;
 }
 
+export interface EffectiveMcpConfigSnapshot {
+  source: "opencode-managed-config";
+  hash: string;
+  servers: Array<ConfiguredMcpServer>;
+  enabled: Array<string>;
+  status?: Array<RuntimeMcp>;
+  statusError?: string;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -257,6 +266,69 @@ export function resolveConfiguredMcpIds(config: AgentMockingbirdConfig) {
       .filter((server) => server.enabled)
       .map((server) => server.id),
   );
+}
+
+export async function loadEffectiveMcpConfig(
+  config: AgentMockingbirdConfig,
+  input?: { includeStatus?: boolean },
+): Promise<EffectiveMcpConfigSnapshot> {
+  let servers: Array<ConfiguredMcpServer> = [];
+  let enabled: Array<string> = [];
+  let hash = hashConfiguredMcpServers([]);
+  let configError: string | undefined;
+
+  try {
+    servers = resolveConfiguredMcpServers(config);
+    enabled = normalizeMcpIds(
+      servers.filter((server) => server.enabled).map((server) => server.id),
+    );
+    hash = hashConfiguredMcpServers(servers);
+  } catch (error) {
+    configError =
+      error instanceof Error
+        ? error.message
+        : "Failed to read effective MCP configuration";
+  }
+
+  if (input?.includeStatus !== true) {
+    return {
+      source: "opencode-managed-config",
+      hash,
+      servers,
+      enabled,
+      ...(configError ? { statusError: configError } : {}),
+    };
+  }
+
+  if (configError) {
+    return {
+      source: "opencode-managed-config",
+      hash,
+      servers,
+      enabled,
+      statusError: configError,
+    };
+  }
+
+  try {
+    const status = await listRuntimeMcps(config);
+    return {
+      source: "opencode-managed-config",
+      hash,
+      servers,
+      enabled,
+      status,
+    };
+  } catch (error) {
+    return {
+      source: "opencode-managed-config",
+      hash,
+      servers,
+      enabled,
+      statusError:
+        error instanceof Error ? error.message : "Failed to load runtime MCP status",
+    };
+  }
 }
 
 async function getWorkspaceMcpConfig(config: AgentMockingbirdConfig) {

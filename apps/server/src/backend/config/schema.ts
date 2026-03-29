@@ -5,6 +5,10 @@ const stringListSchema = z.array(z.string().min(1)).transform(values => {
   return [...new Set(normalized)];
 });
 
+const absoluteUrlPathSchema = z
+  .string()
+  .regex(/^\/[^?#]*$/, "must be an absolute URL path");
+
 const mcpServerIdSchema = z.string().min(1).regex(/^[A-Za-z0-9._-]+$/);
 const mcpHeadersSchema = z.record(z.string(), z.string()).default({});
 const mcpEnvironmentSchema = z.record(z.string(), z.string()).default({});
@@ -135,6 +139,47 @@ const runtimeSmokeTestSchema = z
   })
   .strict();
 
+const runtimeExecutorSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    baseUrl: z.string().url().default("http://127.0.0.1:8788"),
+    workspaceDir: z.string().min(1).default("./data/executor-workspace"),
+    dataDir: z.string().min(1).default("./data/executor"),
+    uiMountPath: absoluteUrlPathSchema.default("/executor"),
+  })
+  .strict()
+  .default({
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8788",
+    workspaceDir: "./data/executor-workspace",
+    dataDir: "./data/executor",
+    uiMountPath: "/executor",
+  });
+
+const embeddedServiceModeSchema = z.enum(["embedded-patched", "upstream-fallback"]);
+
+const runtimeEmbeddedExecutorSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    mountPath: absoluteUrlPathSchema.default("/executor"),
+    baseUrl: z.string().url(),
+    healthcheckPath: absoluteUrlPathSchema.default("/executor"),
+    mode: embeddedServiceModeSchema.default("embedded-patched"),
+  })
+  .strict();
+
+const runtimeEmbeddedServicesSchema = z
+  .object({
+    executor: runtimeEmbeddedExecutorSchema.default({
+      enabled: true,
+      mountPath: "/executor",
+      baseUrl: "http://127.0.0.1:8788",
+      healthcheckPath: "/executor",
+      mode: "embedded-patched",
+    }),
+  })
+  .strict();
+
 const runtimeRunStreamSchema = z
   .object({
     heartbeatMs: z.number().int().min(1_000).default(15_000),
@@ -258,6 +303,8 @@ const runtimeConfigPolicySchema = z
       "runtime.opencode.childSessionHideAfterDays",
       "runtime.opencode.bootstrap",
       "runtime.opencode.imageModel",
+      "runtime.executor",
+      "runtime.embeddedServices",
       "runtime.runStream",
       "runtime.memory",
       "runtime.heartbeat",
@@ -287,6 +334,16 @@ export const agentMockingbirdConfigSchema = z
     runtime: z
       .object({
         opencode: runtimeOpencodeSchema,
+        executor: runtimeExecutorSchema,
+        embeddedServices: runtimeEmbeddedServicesSchema.default({
+          executor: {
+            enabled: true,
+            mountPath: "/executor",
+            baseUrl: "http://127.0.0.1:8788",
+            healthcheckPath: "/executor",
+            mode: "embedded-patched",
+          },
+        }),
         smokeTest: runtimeSmokeTestSchema,
         runStream: runtimeRunStreamSchema.default({
           heartbeatMs: 15_000,
@@ -361,6 +418,8 @@ export const agentMockingbirdConfigSchema = z
             "runtime.opencode.childSessionHideAfterDays",
             "runtime.opencode.bootstrap",
             "runtime.opencode.imageModel",
+            "runtime.executor",
+            "runtime.embeddedServices",
             "runtime.runStream",
             "runtime.memory",
             "runtime.heartbeat",
@@ -382,7 +441,9 @@ export const agentMockingbirdConfigSchema = z
     ui: z
       .object({
         skills: stringListSchema.default([]),
+        // Deprecated. Operational MCP state lives in the managed OpenCode config.
         mcps: stringListSchema.default([]),
+        // Deprecated. Operational MCP state lives in the managed OpenCode config.
         mcpServers: configuredMcpServerListSchema.default([]),
         agents: z.array(specialistAgentSchema).default([]),
         agentTypes: agentTypeDefinitionListSchema.default([]),

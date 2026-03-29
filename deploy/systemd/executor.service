@@ -1,0 +1,27 @@
+[Unit]
+Description=Executor Sidecar for Agent Mockingbird
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=agent-mockingbird
+Group=agent-mockingbird
+WorkingDirectory=/var/lib/agent-mockingbird/executor-workspace
+Environment=EXECUTOR_DATA_DIR=/var/lib/agent-mockingbird/executor
+Environment=EXECUTOR_LOCAL_DATA_DIR=/var/lib/agent-mockingbird/executor/local
+Environment=EXECUTOR_SERVER_PID_FILE=/var/lib/agent-mockingbird/executor/run/server.pid
+Environment=EXECUTOR_SERVER_LOG_FILE=/var/lib/agent-mockingbird/executor/run/server.log
+Environment=EXECUTOR_SERVER_BASE_PATH=/executor
+Environment=EXECUTOR_WEB_ASSETS_DIR=/srv/agent-mockingbird/app/vendor/executor/apps/web/dist
+ExecStart=/usr/bin/env bun /srv/agent-mockingbird/app/vendor/executor/apps/executor/src/cli/main.ts server start --port 8788
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/agent-mockingbird/app /var/lib/agent-mockingbird
+
+[Install]
+WantedBy=multi-user.target

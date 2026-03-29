@@ -73,6 +73,65 @@ describe("AgentMockingbirdPlugin", () => {
     expect(payload.results[0]?.snippet).toBe("Stored detail");
   });
 
+  test("config_manager get_config passes through effective MCP state", async () => {
+    process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async (input) => {
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/config");
+      return new Response(
+        JSON.stringify({
+          hash: "hash-1",
+          path: "/tmp/agent-mockingbird.config.json",
+          config: {
+            ui: {
+              mcps: [],
+              mcpServers: [],
+            },
+          },
+          effective: {
+            mcp: {
+              source: "opencode-managed-config",
+              enabled: ["executor"],
+              servers: [
+                {
+                  id: "executor",
+                  type: "remote",
+                  enabled: true,
+                  url: "http://127.0.0.1:8788/mcp",
+                },
+              ],
+            },
+          },
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }) as typeof fetch;
+
+    const hooks = await AgentMockingbirdPlugin({} as never);
+    const raw = await hooks.tool?.config_manager?.execute({
+      action: "get_config",
+    }, {} as never);
+    const payload = JSON.parse(raw ?? "{}") as {
+      ok: boolean;
+      effective?: {
+        mcp?: {
+          source: string;
+          enabled: string[];
+        };
+      };
+    };
+
+    expect(payload.ok).toBe(true);
+    expect(payload.effective?.mcp).toMatchObject({
+      source: "opencode-managed-config",
+      enabled: ["executor"],
+    });
+  });
+
   test("system transform appends Agent Mockingbird prompt from the runtime API", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 

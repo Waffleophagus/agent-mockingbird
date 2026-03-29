@@ -73,9 +73,15 @@ jobs:
           fi
 
           if [[ "${should_publish}" == "true" ]]; then
-            registry_json="$(curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true)"
-            version_info="$(REGISTRY_JSON="${registry_json}" node -e '
-              const raw = process.env.REGISTRY_JSON || "";
+            version_info="$({
+              curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true
+            } | node -e '
+              let raw = "";
+              process.stdin.setEncoding("utf8");
+              process.stdin.on("data", (chunk) => {
+                raw += chunk;
+              });
+              process.stdin.on("end", () => {
               let latest = "";
               let next = "";
 
@@ -112,10 +118,11 @@ jobs:
                   ? currentNext.prerelease + 1
                   : 1;
 
-              console.log(`LATEST_VERSION=${latest}`);
-              console.log(`NEXT_VERSION=${next}`);
-              console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
-              console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
+                console.log(`LATEST_VERSION=${latest}`);
+                console.log(`NEXT_VERSION=${next}`);
+                console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
+                console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
+              });
             ')"
             eval "${version_info}"
             latest_version="${LATEST_VERSION}"
@@ -158,9 +165,11 @@ jobs:
             pkg.files = [
               "bin",
               "runtime-assets",
+              "vendor/executor",
               "dist",
               "deploy",
               "scripts",
+              "executor.lock.json",
               "opencode.lock.json",
               "README.md",
               "bun.lock",
@@ -185,12 +194,16 @@ jobs:
           tar_contents="$(tar -tzf "${tarball}")"
           grep -Fqx -- "package/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/agent-mockingbird" <<<"${tar_contents}"
+          grep -Fqx -- "package/bin/agent-mockingbird-managed" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-assets.mjs" <<<"${tar_contents}"
           grep -Fqx -- "package/bin/runtime-layout.mjs" <<<"${tar_contents}"
+          grep -Fqx -- "package/executor.lock.json" <<<"${tar_contents}"
           grep -Fqx -- "package/opencode.lock.json" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/app/index.html" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/drizzle/meta/_journal.json" <<<"${tar_contents}"
+          grep -Fqx -- "package/vendor/executor/apps/executor/src/cli/main.ts" <<<"${tar_contents}"
+          grep -Fqx -- "package/vendor/executor/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/workspace/AGENTS.md" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/opencode-config/opencode.jsonc" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/opencode-config/plugins/agent-mockingbird.ts" <<<"${tar_contents}"
@@ -237,7 +250,7 @@ jobs:
           tmpdir="$(mktemp -d)"
           trap 'rm -rf "${tmpdir}"' EXIT
           tar -xzf "${AGENT_MOCKINGBIRD_TARBALL}" -C "${tmpdir}"
-          RUNTIME_IMPL_PATH="${tmpdir}/package/bin/agent-mockingbird" bun -e '
+          RUNTIME_IMPL_PATH="${tmpdir}/package/bin/agent-mockingbird-managed" bun -e '
             const fs = require("fs");
             const path = process.env.RUNTIME_IMPL_PATH;
             if (!path || !fs.existsSync(path)) {
