@@ -1,4 +1,5 @@
 import type { AgentMockingbirdConfig } from "../config/schema";
+import { copyPassthroughProxyHeaders, stripDecodedRepresentationHeaders } from "../http/proxyHeaders";
 
 export type EmbeddedServiceId = "executor";
 export type EmbeddedServiceMode = "embedded-patched" | "upstream-fallback";
@@ -138,25 +139,23 @@ function rewriteCookiePath(setCookie: string, mountPath: string) {
 }
 
 function copyResponseHeaders(response: Response, definition: EmbeddedServiceDefinition, requestUrl: URL) {
-  const headers = new Headers();
-  response.headers.forEach((value, key) => {
-    const normalizedKey = key.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(normalizedKey)) {
-      return;
-    }
-    if (normalizedKey === "location") {
-      headers.set(key, rewriteLocationHeader(value, definition, requestUrl));
-      return;
-    }
-    if (normalizedKey === "set-cookie") {
-      return;
-    }
-    headers.append(key, value);
-  });
+  const headers = copyPassthroughProxyHeaders(response);
+  const location = response.headers.get("location");
+  if (location) {
+    headers.set("location", rewriteLocationHeader(location, definition, requestUrl));
+  }
 
   const setCookies = response.headers.getSetCookie?.() ?? [];
-  for (const cookie of setCookies) {
-    headers.append("set-cookie", definition.rewriteCookies ? rewriteCookiePath(cookie, definition.mountPath) : cookie);
+  if (setCookies.length > 0) {
+    headers.delete("set-cookie");
+    for (const cookie of setCookies) {
+      headers.append("set-cookie", definition.rewriteCookies ? rewriteCookiePath(cookie, definition.mountPath) : cookie);
+    }
+  } else if (definition.rewriteCookies) {
+    const combinedCookie = headers.get("set-cookie");
+    if (combinedCookie) {
+      headers.set("set-cookie", rewriteCookiePath(combinedCookie, definition.mountPath));
+    }
   }
 
   return headers;
@@ -174,27 +173,6 @@ function shouldRewriteTextResponse(response: Response, definition: EmbeddedServi
     return true;
   }
   return false;
-}
-
-function stripRewrittenRepresentationHeaders(headers: Headers) {
-  headers.delete("content-encoding");
-  headers.delete("content-length");
-  headers.delete("etag");
-
-  const vary = headers.get("vary");
-  if (!vary) {
-    return;
-  }
-
-  const preservedValues = vary
-    .split(",")
-    .map(value => value.trim())
-    .filter(value => value.length > 0 && value.toLowerCase() !== "accept-encoding");
-  if (preservedValues.length === 0) {
-    headers.delete("vary");
-    return;
-  }
-  headers.set("vary", preservedValues.join(", "));
 }
 
 function buildEmbeddedServiceDefinition(config: AgentMockingbirdConfig, id: EmbeddedServiceId): EmbeddedServiceDefinition | null {
@@ -334,17 +312,6 @@ function filterExternalRequestHeaders(headers: Headers) {
   return filtered;
 }
 
-function filterExternalResponseHeaders(headers: Headers) {
-  const filtered = new Headers();
-  headers.forEach((value, key) => {
-    if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
-      return;
-    }
-    filtered.append(key, value);
-  });
-  return filtered;
-}
-
 export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMockingbirdConfig) {
   let pathname: string;
   try {
@@ -381,6 +348,7 @@ export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMoc
 
   const headers = copyResponseHeaders(upstream, definition, new URL(req.url));
   if (!shouldRewriteTextResponse(upstream, definition)) {
+    stripDecodedRepresentationHeaders(headers);
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,
@@ -389,7 +357,7 @@ export async function proxyEmbeddedServiceRequest(req: Request, config: AgentMoc
   }
 
   const content = await upstream.text();
-  stripRewrittenRepresentationHeaders(headers);
+  stripDecodedRepresentationHeaders(headers);
   return new Response(rewriteRootRelativeContent(content, definition), {
     status: upstream.status,
     statusText: upstream.statusText,
@@ -438,10 +406,13 @@ export async function proxyEmbeddedExternalRequest(req: Request, config: AgentMo
     redirect: "manual",
   });
 
+  const headers = copyPassthroughProxyHeaders(upstream);
+  stripDecodedRepresentationHeaders(headers);
+
   return new Response(upstream.body, {
     status: upstream.status,
     statusText: upstream.statusText,
-    headers: filterExternalResponseHeaders(new Headers(upstream.headers)),
+    headers,
   });
 }
 
@@ -458,6 +429,5 @@ export const testing = {
   parseExternalProxyRequest,
   rewriteCookiePath,
   rewriteRootRelativeContent,
-  stripRewrittenRepresentationHeaders,
   stripMountPath,
 };
