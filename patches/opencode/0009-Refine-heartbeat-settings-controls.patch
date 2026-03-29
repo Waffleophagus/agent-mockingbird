@@ -1,7 +1,7 @@
-From 6f10b079352ce50a6ed622a76dd963e0e3203893 Mon Sep 17 00:00:00 2001
+From 47579300de8ffc7b7ab4f32926c952dd16b4b852 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Thu, 19 Mar 2026 21:54:09 -0500
-Subject: [PATCH 10/14] Refine heartbeat settings controls
+Subject: [PATCH 09/13] Refine heartbeat settings controls
 
 ---
  .../src/components/dialog-select-model.tsx    |  7 +-
@@ -9,10 +9,10 @@ Subject: [PATCH 10/14] Refine heartbeat settings controls
  2 files changed, 85 insertions(+), 15 deletions(-)
 
 diff --git a/packages/app/src/components/dialog-select-model.tsx b/packages/app/src/components/dialog-select-model.tsx
-index 3654aab85..8a4a88a36 100644
+index cb688c30a..a8c9d198e 100644
 --- a/packages/app/src/components/dialog-select-model.tsx
 +++ b/packages/app/src/components/dialog-select-model.tsx
-@@ -19,13 +19,14 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
+@@ -17,13 +17,14 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
    provider === "opencode" && (!cost || cost.input === 0)
  
  type ModelState = ReturnType<typeof useLocal>["model"]
@@ -28,7 +28,7 @@ index 3654aab85..8a4a88a36 100644
  }> = (props) => {
    const model = props.model ?? useLocal().model
    const language = useLanguage()
-@@ -91,7 +92,7 @@ type ModelSelectorTriggerProps = Omit<ComponentProps<typeof Kobalte.Trigger>, "a
+@@ -89,7 +90,7 @@ type ModelSelectorTriggerProps = Omit<ComponentProps<typeof Kobalte.Trigger>, "a
  
  export function ModelSelectorPopover(props: {
    provider?: string
@@ -37,7 +37,7 @@ index 3654aab85..8a4a88a36 100644
    children?: JSX.Element
    triggerAs?: ValidComponent
    triggerProps?: ModelSelectorTriggerProps
-@@ -189,7 +190,7 @@ export function ModelSelectorPopover(props: {
+@@ -191,7 +192,7 @@ export function ModelSelectorPopover(props: {
    )
  }
  

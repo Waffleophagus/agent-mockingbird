@@ -1,14 +1,13 @@
-From b7f5cebf47fb4d5f233648beec018de3d82ffa0d Mon Sep 17 00:00:00 2001
+From 87ba78c592aba3fafab70e0ae6489697f7c5ad0c Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Wed, 18 Mar 2026 15:36:33 -0500
-Subject: [PATCH 04/14] Add heartbeat settings and usage nav
+Subject: [PATCH 03/13] Add heartbeat settings and usage nav
 
 ---
  .../app/src/components/dialog-settings.tsx    |   8 +
  .../app/src/components/settings-heartbeat.tsx | 409 ++++++++++++++++++
- packages/app/src/pages/layout.tsx             |   2 +
  .../app/src/pages/layout/sidebar-shell.tsx    |  11 +
- 4 files changed, 430 insertions(+)
+ 3 files changed, 428 insertions(+)
  create mode 100644 packages/app/src/components/settings-heartbeat.tsx
 
 diff --git a/packages/app/src/components/dialog-settings.tsx b/packages/app/src/components/dialog-settings.tsx
@@ -459,19 +458,6 @@ index 000000000..95a1770cc
 +    </WaffleSettingsPage>
 +  )
 +}
-diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
-index 9df2a3681..86cfb0b9b 100644
---- a/packages/app/src/pages/layout.tsx
-+++ b/packages/app/src/pages/layout.tsx
-@@ -2227,6 +2227,8 @@ export default function Layout(props: ParentProps) {
-       openProjectKeybind={() => command.keybind("project.open")}
-       onOpenProject={chooseProject}
-       renderProjectOverlay={projectOverlay}
-+      usageLabel={() => "Usage"}
-+      onOpenUsage={() => window.location.assign("/usage")}
-       settingsLabel={() => language.t("sidebar.settings")}
-       settingsKeybind={() => command.keybind("settings.open")}
-       onOpenSettings={openSettings}
 diff --git a/packages/app/src/pages/layout/sidebar-shell.tsx b/packages/app/src/pages/layout/sidebar-shell.tsx
 index 924828c2f..7ed209697 100644
 --- a/packages/app/src/pages/layout/sidebar-shell.tsx

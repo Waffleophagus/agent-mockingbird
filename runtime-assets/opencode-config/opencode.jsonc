@@ -22,6 +22,12 @@
   "experimental": {
     "batch_tool": true
   },
+  "plugin": [
+    [
+      "./plugins/agent-mockingbird.ts",
+      {}
+    ]
+  ],
   "mcp": {
     "executor": {
       "type": "remote",

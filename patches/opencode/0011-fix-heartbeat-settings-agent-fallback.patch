@@ -1,7 +1,7 @@
-From f8eb83b66fb06d99b54bc27bb43c25073ce3085e Mon Sep 17 00:00:00 2001
+From 9e307d2ec5a6535dc5f60c2ba248ed23feeaafee Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sat, 21 Mar 2026 18:34:46 -0500
-Subject: [PATCH 12/14] fix heartbeat settings agent fallback
+Subject: [PATCH 11/13] fix heartbeat settings agent fallback
 
 ---
  .../app/src/components/settings-heartbeat.tsx | 26 +++++++++++++------
