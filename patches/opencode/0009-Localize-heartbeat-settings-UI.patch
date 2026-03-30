@@ -1,4 +1,4 @@
-From 53e01f18c238d6ce8fe306cea2dceaba70331cde Mon Sep 17 00:00:00 2001
+From f7b729f7d6472e072dad287fbe72cc7582ae0c82 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 17:04:36 -0500
 Subject: [PATCH 9/9] Localize heartbeat settings UI
@@ -23,18 +23,18 @@ index 8b51a29fd..fa324fc0b 100644
                      <Tabs.Trigger value="cron">
                        <Icon name="warning" />
 diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
-index 8d48a34bd..4288feeb6 100644
+index 8d37cfc7f..09a146ae9 100644
 --- a/packages/app/src/components/settings-heartbeat.tsx
 +++ b/packages/app/src/components/settings-heartbeat.tsx
-@@ -4,6 +4,7 @@ import { Switch } from "@opencode-ai/ui/switch"
- import { showToast } from "@opencode-ai/ui/toast"
+@@ -5,6 +5,7 @@ import { showToast } from "@opencode-ai/ui/toast"
+ import { useNavigate } from "@solidjs/router"
  import { createMemo, onMount, Show, type Component } from "solid-js"
  import { createStore } from "solid-js/store"
 +import { useLanguage } from "@/context/language"
  import { useModels } from "@/context/models"
  import { mockingbirdJson } from "@/utils/mockingbird"
  import { ModelSelectorPopover, type ModelSelectorState } from "./dialog-select-model"
-@@ -101,39 +102,22 @@ function toForm(config: HeartbeatRuntimeConfig): HeartbeatFormState {
+@@ -102,39 +103,22 @@ function toForm(config: HeartbeatRuntimeConfig): HeartbeatFormState {
    }
  }
  
@@ -84,7 +84,7 @@ index 8d48a34bd..4288feeb6 100644
  
    const activeHours =
      form.activeHoursEnabled
-@@ -145,7 +129,7 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
+@@ -146,7 +130,7 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
        : null
  
    if (activeHours && (!activeHours.start || !activeHours.end || !activeHours.timezone)) {
@@ -93,15 +93,15 @@ index 8d48a34bd..4288feeb6 100644
    }
  
    return {
-@@ -160,6 +144,7 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
+@@ -161,6 +145,7 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
  }
  
  export const SettingsHeartbeat: Component = () => {
 +  const language = useLanguage()
    const models = useModels()
+   const navigate = useNavigate()
    const [state, setState] = createStore({
-     loading: true,
-@@ -219,6 +204,28 @@ export const SettingsHeartbeat: Component = () => {
+@@ -221,6 +206,28 @@ export const SettingsHeartbeat: Component = () => {
      },
    }
  
@@ -130,7 +130,7 @@ index 8d48a34bd..4288feeb6 100644
    async function load() {
      setState("loading", true)
      setState("error", "")
-@@ -241,7 +248,7 @@ export const SettingsHeartbeat: Component = () => {
+@@ -243,7 +250,7 @@ export const SettingsHeartbeat: Component = () => {
          setState("agentOptions", [...ids].sort((left, right) => left.localeCompare(right)))
        }
      } catch (error) {
@@ -139,7 +139,7 @@ index 8d48a34bd..4288feeb6 100644
      } finally {
        setState("loading", false)
      }
-@@ -250,9 +257,9 @@ export const SettingsHeartbeat: Component = () => {
+@@ -252,9 +259,9 @@ export const SettingsHeartbeat: Component = () => {
    async function save() {
      let heartbeatPatch: HeartbeatRuntimeConfig
      try {
@@ -151,7 +151,7 @@ index 8d48a34bd..4288feeb6 100644
        return
      }
  
-@@ -275,11 +282,11 @@ export const SettingsHeartbeat: Component = () => {
+@@ -277,11 +284,11 @@ export const SettingsHeartbeat: Component = () => {
        showToast({
          variant: "success",
          icon: "circle-check",
@@ -165,7 +165,7 @@ index 8d48a34bd..4288feeb6 100644
      } finally {
        setState("saving", false)
      }
-@@ -297,10 +304,10 @@ export const SettingsHeartbeat: Component = () => {
+@@ -299,10 +306,10 @@ export const SettingsHeartbeat: Component = () => {
        showToast({
          variant: "success",
          icon: "circle-check",
@@ -178,7 +178,7 @@ index 8d48a34bd..4288feeb6 100644
      } finally {
        setState("running", false)
      }
-@@ -312,18 +319,18 @@ export const SettingsHeartbeat: Component = () => {
+@@ -314,18 +321,18 @@ export const SettingsHeartbeat: Component = () => {
  
    return (
      <MockingbirdSettingsPage
@@ -202,7 +202,7 @@ index 8d48a34bd..4288feeb6 100644
            </Button>
          </MockingbirdToolbar>
        }
-@@ -335,16 +342,34 @@ export const SettingsHeartbeat: Component = () => {
+@@ -337,16 +344,34 @@ export const SettingsHeartbeat: Component = () => {
        <Show when={state.status}>
          {(status) => (
            <>
@@ -248,8 +248,8 @@ index 8d48a34bd..4288feeb6 100644
                  {(href) => (
                    <div class="flex justify-end">
 @@ -355,7 +380,7 @@ export const SettingsHeartbeat: Component = () => {
-                         window.location.href = href()
-                       }}
+                       size="small"
+                       onClick={() => navigate(href())}
                      >
 -                      Open heartbeat session
 +                      {language.t("heartbeat.action.openSession")}

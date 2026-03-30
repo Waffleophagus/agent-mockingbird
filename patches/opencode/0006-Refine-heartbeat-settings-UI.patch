@@ -1,4 +1,4 @@
-From 5f715e570a46eb95080d5104afd88eac92a54f38 Mon Sep 17 00:00:00 2001
+From 5f19a6fe90c627a1451a8dd2fa0b0930bc7e7441 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 17:04:36 -0500
 Subject: [PATCH 6/9] Refine heartbeat settings UI
@@ -47,15 +47,16 @@ index cb688c30a..a8c9d198e 100644
    const language = useLanguage()
  
 diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
-index 628fda355..c3746ffdc 100644
+index 628fda355..f7046b9a9 100644
 --- a/packages/app/src/components/settings-heartbeat.tsx
 +++ b/packages/app/src/components/settings-heartbeat.tsx
-@@ -1,9 +1,12 @@
+@@ -1,9 +1,13 @@
  import { Button } from "@opencode-ai/ui/button"
 +import { Select } from "@opencode-ai/ui/select"
  import { Switch } from "@opencode-ai/ui/switch"
  import { showToast } from "@opencode-ai/ui/toast"
 -import { onMount, Show, type Component } from "solid-js"
++import { useNavigate } from "@solidjs/router"
 +import { createMemo, onMount, Show, type Component } from "solid-js"
  import { createStore } from "solid-js/store"
 +import { useModels } from "@/context/models"
@@ -64,7 +65,7 @@ index 628fda355..c3746ffdc 100644
  import {
    MockingbirdCard,
    MockingbirdInput,
-@@ -33,6 +36,7 @@ type HeartbeatRuntimeConfig = {
+@@ -33,6 +37,7 @@ type HeartbeatRuntimeConfig = {
  
  type HeartbeatStatus = {
    config: HeartbeatRuntimeConfig
@@ -72,7 +73,7 @@ index 628fda355..c3746ffdc 100644
    state: {
      sessionId: string | null
      running: boolean
-@@ -54,6 +58,16 @@ type RuntimePayload = {
+@@ -54,6 +59,16 @@ type RuntimePayload = {
    path: string
  }
  
@@ -89,15 +90,16 @@ index 628fda355..c3746ffdc 100644
  type HeartbeatFormState = {
    enabled: boolean
    interval: string
-@@ -141,6 +155,7 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
+@@ -141,6 +156,8 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
  }
  
  export const SettingsHeartbeat: Component = () => {
 +  const models = useModels()
++  const navigate = useNavigate()
    const [state, setState] = createStore({
      loading: true,
      saving: false,
-@@ -148,6 +163,7 @@ export const SettingsHeartbeat: Component = () => {
+@@ -148,6 +165,7 @@ export const SettingsHeartbeat: Component = () => {
      error: "",
      runtimeHash: "",
      runtimePath: "",
@@ -105,7 +107,7 @@ index 628fda355..c3746ffdc 100644
      status: null as HeartbeatStatus | null,
      form: {
        enabled: true,
-@@ -163,17 +179,59 @@ export const SettingsHeartbeat: Component = () => {
+@@ -163,17 +181,59 @@ export const SettingsHeartbeat: Component = () => {
      } as HeartbeatFormState,
    })
  
@@ -166,7 +168,7 @@ index 628fda355..c3746ffdc 100644
        setState("form", toForm(heartbeat.heartbeat.config))
      } catch (error) {
        setState("error", error instanceof Error ? error.message : "Failed to load heartbeat settings")
-@@ -274,11 +332,27 @@ export const SettingsHeartbeat: Component = () => {
+@@ -274,11 +334,25 @@ export const SettingsHeartbeat: Component = () => {
                <MockingbirdMetaRow label="Config file" value={state.runtimePath || "Unavailable"} />
                <MockingbirdMetaRow label="Enabled" value={status().config.enabled ? "Yes" : "No"} />
                <MockingbirdMetaRow label="Session id" value={status().state.sessionId ?? "Not created yet"} />
@@ -182,9 +184,7 @@ index 628fda355..c3746ffdc 100644
 +                    <Button
 +                      variant="ghost"
 +                      size="small"
-+                      onClick={() => {
-+                        window.location.href = href()
-+                      }}
++                      onClick={() => navigate(href())}
 +                    >
 +                      Open heartbeat session
 +                    </Button>

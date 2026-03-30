@@ -128,6 +128,7 @@ async function main() {
     verifyPatchReproducibility(lock, {
       baseCommit: targetCommit,
       compareDir: path.resolve(repoRoot, lock.paths.vendor),
+      cleanroomOverride: path.resolve(repoRoot, lock.paths.cleanroom),
     });
     writeLock(lock, {
       upstream: {
@@ -156,6 +157,7 @@ async function main() {
     verifyPatchReproducibility(lock, {
       baseCommit: targetCommit,
       compareDir: path.resolve(repoRoot, lock.paths.vendor),
+      cleanroomOverride: path.resolve(repoRoot, lock.paths.cleanroom),
     });
     writeLock(lock, {
       upstream: {

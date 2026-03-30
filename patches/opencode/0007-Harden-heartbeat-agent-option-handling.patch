@@ -1,4 +1,4 @@
-From 90443a326114bef6f40468d5f76facb5f7781c1e Mon Sep 17 00:00:00 2001
+From 946f2abef32a9d955dd4019a40fe64952245566d Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 17:04:36 -0500
 Subject: [PATCH 7/9] Harden heartbeat agent option handling
@@ -86,10 +86,10 @@ index 000000000..e2fd344a8
 +  })
 +})
 diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
-index c3746ffdc..8d48a34bd 100644
+index f7046b9a9..8d37cfc7f 100644
 --- a/packages/app/src/components/settings-heartbeat.tsx
 +++ b/packages/app/src/components/settings-heartbeat.tsx
-@@ -7,6 +7,10 @@ import { createStore } from "solid-js/store"
+@@ -8,6 +8,10 @@ import { createStore } from "solid-js/store"
  import { useModels } from "@/context/models"
  import { mockingbirdJson } from "@/utils/mockingbird"
  import { ModelSelectorPopover, type ModelSelectorState } from "./dialog-select-model"
@@ -100,7 +100,7 @@ index c3746ffdc..8d48a34bd 100644
  import {
    MockingbirdCard,
    MockingbirdInput,
-@@ -62,6 +66,7 @@ type AgentType = {
+@@ -63,6 +67,7 @@ type AgentType = {
    id: string
    mode?: string
    hidden?: boolean
@@ -108,7 +108,7 @@ index c3746ffdc..8d48a34bd 100644
  }
  
  type AgentsPayload = {
-@@ -218,21 +223,23 @@ export const SettingsHeartbeat: Component = () => {
+@@ -220,21 +225,23 @@ export const SettingsHeartbeat: Component = () => {
      setState("loading", true)
      setState("error", "")
      try {
