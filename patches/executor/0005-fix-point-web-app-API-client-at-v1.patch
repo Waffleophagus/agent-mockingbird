@@ -1,0 +1,97 @@
+From dd5235e35190dc21b889719d11145226e22c85ed Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Mon, 30 Mar 2026 00:17:15 -0500
+Subject: [PATCH 5/5] fix: point web app API client at /v1
+
+
+diff --git a/apps/web/src/components/local-mcp-install-card.tsx b/apps/web/src/components/local-mcp-install-card.tsx
+index d5071c077e5ec1bacfc8c8a3a3880724281adf70..2c78b882a93d9e9eb3e3aad94906ea4537f62385 100644
+--- a/apps/web/src/components/local-mcp-install-card.tsx
++++ b/apps/web/src/components/local-mcp-install-card.tsx
+@@ -1,6 +1,7 @@
+ import { useEffect, useState } from "react";
+ import { CodeBlock } from "./code-block";
+ import { cn } from "../lib/utils";
++import { getExecutorUiBaseUrl } from "../lib/urls";
+ 
+ type LocalMcpInstallMode = "stdio" | "http";
+ 
+@@ -13,7 +14,7 @@ export function LocalMcpInstallCard(props: {
+   const [mode, setMode] = useState<LocalMcpInstallMode>("stdio");
+ 
+   useEffect(() => {
+-    setOrigin(new URL(import.meta.env.BASE_URL ?? "/", window.location.origin).toString().replace(/\/+$/, ""));
++    setOrigin(getExecutorUiBaseUrl(import.meta.env.BASE_URL ?? "/", window.location.origin));
+   }, []);
+ 
+   const command = mode === "stdio"
+diff --git a/apps/web/src/lib/urls.test.ts b/apps/web/src/lib/urls.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..00537d10f80d9b2d4067232aac5f46ae497c23b6
+--- /dev/null
++++ b/apps/web/src/lib/urls.test.ts
+@@ -0,0 +1,22 @@
++import { describe, expect, test } from "bun:test";
++import { getExecutorApiBaseUrl, getExecutorUiBaseUrl } from "./urls";
++
++describe("executor web URLs", () => {
++  test("builds the UI base URL from the app base path", () => {
++    expect(getExecutorUiBaseUrl("/executor/", "https://example.com")).toBe(
++      "https://example.com/executor",
++    );
++  });
++
++  test("builds the API base URL under /v1 for nested app bases", () => {
++    expect(getExecutorApiBaseUrl("/executor/", "https://example.com")).toBe(
++      "https://example.com/executor/v1",
++    );
++  });
++
++  test("builds the API base URL under /v1 for the root app base", () => {
++    expect(getExecutorApiBaseUrl("/", "https://example.com")).toBe(
++      "https://example.com/v1",
++    );
++  });
++});
+diff --git a/apps/web/src/lib/urls.ts b/apps/web/src/lib/urls.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..24df31770ab194dc27b21c3ba7628f49e4318c3c
+--- /dev/null
++++ b/apps/web/src/lib/urls.ts
+@@ -0,0 +1,10 @@
++const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
++
++const resolveBaseUrl = (baseUrl: string, origin: string): URL =>
++  new URL(baseUrl || "/", origin);
++
++export const getExecutorUiBaseUrl = (baseUrl: string, origin: string): string =>
++  trimTrailingSlash(resolveBaseUrl(baseUrl, origin).toString());
++
++export const getExecutorApiBaseUrl = (baseUrl: string, origin: string): string =>
++  trimTrailingSlash(new URL("v1/", resolveBaseUrl(baseUrl, origin)).toString());
+diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
+index 1b2af668c1b5f1c521aeb5e3a3502c24da315a41..8e159f5bda6913c5db722330ab6d46b68d4fb97a 100644
+--- a/apps/web/src/main.tsx
++++ b/apps/web/src/main.tsx
+@@ -16,6 +16,7 @@ import { EditSourcePage, NewSourcePage } from "./views/source-editor";
+ import { SourceDetailPage } from "./views/source-detail";
+ import { SecretsPage } from "./views/secrets";
+ import { AddSourcePage } from "./views/add-source";
++import { getExecutorApiBaseUrl } from "./lib/urls";
+ 
+ // ---------------------------------------------------------------------------
+ // Route search schema
+@@ -31,9 +32,7 @@ const sourceTabs = ["model", "discover"] as const;
+ const executorBasePath = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") || "/";
+ 
+ if (typeof window !== "undefined") {
+-  setExecutorApiBaseUrl(
+-    new URL(import.meta.env.BASE_URL ?? "/", window.location.origin).toString().replace(/\/+$/, ""),
+-  );
++  setExecutorApiBaseUrl(getExecutorApiBaseUrl(import.meta.env.BASE_URL ?? "/", window.location.origin));
+ }
+ 
+ // ---------------------------------------------------------------------------
+-- 
+2.53.0
+
