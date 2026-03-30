@@ -1,7 +1,7 @@
-From fb717ec08cead68422f759e83568cf5d6197481e Mon Sep 17 00:00:00 2001
+From c461d3696caa6ebb41c42a7e9edded694874aad2 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 00:51:34 -0500
-Subject: [PATCH 7/7] fix: preserve array responses in wrapped api client
+Subject: [PATCH 6/6] fix: preserve array responses in wrapped api client
 
 
 diff --git a/packages/clients/react/src/index.test.tsx b/packages/clients/react/src/index.test.tsx

@@ -1,7 +1,7 @@
 From c4dd773d959e3eaf47b733b599413f3d48118ac8 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Fri, 27 Mar 2026 17:50:46 -0500
-Subject: [PATCH 2/7] feat: add back button to navigate to primary chat
+Subject: [PATCH 2/6] feat: add back button to navigate to primary chat
 
 
 diff --git a/apps/web/src/components/shell.tsx b/apps/web/src/components/shell.tsx
