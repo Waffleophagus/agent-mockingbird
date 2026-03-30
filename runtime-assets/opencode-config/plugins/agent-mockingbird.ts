@@ -11,7 +11,75 @@ type JsonSchema = {
   items?: JsonSchema
 }
 
-function resolveApiBaseUrl(...envKeys: string[]) {
+type AgentMockingbirdPluginOptions = {
+  apiBaseUrl?: string
+  configApiBaseUrl?: string
+  memoryApiBaseUrl?: string
+  cronApiBaseUrl?: string
+  enableSystemPromptTransform?: boolean
+  enableCompactionHook?: boolean
+  enableToolDefinitionOverrides?: boolean
+  enableShellEnv?: boolean
+}
+
+type ApiScope = "config" | "memory" | "cron"
+
+const scopeEnvKeys: Record<ApiScope, string[]> = {
+  config: [
+    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+  ],
+  memory: [
+    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+  ],
+  cron: [
+    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+  ],
+}
+
+function normalizeBaseUrl(value?: string) {
+  const trimmed = value?.trim()
+  if (!trimmed) return
+  return trimmed.replace(/\/+$/, "")
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function parsePluginOptions(options: unknown): AgentMockingbirdPluginOptions {
+  if (!isPlainObject(options)) return {}
+  const parsed: AgentMockingbirdPluginOptions = {}
+
+  if (typeof options.apiBaseUrl === "string") parsed.apiBaseUrl = options.apiBaseUrl
+  if (typeof options.configApiBaseUrl === "string") parsed.configApiBaseUrl = options.configApiBaseUrl
+  if (typeof options.memoryApiBaseUrl === "string") parsed.memoryApiBaseUrl = options.memoryApiBaseUrl
+  if (typeof options.cronApiBaseUrl === "string") parsed.cronApiBaseUrl = options.cronApiBaseUrl
+  if (typeof options.enableSystemPromptTransform === "boolean") parsed.enableSystemPromptTransform = options.enableSystemPromptTransform
+  if (typeof options.enableCompactionHook === "boolean") parsed.enableCompactionHook = options.enableCompactionHook
+  if (typeof options.enableToolDefinitionOverrides === "boolean") parsed.enableToolDefinitionOverrides = options.enableToolDefinitionOverrides
+  if (typeof options.enableShellEnv === "boolean") parsed.enableShellEnv = options.enableShellEnv
+
+  return parsed
+}
+
+let activePluginOptions: AgentMockingbirdPluginOptions = {}
+
+function resolveApiBaseUrl(options: AgentMockingbirdPluginOptions, scope: ApiScope, ...envKeys: string[]) {
+  const optionValue =
+    scope === "config"
+      ? options.configApiBaseUrl
+      : scope === "memory"
+        ? options.memoryApiBaseUrl
+        : options.cronApiBaseUrl
+  const configured = normalizeBaseUrl(optionValue) ?? normalizeBaseUrl(options.apiBaseUrl)
+  if (configured) return configured
+
   for (const key of envKeys) {
     const value = process.env[key]?.trim()
     if (value) return value.replace(/\/+$/, "")
@@ -21,11 +89,11 @@ function resolveApiBaseUrl(...envKeys: string[]) {
   return `http://127.0.0.1:${port}`
 }
 
-async function requestJson(pathname: string, init?: RequestInit) {
+async function requestJson(options: AgentMockingbirdPluginOptions, scope: ApiScope, pathname: string, init?: RequestInit) {
   const response = await fetch(`${resolveApiBaseUrl(
-    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
-    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
-    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+    options,
+    scope,
+    ...scopeEnvKeys[scope],
   )}${pathname}`, init)
   const payload = (await response.json()) as JsonObject
   if (!response.ok) {
@@ -62,8 +130,14 @@ type SessionScope = {
 
 const sessionScopeCache = new Map<string, { value: SessionScope; expiresAtMs: number }>()
 
-async function postJson(pathname: string, body: unknown, envKeys: string[] = []) {
-  const response = await fetch(`${resolveApiBaseUrl(...envKeys)}${pathname}`, {
+async function postJson(
+  options: AgentMockingbirdPluginOptions,
+  scope: ApiScope,
+  pathname: string,
+  body: unknown,
+  envKeys: string[] = [],
+) {
+  const response = await fetch(`${resolveApiBaseUrl(options, scope, ...envKeys)}${pathname}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -153,20 +227,20 @@ function rewriteToolDefinition(toolID: string, output: { description: string; pa
   }
 }
 
-async function fetchSystemPrompt() {
+async function fetchSystemPrompt(options: AgentMockingbirdPluginOptions) {
   const now = Date.now()
   if (systemPromptCache.expiresAtMs > now) {
     return systemPromptCache.value
   }
 
-  const payload = await requestJson("/api/mockingbird/runtime/system-prompt")
+  const payload = await requestJson(options, "config", "/api/mockingbird/runtime/system-prompt")
   const system = typeof payload.system === "string" ? payload.system : ""
   systemPromptCache.value = system
   systemPromptCache.expiresAtMs = now + 5_000
   return system
 }
 
-async function fetchCompactionContext(sessionID?: string): Promise<CompactionPayload> {
+async function fetchCompactionContext(options: AgentMockingbirdPluginOptions, sessionID?: string): Promise<CompactionPayload> {
   const now = Date.now()
   const cacheKey = sessionID?.trim() || "__default__"
   if (compactionContextCache.expiresAtMs > now && cacheKey === "__default__") {
@@ -177,7 +251,7 @@ async function fetchCompactionContext(sessionID?: string): Promise<CompactionPay
   }
 
   const search = sessionID?.trim() ? `?sessionId=${encodeURIComponent(sessionID.trim())}` : ""
-  const payload = await requestJson(`/api/mockingbird/runtime/compaction-context${search}`)
+  const payload = await requestJson(options, "config", `/api/mockingbird/runtime/compaction-context${search}`)
   const prompt = typeof payload.prompt === "string" && payload.prompt.trim().length > 0 ? payload.prompt : undefined
   const context = Array.isArray(payload.context)
     ? payload.context.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
@@ -190,7 +264,7 @@ async function fetchCompactionContext(sessionID?: string): Promise<CompactionPay
   return { prompt, context }
 }
 
-async function fetchSessionScope(sessionID?: string) {
+async function fetchSessionScope(options: AgentMockingbirdPluginOptions, sessionID?: string) {
   if (!sessionID?.trim()) {
     return {
       localSessionId: null,
@@ -209,7 +283,11 @@ async function fetchSessionScope(sessionID?: string) {
     return cached.value
   }
 
-  const payload = await requestJson(`/api/mockingbird/runtime/session-scope?sessionId=${encodeURIComponent(cacheKey)}`)
+  const payload = await requestJson(
+    options,
+    "config",
+    `/api/mockingbird/runtime/session-scope?sessionId=${encodeURIComponent(cacheKey)}`,
+  )
   const kind: SessionScope["kind"] =
     payload.kind === "main" || payload.kind === "cron" || payload.kind === "heartbeat" || payload.kind === "other"
       ? payload.kind
@@ -384,6 +462,8 @@ const memorySearchTool = tool({
   },
   async execute(args: { query: string; maxResults?: number; minScore?: number; debug?: boolean }) {
     const response = await postJson(
+      activePluginOptions,
+      "memory",
       "/api/mockingbird/memory/retrieve",
       {
         query: args.query,
@@ -433,6 +513,8 @@ const memoryGetTool = tool({
   },
   async execute(args: { path: string; from?: number; lines?: number }) {
     const response = await postJson(
+      activePluginOptions,
+      "memory",
       "/api/mockingbird/memory/read",
       {
         path: args.path,
@@ -473,6 +555,8 @@ const memoryRememberTool = tool({
     topic?: string
   }, context: ToolContext) {
     const response = await postJson(
+      activePluginOptions,
+      "memory",
       "/api/mockingbird/memory/remember",
       {
         ...args,
@@ -522,7 +606,7 @@ const cronManagerTool = tool({
   },
   async execute(rawArgs) {
     const args = cronArgsSchema.parse(rawArgs)
-    const response = await postJson("/api/mockingbird/cron/manage", args, [
+    const response = await postJson(activePluginOptions, "cron", "/api/mockingbird/cron/manage", args, [
       "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
       "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
     ])
@@ -544,11 +628,16 @@ const notifyMainThreadTool = tool({
     severity: z.enum(["info", "warn", "critical"]).optional(),
   },
   async execute(args: { prompt: string; severity?: "info" | "warn" | "critical" }, context: ToolContext) {
-    const response = await postJson("/api/mockingbird/runtime/notify-main-thread", {
-      sessionId: context.sessionID,
-      prompt: args.prompt,
-      severity: args.severity,
-    })
+    const response = await postJson(
+      activePluginOptions,
+      "cron",
+      "/api/mockingbird/runtime/notify-main-thread",
+      {
+        sessionId: context.sessionID,
+        prompt: args.prompt,
+        severity: args.severity,
+      },
+    )
     if (!response.ok) {
       const error = typeof response.payload.error === "string" ? response.payload.error : `Request failed (${response.status})`
       throw new Error(error)
@@ -578,12 +667,12 @@ const agentTypeManagerTool = tool({
     const args = agentArgsSchema.parse(rawArgs)
 
     if (args.action === "list") {
-      const payload = await requestJson("/api/mockingbird/agents")
+      const payload = await requestJson(activePluginOptions, "config", "/api/mockingbird/agents")
       return JSON.stringify({ ok: true, ...payload })
     }
 
     if (args.action === "validate_patch") {
-      const payload = await requestJson("/api/mockingbird/agents/validate", {
+      const payload = await requestJson(activePluginOptions, "config", "/api/mockingbird/agents/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -594,7 +683,7 @@ const agentTypeManagerTool = tool({
       return JSON.stringify({ ok: true, ...payload })
     }
 
-    const payload = await requestJson("/api/mockingbird/agents", {
+    const payload = await requestJson(activePluginOptions, "config", "/api/mockingbird/agents", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -627,12 +716,12 @@ const configManagerTool = tool({
     const args = configArgsSchema.parse(rawArgs)
 
     if (args.action === "get_config") {
-      const payload = await requestJson("/api/config")
+      const payload = await requestJson(activePluginOptions, "config", "/api/config")
       return JSON.stringify({ ok: true, ...payload })
     }
 
     if (args.action === "patch_config") {
-      const payload = await requestJson("/api/config/patch-safe", {
+      const payload = await requestJson(activePluginOptions, "config", "/api/config/patch-safe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -644,7 +733,7 @@ const configManagerTool = tool({
       return JSON.stringify({ ok: true, ...payload })
     }
 
-    const payload = await requestJson("/api/config/replace-safe", {
+    const payload = await requestJson(activePluginOptions, "config", "/api/config/replace-safe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -657,51 +746,72 @@ const configManagerTool = tool({
   },
 })
 
-const AgentMockingbirdPlugin: Plugin = async () => {
+const AgentMockingbirdPlugin: Plugin = async (_input, options) => {
+  activePluginOptions = parsePluginOptions(options)
+
   return {
-    "experimental.chat.system.transform": async (_input, output) => {
-      const system = await fetchSystemPrompt()
-      if (!system.trim()) return
-      output.system.push(system)
-      const sessionScope = await fetchSessionScope(_input.sessionID)
-      if (sessionScope.isMain) {
-        output.system.push(buildMainThreadNote())
-      } else if (sessionScope.kind === "cron") {
-        output.system.push(buildCronThreadNote(sessionScope))
-      } else if (sessionScope.kind === "heartbeat") {
-        output.system.push(buildHeartbeatThreadNote())
-      }
-    },
-    "experimental.session.compacting": async (_input, output) => {
-      const compaction = await fetchCompactionContext(_input.sessionID)
-      if (compaction.prompt) {
-        output.prompt = compaction.prompt
-        return
-      }
-      if (compaction.context.length === 0) return
-      output.context.push(...compaction.context)
-    },
-    "tool.definition": async (input, output) => {
-      rewriteToolDefinition(input.toolID, output)
-    },
-    "shell.env": async (_input, output) => {
-      const defaultBaseUrl = resolveApiBaseUrl(
-        "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
-        "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
-        "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
-      )
-      output.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL ??=
-        process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL?.trim() || defaultBaseUrl
-      output.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL ??=
-        process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim() || defaultBaseUrl
-      output.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL ??=
-        process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL?.trim() ||
-        process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim() ||
-        defaultBaseUrl
-      if (process.env.AGENT_MOCKINGBIRD_PORT?.trim()) {
-        output.env.AGENT_MOCKINGBIRD_PORT ??= process.env.AGENT_MOCKINGBIRD_PORT.trim()
-      }
-    },
+    "experimental.chat.system.transform": activePluginOptions.enableSystemPromptTransform === false
+      ? undefined
+      : async (_input, output) => {
+          const system = await fetchSystemPrompt(activePluginOptions)
+          if (!system.trim()) return
+          output.system.push(system)
+          const sessionScope = await fetchSessionScope(activePluginOptions, _input.sessionID)
+          if (sessionScope.isMain) {
+            output.system.push(buildMainThreadNote())
+          } else if (sessionScope.kind === "cron") {
+            output.system.push(buildCronThreadNote(sessionScope))
+          } else if (sessionScope.kind === "heartbeat") {
+            output.system.push(buildHeartbeatThreadNote())
+          }
+        },
+    "experimental.session.compacting": activePluginOptions.enableCompactionHook === false
+      ? undefined
+      : async (_input, output) => {
+          const compaction = await fetchCompactionContext(activePluginOptions, _input.sessionID)
+          if (compaction.prompt) {
+            output.prompt = compaction.prompt
+            return
+          }
+          if (compaction.context.length === 0) return
+          output.context.push(...compaction.context)
+        },
+    "tool.definition": activePluginOptions.enableToolDefinitionOverrides === false
+      ? undefined
+      : async (input, output) => {
+          rewriteToolDefinition(input.toolID, output)
+        },
+    "shell.env": activePluginOptions.enableShellEnv === false
+      ? undefined
+      : async (_input, output) => {
+          const configBaseUrl = resolveApiBaseUrl(
+            activePluginOptions,
+            "config",
+            "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+            "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+            "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+          )
+          const memoryBaseUrl = resolveApiBaseUrl(
+            activePluginOptions,
+            "memory",
+            "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+            "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+            "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+          )
+          const cronBaseUrl = resolveApiBaseUrl(
+            activePluginOptions,
+            "cron",
+            "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+            "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+            "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+          )
+          output.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL ??= configBaseUrl
+          output.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL ??= memoryBaseUrl
+          output.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL ??= cronBaseUrl
+          if (process.env.AGENT_MOCKINGBIRD_PORT?.trim()) {
+            output.env.AGENT_MOCKINGBIRD_PORT ??= process.env.AGENT_MOCKINGBIRD_PORT.trim()
+          }
+        },
     tool: {
       memory_search: memorySearchTool,
       memory_get: memoryGetTool,

@@ -302,6 +302,33 @@ test("gateway does not rewrite json payloads", async () => {
   expect(await response?.text()).toBe('{"next":"/v1/local/installation"}');
 });
 
+test("gateway strips stale encoding metadata from embedded service passthrough responses", async () => {
+  const config = buildConfig("embedded-patched");
+  globalThis.fetch = ((async () =>
+    new Response('{"status":"ok"}', {
+      headers: {
+        "content-encoding": "gzip",
+        "content-length": "321",
+        "content-type": "application/json",
+        etag: '"executor-etag"',
+        vary: "accept-encoding, origin",
+      },
+    })) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedServiceRequest(
+    new Request("http://127.0.0.1:3001/executor/v1/status"),
+    config,
+  );
+
+  expect(response).not.toBeNull();
+  expect(await response?.text()).toBe('{"status":"ok"}');
+  expect(response?.headers.get("content-encoding")).toBeNull();
+  expect(response?.headers.get("content-length")).toBeNull();
+  expect(response?.headers.get("etag")).toBeNull();
+  expect(response?.headers.get("vary")).toBe("origin");
+  expect(response?.headers.get("content-type")).toBe("application/json");
+});
+
 test("gateway enforces the external allowlist", async () => {
   const config = buildConfig("embedded-patched");
 
@@ -332,6 +359,33 @@ test("gateway proxies approved external requests", async () => {
 
   expect(response?.status).toBe(200);
   expect(requestedUrl).toBe("https://registry.npmjs.org/-/package/executor/dist-tags");
+});
+
+test("gateway strips stale encoding metadata from external passthrough responses", async () => {
+  const config = buildConfig("embedded-patched");
+  globalThis.fetch = ((async () =>
+    new Response('{"latest":"1.2.4"}', {
+      headers: {
+        "content-encoding": "gzip",
+        "content-length": "111",
+        "content-type": "application/json",
+        etag: '"npm-etag"',
+        vary: "accept-encoding",
+      },
+    })) as unknown) as typeof fetch;
+
+  const response = await proxyEmbeddedExternalRequest(
+    new Request("http://127.0.0.1:3001/api/embed/external/executor/npm-registry/-/package/executor/dist-tags"),
+    config,
+  );
+
+  expect(response).not.toBeNull();
+  expect(await response?.text()).toBe('{"latest":"1.2.4"}');
+  expect(response?.headers.get("content-encoding")).toBeNull();
+  expect(response?.headers.get("content-length")).toBeNull();
+  expect(response?.headers.get("etag")).toBeNull();
+  expect(response?.headers.get("vary")).toBeNull();
+  expect(response?.headers.get("content-type")).toBe("application/json");
 });
 
 test("gateway strips caller-supplied query params for external requests by default", async () => {

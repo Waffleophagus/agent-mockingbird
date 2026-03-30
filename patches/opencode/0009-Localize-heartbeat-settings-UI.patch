@@ -1,0 +1,495 @@
+From f7b729f7d6472e072dad287fbe72cc7582ae0c82 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Mon, 30 Mar 2026 17:04:36 -0500
+Subject: [PATCH 9/9] Localize heartbeat settings UI
+
+---
+ .../app/src/components/dialog-settings.tsx    |   2 +-
+ .../app/src/components/settings-heartbeat.tsx | 185 +++++++++++-------
+ packages/app/src/i18n/en.ts                   |  69 +++++++
+ 3 files changed, 181 insertions(+), 75 deletions(-)
+
+diff --git a/packages/app/src/components/dialog-settings.tsx b/packages/app/src/components/dialog-settings.tsx
+index 8b51a29fd..fa324fc0b 100644
+--- a/packages/app/src/components/dialog-settings.tsx
++++ b/packages/app/src/components/dialog-settings.tsx
+@@ -75,7 +75,7 @@ export const DialogSettings: Component = () => {
+                     </Tabs.Trigger>
+                     <Tabs.Trigger value="heartbeat">
+                       <Icon name="status" />
+-                      Heartbeat
++                      {language.t("heartbeat.page.title")}
+                     </Tabs.Trigger>
+                     <Tabs.Trigger value="cron">
+                       <Icon name="warning" />
+diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
+index 8d37cfc7f..09a146ae9 100644
+--- a/packages/app/src/components/settings-heartbeat.tsx
++++ b/packages/app/src/components/settings-heartbeat.tsx
+@@ -5,6 +5,7 @@ import { showToast } from "@opencode-ai/ui/toast"
+ import { useNavigate } from "@solidjs/router"
+ import { createMemo, onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
++import { useLanguage } from "@/context/language"
+ import { useModels } from "@/context/models"
+ import { mockingbirdJson } from "@/utils/mockingbird"
+ import { ModelSelectorPopover, type ModelSelectorState } from "./dialog-select-model"
+@@ -102,39 +103,22 @@ function toForm(config: HeartbeatRuntimeConfig): HeartbeatFormState {
+   }
+ }
+ 
+-function formatTimestamp(value: string | null) {
+-  if (!value) return "Never"
+-  const date = new Date(value)
+-  if (Number.isNaN(date.getTime())) return value
+-  return date.toLocaleString()
+-}
+-
+-function formatResult(value: HeartbeatStatus["state"]["lastResult"]) {
+-  switch (value) {
+-    case "acknowledged":
+-      return "Acknowledged"
+-    case "attention":
+-      return "Needs attention"
+-    case "skipped":
+-      return "Skipped"
+-    case "error":
+-      return "Error"
+-    default:
+-      return "Idle"
+-  }
+-}
+-
+-function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
++function buildHeartbeatPatch(
++  form: HeartbeatFormState,
++  t: ReturnType<typeof useLanguage>["t"],
++): HeartbeatRuntimeConfig {
+   const interval = form.interval.trim()
+   const model = form.model.trim()
+   const agentId = form.agentId.trim()
+   const prompt = form.prompt.trim()
+   const ackMaxChars = Number(form.ackMaxChars)
+ 
+-  if (!interval) throw new Error("Interval is required")
+-  if (!model) throw new Error("Model is required")
+-  if (!prompt) throw new Error("Prompt is required")
+-  if (!Number.isFinite(ackMaxChars) || ackMaxChars < 1) throw new Error("Ack max chars must be a positive number")
++  if (!interval) throw new Error(t("heartbeat.error.intervalRequired"))
++  if (!model) throw new Error(t("heartbeat.error.modelRequired"))
++  if (!prompt) throw new Error(t("heartbeat.error.promptRequired"))
++  if (!Number.isInteger(ackMaxChars) || ackMaxChars < 1) {
++    throw new Error(t("heartbeat.error.ackMaxCharsPositiveInteger"))
++  }
+ 
+   const activeHours =
+     form.activeHoursEnabled
+@@ -146,7 +130,7 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
+       : null
+ 
+   if (activeHours && (!activeHours.start || !activeHours.end || !activeHours.timezone)) {
+-    throw new Error("Active hours require a start, end, and timezone")
++    throw new Error(t("heartbeat.error.activeHoursIncomplete"))
+   }
+ 
+   return {
+@@ -161,6 +145,7 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
+ }
+ 
+ export const SettingsHeartbeat: Component = () => {
++  const language = useLanguage()
+   const models = useModels()
+   const navigate = useNavigate()
+   const [state, setState] = createStore({
+@@ -221,6 +206,28 @@ export const SettingsHeartbeat: Component = () => {
+     },
+   }
+ 
++  const formatTimestamp = (value: string | null) => {
++    if (!value) return language.t("heartbeat.time.never")
++    const date = new Date(value)
++    if (Number.isNaN(date.getTime())) return value
++    return date.toLocaleString()
++  }
++
++  const formatResult = (value: HeartbeatStatus["state"]["lastResult"]) => {
++    switch (value) {
++      case "acknowledged":
++        return language.t("heartbeat.result.acknowledged")
++      case "attention":
++        return language.t("heartbeat.result.attention")
++      case "skipped":
++        return language.t("heartbeat.result.skipped")
++      case "error":
++        return language.t("heartbeat.result.error")
++      default:
++        return language.t("heartbeat.result.idle")
++    }
++  }
++
+   async function load() {
+     setState("loading", true)
+     setState("error", "")
+@@ -243,7 +250,7 @@ export const SettingsHeartbeat: Component = () => {
+         setState("agentOptions", [...ids].sort((left, right) => left.localeCompare(right)))
+       }
+     } catch (error) {
+-      setState("error", error instanceof Error ? error.message : "Failed to load heartbeat settings")
++      setState("error", error instanceof Error ? error.message : language.t("heartbeat.error.loadFailed"))
+     } finally {
+       setState("loading", false)
+     }
+@@ -252,9 +259,9 @@ export const SettingsHeartbeat: Component = () => {
+   async function save() {
+     let heartbeatPatch: HeartbeatRuntimeConfig
+     try {
+-      heartbeatPatch = buildHeartbeatPatch(state.form)
++      heartbeatPatch = buildHeartbeatPatch(state.form, language.t)
+     } catch (error) {
+-      setState("error", error instanceof Error ? error.message : "Invalid heartbeat settings")
++      setState("error", error instanceof Error ? error.message : language.t("heartbeat.error.invalidSettings"))
+       return
+     }
+ 
+@@ -277,11 +284,11 @@ export const SettingsHeartbeat: Component = () => {
+       showToast({
+         variant: "success",
+         icon: "circle-check",
+-        title: "Heartbeat settings saved",
++        title: language.t("heartbeat.toast.saved"),
+       })
+       await load()
+     } catch (error) {
+-      setState("error", error instanceof Error ? error.message : "Failed to save heartbeat settings")
++      setState("error", error instanceof Error ? error.message : language.t("heartbeat.error.saveFailed"))
+     } finally {
+       setState("saving", false)
+     }
+@@ -299,10 +306,10 @@ export const SettingsHeartbeat: Component = () => {
+       showToast({
+         variant: "success",
+         icon: "circle-check",
+-        title: "Heartbeat run completed",
++        title: language.t("heartbeat.toast.runCompleted"),
+       })
+     } catch (error) {
+-      setState("error", error instanceof Error ? error.message : "Failed to run heartbeat")
++      setState("error", error instanceof Error ? error.message : language.t("heartbeat.error.runFailed"))
+     } finally {
+       setState("running", false)
+     }
+@@ -314,18 +321,18 @@ export const SettingsHeartbeat: Component = () => {
+ 
+   return (
+     <MockingbirdSettingsPage
+-      title="Heartbeat"
+-      description="Monitor the dedicated heartbeat session, control its schedule, and choose its model explicitly."
++      title={language.t("heartbeat.page.title")}
++      description={language.t("heartbeat.page.description")}
+       actions={
+         <MockingbirdToolbar>
+           <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving || state.running}>
+-            Refresh
++            {language.t("heartbeat.action.refresh")}
+           </Button>
+           <Button variant="ghost" size="large" onClick={() => void runNow()} disabled={state.loading || state.saving || state.running}>
+-            Run now
++            {language.t("heartbeat.action.runNow")}
+           </Button>
+           <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving || state.running}>
+-            Save
++            {language.t("heartbeat.action.save")}
+           </Button>
+         </MockingbirdToolbar>
+       }
+@@ -337,16 +344,34 @@ export const SettingsHeartbeat: Component = () => {
+       <Show when={state.status}>
+         {(status) => (
+           <>
+-            <MockingbirdSettingsSection title="Status" description="Current scheduler state for the dedicated Heartbeat session.">
+-              <MockingbirdMetaRow label="Config file" value={state.runtimePath || "Unavailable"} />
+-              <MockingbirdMetaRow label="Enabled" value={status().config.enabled ? "Yes" : "No"} />
+-              <MockingbirdMetaRow label="Session id" value={status().state.sessionId ?? "Not created yet"} />
+-              <MockingbirdMetaRow label="Session title" value={status().sessionTitle ?? "Heartbeat"} />
+-              <MockingbirdMetaRow label="Currently running" value={status().state.running ? "Yes" : "No"} />
+-              <MockingbirdMetaRow label="Last run" value={formatTimestamp(status().state.lastRunAt)} />
+-              <MockingbirdMetaRow label="Next due" value={formatTimestamp(status().nextDueAt)} />
+-              <MockingbirdMetaRow label="Last result" value={formatResult(status().state.lastResult)} />
+-              <MockingbirdMetaRow label="Last updated" value={formatTimestamp(status().state.updatedAt)} />
++            <MockingbirdSettingsSection
++              title={language.t("heartbeat.status.title")}
++              description={language.t("heartbeat.status.description")}
++            >
++              <MockingbirdMetaRow
++                label={language.t("heartbeat.status.configFile")}
++                value={state.runtimePath || language.t("heartbeat.status.unavailable")}
++              />
++              <MockingbirdMetaRow
++                label={language.t("heartbeat.status.enabled")}
++                value={status().config.enabled ? language.t("heartbeat.common.yes") : language.t("heartbeat.common.no")}
++              />
++              <MockingbirdMetaRow
++                label={language.t("heartbeat.status.sessionId")}
++                value={status().state.sessionId ?? language.t("heartbeat.status.notCreatedYet")}
++              />
++              <MockingbirdMetaRow
++                label={language.t("heartbeat.status.sessionTitle")}
++                value={status().sessionTitle ?? language.t("heartbeat.status.defaultSessionTitle")}
++              />
++              <MockingbirdMetaRow
++                label={language.t("heartbeat.status.currentlyRunning")}
++                value={status().state.running ? language.t("heartbeat.common.yes") : language.t("heartbeat.common.no")}
++              />
++              <MockingbirdMetaRow label={language.t("heartbeat.status.lastRun")} value={formatTimestamp(status().state.lastRunAt)} />
++              <MockingbirdMetaRow label={language.t("heartbeat.status.nextDue")} value={formatTimestamp(status().nextDueAt)} />
++              <MockingbirdMetaRow label={language.t("heartbeat.status.lastResult")} value={formatResult(status().state.lastResult)} />
++              <MockingbirdMetaRow label={language.t("heartbeat.status.lastUpdated")} value={formatTimestamp(status().state.updatedAt)} />
+               <Show when={heartbeatSessionHref()}>
+                 {(href) => (
+                   <div class="flex justify-end">
+@@ -355,7 +380,7 @@ export const SettingsHeartbeat: Component = () => {
+                       size="small"
+                       onClick={() => navigate(href())}
+                     >
+-                      Open heartbeat session
++                      {language.t("heartbeat.action.openSession")}
+                     </Button>
+                   </div>
+                 )}
+@@ -367,7 +392,10 @@ export const SettingsHeartbeat: Component = () => {
+             </Show>
+ 
+             <Show when={status().state.lastResponse}>
+-              <MockingbirdSettingsSection title="Last response" description="Most recent heartbeat response captured from the dedicated session.">
++              <MockingbirdSettingsSection
++                title={language.t("heartbeat.response.title")}
++                description={language.t("heartbeat.response.description")}
++              >
+                 <MockingbirdCard>
+                   <div class="text-13-regular text-text-strong whitespace-pre-wrap break-words">
+                     {status().state.lastResponse}
+@@ -379,21 +407,24 @@ export const SettingsHeartbeat: Component = () => {
+         )}
+       </Show>
+ 
+-      <MockingbirdSettingsSection title="Controls" description="Choose whether heartbeat runs, how often it runs, and which model it uses.">
++      <MockingbirdSettingsSection
++        title={language.t("heartbeat.controls.title")}
++        description={language.t("heartbeat.controls.description")}
++      >
+         <MockingbirdCard>
+           <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-weak-base bg-surface-base px-4 py-3">
+             <div class="flex flex-col gap-1">
+-              <div class="text-13-medium text-text-strong">Heartbeat enabled</div>
+-              <div class="text-12-regular text-text-weak">Disable this to stop the scheduler without removing the Heartbeat session.</div>
++              <div class="text-13-medium text-text-strong">{language.t("heartbeat.controls.enabled.title")}</div>
++              <div class="text-12-regular text-text-weak">{language.t("heartbeat.controls.enabled.description")}</div>
+             </div>
+             <Switch checked={state.form.enabled} onChange={(enabled) => setState("form", "enabled", enabled)} hideLabel>
+-              Heartbeat enabled
++              {language.t("heartbeat.controls.enabled.label")}
+             </Switch>
+           </div>
+ 
+           <div class="grid gap-4 sm:grid-cols-2">
+             <div class="flex flex-col gap-2">
+-              <span class="text-12-medium text-text-weak">Model</span>
++              <span class="text-12-medium text-text-weak">{language.t("heartbeat.controls.model.label")}</span>
+               <ModelSelectorPopover model={heartbeatModelSelector}>
+                 <Button
+                   as="div"
+@@ -402,26 +433,26 @@ export const SettingsHeartbeat: Component = () => {
+                   class="w-full min-w-0 justify-between rounded-lg border border-border-weak-base bg-surface-base px-3 py-2 text-13-regular text-text-strong hover:bg-surface-base"
+                 >
+                   <span class="truncate text-left">
+-                    {(currentModel()?.name ?? state.form.model) || "Select model"}
++                    {(currentModel()?.name ?? state.form.model) || language.t("heartbeat.controls.model.placeholder")}
+                   </span>
+                 </Button>
+               </ModelSelectorPopover>
+             </div>
+             <div class="flex flex-col gap-2">
+-              <span class="text-12-medium text-text-weak">Interval</span>
++              <span class="text-12-medium text-text-weak">{language.t("heartbeat.controls.interval.label")}</span>
+               <MockingbirdInput
+                 value={state.form.interval}
+-                placeholder="15m"
++                placeholder={language.t("heartbeat.controls.interval.placeholder")}
+                 onInput={(event) => setState("form", "interval", event.currentTarget.value)}
+               />
+             </div>
+             <div class="flex flex-col gap-2">
+-              <span class="text-12-medium text-text-weak">Agent id</span>
++              <span class="text-12-medium text-text-weak">{language.t("heartbeat.controls.agentId.label")}</span>
+               <Select
+                 options={agentOptions()}
+                 current={state.form.agentId}
+                 onSelect={(value) => value && setState("form", "agentId", value)}
+-                placeholder="Select agent"
++                placeholder={language.t("heartbeat.controls.agentId.placeholder")}
+                 variant="ghost"
+                 size="normal"
+                 class="w-full capitalize text-text-base"
+@@ -430,7 +461,7 @@ export const SettingsHeartbeat: Component = () => {
+               />
+             </div>
+             <div class="flex flex-col gap-2">
+-              <span class="text-12-medium text-text-weak">Ack max chars</span>
++              <span class="text-12-medium text-text-weak">{language.t("heartbeat.controls.ackMaxChars.label")}</span>
+               <MockingbirdInput
+                 type="number"
+                 min="1"
+@@ -442,45 +473,48 @@ export const SettingsHeartbeat: Component = () => {
+         </MockingbirdCard>
+       </MockingbirdSettingsSection>
+ 
+-      <MockingbirdSettingsSection title="Active hours" description="Optionally restrict heartbeat runs to a daily time window.">
++      <MockingbirdSettingsSection
++        title={language.t("heartbeat.activeHours.title")}
++        description={language.t("heartbeat.activeHours.description")}
++      >
+         <MockingbirdCard>
+           <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-weak-base bg-surface-base px-4 py-3">
+             <div class="flex flex-col gap-1">
+-              <div class="text-13-medium text-text-strong">Restrict to active hours</div>
+-              <div class="text-12-regular text-text-weak">When enabled, heartbeat only runs inside the configured local time window.</div>
++              <div class="text-13-medium text-text-strong">{language.t("heartbeat.activeHours.enabled.title")}</div>
++              <div class="text-12-regular text-text-weak">{language.t("heartbeat.activeHours.enabled.description")}</div>
+             </div>
+             <Switch
+               checked={state.form.activeHoursEnabled}
+               onChange={(enabled) => setState("form", "activeHoursEnabled", enabled)}
+               hideLabel
+             >
+-              Restrict to active hours
++              {language.t("heartbeat.activeHours.enabled.label")}
+             </Switch>
+           </div>
+ 
+           <Show when={state.form.activeHoursEnabled}>
+             <div class="grid gap-4 sm:grid-cols-3">
+               <div class="flex flex-col gap-2">
+-                <span class="text-12-medium text-text-weak">Start</span>
++                <span class="text-12-medium text-text-weak">{language.t("heartbeat.activeHours.start.label")}</span>
+                 <MockingbirdInput
+                   value={state.form.activeStart}
+-                  placeholder="09:00"
++                  placeholder={language.t("heartbeat.activeHours.start.placeholder")}
+                   onInput={(event) => setState("form", "activeStart", event.currentTarget.value)}
+                 />
+               </div>
+               <div class="flex flex-col gap-2">
+-                <span class="text-12-medium text-text-weak">End</span>
++                <span class="text-12-medium text-text-weak">{language.t("heartbeat.activeHours.end.label")}</span>
+                 <MockingbirdInput
+                   value={state.form.activeEnd}
+-                  placeholder="17:00"
++                  placeholder={language.t("heartbeat.activeHours.end.placeholder")}
+                   onInput={(event) => setState("form", "activeEnd", event.currentTarget.value)}
+                 />
+               </div>
+               <div class="flex flex-col gap-2">
+-                <span class="text-12-medium text-text-weak">Timezone</span>
++                <span class="text-12-medium text-text-weak">{language.t("heartbeat.activeHours.timezone.label")}</span>
+                 <MockingbirdInput
+                   value={state.form.activeTimezone}
+-                  placeholder="America/Chicago"
++                  placeholder={language.t("heartbeat.activeHours.timezone.placeholder")}
+                   onInput={(event) => setState("form", "activeTimezone", event.currentTarget.value)}
+                 />
+               </div>
+@@ -489,7 +523,10 @@ export const SettingsHeartbeat: Component = () => {
+         </MockingbirdCard>
+       </MockingbirdSettingsSection>
+ 
+-      <MockingbirdSettingsSection title="Prompt" description="This prompt runs in the visible Heartbeat session whenever the scheduler fires.">
++      <MockingbirdSettingsSection
++        title={language.t("heartbeat.prompt.title")}
++        description={language.t("heartbeat.prompt.description")}
++      >
+         <MockingbirdCard>
+           <MockingbirdTextArea
+             rows={12}
+diff --git a/packages/app/src/i18n/en.ts b/packages/app/src/i18n/en.ts
+index 9f497d9d2..12d075b27 100644
+--- a/packages/app/src/i18n/en.ts
++++ b/packages/app/src/i18n/en.ts
+@@ -865,6 +865,75 @@ export const dict = {
+   "settings.skills.title": "Skills",
+   "settings.runtime.title": "Runtime",
+   "settings.cron.title": "Cron",
++  "heartbeat.page.title": "Heartbeat",
++  "heartbeat.page.description":
++    "Monitor the dedicated heartbeat session, control its schedule, and choose its model explicitly.",
++  "heartbeat.action.refresh": "Refresh",
++  "heartbeat.action.runNow": "Run now",
++  "heartbeat.action.save": "Save",
++  "heartbeat.action.openSession": "Open heartbeat session",
++  "heartbeat.common.yes": "Yes",
++  "heartbeat.common.no": "No",
++  "heartbeat.status.title": "Status",
++  "heartbeat.status.description": "Current scheduler state for the dedicated Heartbeat session.",
++  "heartbeat.status.configFile": "Config file",
++  "heartbeat.status.enabled": "Enabled",
++  "heartbeat.status.sessionId": "Session id",
++  "heartbeat.status.sessionTitle": "Session title",
++  "heartbeat.status.currentlyRunning": "Currently running",
++  "heartbeat.status.lastRun": "Last run",
++  "heartbeat.status.nextDue": "Next due",
++  "heartbeat.status.lastResult": "Last result",
++  "heartbeat.status.lastUpdated": "Last updated",
++  "heartbeat.status.unavailable": "Unavailable",
++  "heartbeat.status.notCreatedYet": "Not created yet",
++  "heartbeat.status.defaultSessionTitle": "Heartbeat",
++  "heartbeat.response.title": "Last response",
++  "heartbeat.response.description": "Most recent heartbeat response captured from the dedicated session.",
++  "heartbeat.controls.title": "Controls",
++  "heartbeat.controls.description": "Choose whether heartbeat runs, how often it runs, and which model it uses.",
++  "heartbeat.controls.enabled.title": "Heartbeat enabled",
++  "heartbeat.controls.enabled.description":
++    "Disable this to stop the scheduler without removing the Heartbeat session.",
++  "heartbeat.controls.enabled.label": "Heartbeat enabled",
++  "heartbeat.controls.model.label": "Model",
++  "heartbeat.controls.model.placeholder": "Select model",
++  "heartbeat.controls.interval.label": "Interval",
++  "heartbeat.controls.interval.placeholder": "15m",
++  "heartbeat.controls.agentId.label": "Agent id",
++  "heartbeat.controls.agentId.placeholder": "Select agent",
++  "heartbeat.controls.ackMaxChars.label": "Ack max chars",
++  "heartbeat.activeHours.title": "Active hours",
++  "heartbeat.activeHours.description": "Optionally restrict heartbeat runs to a daily time window.",
++  "heartbeat.activeHours.enabled.title": "Restrict to active hours",
++  "heartbeat.activeHours.enabled.description":
++    "When enabled, heartbeat only runs inside the configured local time window.",
++  "heartbeat.activeHours.enabled.label": "Restrict to active hours",
++  "heartbeat.activeHours.start.label": "Start",
++  "heartbeat.activeHours.start.placeholder": "09:00",
++  "heartbeat.activeHours.end.label": "End",
++  "heartbeat.activeHours.end.placeholder": "17:00",
++  "heartbeat.activeHours.timezone.label": "Timezone",
++  "heartbeat.activeHours.timezone.placeholder": "America/Chicago",
++  "heartbeat.prompt.title": "Prompt",
++  "heartbeat.prompt.description": "This prompt runs in the visible Heartbeat session whenever the scheduler fires.",
++  "heartbeat.result.acknowledged": "Acknowledged",
++  "heartbeat.result.attention": "Needs attention",
++  "heartbeat.result.skipped": "Skipped",
++  "heartbeat.result.error": "Error",
++  "heartbeat.result.idle": "Idle",
++  "heartbeat.time.never": "Never",
++  "heartbeat.toast.saved": "Heartbeat settings saved",
++  "heartbeat.toast.runCompleted": "Heartbeat run completed",
++  "heartbeat.error.intervalRequired": "Interval is required",
++  "heartbeat.error.modelRequired": "Model is required",
++  "heartbeat.error.promptRequired": "Prompt is required",
++  "heartbeat.error.ackMaxCharsPositiveInteger": "Ack max chars must be a positive integer",
++  "heartbeat.error.activeHoursIncomplete": "Active hours require a start, end, and timezone",
++  "heartbeat.error.loadFailed": "Failed to load heartbeat settings",
++  "heartbeat.error.invalidSettings": "Invalid heartbeat settings",
++  "heartbeat.error.saveFailed": "Failed to save heartbeat settings",
++  "heartbeat.error.runFailed": "Failed to run heartbeat",
+ 
+   "settings.permissions.title": "Permissions",
+   "settings.permissions.description": "Control what tools the server can use by default.",
+-- 
+2.53.0
+
