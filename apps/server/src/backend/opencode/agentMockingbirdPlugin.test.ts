@@ -73,6 +73,32 @@ describe("AgentMockingbirdPlugin", () => {
     expect(payload.results[0]?.snippet).toBe("Stored detail");
   });
 
+  test("plugin options override env defaults for API base URLs", async () => {
+    process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async (input) => {
+      expect(String(input)).toBe("http://127.0.0.1:4010/api/mockingbird/memory/retrieve");
+      return new Response(JSON.stringify({ results: [] }), {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    }) as typeof fetch;
+
+    const hooks = await AgentMockingbirdPlugin({} as never, {
+      memoryApiBaseUrl: "http://127.0.0.1:4010/",
+    });
+
+    const raw = await hooks.tool?.memory_search?.execute(
+      {
+        query: "stored detail",
+      },
+      {} as never,
+    );
+
+    expect(JSON.parse(raw ?? "{}")).toMatchObject({ ok: true, count: 0 });
+  });
+
   test("config_manager get_config passes through effective MCP state", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
@@ -377,6 +403,20 @@ describe("AgentMockingbirdPlugin", () => {
     expect(output.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL).toBe("http://127.0.0.1:3001");
     expect(output.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL).toBe("http://127.0.0.1:3001");
     expect(output.env.AGENT_MOCKINGBIRD_PORT).toBe("3001");
+  });
+
+  test("shell env falls back to env-derived base URLs when plugin options are absent", async () => {
+    process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3101";
+    process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3201";
+    process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL = "http://127.0.0.1:3301";
+
+    const hooks = await AgentMockingbirdPlugin({} as never);
+    const output = { env: {} as Record<string, string> };
+    await hooks["shell.env"]?.({ cwd: "/tmp" }, output);
+
+    expect(output.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL).toBe("http://127.0.0.1:3101");
+    expect(output.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL).toBe("http://127.0.0.1:3201");
+    expect(output.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL).toBe("http://127.0.0.1:3301");
   });
 
   test("notify_main_thread sends an escalation request using the calling session", async () => {

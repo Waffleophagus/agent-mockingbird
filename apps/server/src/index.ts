@@ -7,6 +7,7 @@ import { ensureSeedData, getHeartbeatSnapshot, getUsageSnapshot } from "./backen
 import { proxyEmbeddedExternalRequest, proxyEmbeddedServiceRequest } from "./backend/embed/gateway";
 import { env } from "./backend/env";
 import { HeartbeatRuntimeService } from "./backend/heartbeat/runtimeService";
+import { proxyOpenCodeSidecar } from "./backend/http/opencodeProxy";
 import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
@@ -72,20 +73,6 @@ const apiRoutes = createApiRoutes({
 
 const unsubscribeRuntimeEvents = runtime.subscribe(eventStream.publish);
 
-async function proxyOpenCodeSidecar(req: Request) {
-  const sidecarBaseUrl = getConfigSnapshot().config.runtime.opencode.baseUrl;
-  const incoming = new URL(req.url);
-  const target = new URL(`${incoming.pathname}${incoming.search}`, sidecarBaseUrl);
-  const headers = new Headers(req.headers);
-  headers.delete("host");
-  return fetch(target, {
-    method: req.method,
-    headers,
-    body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
-    redirect: "manual",
-  });
-}
-
 async function serveOpenCodeApp(req: Request) {
   const url = new URL(req.url);
   const pathname = decodeURIComponent(url.pathname);
@@ -99,7 +86,7 @@ async function serveOpenCodeApp(req: Request) {
     return embeddedExternalResponse;
   }
   if (isOpenCodeServerPath(pathname)) {
-    return proxyOpenCodeSidecar(req);
+    return proxyOpenCodeSidecar(req, config.runtime.opencode.baseUrl);
   }
   if (!appDistDir) {
     return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
@@ -126,7 +113,14 @@ runService.start();
 cronService.start();
 heartbeatService.start();
 
+const serverPort = Number(
+  process.env.PORT?.trim() ||
+  process.env.AGENT_MOCKINGBIRD_PORT?.trim() ||
+  "3001",
+);
+
 const server = serve({
+  port: Number.isFinite(serverPort) && serverPort > 0 ? serverPort : 3001,
   idleTimeout: 120,
   fetch: async (req) => {
     const apiResponse = await dispatchRoute(apiRoutes, req);

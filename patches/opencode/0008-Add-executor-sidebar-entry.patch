@@ -1,26 +1,12 @@
-From f801cce40131330148e54575cc2d115621ea696a Mon Sep 17 00:00:00 2001
+From 81bdc5e23afc84b91bdafe42f4c2cbf986ab364d Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
-Date: Sun, 22 Mar 2026 00:14:20 -0500
-Subject: [PATCH 13/15] feat: add executor sidebar entry
+Date: Mon, 30 Mar 2026 17:04:36 -0500
+Subject: [PATCH 08/10] Add executor sidebar entry
 
 ---
- packages/app/src/pages/layout.tsx               |  2 ++
  packages/app/src/pages/layout/sidebar-shell.tsx | 11 +++++++++++
- 2 files changed, 13 insertions(+)
+ 1 file changed, 11 insertions(+)
 
-diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
-index 3246eaebc..59851b525 100644
---- a/packages/app/src/pages/layout.tsx
-+++ b/packages/app/src/pages/layout.tsx
-@@ -2229,6 +2229,8 @@ export default function Layout(props: ParentProps) {
-       renderProjectOverlay={projectOverlay}
-       usageLabel={() => "Usage"}
-       onOpenUsage={() => window.location.assign("/usage")}
-+      executorLabel={() => "Executor"}
-+      onOpenExecutor={() => window.location.assign("/executor")}
-       settingsLabel={() => language.t("sidebar.settings")}
-       settingsKeybind={() => command.keybind("settings.open")}
-       onOpenSettings={openSettings}
 diff --git a/packages/app/src/pages/layout/sidebar-shell.tsx b/packages/app/src/pages/layout/sidebar-shell.tsx
 index 47df7f298..655e5f3ca 100644
 --- a/packages/app/src/pages/layout/sidebar-shell.tsx

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -136,4 +136,40 @@ test("ensureExecutorMcpServerConfigured preserves the corrected path when execut
 
   expect(reloaded.mcp?.executor?.url).toBe("http://127.0.0.1:8788/executor/mcp");
   expect(reloaded.mcp?.executor?.enabled).toBe(false);
+});
+
+test("patchManagedTuiConfig creates tui.json with the expected schema and fields", async () => {
+  const snapshot = configStore.getConfigSnapshot();
+
+  await managedConfig.patchManagedTuiConfig(snapshot.config, {
+    keybinds: {
+      leader: "ctrl+x",
+    },
+  });
+
+  const reloaded = managedConfig.readManagedTuiConfig(snapshot.config) as {
+    $schema?: string;
+    keybinds?: Record<string, string>;
+  };
+
+  expect(reloaded.$schema).toBe("https://opencode.ai/tui.json");
+  expect(reloaded.keybinds?.leader).toBe("ctrl+x");
+});
+
+test("patchManagedTuiConfig does not write TUI-only settings into opencode.jsonc", async () => {
+  const snapshot = configStore.getConfigSnapshot();
+
+  managedConfig.readManagedOpencodeConfig(snapshot.config);
+  await managedConfig.patchManagedTuiConfig(snapshot.config, {
+    keybinds: {
+      leader: "ctrl+x",
+    },
+  });
+
+  const configDir = resolveOpencodeConfigDir(snapshot.config);
+  const opencodeRaw = readFileSync(path.join(configDir, "opencode.jsonc"), "utf8");
+  const tuiRaw = readFileSync(path.join(configDir, "tui.json"), "utf8");
+
+  expect(opencodeRaw).not.toContain('"keybinds"');
+  expect(tuiRaw).toContain('"keybinds"');
 });

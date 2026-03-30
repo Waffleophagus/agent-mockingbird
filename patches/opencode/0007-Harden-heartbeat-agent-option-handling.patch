@@ -1,13 +1,13 @@
-From 1373010b90d74483a3b86e8326383337146f6653 Mon Sep 17 00:00:00 2001
+From 6619a85fda5a4bf62907c37f3f08afc5188bb80d Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
-Date: Fri, 27 Mar 2026 17:42:39 -0500
-Subject: [PATCH 14/15] Fix heartbeat agent option filtering
+Date: Mon, 30 Mar 2026 17:04:36 -0500
+Subject: [PATCH 07/10] Harden heartbeat agent option handling
 
 ---
  .../components/settings-heartbeat-options.ts  | 31 +++++++++++++++++++
  .../src/components/settings-heartbeat.test.ts | 31 +++++++++++++++++++
- .../app/src/components/settings-heartbeat.tsx | 13 +++-----
- 3 files changed, 67 insertions(+), 8 deletions(-)
+ .../app/src/components/settings-heartbeat.tsx | 23 +++++++++-----
+ 3 files changed, 77 insertions(+), 8 deletions(-)
  create mode 100644 packages/app/src/components/settings-heartbeat-options.ts
  create mode 100644 packages/app/src/components/settings-heartbeat.test.ts
 
@@ -86,10 +86,10 @@ index 000000000..e2fd344a8
 +  })
 +})
 diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
-index 0331ae705..8d48a34bd 100644
+index f7046b9a9..8d37cfc7f 100644
 --- a/packages/app/src/components/settings-heartbeat.tsx
 +++ b/packages/app/src/components/settings-heartbeat.tsx
-@@ -7,6 +7,10 @@ import { createStore } from "solid-js/store"
+@@ -8,6 +8,10 @@ import { createStore } from "solid-js/store"
  import { useModels } from "@/context/models"
  import { mockingbirdJson } from "@/utils/mockingbird"
  import { ModelSelectorPopover, type ModelSelectorState } from "./dialog-select-model"
@@ -100,29 +100,46 @@ index 0331ae705..8d48a34bd 100644
  import {
    MockingbirdCard,
    MockingbirdInput,
-@@ -82,8 +86,6 @@ type HeartbeatFormState = {
-   activeTimezone: string
+@@ -63,6 +67,7 @@ type AgentType = {
+   id: string
+   mode?: string
+   hidden?: boolean
++  disable?: boolean
  }
  
--const DEFAULT_HEARTBEAT_AGENT_OPTIONS = ["build", "plan"]
--
- function toForm(config: HeartbeatRuntimeConfig): HeartbeatFormState {
-   return {
-     enabled: config.enabled,
-@@ -231,12 +233,7 @@ export const SettingsHeartbeat: Component = () => {
+ type AgentsPayload = {
+@@ -220,21 +225,23 @@ export const SettingsHeartbeat: Component = () => {
+     setState("loading", true)
+     setState("error", "")
+     try {
+-      const [heartbeat, runtime, agents] = await Promise.all([
++      const [heartbeat, runtime] = await Promise.all([
+         mockingbirdJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
+         mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config"),
+-        mockingbirdJson<AgentsPayload>("/api/mockingbird/agents"),
+       ])
+       setState("status", heartbeat.heartbeat)
+       setState("runtimeHash", runtime.hash)
+       setState("runtimePath", runtime.path)
+-      setState(
+-        "agentOptions",
+-        agents.agentTypes
+-          .filter((item) => item.mode !== "subagent" && !item.hidden)
+-          .map((item) => item.id),
+-      )
        setState("form", toForm(heartbeat.heartbeat.config))
-       try {
-         const agents = await mockingbirdJson<AgentsPayload>("/api/mockingbird/agents")
--        const ids = new Set(DEFAULT_HEARTBEAT_AGENT_OPTIONS)
--        for (const item of agents.agentTypes) {
--          if (item.mode === "subagent" || item.hidden || item.disable) continue
--          ids.add(item.id)
--        }
--        setState("agentOptions", [...ids].sort((left, right) => left.localeCompare(right)))
++      try {
++        const agents = await mockingbirdJson<AgentsPayload>("/api/mockingbird/agents")
 +        setState("agentOptions", resolveHeartbeatAgentOptions(agents.agentTypes))
-       } catch {
-         const ids = new Set(DEFAULT_HEARTBEAT_AGENT_OPTIONS)
-         const configured = heartbeat.heartbeat.config.agentId.trim()
++      } catch {
++        const ids = new Set(DEFAULT_HEARTBEAT_AGENT_OPTIONS)
++        const configured = heartbeat.heartbeat.config.agentId.trim()
++        if (configured) ids.add(configured)
++        setState("agentOptions", [...ids].sort((left, right) => left.localeCompare(right)))
++      }
+     } catch (error) {
+       setState("error", error instanceof Error ? error.message : "Failed to load heartbeat settings")
+     } finally {
 -- 
 2.53.0
 

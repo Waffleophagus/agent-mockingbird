@@ -1,18 +1,18 @@
-From 4b5655174cb635f87a5318c7f03f61c206bb20c7 Mon Sep 17 00:00:00 2001
+From 3d7fe2cb9624e266aa4d86f685d776618d0922fd Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
-Date: Thu, 19 Mar 2026 21:54:09 -0500
-Subject: [PATCH 10/15] Refine heartbeat settings controls
+Date: Mon, 30 Mar 2026 17:04:36 -0500
+Subject: [PATCH 06/10] Refine heartbeat settings UI
 
 ---
- .../src/components/dialog-select-model.tsx    |  7 +-
- .../app/src/components/settings-heartbeat.tsx | 93 ++++++++++++++++---
- 2 files changed, 85 insertions(+), 15 deletions(-)
+ .../src/components/dialog-select-model.tsx    |   7 +-
+ .../app/src/components/settings-heartbeat.tsx | 109 ++++++++++++++++--
+ 2 files changed, 102 insertions(+), 14 deletions(-)
 
 diff --git a/packages/app/src/components/dialog-select-model.tsx b/packages/app/src/components/dialog-select-model.tsx
-index 3654aab85..8a4a88a36 100644
+index cb688c30a..a8c9d198e 100644
 --- a/packages/app/src/components/dialog-select-model.tsx
 +++ b/packages/app/src/components/dialog-select-model.tsx
-@@ -19,13 +19,14 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
+@@ -17,13 +17,14 @@ const isFree = (provider: string, cost: { input: number } | undefined) =>
    provider === "opencode" && (!cost || cost.input === 0)
  
  type ModelState = ReturnType<typeof useLocal>["model"]
@@ -28,7 +28,7 @@ index 3654aab85..8a4a88a36 100644
  }> = (props) => {
    const model = props.model ?? useLocal().model
    const language = useLanguage()
-@@ -91,7 +92,7 @@ type ModelSelectorTriggerProps = Omit<ComponentProps<typeof Kobalte.Trigger>, "a
+@@ -89,7 +90,7 @@ type ModelSelectorTriggerProps = Omit<ComponentProps<typeof Kobalte.Trigger>, "a
  
  export function ModelSelectorPopover(props: {
    provider?: string
@@ -37,7 +37,7 @@ index 3654aab85..8a4a88a36 100644
    children?: JSX.Element
    triggerAs?: ValidComponent
    triggerProps?: ModelSelectorTriggerProps
-@@ -189,7 +190,7 @@ export function ModelSelectorPopover(props: {
+@@ -191,7 +192,7 @@ export function ModelSelectorPopover(props: {
    )
  }
  
@@ -47,7 +47,7 @@ index 3654aab85..8a4a88a36 100644
    const language = useLanguage()
  
 diff --git a/packages/app/src/components/settings-heartbeat.tsx b/packages/app/src/components/settings-heartbeat.tsx
-index 628fda355..770e0ccbd 100644
+index 628fda355..f7046b9a9 100644
 --- a/packages/app/src/components/settings-heartbeat.tsx
 +++ b/packages/app/src/components/settings-heartbeat.tsx
 @@ -1,9 +1,13 @@
@@ -56,39 +56,50 @@ index 628fda355..770e0ccbd 100644
  import { Switch } from "@opencode-ai/ui/switch"
  import { showToast } from "@opencode-ai/ui/toast"
 -import { onMount, Show, type Component } from "solid-js"
++import { useNavigate } from "@solidjs/router"
 +import { createMemo, onMount, Show, type Component } from "solid-js"
  import { createStore } from "solid-js/store"
--import { mockingbirdJson } from "@/utils/mockingbird"
 +import { useModels } from "@/context/models"
-+import { useGlobalSDK } from "@/context/global-sdk"
-+import { mockingbirdJson, readPinnedWorkspace } from "@/utils/mockingbird"
+ import { mockingbirdJson } from "@/utils/mockingbird"
 +import { ModelSelectorPopover, type ModelSelectorState } from "./dialog-select-model"
  import {
    MockingbirdCard,
    MockingbirdInput,
-@@ -54,6 +58,12 @@ type RuntimePayload = {
+@@ -33,6 +37,7 @@ type HeartbeatRuntimeConfig = {
+ 
+ type HeartbeatStatus = {
+   config: HeartbeatRuntimeConfig
++  sessionTitle: string | null
+   state: {
+     sessionId: string | null
+     running: boolean
+@@ -54,6 +59,16 @@ type RuntimePayload = {
    path: string
  }
  
-+type LiveAgent = {
-+  name: string
++type AgentType = {
++  id: string
 +  mode?: string
 +  hidden?: boolean
++}
++
++type AgentsPayload = {
++  agentTypes: AgentType[]
 +}
 +
  type HeartbeatFormState = {
    enabled: boolean
    interval: string
-@@ -141,6 +151,8 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
+@@ -141,6 +156,8 @@ function buildHeartbeatPatch(form: HeartbeatFormState): HeartbeatRuntimeConfig {
  }
  
  export const SettingsHeartbeat: Component = () => {
-+  const globalSDK = useGlobalSDK()
 +  const models = useModels()
++  const navigate = useNavigate()
    const [state, setState] = createStore({
      loading: true,
      saving: false,
-@@ -148,6 +160,7 @@ export const SettingsHeartbeat: Component = () => {
+@@ -148,6 +165,7 @@ export const SettingsHeartbeat: Component = () => {
      error: "",
      runtimeHash: "",
      runtimePath: "",
@@ -96,7 +107,7 @@ index 628fda355..770e0ccbd 100644
      status: null as HeartbeatStatus | null,
      form: {
        enabled: true,
-@@ -163,17 +176,60 @@ export const SettingsHeartbeat: Component = () => {
+@@ -163,17 +181,59 @@ export const SettingsHeartbeat: Component = () => {
      } as HeartbeatFormState,
    })
  
@@ -115,6 +126,12 @@ index 628fda355..770e0ccbd 100644
 +    const modelID = value.slice(slash + 1)
 +    if (!providerID || !modelID) return
 +    return models.find({ providerID, modelID })
++  })
++
++  const heartbeatSessionHref = createMemo(() => {
++    const sessionId = state.status?.state.sessionId?.trim()
++    if (!sessionId) return null
++    return `/session/${sessionId}`
 +  })
 +
 +  const heartbeatModelSelector: ModelSelectorState = {
@@ -137,28 +154,47 @@ index 628fda355..770e0ccbd 100644
 +      const [heartbeat, runtime, agents] = await Promise.all([
          mockingbirdJson<HeartbeatStatusPayload>("/api/mockingbird/heartbeat"),
          mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config"),
-+        readPinnedWorkspace().then(async (workspace) => {
-+          const client = globalSDK.createClient({
-+            directory: workspace.directory,
-+            throwOnError: true,
-+          })
-+          const payload = await client.app.agents()
-+          return payload.data ?? []
-+        }),
++        mockingbirdJson<AgentsPayload>("/api/mockingbird/agents"),
        ])
        setState("status", heartbeat.heartbeat)
        setState("runtimeHash", runtime.hash)
        setState("runtimePath", runtime.path)
 +      setState(
 +        "agentOptions",
-+        agents
-+          .filter((item: LiveAgent) => item.mode !== "subagent" && !item.hidden)
-+          .map((item: LiveAgent) => item.name),
++        agents.agentTypes
++          .filter((item) => item.mode !== "subagent" && !item.hidden)
++          .map((item) => item.id),
 +      )
        setState("form", toForm(heartbeat.heartbeat.config))
      } catch (error) {
        setState("error", error instanceof Error ? error.message : "Failed to load heartbeat settings")
-@@ -313,11 +369,18 @@ export const SettingsHeartbeat: Component = () => {
+@@ -274,11 +334,25 @@ export const SettingsHeartbeat: Component = () => {
+               <MockingbirdMetaRow label="Config file" value={state.runtimePath || "Unavailable"} />
+               <MockingbirdMetaRow label="Enabled" value={status().config.enabled ? "Yes" : "No"} />
+               <MockingbirdMetaRow label="Session id" value={status().state.sessionId ?? "Not created yet"} />
++              <MockingbirdMetaRow label="Session title" value={status().sessionTitle ?? "Heartbeat"} />
+               <MockingbirdMetaRow label="Currently running" value={status().state.running ? "Yes" : "No"} />
+               <MockingbirdMetaRow label="Last run" value={formatTimestamp(status().state.lastRunAt)} />
+               <MockingbirdMetaRow label="Next due" value={formatTimestamp(status().nextDueAt)} />
+               <MockingbirdMetaRow label="Last result" value={formatResult(status().state.lastResult)} />
+               <MockingbirdMetaRow label="Last updated" value={formatTimestamp(status().state.updatedAt)} />
++              <Show when={heartbeatSessionHref()}>
++                {(href) => (
++                  <div class="flex justify-end">
++                    <Button
++                      variant="ghost"
++                      size="small"
++                      onClick={() => navigate(href())}
++                    >
++                      Open heartbeat session
++                    </Button>
++                  </div>
++                )}
++              </Show>
+             </MockingbirdSettingsSection>
+ 
+             <Show when={status().state.lastError}>
+@@ -313,11 +387,18 @@ export const SettingsHeartbeat: Component = () => {
            <div class="grid gap-4 sm:grid-cols-2">
              <div class="flex flex-col gap-2">
                <span class="text-12-medium text-text-weak">Model</span>
@@ -182,7 +218,7 @@ index 628fda355..770e0ccbd 100644
              </div>
              <div class="flex flex-col gap-2">
                <span class="text-12-medium text-text-weak">Interval</span>
-@@ -329,10 +392,16 @@ export const SettingsHeartbeat: Component = () => {
+@@ -329,10 +410,16 @@ export const SettingsHeartbeat: Component = () => {
              </div>
              <div class="flex flex-col gap-2">
                <span class="text-12-medium text-text-weak">Agent id</span>

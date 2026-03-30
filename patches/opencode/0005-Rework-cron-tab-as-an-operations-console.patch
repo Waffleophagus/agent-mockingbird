@@ -1,26 +1,66 @@
-From 27d63d501f0868545d6f255e04032bd6596b2e3b Mon Sep 17 00:00:00 2001
+From f118ada1f8b628724ce650d43c5b9443c0232e70 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
-Date: Thu, 19 Mar 2026 17:40:25 -0500
-Subject: [PATCH 09/15] Rework cron tab as operations console
+Date: Mon, 30 Mar 2026 17:04:36 -0500
+Subject: [PATCH 05/10] Rework cron tab as an operations console
 
 ---
- .../src/components/settings-cron-data.test.ts | 102 +++++++++++-----
- .../app/src/components/settings-cron-data.ts  |  65 +++++-----
- packages/app/src/components/settings-cron.tsx | 112 ++++--------------
- 3 files changed, 131 insertions(+), 148 deletions(-)
+ .../src/components/settings-cron-data.test.ts | 125 +++++++++-------
+ .../app/src/components/settings-cron-data.ts  |  86 +++++------
+ packages/app/src/components/settings-cron.tsx | 137 +++---------------
+ 3 files changed, 133 insertions(+), 215 deletions(-)
 
 diff --git a/packages/app/src/components/settings-cron-data.test.ts b/packages/app/src/components/settings-cron-data.test.ts
-index 2cc587ed7..a81509423 100644
+index c1ec8fcd3..a81509423 100644
 --- a/packages/app/src/components/settings-cron-data.test.ts
 +++ b/packages/app/src/components/settings-cron-data.test.ts
-@@ -1,5 +1,5 @@
+@@ -1,8 +1,8 @@
  import { describe, expect, test } from "bun:test"
 -import { DEFAULT_JOB, loadCronSettings, serializeCronJobForEdit, type CronJobDefinition } from "./settings-cron-data"
 +import { describeCronJobTarget, formatCronSchedule, loadCronSettings, type CronJobDefinition } from "./settings-cron-data"
  
  describe("loadCronSettings", () => {
-   test("loads jobs and health without requesting handlers or contract metadata", async () => {
-@@ -28,48 +28,96 @@ describe("loadCronSettings", () => {
+-  test("loads jobs, health, and contract without requesting handlers", async () => {
++  test("loads jobs and health without requesting handlers or contract metadata", async () => {
+     const calls: Array<{ path: string; init?: RequestInit }> = []
+     const requestJson = async <T>(path: string, init?: RequestInit) => {
+       calls.push({ path, init })
+@@ -12,15 +12,6 @@ describe("loadCronSettings", () => {
+       if (path === "/api/mockingbird/cron/health") {
+         return { health: { enabled: true, jobs: { total: 0, enabled: 0 } } } as T
+       }
+-      if (path === "/api/mockingbird/cron/manage") {
+-        return {
+-          contract: {
+-            runModes: {
+-              agent: { requires: ["agentPromptTemplate"], forbids: ["conditionModulePath"] },
+-            },
+-          },
+-        } as T
+-      }
+       throw new Error(`Unexpected path: ${path}`)
+     }
+ 
+@@ -29,68 +20,104 @@ describe("loadCronSettings", () => {
+     expect(payload).toEqual({
+       jobs: [],
+       health: { enabled: true, jobs: { total: 0, enabled: 0 } },
+-      contract: {
+-        runModes: {
+-          agent: { requires: ["agentPromptTemplate"], forbids: ["conditionModulePath"] },
+-        },
+-      },
+     })
+     expect(calls).toEqual([
+       { path: "/api/mockingbird/cron/jobs", init: undefined },
+       { path: "/api/mockingbird/cron/health", init: undefined },
+-      {
+-        path: "/api/mockingbird/cron/manage",
+-        init: {
+-          method: "POST",
+-          body: JSON.stringify({ action: "describe_contract" }),
+-        },
+-      },
+     ])
    })
  })
  
@@ -144,7 +184,7 @@ index 2cc587ed7..a81509423 100644
    })
  })
 diff --git a/packages/app/src/components/settings-cron-data.ts b/packages/app/src/components/settings-cron-data.ts
-index 8c044168f..992820096 100644
+index 2eeab5f94..992820096 100644
 --- a/packages/app/src/components/settings-cron-data.ts
 +++ b/packages/app/src/components/settings-cron-data.ts
 @@ -1,4 +1,4 @@
@@ -153,8 +193,31 @@ index 8c044168f..992820096 100644
  
  export type CronJobDefinition = {
    id: string
-@@ -37,18 +37,6 @@ type CronHealthResponse = {
+@@ -27,16 +27,6 @@ export type CronHealthSnapshot = {
+   }
+ }
  
+-type CronContractMode = {
+-  requires?: string[]
+-  optional?: string[]
+-  forbids?: string[]
+-}
+-
+-export type CronContract = {
+-  runModes: Record<string, CronContractMode>
+-}
+-
+ type CronJobsResponse = {
+   jobs: CronJobDefinition[]
+ }
+@@ -45,57 +35,51 @@ type CronHealthResponse = {
+   health: CronHealthSnapshot
+ }
+ 
+-type CronContractResponse = {
+-  contract: CronContract
+-}
+-
  type MockingbirdJson = <T>(path: string, init?: RequestInit) => Promise<T>
  
 -const DEFAULT_AGENT_JOB = {
@@ -170,9 +233,20 @@ index 8c044168f..992820096 100644
 -export const DEFAULT_JOB = prettyJson(DEFAULT_AGENT_JOB)
 -
  export async function loadCronSettings(requestJson: MockingbirdJson = mockingbirdJson) {
-   const [jobs, health] = await Promise.all([
+-  const [jobs, health, contract] = await Promise.all([
++  const [jobs, health] = await Promise.all([
      requestJson<CronJobsResponse>("/api/mockingbird/cron/jobs"),
-@@ -61,22 +49,37 @@ export async function loadCronSettings(requestJson: MockingbirdJson = mockingbir
+     requestJson<CronHealthResponse>("/api/mockingbird/cron/health"),
+-    requestJson<CronContractResponse>("/api/mockingbird/cron/manage", {
+-      method: "POST",
+-      body: JSON.stringify({ action: "describe_contract" }),
+-    }),
+   ])
+ 
+   return {
+     jobs: jobs.jobs,
+     health: health.health,
+-    contract: contract.contract,
    }
  }
  
@@ -229,17 +303,17 @@ index 8c044168f..992820096 100644
 +  return "No code target"
  }
 diff --git a/packages/app/src/components/settings-cron.tsx b/packages/app/src/components/settings-cron.tsx
-index f56fef497..24395d8b5 100644
+index 67f282245..24395d8b5 100644
 --- a/packages/app/src/components/settings-cron.tsx
 +++ b/packages/app/src/components/settings-cron.tsx
-@@ -1,22 +1,19 @@
+@@ -1,23 +1,19 @@
  import { Button } from "@opencode-ai/ui/button"
 +import { Switch } from "@opencode-ai/ui/switch"
  import { showToast } from "@opencode-ai/ui/toast"
  import { For, onMount, Show, type Component } from "solid-js"
  import { createStore } from "solid-js/store"
  import { mockingbirdJson } from "@/utils/mockingbird"
--import { DEFAULT_JOB, loadCronSettings, serializeCronJobForEdit, type CronHealthSnapshot, type CronJobDefinition } from "./settings-cron-data"
+-import { DEFAULT_JOB, loadCronSettings, serializeCronJobForEdit, type CronContract, type CronHealthSnapshot, type CronJobDefinition } from "./settings-cron-data"
 -import { MockingbirdCard, MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdTextArea, MockingbirdToolbar } from "./settings-mockingbird-shared"
 +import { describeCronJobTarget, formatCronSchedule, loadCronSettings, type CronHealthSnapshot, type CronJobDefinition } from "./settings-cron-data"
 +import { MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdToolbar } from "./settings-mockingbird-shared"
@@ -252,13 +326,22 @@ index f56fef497..24395d8b5 100644
      error: "",
      jobs: [] as CronJobDefinition[],
      health: null as CronHealthSnapshot | null,
+-    contract: null as CronContract | null,
 -    createText: DEFAULT_JOB,
 -    editingId: "",
 -    editText: "",
    })
  
    async function load() {
-@@ -37,55 +34,19 @@ export const SettingsCron: Component = () => {
+@@ -27,7 +23,6 @@ export const SettingsCron: Component = () => {
+       const payload = await loadCronSettings()
+       setState("jobs", payload.jobs)
+       setState("health", payload.health)
+-      setState("contract", payload.contract)
+     } catch (error) {
+       setState("error", error instanceof Error ? error.message : "Failed to load cron jobs")
+     } finally {
+@@ -39,55 +34,19 @@ export const SettingsCron: Component = () => {
      await load()
    }
  
@@ -320,7 +403,7 @@ index f56fef497..24395d8b5 100644
        await refresh()
      } catch (error) {
        setState("error", error instanceof Error ? error.message : "Failed to update cron job")
-@@ -133,10 +94,10 @@ export const SettingsCron: Component = () => {
+@@ -135,10 +94,10 @@ export const SettingsCron: Component = () => {
    return (
      <MockingbirdSettingsPage
        title="Cron"
@@ -333,7 +416,37 @@ index f56fef497..24395d8b5 100644
              Refresh
            </Button>
          </MockingbirdToolbar>
-@@ -168,23 +129,23 @@ export const SettingsCron: Component = () => {
+@@ -158,29 +117,6 @@ export const SettingsCron: Component = () => {
+         )}
+       </Show>
+ 
+-      <Show when={state.contract}>
+-        {(contract) => (
+-          <MockingbirdSettingsSection title="Run mode contract" description="Current backend requirements for each cron run mode.">
+-            <For each={Object.entries(contract().runModes)}>
+-              {([mode, details]) => (
+-                <div class="px-4 py-4 border-b border-border-weak-base last:border-none flex flex-col gap-1">
+-                  <div class="text-14-medium text-text-strong">{mode}</div>
+-                  <div class="text-12-regular text-text-weak">
+-                    Requires: {details.requires?.length ? details.requires.join(", ") : "Nothing special"}
+-                  </div>
+-                  <Show when={details.optional?.length}>
+-                    <div class="text-12-regular text-text-weak">Optional: {details.optional?.join(", ")}</div>
+-                  </Show>
+-                  <Show when={details.forbids?.length}>
+-                    <div class="text-12-regular text-text-weak">Forbids: {details.forbids?.join(", ")}</div>
+-                  </Show>
+-                </div>
+-              )}
+-            </For>
+-          </MockingbirdSettingsSection>
+-        )}
+-      </Show>
+-
+       <MockingbirdSettingsSection title="Jobs">
+         <Show
+           when={state.jobs.length > 0}
+@@ -193,23 +129,23 @@ export const SettingsCron: Component = () => {
                    <div class="flex flex-col gap-1">
                      <div class="text-14-medium text-text-strong">{job.name}</div>
                      <div class="text-12-regular text-text-weak">
@@ -368,7 +481,7 @@ index f56fef497..24395d8b5 100644
                      <Button
                        variant="ghost"
                        size="large"
-@@ -203,40 +164,11 @@ export const SettingsCron: Component = () => {
+@@ -228,40 +164,11 @@ export const SettingsCron: Component = () => {
                      </Button>
                    </div>
                  </div>
