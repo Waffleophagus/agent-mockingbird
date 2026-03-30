@@ -610,7 +610,16 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
         signal: this.defaultRequestSignal(),
       });
       this.markMemoryInjectionStateForReinject(opencodeSessionId);
-      return Boolean(unwrapSdkData<boolean>(result));
+      const compacted = Boolean(unwrapSdkData<boolean>(result));
+      if (compacted) {
+        await this.syncLocalSessionFromOpencode({
+          localSessionId: session.id,
+          externalSessionId: opencodeSessionId,
+          force: true,
+          titleHint: session.title,
+        });
+      }
+      return compacted;
     } catch (error) {
       if (getOpencodeErrorStatus(error) === 404) {
         opencodeSessionId = await this.createOpencodeSession(session.id, session.title);
@@ -622,7 +631,16 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
           signal: this.defaultRequestSignal(),
         });
         this.markMemoryInjectionStateForReinject(opencodeSessionId);
-        return Boolean(unwrapSdkData<boolean>(retry));
+        const compacted = Boolean(unwrapSdkData<boolean>(retry));
+        if (compacted) {
+          await this.syncLocalSessionFromOpencode({
+            localSessionId: session.id,
+            externalSessionId: opencodeSessionId,
+            force: true,
+            titleHint: session.title,
+          });
+        }
+        return compacted;
       }
       throw this.normalizeRuntimeError(error);
     }

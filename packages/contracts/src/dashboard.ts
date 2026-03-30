@@ -299,7 +299,7 @@ export interface MemoryWriteEvent {
   id: string;
   status: "accepted" | "rejected";
   reason: string;
-  source: "user" | "assistant" | "system";
+  source: "user" | "assistant" | "system" | "compaction";
   content: string;
   confidence: number;
   sessionId: string | null;

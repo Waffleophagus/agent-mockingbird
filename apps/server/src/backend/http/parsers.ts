@@ -104,7 +104,7 @@ export function parseMemoryRememberBody(body: unknown) {
     : [];
   const confidence = typeof value.confidence === "number" ? value.confidence : undefined;
   if (!content) return null;
-  const allowedSources = ["user", "assistant", "system"] as const;
+  const allowedSources = ["user", "assistant", "system", "compaction"] as const;
   if (!allowedSources.includes(source as MemoryRecordSource)) return null;
   return {
     source: source as MemoryRecordSource,

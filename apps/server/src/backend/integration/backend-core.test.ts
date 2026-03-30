@@ -54,7 +54,7 @@ interface MemoryRememberResultLite {
 interface MemoryServiceApi {
   initializeMemory: () => Promise<void>;
   rememberMemory: (input: {
-    source: "user" | "assistant" | "system";
+    source: "user" | "assistant" | "system" | "compaction";
     content: string;
     sessionId?: string;
     confidence?: number;

@@ -1,4 +1,4 @@
-export type MemoryRecordSource = "user" | "assistant" | "system";
+export type MemoryRecordSource = "user" | "assistant" | "system" | "compaction";
 export type MemoryToolMode = "hybrid" | "inject_only" | "tool_only";
 
 export interface MemoryRecordInput {

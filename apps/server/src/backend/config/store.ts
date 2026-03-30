@@ -280,6 +280,11 @@ function buildLegacyBootstrappedConfig() {
         runWaitTimeoutMs: DEFAULT_OPENCODE_RUN_WAIT_TIMEOUT_MS,
         childSessionHideAfterDays: 3,
         directory: env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR,
+        compaction: {
+          preemptiveIdleMinutes: 15,
+          preemptiveThresholdRatio: 0.6,
+          memoryAutoPersist: true,
+        },
         bootstrap: {
           enabled: true,
           maxCharsPerFile: 20_000,
@@ -378,6 +383,7 @@ function buildLegacyBootstrappedConfig() {
         strictAllowPaths: [
           "runtime.opencode.runWaitTimeoutMs",
           "runtime.opencode.childSessionHideAfterDays",
+          "runtime.opencode.compaction",
           "runtime.opencode.bootstrap",
           "runtime.executor",
           "runtime.embeddedServices",

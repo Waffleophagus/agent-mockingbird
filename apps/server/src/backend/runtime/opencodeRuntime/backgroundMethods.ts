@@ -1,3 +1,4 @@
+import { persistCompactionMemoryCandidates } from "./compactionMemory";
 import {
   BACKGROUND_MESSAGE_SYNC_MIN_INTERVAL_MS,
   BACKGROUND_SYNC_BATCH_LIMIT,
@@ -424,6 +425,32 @@ export const opencodeRuntimeBackgroundMethods: OpencodeRuntimeBackgroundMethods 
       }
       if (synced.inserted.length === 0) return;
       for (const message of synced.inserted) {
+        const entry = entriesById.get(message.id);
+        if (
+          message.role === "assistant" &&
+          entry?.info.role === "assistant" &&
+          entry.info.summary === true
+        ) {
+          const scopedMessageId = this.scopedMessageId(externalSessionId, message.id);
+          if (!this["processedCompactionMessageIds"].has(scopedMessageId)) {
+            this.setBoundedMapEntry(
+              this["processedCompactionMessageIds"],
+              scopedMessageId,
+              true,
+            );
+            try {
+              await persistCompactionMemoryCandidates({
+                summary: message.content,
+                sessionId: localSessionId,
+              });
+            } catch (error) {
+              logger.warnWithCause("Failed to process compaction memory candidates", error, {
+                sessionId: localSessionId,
+                messageId: message.id,
+              });
+            }
+          }
+        }
         this.emit(
           createSessionMessageCreatedEvent(
             { sessionId: localSessionId, message },

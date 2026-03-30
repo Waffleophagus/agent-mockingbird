@@ -13,6 +13,7 @@ const OPENCODE_COMPACTION_HEADINGS = [
   "## Constraints/Rules",
   "## Pending user asks",
   "## Exact identifiers",
+  "## Memory candidates",
 ] as const;
 const MAX_COMPACTION_RECENT_MESSAGES = 6;
 const MAX_COMPACTION_RECENT_MESSAGE_CHARS = 220;
@@ -141,6 +142,10 @@ function buildCompactionRequirementLines() {
     "- Preserve active tasks, current status, blockers, approvals, unresolved questions, and promised follow-ups.",
     "- Preserve the latest unresolved user ask even if it appeared very recently.",
     "- Prefer recent context over older history when choosing what to keep.",
+    "- In ## Memory candidates, include only durable facts, preferences, ongoing standing context, identity/relationship facts, recurring patterns, or active long-running commitments worth saving beyond this session.",
+    "- In ## Memory candidates, omit ephemeral execution details, transient step-by-step notes, and already-finished one-off work unless it changes future behavior.",
+    '- Format every memory candidate as a single bullet exactly like: `- content: ... | confidence: high | entities: a, b | topic: optional`.',
+    "- If there are no durable memory candidates, write `none` under ## Memory candidates.",
     "",
     "Produce the summary with these exact headings, in this exact order:",
     ...OPENCODE_COMPACTION_HEADINGS,
@@ -241,7 +246,7 @@ export function buildAgentMockingbirdCompactionContext(externalSessionId?: strin
       [
         "Memory follow-through:",
         "- Include any retrieved memory records that materially changed the approach.",
-        "- Include any new facts that should probably be persisted with memory_remember if they were not saved yet.",
+        "- Put durable memory candidates in ## Memory candidates instead of calling memory tools from the hidden compaction agent.",
       ].join("\n"),
     );
   }

@@ -45,6 +45,7 @@ class OpencodeRuntimeImpl {
   private imageCapabilityFetchedAtMs = 0;
   private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
   private partTypeByScopedPartId = new Map<string, Part["type"]>();
+  private processedCompactionMessageIds = new Map<string, true>();
   private memoryInjectionStateBySessionId = new Map<
     string,
     MemoryInjectionStateEntry
@@ -107,6 +108,7 @@ class OpencodeRuntimeImpl {
     this.drainingSessions.clear();
     this.messageRoleByScopedMessageId.clear();
     this.partTypeByScopedPartId.clear();
+    this.processedCompactionMessageIds.clear();
     this.memoryInjectionStateBySessionId.clear();
     if (this.backgroundSyncInFlight) {
       await this.backgroundSyncInFlight.catch(() => {});

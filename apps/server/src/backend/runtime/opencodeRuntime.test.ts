@@ -157,6 +157,11 @@ type RuntimeCtor = new (input: {
     runWaitTimeoutMs: number;
     childSessionHideAfterDays: number;
     directory: string | null;
+    compaction: {
+      preemptiveIdleMinutes: number;
+      preemptiveThresholdRatio: number;
+      memoryAutoPersist: boolean;
+    };
     bootstrap: {
       enabled: boolean;
       maxCharsPerFile: number;
@@ -521,32 +526,108 @@ function createRuntimeWithClient(
     enableSmallModelSync?: boolean;
     enableBackgroundSync?: boolean;
     runtimeDirectory?: string | null;
+    runtimeConfig?:
+      | {
+          baseUrl: string;
+          providerId: string;
+          modelId: string;
+          fallbackModels: string[];
+          imageModel: string | null;
+          smallModel: string;
+          timeoutMs: number;
+          promptTimeoutMs: number;
+          runWaitTimeoutMs: number;
+          childSessionHideAfterDays: number;
+          directory: string | null;
+          compaction: {
+            preemptiveIdleMinutes: number;
+            preemptiveThresholdRatio: number;
+            memoryAutoPersist: boolean;
+          };
+          bootstrap: {
+            enabled: boolean;
+            maxCharsPerFile: number;
+            maxCharsTotal: number;
+            subagentMinimal: boolean;
+            includeAgentPrompt: boolean;
+          };
+        }
+      | (() => {
+          baseUrl: string;
+          providerId: string;
+          modelId: string;
+          fallbackModels: string[];
+          imageModel: string | null;
+          smallModel: string;
+          timeoutMs: number;
+          promptTimeoutMs: number;
+          runWaitTimeoutMs: number;
+          childSessionHideAfterDays: number;
+          directory: string | null;
+          compaction: {
+            preemptiveIdleMinutes: number;
+            preemptiveThresholdRatio: number;
+            memoryAutoPersist: boolean;
+          };
+          bootstrap: {
+            enabled: boolean;
+            maxCharsPerFile: number;
+            maxCharsTotal: number;
+            subagentMinimal: boolean;
+            includeAgentPrompt: boolean;
+          };
+        });
   },
 ) {
+  const defaultRuntimeConfig = {
+    baseUrl: "http://127.0.0.1:4096",
+    providerId: "test-provider",
+    modelId: "test-model",
+    fallbackModels: options?.fallbackModelRefs ?? [],
+    imageModel: null,
+    smallModel: "test-provider/test-small",
+    timeoutMs: 120_000,
+    promptTimeoutMs: 20,
+    runWaitTimeoutMs: 180_000,
+    childSessionHideAfterDays: 3,
+    directory: options?.runtimeDirectory ?? null,
+    compaction: {
+      preemptiveIdleMinutes: 15,
+      preemptiveThresholdRatio: 0.6,
+      memoryAutoPersist: true,
+    },
+    bootstrap: {
+      enabled: true,
+      maxCharsPerFile: 20_000,
+      maxCharsTotal: 150_000,
+      subagentMinimal: true,
+      includeAgentPrompt: true,
+    },
+  };
+  const runtimeConfigOverride =
+    typeof options?.runtimeConfig === "function"
+      ? null
+      : (options?.runtimeConfig ?? null);
+  const getRuntimeConfig =
+    typeof options?.runtimeConfig === "function"
+      ? options.runtimeConfig
+      : () => ({
+          ...defaultRuntimeConfig,
+          ...(runtimeConfigOverride ?? {}),
+          compaction: {
+            ...defaultRuntimeConfig.compaction,
+            ...(runtimeConfigOverride?.compaction ?? {}),
+          },
+          bootstrap: {
+            ...defaultRuntimeConfig.bootstrap,
+            ...(runtimeConfigOverride?.bootstrap ?? {}),
+          },
+        });
   return new OpencodeRuntime({
     defaultProviderId: "test-provider",
     defaultModelId: "test-model",
     fallbackModelRefs: options?.fallbackModelRefs,
-    getRuntimeConfig: () => ({
-      baseUrl: "http://127.0.0.1:4096",
-      providerId: "test-provider",
-      modelId: "test-model",
-      fallbackModels: options?.fallbackModelRefs ?? [],
-      imageModel: null,
-      smallModel: "test-provider/test-small",
-      timeoutMs: 120_000,
-      promptTimeoutMs: 20,
-      runWaitTimeoutMs: 180_000,
-      childSessionHideAfterDays: 3,
-      directory: options?.runtimeDirectory ?? null,
-      bootstrap: {
-        enabled: true,
-        maxCharsPerFile: 20_000,
-        maxCharsTotal: 150_000,
-        subagentMinimal: true,
-        includeAgentPrompt: true,
-      },
-    }),
+    getRuntimeConfig,
     getEnabledSkills: options?.getEnabledSkills,
     getEnabledMcps: options?.getEnabledMcps,
     getConfiguredMcpServers: options?.getConfiguredMcpServers,
@@ -1285,6 +1366,11 @@ describe("opencode runtime failover contract", () => {
           skills: {
             paths: [],
           },
+          compaction: {
+            auto: false,
+            prune: true,
+            reserved: 1234,
+          },
           mcp: {
             github: {
               enabled: true,
@@ -1300,9 +1386,36 @@ describe("opencode runtime failover contract", () => {
       };
     };
 
+    const runtimeConfig = {
+      baseUrl: "http://127.0.0.1:4096",
+      providerId: "test-provider",
+      modelId: "test-model",
+      fallbackModels: [],
+      imageModel: null,
+      smallModel: "test-provider/test-small",
+      timeoutMs: 120_000,
+      promptTimeoutMs: 20,
+      runWaitTimeoutMs: 180_000,
+      childSessionHideAfterDays: 3,
+      directory: testWorkspacePath,
+      compaction: {
+        preemptiveIdleMinutes: 15,
+        preemptiveThresholdRatio: 0.6,
+        memoryAutoPersist: true,
+      },
+      bootstrap: {
+        enabled: true,
+        maxCharsPerFile: 20_000,
+        maxCharsTotal: 150_000,
+        subagentMinimal: true,
+        includeAgentPrompt: true,
+      },
+    };
+
     const runtime = createRuntimeWithClient(client, {
       enableSmallModelSync: true,
       runtimeDirectory: testWorkspacePath,
+      runtimeConfig,
       getEnabledSkills: () => ["btca-cli"],
       getEnabledMcps: () => ["github"],
       getConfiguredMcpServers: () => [
@@ -1331,35 +1444,124 @@ describe("opencode runtime failover contract", () => {
       JSON.stringify((await import("../opencode/managedConfig")).readManagedOpencodeConfig({
         workspace: { pinnedDirectory: testWorkspacePath },
         runtime: {
-          opencode: {
-            baseUrl: "http://127.0.0.1:4096",
-            providerId: "test-provider",
-            modelId: "test-model",
-            fallbackModels: [],
-            imageModel: null,
-            smallModel: "test-provider/test-small",
-            timeoutMs: 120_000,
-            promptTimeoutMs: 120_000,
-            runWaitTimeoutMs: 180_000,
-            childSessionHideAfterDays: 3,
-            directory: testWorkspacePath,
-            bootstrap: {
-              enabled: true,
-              maxCharsPerFile: 20_000,
-              maxCharsTotal: 150_000,
-              subagentMinimal: true,
-              includeAgentPrompt: true,
-            },
-          },
+          opencode: runtimeConfig,
         },
       } as never)),
-    ) as { skills?: { paths?: string[] }; permission?: Record<string, unknown>; agent?: Record<string, unknown> };
+    ) as {
+      skills?: { paths?: string[] };
+      permission?: Record<string, unknown>;
+      agent?: Record<string, unknown>;
+      compaction?: {
+        auto?: boolean;
+        prune?: boolean;
+        reserved?: number;
+        preemptiveIdleMs?: number;
+        preemptiveThresholdRatio?: number;
+      };
+    };
 
     expect(managedConfig.skills?.paths).toContain(path.resolve(testWorkspacePath, ".agents", "skills"));
+    expect(managedConfig.compaction).toEqual({
+      auto: false,
+      prune: true,
+      reserved: 1234,
+      preemptiveIdleMs: 900_000,
+      preemptiveThresholdRatio: 0.6,
+    });
     expect(managedConfig.permission).toBeUndefined();
     expect(managedConfig.agent).toBeUndefined();
     expect(readFileSync(testManagedConfigPath, "utf8")).not.toContain('"default_agent"');
     expect(readFileSync(testManagedConfigPath, "utf8")).not.toContain('"agent-mockingbird"');
+  });
+
+  test("changing local compaction settings invalidates runtime config sync cache", async () => {
+    let configGetCount = 0;
+    const client = createMockClient({
+      prompt: async (request) => assistantResponse(request.path.id, "OK"),
+    });
+    client.config.get = async () => {
+      configGetCount += 1;
+      return {
+        data: {
+          skills: {
+            paths: [],
+          },
+          compaction: {
+            auto: true,
+            prune: true,
+            reserved: 2048,
+          },
+        },
+      };
+    };
+
+    const runtimeConfig = {
+      baseUrl: "http://127.0.0.1:4096",
+      providerId: "test-provider",
+      modelId: "test-model",
+      fallbackModels: [],
+      imageModel: null,
+      smallModel: "test-provider/test-small",
+      timeoutMs: 120_000,
+      promptTimeoutMs: 20,
+      runWaitTimeoutMs: 180_000,
+      childSessionHideAfterDays: 3,
+      directory: testWorkspacePath,
+      compaction: {
+        preemptiveIdleMinutes: 15,
+        preemptiveThresholdRatio: 0.6,
+        memoryAutoPersist: true,
+      },
+      bootstrap: {
+        enabled: true,
+        maxCharsPerFile: 20_000,
+        maxCharsTotal: 150_000,
+        subagentMinimal: true,
+        includeAgentPrompt: true,
+      },
+    };
+
+    const runtime = createRuntimeWithClient(client, {
+      enableSmallModelSync: true,
+      runtimeDirectory: testWorkspacePath,
+      runtimeConfig: () => runtimeConfig,
+      getEnabledSkills: () => ["btca-cli"],
+    });
+
+    await runtime.sendUserMessage({ sessionId: "main", content: "hello" });
+    const firstConfigGetCount = configGetCount;
+    expect(firstConfigGetCount).toBeGreaterThan(0);
+
+    runtimeConfig.compaction.preemptiveIdleMinutes = 5;
+    runtimeConfig.compaction.preemptiveThresholdRatio = 0.8;
+
+    await runtime.sendUserMessage({ sessionId: "main", content: "hello again" });
+    expect(configGetCount).toBeGreaterThan(firstConfigGetCount);
+
+    const managedConfig = JSON.parse(
+      JSON.stringify((await import("../opencode/managedConfig")).readManagedOpencodeConfig({
+        workspace: { pinnedDirectory: testWorkspacePath },
+        runtime: {
+          opencode: runtimeConfig,
+        },
+      } as never)),
+    ) as {
+      compaction?: {
+        auto?: boolean;
+        prune?: boolean;
+        reserved?: number;
+        preemptiveIdleMs?: number;
+        preemptiveThresholdRatio?: number;
+      };
+    };
+
+    expect(managedConfig.compaction).toEqual({
+      auto: true,
+      prune: true,
+      reserved: 2048,
+      preemptiveIdleMs: 300_000,
+      preemptiveThresholdRatio: 0.8,
+    });
   });
 
   test("maps authentication errors to RuntimeProviderAuthError", async () => {

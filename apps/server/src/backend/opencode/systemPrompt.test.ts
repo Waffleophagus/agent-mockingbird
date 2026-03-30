@@ -89,6 +89,7 @@ describe("systemPrompt helpers", () => {
     expect(prompt).toContain("## Decisions");
     expect(prompt).toContain("## Pending user asks");
     expect(prompt).toContain("## Exact identifiers");
+    expect(prompt).toContain("## Memory candidates");
     expect(prompt).toContain("Agent Mockingbird continuation notes:");
     expect(prompt).toContain("Memory follow-through:");
     expect(prompt).toContain("Workspace bootstrap context:");

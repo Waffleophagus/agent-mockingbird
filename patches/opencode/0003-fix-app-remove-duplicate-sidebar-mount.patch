@@ -1,7 +1,7 @@
-From cece02236149e2aadff66a168d912b70f0a1c3d0 Mon Sep 17 00:00:00 2001
+From 5c1985d9f58d9b204177c7618b9b8e6681374f42 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 16 Mar 2026 21:06:59 -0500
-Subject: [PATCH 03/14] fix(app): remove duplicate sidebar mount
+Subject: [PATCH 03/15] fix(app): remove duplicate sidebar mount
 
 ---
  packages/app/src/pages/layout.tsx | 2 --

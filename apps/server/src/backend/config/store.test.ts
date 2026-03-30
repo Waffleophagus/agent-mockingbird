@@ -106,6 +106,31 @@ test("ensureConfigSnapshot respects AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=false for
   }
 });
 
+test("ensureConfigSnapshot bootstraps opencode compaction defaults", () => {
+  const previousConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
+  const tempRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "agent-mockingbird-config-snapshot-"),
+  );
+  const configPath = path.join(tempRoot, "agent-mockingbird.config.json");
+  process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = configPath;
+
+  try {
+    const snapshot = ensureConfigSnapshot();
+    expect(snapshot.config.runtime.opencode.compaction).toEqual({
+      preemptiveIdleMinutes: 15,
+      preemptiveThresholdRatio: 0.6,
+      memoryAutoPersist: true,
+    });
+  } finally {
+    if (previousConfigPath === undefined) {
+      delete process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
+    } else {
+      process.env.AGENT_MOCKINGBIRD_CONFIG_PATH = previousConfigPath;
+    }
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("parseConfig aligns AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY through workspace.pinnedDirectory", () => {
   const previousOpencodeDirectory =
     process.env.AGENT_MOCKINGBIRD_OPENCODE_DIRECTORY;

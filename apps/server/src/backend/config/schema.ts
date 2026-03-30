@@ -113,6 +113,18 @@ const runtimeOpencodeSchema = z
     runWaitTimeoutMs: z.number().int().positive().default(180_000),
     childSessionHideAfterDays: z.number().int().min(0).max(365).default(3),
     directory: z.string().min(1).nullable().default(null),
+    compaction: z
+      .object({
+        preemptiveIdleMinutes: z.number().min(0).default(15),
+        preemptiveThresholdRatio: z.number().min(0).max(1).default(0.6),
+        memoryAutoPersist: z.boolean().default(true),
+      })
+      .strict()
+      .default({
+        preemptiveIdleMinutes: 15,
+        preemptiveThresholdRatio: 0.6,
+        memoryAutoPersist: true,
+      }),
     bootstrap: z
       .object({
         enabled: z.boolean().default(true),
@@ -301,6 +313,7 @@ const runtimeConfigPolicySchema = z
     strictAllowPaths: stringListSchema.default([
       "runtime.opencode.runWaitTimeoutMs",
       "runtime.opencode.childSessionHideAfterDays",
+      "runtime.opencode.compaction",
       "runtime.opencode.bootstrap",
       "runtime.opencode.imageModel",
       "runtime.executor",
@@ -416,6 +429,7 @@ export const agentMockingbirdConfigSchema = z
           strictAllowPaths: [
             "runtime.opencode.runWaitTimeoutMs",
             "runtime.opencode.childSessionHideAfterDays",
+            "runtime.opencode.compaction",
             "runtime.opencode.bootstrap",
             "runtime.opencode.imageModel",
             "runtime.executor",

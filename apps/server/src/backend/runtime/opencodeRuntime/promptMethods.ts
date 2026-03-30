@@ -1088,11 +1088,13 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
   },
 
   runtimeConfigTargetKey(this: OpencodeRuntime) {
+    const runtimeConfig = this.currentRuntimeConfig();
     return JSON.stringify({
       enabledSkills: this.currentEnabledSkills(),
       managedSkillsRoot: getManagedSkillsRootPath(
-        this.currentRuntimeConfig()?.directory ?? null,
+        runtimeConfig?.directory ?? null,
       ),
+      compaction: runtimeConfig?.compaction ?? null,
     });
   },
 
@@ -1128,6 +1130,10 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
       const nextConfig: Config = { ...current };
       const currentRecord = current as Record<string, unknown>;
       let changed = false;
+      const currentCompactionValue = currentRecord.compaction;
+      const currentCompaction = isPlainObject(currentCompactionValue)
+        ? currentCompactionValue
+        : {};
       const desiredSkillPaths = normalizeStringArray(
         buildManagedSkillPaths(
           current,
@@ -1150,6 +1156,34 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
         };
         changed = true;
       }
+      const localCompaction = runtimeConfig?.compaction;
+      if (localCompaction) {
+        const desiredCompaction = {
+          ...currentCompaction,
+          preemptiveIdleMs: Math.max(
+            0,
+            Math.round(localCompaction.preemptiveIdleMinutes * 60_000),
+          ),
+          preemptiveThresholdRatio: localCompaction.preemptiveThresholdRatio,
+        };
+        const currentIdleMs =
+          typeof currentCompaction.preemptiveIdleMs === "number" &&
+          Number.isFinite(currentCompaction.preemptiveIdleMs)
+            ? currentCompaction.preemptiveIdleMs
+            : null;
+        const currentThresholdRatio =
+          typeof currentCompaction.preemptiveThresholdRatio === "number" &&
+          Number.isFinite(currentCompaction.preemptiveThresholdRatio)
+            ? currentCompaction.preemptiveThresholdRatio
+            : null;
+        if (
+          currentIdleMs !== desiredCompaction.preemptiveIdleMs ||
+          currentThresholdRatio !== desiredCompaction.preemptiveThresholdRatio
+        ) {
+          (nextConfig as Record<string, unknown>).compaction = desiredCompaction;
+          changed = true;
+        }
+      }
       if (changed) {
         if (!runtimeConfig?.directory) {
           throw new Error(
@@ -1170,6 +1204,9 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
               string,
               unknown
             >,
+            compaction: (nextConfig as Record<string, unknown>).compaction as
+              | Record<string, unknown>
+              | undefined,
           },
         );
       }

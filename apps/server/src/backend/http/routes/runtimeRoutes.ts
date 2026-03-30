@@ -21,6 +21,12 @@ const runtimePatchSchema = z
       .optional(),
     runtime: z
       .object({
+        opencode: z
+          .object({
+            compaction: z.record(z.string(), z.unknown()).optional(),
+          })
+          .partial()
+          .optional(),
         executor: z.record(z.string(), z.unknown()).optional(),
         embeddedServices: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
         memory: z.record(z.string(), z.unknown()).optional(),

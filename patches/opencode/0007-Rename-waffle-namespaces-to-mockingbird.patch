@@ -1,7 +1,7 @@
-From b94e1dde9a7ae41780cc4ee98b8db885013be382 Mon Sep 17 00:00:00 2001
+From 325ac5915db8bfde48d2b7e59b06f5f702a146d2 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Thu, 19 Mar 2026 15:30:30 -0500
-Subject: [PATCH 07/14] Rename waffle namespaces to mockingbird
+Subject: [PATCH 07/15] Rename waffle namespaces to mockingbird
 
 ---
  .../app/src/components/settings-agents.tsx    |  38 +++---
