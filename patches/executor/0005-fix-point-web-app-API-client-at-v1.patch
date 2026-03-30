@@ -1,7 +1,7 @@
 From dd5235e35190dc21b889719d11145226e22c85ed Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 00:17:15 -0500
-Subject: [PATCH 5/5] fix: point web app API client at /v1
+Subject: [PATCH 5/6] fix: point web app API client at /v1
 
 
 diff --git a/apps/web/src/components/local-mcp-install-card.tsx b/apps/web/src/components/local-mcp-install-card.tsx
