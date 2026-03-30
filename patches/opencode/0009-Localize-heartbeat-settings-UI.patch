@@ -1,7 +1,7 @@
-From ff10a98ff97495afe5199c7f481ca9cac010f3fb Mon Sep 17 00:00:00 2001
+From 53e01f18c238d6ce8fe306cea2dceaba70331cde Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
-Date: Mon, 30 Mar 2026 16:25:27 -0500
-Subject: [PATCH 14/14] Localize heartbeat settings UI
+Date: Mon, 30 Mar 2026 17:04:36 -0500
+Subject: [PATCH 9/9] Localize heartbeat settings UI
 
 ---
  .../app/src/components/dialog-settings.tsx    |   2 +-

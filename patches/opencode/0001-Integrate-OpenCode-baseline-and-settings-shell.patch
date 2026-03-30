@@ -1,7 +1,7 @@
-From ed759a8e5418fcbdda09269765d5eec49774989e Mon Sep 17 00:00:00 2001
+From c7b2960222a7ff357aa7e17bd43a45c690e38fa0 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
-Date: Mon, 16 Mar 2026 14:05:14 -0500
-Subject: [PATCH 01/14] Wafflebot OpenCode baseline
+Date: Mon, 30 Mar 2026 17:04:36 -0500
+Subject: [PATCH 1/9] Integrate OpenCode baseline and settings shell
 
 ---
  packages/app/src/app.tsx                      |   2 +
@@ -13,7 +13,7 @@ Subject: [PATCH 01/14] Wafflebot OpenCode baseline
  .../app/src/components/settings-skills.tsx    | 256 ++++++++++++++
  .../src/components/settings-waffle-shared.tsx | 116 +++++++
  packages/app/src/context/server.tsx           |  12 +
- packages/app/src/entry.tsx                    |  31 +-
+ packages/app/src/entry.tsx                    |  10 +-
  packages/app/src/i18n/en.ts                   |   8 +-
  packages/app/src/pages/directory-layout.tsx   |  11 +-
  packages/app/src/pages/home.tsx               | 148 ++------
@@ -21,7 +21,7 @@ Subject: [PATCH 01/14] Wafflebot OpenCode baseline
  .../app/src/pages/layout/sidebar-project.tsx  |  23 --
  .../app/src/pages/layout/sidebar-shell.tsx    |  25 +-
  packages/app/src/utils/waffle.ts              |  61 ++++
- 17 files changed, 1356 insertions(+), 208 deletions(-)
+ 17 files changed, 1356 insertions(+), 187 deletions(-)
  create mode 100644 packages/app/src/components/settings-agents.tsx
  create mode 100644 packages/app/src/components/settings-cron.tsx
  create mode 100644 packages/app/src/components/settings-mcp.tsx
@@ -51,7 +51,7 @@ index c0715cc94..08069fa7e 100644
        <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
          <ServerKey>
 diff --git a/packages/app/src/components/dialog-settings.tsx b/packages/app/src/components/dialog-settings.tsx
-index 83cea131f..005920ccb 100644
+index 83cea131f..460555ed1 100644
 --- a/packages/app/src/components/dialog-settings.tsx
 +++ b/packages/app/src/components/dialog-settings.tsx
 @@ -8,6 +8,11 @@ import { SettingsGeneral } from "./settings-general"
@@ -75,23 +75,23 @@ index 83cea131f..005920ccb 100644
 +                  <Tabs.SectionTitle>Agent Mockingbird</Tabs.SectionTitle>
 +                  <div class="flex flex-col gap-1.5 w-full">
 +                    <Tabs.Trigger value="agents">
-+                      <Icon name="sparkles" />
++                      <Icon name="brain" />
 +                      {language.t("settings.agents.title")}
 +                    </Tabs.Trigger>
 +                    <Tabs.Trigger value="mcp">
-+                      <Icon name="plug-2" />
++                      <Icon name="providers" />
 +                      {language.t("settings.mcp.title")}
 +                    </Tabs.Trigger>
 +                    <Tabs.Trigger value="skills">
-+                      <Icon name="book-open" />
++                      <Icon name="help" />
 +                      {language.t("settings.skills.title")}
 +                    </Tabs.Trigger>
 +                    <Tabs.Trigger value="runtime">
-+                      <Icon name="terminal-square" />
++                      <Icon name="terminal" />
 +                      {language.t("settings.runtime.title")}
 +                    </Tabs.Trigger>
 +                    <Tabs.Trigger value="cron">
-+                      <Icon name="clock-3" />
++                      <Icon name="warning" />
 +                      {language.t("settings.cron.title")}
 +                    </Tabs.Trigger>
 +                  </div>
@@ -1374,51 +1374,23 @@ index 1204fba55..d40a9b9fd 100644
        const current_ = current()
        if (!current_) return
 diff --git a/packages/app/src/entry.tsx b/packages/app/src/entry.tsx
-index b5cbed6e7..2198a7bc1 100644
+index b5cbed6e7..52b6e7669 100644
 --- a/packages/app/src/entry.tsx
 +++ b/packages/app/src/entry.tsx
-@@ -9,8 +9,6 @@ import { handleNotificationClick } from "@/utils/notification-click"
- import pkg from "../package.json"
- import { ServerConnection } from "./context/server"
- 
--const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
--
- const getLocale = () => {
-   if (typeof navigator !== "object") return "en" as const
-   const languages = navigator.languages?.length ? navigator.languages : [navigator.language]
-@@ -27,31 +25,6 @@ const getRootNotFoundError = () => {
-   return locale === "zh" ? (zh[key] ?? en[key]) : en[key]
+@@ -104,12 +104,6 @@ const getCurrentUrl = () => {
+   return location.origin
  }
  
--const getStorage = (key: string) => {
--  if (typeof localStorage === "undefined") return null
--  try {
--    return localStorage.getItem(key)
--  } catch {
--    return null
--  }
+-const getDefaultUrl = () => {
+-  const lsDefault = readDefaultServerUrl()
+-  if (lsDefault) return lsDefault
+-  return getCurrentUrl()
 -}
 -
--const setStorage = (key: string, value: string | null) => {
--  if (typeof localStorage === "undefined") return
--  try {
--    if (value !== null) {
--      localStorage.setItem(key, value)
--      return
--    }
--    localStorage.removeItem(key)
--  } catch {
--    return
--  }
--}
--
--const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
--const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
--
- const notify: Platform["notify"] = async (title, description, href) => {
-   if (!("Notification" in window)) return
- 
-@@ -124,7 +97,6 @@ const platform: Platform = {
+ const platform: Platform = {
+   platform: "web",
+   version: pkg.version,
+@@ -124,7 +118,6 @@ const platform: Platform = {
    },
    setDefaultServer: writeDefaultServerUrl,
  }
@@ -1426,7 +1398,7 @@ index b5cbed6e7..2198a7bc1 100644
  if (root instanceof HTMLElement) {
    const server: ServerConnection.Http = { type: "http", http: { url: getCurrentUrl() } }
    render(
-@@ -132,8 +104,9 @@ if (root instanceof HTMLElement) {
+@@ -132,8 +125,9 @@ if (root instanceof HTMLElement) {
        <PlatformProvider value={platform}>
          <AppBaseProviders>
            <AppInterface
