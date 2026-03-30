@@ -1,7 +1,7 @@
 From 74079bb47f68537939da3ca3245a52eeb9201f84 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sun, 29 Mar 2026 23:37:37 -0500
-Subject: [PATCH 4/6] fix: render mermaid fences as plain code in source detail
+Subject: [PATCH 4/7] fix: render mermaid fences as plain code in source detail
 
 
 diff --git a/apps/web/src/components/markdown.tsx b/apps/web/src/components/markdown.tsx

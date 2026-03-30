@@ -1,7 +1,7 @@
 From 77049a8ab788ebe33f4d08dad55545520db8599e Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 00:28:30 -0500
-Subject: [PATCH 6/6] fix: keep executor web API base at app root
+Subject: [PATCH 6/7] fix: keep executor web API base at app root
 
 
 diff --git a/apps/web/src/lib/urls.test.ts b/apps/web/src/lib/urls.test.ts
