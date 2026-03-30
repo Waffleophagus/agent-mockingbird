@@ -1,0 +1,224 @@
+From c461d3696caa6ebb41c42a7e9edded694874aad2 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Mon, 30 Mar 2026 00:51:34 -0500
+Subject: [PATCH 6/6] fix: preserve array responses in wrapped api client
+
+
+diff --git a/packages/clients/react/src/index.test.tsx b/packages/clients/react/src/index.test.tsx
+index 30780805fddc01fff20a1cf1180c494b6795f28c..83be9d62143fd04e625e96cfb89faac2af48375d 100644
+--- a/packages/clients/react/src/index.test.tsx
++++ b/packages/clients/react/src/index.test.tsx
+@@ -14,6 +14,11 @@ import { describe, expect, it } from "@effect/vitest";
+ import {
+   startOpenApiTestServer,
+ } from "@executor/effect-test-utils";
++import {
++  createExecutorApiClient,
++  type CreateSecretResult,
++  type SecretListItem,
++} from "@executor/platform-api";
+ import {
+   createExecutorApiLayer,
+ } from "@executor/platform-api/http";
+@@ -304,6 +309,22 @@ const getInstallation = (baseUrl: string) =>
+     path: "/v1/local/installation",
+   });
+ 
++const listSourcesRaw = (input: {
++  baseUrl: string;
++  installation: LocalInstallation;
++}) =>
++  requestJson<ReadonlyArray<Source>>({
++    baseUrl: input.baseUrl,
++    path: `/v1/workspaces/${input.installation.scopeId}/sources`,
++    accountId: input.installation.actorScopeId,
++  });
++
++const listSecretsRaw = (baseUrl: string) =>
++  requestJson<ReadonlyArray<SecretListItem>>({
++    baseUrl,
++    path: "/v1/local/secrets",
++  });
++
+ const seedStoredOpenApiSource = async (input: {
+   server: ApiServer;
+   installation: LocalInstallation;
+@@ -335,6 +356,18 @@ const seedStoredOpenApiSource = async (input: {
+   });
+ };
+ 
++const seedSecret = (baseUrl: string, name: string): Promise<CreateSecretResult> =>
++  requestJson<CreateSecretResult>({
++    baseUrl,
++    path: "/v1/local/secrets",
++    method: "POST",
++    payload: {
++      name,
++      value: `secret-value-${name}`,
++      purpose: "auth_material",
++    },
++  });
++
+ async function renderExecutorHarness<T>(useValue: () => T): Promise<HookHarness<T>> {
+   const container = document.createElement("div");
+   document.body.appendChild(container);
+@@ -422,6 +455,75 @@ function getReadyData<T>(loadable: Loadable<T>): T {
+   return loadable.data;
+ }
+ 
++describe("executor platform API client wrapper", () => {
++  const expectWrappedSourceList = (count: number) =>
++    Effect.promise(async () => {
++      const apiServer = await startControlPlaneServer();
++
++      try {
++        const installation = await getInstallation(apiServer.baseUrl);
++        for (let index = 0; index < count; index += 1) {
++          await seedStoredOpenApiSource({
++            server: apiServer,
++            installation,
++            name: `Source ${index + 1}`,
++          });
++        }
++
++        const client = await createExecutorApiClient({
++          baseUrl: apiServer.baseUrl,
++          accountId: installation.actorScopeId,
++        });
++        const raw = await listSourcesRaw({
++          baseUrl: apiServer.baseUrl,
++          installation,
++        });
++        const wrapped = await client.sources.list({
++          path: {
++            workspaceId: installation.scopeId,
++          },
++        });
++
++        expect(Array.isArray(wrapped)).toBe(true);
++        expect(wrapped).toHaveLength(count);
++        expect(wrapped.map((source) => source.id)).toEqual(raw.map((source) => source.id));
++      } finally {
++        await apiServer.close();
++      }
++    });
++
++  it.effect("returns both sources when the server responds with exactly two items", () =>
++    expectWrappedSourceList(2));
++
++  it.effect("returns a one-item source list unchanged", () =>
++    expectWrappedSourceList(1));
++
++  it.effect("returns a three-item source list unchanged", () =>
++    expectWrappedSourceList(3));
++
++  it.effect("returns both secrets when the server responds with exactly two items", () =>
++    Effect.promise(async () => {
++      const apiServer = await startControlPlaneServer();
++
++      try {
++        await seedSecret(apiServer.baseUrl, "First Secret");
++        await seedSecret(apiServer.baseUrl, "Second Secret");
++
++        const client = await createExecutorApiClient({
++          baseUrl: apiServer.baseUrl,
++        });
++        const raw = await listSecretsRaw(apiServer.baseUrl);
++        const wrapped = await client.local.listSecrets({});
++
++        expect(Array.isArray(wrapped)).toBe(true);
++        expect(wrapped).toHaveLength(2);
++        expect(wrapped.map((secret) => secret.id)).toEqual(raw.map((secret) => secret.id));
++      } finally {
++        await apiServer.close();
++      }
++    }));
++});
++
+ 
+ describe("executor-react source hooks", () => {
+   it.effect("rejects invalid source creation before applying optimistic state", () =>
+@@ -489,6 +591,51 @@ describe("executor-react source hooks", () => {
+     60_000,
+   );
+ 
++  it.effect("keeps two-item source lists intact when useSources resolves", () =>
++    Effect.promise(async () => {
++    const apiServer = await startControlPlaneServer();
++    setExecutorApiBaseUrl(apiServer.baseUrl);
++
++    try {
++      const installation = await getInstallation(apiServer.baseUrl);
++      await seedStoredOpenApiSource({
++        server: apiServer,
++        installation,
++        name: "First Source",
++      });
++      await seedStoredOpenApiSource({
++        server: apiServer,
++        installation,
++        name: "Second Source",
++      });
++      const raw = await requestJson<ReadonlyArray<Source>>({
++        baseUrl: apiServer.baseUrl,
++        path: `/v1/workspaces/${installation.scopeId}/sources`,
++        accountId: installation.actorScopeId,
++      });
++      const harness = await renderCreateHarness();
++
++      try {
++        const loaded = await waitForValue(
++          () => harness.current,
++          (value) =>
++            isReady(value.sources)
++            && value.sources.data.length === 2,
++        );
++
++        expect(getReadyData(loaded.sources).map((source) => source.id)).toEqual(
++          raw.map((source) => source.id),
++        );
++      } finally {
++        await harness.unmount();
++      }
++    } finally {
++      await apiServer.close();
++    }
++    }),
++    60_000,
++  );
++
+   it.effect("applies optimistic source updates and refreshes live inspection data after success", () =>
+     Effect.promise(async () => {
+     const apiServer = await startControlPlaneServer();
+diff --git a/packages/platform/api/src/client.ts b/packages/platform/api/src/client.ts
+index 70e4fef95507bb4f790c668ae57485339f6a89e0..34bed13b0e06fc20b2b5e362257660582c058d62 100644
+--- a/packages/platform/api/src/client.ts
++++ b/packages/platform/api/src/client.ts
+@@ -80,15 +80,6 @@ export type ExecutorApiClient = {
+   };
+ };
+ 
+-const isResponseTuple = <Value>(
+-  value: Value | readonly [Value, unknown],
+-): value is readonly [Value, unknown] =>
+-  Array.isArray(value) && value.length === 2;
+-
+-function stripResponse<Value>(value: Value | readonly [Value, unknown]): Value {
+-  return isResponseTuple(value) ? value[0] : value;
+-}
+-
+ const wrapMethod = <
+   F extends (input: any) => Effect.Effect<any, unknown, never>,
+ >(
+@@ -98,7 +89,7 @@ const wrapMethod = <
+   const wrapped = (input: MethodInput<F>): Promise<MethodOutput<F>> =>
+     effectClientPromise
+       .then((client) => Effect.runPromise(select(client)(input)))
+-      .then(stripResponse);
++      .then((value) => value as MethodOutput<F>);
+ 
+   return wrapped;
+ };
+-- 
+2.53.0
+
