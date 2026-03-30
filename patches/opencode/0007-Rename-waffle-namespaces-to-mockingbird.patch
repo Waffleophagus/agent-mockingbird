@@ -1,7 +1,7 @@
-From b94e1dde9a7ae41780cc4ee98b8db885013be382 Mon Sep 17 00:00:00 2001
+From ac8161fa6c473b6ca995d510f9c55f360546fae5 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Thu, 19 Mar 2026 15:30:30 -0500
-Subject: [PATCH 07/14] Rename waffle namespaces to mockingbird
+Subject: [PATCH 07/15] Rename waffle namespaces to mockingbird
 
 ---
  .../app/src/components/settings-agents.tsx    |  38 +++---
@@ -1002,10 +1002,10 @@ index 2254d384c..ca7c7b3cf 100644
    )
  }
 diff --git a/packages/app/src/i18n/en.ts b/packages/app/src/i18n/en.ts
-index 0bb31bab0..5c6e30b68 100644
+index f20ce01eb..9f497d9d2 100644
 --- a/packages/app/src/i18n/en.ts
 +++ b/packages/app/src/i18n/en.ts
-@@ -703,7 +703,7 @@ export const dict = {
+@@ -708,7 +708,7 @@ export const dict = {
  
    "settings.section.desktop": "Desktop",
    "settings.section.server": "Server",
@@ -1015,20 +1015,20 @@ index 0bb31bab0..5c6e30b68 100644
    "settings.tab.shortcuts": "Shortcuts",
    "settings.desktop.section.wsl": "WSL",
 diff --git a/packages/app/src/pages/directory-layout.tsx b/packages/app/src/pages/directory-layout.tsx
-index 50b6fa5ad..f6c5b7b23 100644
+index b68d9b2b7..002f4f27b 100644
 --- a/packages/app/src/pages/directory-layout.tsx
 +++ b/packages/app/src/pages/directory-layout.tsx
-@@ -11,7 +11,7 @@ import { base64Encode } from "@opencode-ai/util/encode"
+@@ -10,7 +10,7 @@ import { SDKProvider } from "@/context/sdk"
+ import { SyncProvider, useSync } from "@/context/sync"
+ import { useGlobalSDK } from "@/context/global-sdk"
  import { decode64 } from "@/utils/base64"
- import { showToast } from "@opencode-ai/ui/toast"
- import { useLanguage } from "@/context/language"
 -import { readPinnedWorkspace, workspaceHref } from "@/utils/waffle"
 +import { readPinnedWorkspace, workspaceHref } from "@/utils/mockingbird"
+ 
  function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
-   const navigate = useNavigate()
-   const sync = useSync()
+   const location = useLocation()
 diff --git a/packages/app/src/pages/home.tsx b/packages/app/src/pages/home.tsx
-index ab5c84329..a556507cb 100644
+index e8b00afd0..18406cbf0 100644
 --- a/packages/app/src/pages/home.tsx
 +++ b/packages/app/src/pages/home.tsx
 @@ -1,6 +1,6 @@
@@ -1040,10 +1040,10 @@ index ab5c84329..a556507cb 100644
  export default function Home() {
    const navigate = useNavigate()
 diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
-index 86cfb0b9b..3246eaebc 100644
+index c6540424d..109eb5e35 100644
 --- a/packages/app/src/pages/layout.tsx
 +++ b/packages/app/src/pages/layout.tsx
-@@ -91,7 +91,7 @@ import {
+@@ -86,7 +86,7 @@ import {
  } from "./layout/sidebar-workspace"
  import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
  import { SidebarContent } from "./layout/sidebar-shell"

@@ -1,25 +1,17 @@
-From cece02236149e2aadff66a168d912b70f0a1c3d0 Mon Sep 17 00:00:00 2001
+From d71427d7a9dc9fbe9c204eed44d9b72f4177075d Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 16 Mar 2026 21:06:59 -0500
-Subject: [PATCH 03/14] fix(app): remove duplicate sidebar mount
+Subject: [PATCH 03/15] fix(app): remove duplicate sidebar mount
 
 ---
- packages/app/src/pages/layout.tsx | 2 --
- 1 file changed, 2 deletions(-)
+ packages/app/src/pages/layout.tsx | 1 -
+ 1 file changed, 1 deletion(-)
 
 diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
-index 5626c040b..9df2a3681 100644
+index f1f74ffc9..5492ede2b 100644
 --- a/packages/app/src/pages/layout.tsx
 +++ b/packages/app/src/pages/layout.tsx
-@@ -2272,7 +2272,6 @@ export default function Layout(props: ParentProps) {
-                 arm()
-               }}
-             >
--              <div class="@container w-full h-full contain-strict">{sidebarContent()}</div>
-               <div class="@container w-full h-full contain-strict">{sidebarContent()}</div>
-               <Show when={layout.sidebar.opened()}>
-                 <div onPointerDown={() => setState("sizing", true)}>
-@@ -2321,7 +2320,6 @@ export default function Layout(props: ParentProps) {
+@@ -2438,7 +2438,6 @@ export default function Layout(props: ParentProps) {
                  onClick={(e) => e.stopPropagation()}
                >
                  {sidebarContent(true)}

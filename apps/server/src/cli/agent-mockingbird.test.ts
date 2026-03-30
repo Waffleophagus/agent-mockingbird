@@ -125,7 +125,7 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
     fs.mkdirSync(appDir, { recursive: true });
     fs.writeFileSync(
       path.join(appDir, "opencode.lock.json"),
-      JSON.stringify({ packageVersion: "1.2.27" }),
+      JSON.stringify({ packageVersion: "1.3.7" }),
       "utf8",
     );
 
@@ -140,7 +140,7 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
         moduleDir: "/tmp/fake-module",
       });
 
-      expect(version).toBe("1.2.27");
+      expect(version).toBe("1.3.7");
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -516,7 +516,7 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
     fs.mkdirSync(path.dirname(packagedOpencodePkg), { recursive: true });
     fs.writeFileSync(
       packagedOpencodePkg,
-      JSON.stringify({ name: "opencode", version: "1.2.27" }),
+      JSON.stringify({ name: "opencode", version: "1.3.7" }),
       "utf8",
     );
 
@@ -526,7 +526,7 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
           agentMockingbirdAppDirGlobal: appDir,
           npmPrefix: path.join(tempRoot, "npm"),
         }),
-      ).toBe("1.2.27");
+      ).toBe("1.3.7");
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

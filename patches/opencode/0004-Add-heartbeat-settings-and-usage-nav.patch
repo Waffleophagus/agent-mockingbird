@@ -1,7 +1,7 @@
-From b7f5cebf47fb4d5f233648beec018de3d82ffa0d Mon Sep 17 00:00:00 2001
+From 61dc199c57ec0ef040bc9cab56f72d82d7a12f45 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Wed, 18 Mar 2026 15:36:33 -0500
-Subject: [PATCH 04/14] Add heartbeat settings and usage nav
+Subject: [PATCH 04/15] Add heartbeat settings and usage nav
 
 ---
  .../app/src/components/dialog-settings.tsx    |   8 +
@@ -460,10 +460,10 @@ index 000000000..95a1770cc
 +  )
 +}
 diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
-index 9df2a3681..86cfb0b9b 100644
+index 5492ede2b..c6540424d 100644
 --- a/packages/app/src/pages/layout.tsx
 +++ b/packages/app/src/pages/layout.tsx
-@@ -2227,6 +2227,8 @@ export default function Layout(props: ParentProps) {
+@@ -2348,6 +2348,8 @@ export default function Layout(props: ParentProps) {
        openProjectKeybind={() => command.keybind("project.open")}
        onOpenProject={chooseProject}
        renderProjectOverlay={projectOverlay}

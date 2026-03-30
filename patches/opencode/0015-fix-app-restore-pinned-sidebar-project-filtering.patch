@@ -1,0 +1,40 @@
+From f87c1c24f787eccd22e45b44af2aa3842c868c95 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Mon, 30 Mar 2026 14:28:50 -0500
+Subject: [PATCH 15/15] fix(app): restore pinned sidebar project filtering
+
+---
+ packages/app/src/pages/layout.tsx | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/packages/app/src/pages/layout.tsx b/packages/app/src/pages/layout.tsx
+index 25069a011..5f9fad30c 100644
+--- a/packages/app/src/pages/layout.tsx
++++ b/packages/app/src/pages/layout.tsx
+@@ -589,11 +589,6 @@ export default function Layout(props: ParentProps) {
+     return projects.find((p) => p.worktree === root)
+   })
+ 
+-  const [autoselecting] = createResource(async () => {
+-    await ready.promise
+-    await layout.ready.promise
+-    if (!untrack(() => state.autoselect)) return
+-
+   const sidebarProjects = createMemo(() => {
+     const pinned = pinnedDirectory()
+     const projects = layout.projects.list()
+@@ -618,6 +613,11 @@ export default function Layout(props: ParentProps) {
+     layout.projects.open(directory)
+   })
+ 
++  const [autoselecting] = createResource(async () => {
++    await ready.promise
++    await layout.ready.promise
++    if (!untrack(() => state.autoselect)) return
++
+     const list = layout.projects.list()
+     const last = server.projects.last()
+ 
+-- 
+2.53.0
+

@@ -39,7 +39,7 @@
     "agent-mockingbird": "bin/agent-mockingbird"
   },
   "agentMockingbirdInstall": {
-    "opencodeVersion": "1.2.27",
+    "opencodeVersion": "1.3.7",
     "executorVersion": "1.2.5"
   },
   "workspaces": [

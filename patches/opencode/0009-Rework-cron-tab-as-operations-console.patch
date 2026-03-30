@@ -1,7 +1,7 @@
-From d7ca326cc2e4a14a84ddcd4137092bcb2585d2e5 Mon Sep 17 00:00:00 2001
+From cfa91bf41c02afa0b32cc0f95e657d0d2fb9e270 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Thu, 19 Mar 2026 17:40:25 -0500
-Subject: [PATCH 09/14] Rework cron tab as operations console
+Subject: [PATCH 09/15] Rework cron tab as operations console
 
 ---
  .../src/components/settings-cron-data.test.ts | 102 +++++++++++-----
