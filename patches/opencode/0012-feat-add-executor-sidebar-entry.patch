@@ -1,4 +1,4 @@
-From c0811cef08ac94e0c891f9d7e4fa9a1cdff917b3 Mon Sep 17 00:00:00 2001
+From 17f85d20449163fc5d1bee1ad0db0eec3f6c4a9b Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sun, 22 Mar 2026 00:14:20 -0500
 Subject: [PATCH 12/13] feat: add executor sidebar entry

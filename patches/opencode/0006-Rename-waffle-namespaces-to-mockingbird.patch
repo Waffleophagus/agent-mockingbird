@@ -1,4 +1,4 @@
-From 257a3a76db71cf8e358d863e9217d6a223fb796d Mon Sep 17 00:00:00 2001
+From 19ecf7363258757fd669a56d4c281ad020e85fef Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Thu, 19 Mar 2026 15:30:30 -0500
 Subject: [PATCH 06/13] Rename waffle namespaces to mockingbird

@@ -1,4 +1,4 @@
-From 87ba78c592aba3fafab70e0ae6489697f7c5ad0c Mon Sep 17 00:00:00 2001
+From 47a5247be7866eb95a82444362688ee0487e6989 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Wed, 18 Mar 2026 15:36:33 -0500
 Subject: [PATCH 03/13] Add heartbeat settings and usage nav

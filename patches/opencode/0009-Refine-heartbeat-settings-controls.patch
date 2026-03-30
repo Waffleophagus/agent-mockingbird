@@ -1,4 +1,4 @@
-From 47579300de8ffc7b7ab4f32926c952dd16b4b852 Mon Sep 17 00:00:00 2001
+From 47bb04c9013d7e407b412fc57c7e2cd99675d8fe Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Thu, 19 Mar 2026 21:54:09 -0500
 Subject: [PATCH 09/13] Refine heartbeat settings controls

@@ -119,12 +119,12 @@ async function main() {
     ensureCleanroomPristine(lock);
     const targetTag = normalizeTag(args.ref);
     const targetCommit = resolveUpstreamCommit(lock.paths.cleanroom, targetTag);
-    ensureVendorSafeForRefChange(lock);
+    ensureVendorSafeForRefChange(lock, targetCommit);
     ensureCleanroomAtCommit(lock, targetCommit);
     recreateVendorWorktree(lock, targetCommit);
     runValidation(lock.paths.vendor);
     exportPatchesFromBranch(lock, targetCommit);
-    verifyBranchMatchesPatches(lock);
+    verifyBranchMatchesPatches(lock, targetCommit);
     verifyPatchReproducibility(lock, {
       baseCommit: targetCommit,
       compareDir: path.resolve(repoRoot, lock.paths.vendor),
@@ -153,7 +153,7 @@ async function main() {
     recreateVendorWorktree(lock, targetCommit, { force: true });
     runValidation(lock.paths.vendor);
     exportPatchesFromBranch(lock, targetCommit);
-    verifyBranchMatchesPatches(lock);
+    verifyBranchMatchesPatches(lock, targetCommit);
     verifyPatchReproducibility(lock, {
       baseCommit: targetCommit,
       compareDir: path.resolve(repoRoot, lock.paths.vendor),
@@ -439,7 +439,7 @@ function resolveUpstreamCommit(cleanroomPathInput: string, ref: string) {
   return gitOutput(cleanroomPath, ["rev-parse", `refs/tags/${ref}^{commit}`]).trim();
 }
 
-function ensureVendorSafeForRefChange(lock: LockFile) {
+function ensureVendorSafeForRefChange(lock: LockFile, baseCommit?: string) {
   const vendorPath = path.resolve(repoRoot, lock.paths.vendor);
   if (!existsSync(vendorPath)) {
     return;
@@ -451,7 +451,7 @@ function ensureVendorSafeForRefChange(lock: LockFile) {
   if (dirty) {
     throw new Error(`Vendor worktree is dirty. Commit or discard changes first: ${vendorPath}`);
   }
-  if (!branchMatchesPatches(lock, vendorPath)) {
+  if (!branchMatchesPatches(lock, vendorPath, baseCommit)) {
     throw new Error("Vendor branch has changes that are not represented by patches/opencode.");
   }
 }
@@ -542,15 +542,15 @@ function ensureVendorBranchState(lock: LockFile, options: { requirePatchesMatch:
   }
 }
 
-function verifyBranchMatchesPatches(lock: LockFile) {
+function verifyBranchMatchesPatches(lock: LockFile, baseCommit?: string) {
   ensureVendorBranchState(lock, { requirePatchesMatch: false });
   const vendorPath = path.resolve(repoRoot, lock.paths.vendor);
-  if (!branchMatchesPatches(lock, vendorPath)) {
+  if (!branchMatchesPatches(lock, vendorPath, baseCommit)) {
     throw new Error("Exported patch series is not reproducible from the current branch.");
   }
 }
 
-function branchMatchesPatches(lock: LockFile, vendorPath: string) {
+function branchMatchesPatches(lock: LockFile, vendorPath: string, baseCommit?: string) {
   const cleanroomPath = path.resolve(repoRoot, lock.paths.cleanroom);
   if (!isGitRepository(cleanroomPath)) {
     return false;
@@ -559,7 +559,10 @@ function branchMatchesPatches(lock: LockFile, vendorPath: string) {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-branch-match-"));
   try {
     const compareWorktree = path.join(tempDir, "vendor");
-    run(["git", "worktree", "add", "--detach", compareWorktree, lock.upstream.commit], cleanroomPath);
+    run(
+      ["git", "worktree", "add", "--detach", compareWorktree, baseCommit ?? lock.upstream.commit],
+      cleanroomPath,
+    );
     const patches = patchFiles(path.resolve(repoRoot, lock.paths.patches));
     if (patches.length > 0) {
       run(["git", "am", "--3way", ...patches], compareWorktree, { env: gitAmEnv() });

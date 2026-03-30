@@ -1,4 +1,4 @@
-From 9e307d2ec5a6535dc5f60c2ba248ed23feeaafee Mon Sep 17 00:00:00 2001
+From 7639ae8327b3033115e250012dfcb2f7cd135e03 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sat, 21 Mar 2026 18:34:46 -0500
 Subject: [PATCH 11/13] fix heartbeat settings agent fallback
