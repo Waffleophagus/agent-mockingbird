@@ -361,18 +361,22 @@ function runCheck(lock: LockFile) {
   const tempRoot = mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-check-"));
   try {
     const cleanroomPath = path.join(tempRoot, "cleanroom");
-    run(["git", "clone", lock.upstream.remote, cleanroomPath], repoRoot);
-    run(["git", "fetch", "--tags", "origin"], cleanroomPath);
+    console.log("Checking OpenCode workflow: cloning upstream...");
+    cloneUpstreamForValidation(lock, cleanroomPath);
     run(["git", "checkout", "--detach", lock.upstream.commit], cleanroomPath);
     const vendorPath = path.join(tempRoot, "vendor");
+    console.log("Checking OpenCode workflow: creating temporary vendor worktree...");
     run(["git", "worktree", "add", "--detach", vendorPath, lock.upstream.commit], cleanroomPath);
     run(["git", "checkout", "-B", lock.branch.name, lock.upstream.commit], vendorPath);
+    console.log("Checking OpenCode workflow: applying tracked patch series...");
     applyPatchSeries(lock, vendorPath);
+    console.log("Checking OpenCode workflow: running OpenCode validation...");
     runValidation(vendorPath, { includeRepoValidation: false });
+    console.log("Checking OpenCode workflow: verifying patch reproducibility...");
     verifyPatchReproducibility(lock, {
       baseCommit: lock.upstream.commit,
       compareDir: vendorPath,
-      useTemporaryClone: true,
+      cleanroomOverride: cleanroomPath,
     });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
@@ -578,7 +582,6 @@ function verifyPatchReproducibility(
   options: {
     baseCommit: string;
     compareDir: string;
-    useTemporaryClone: boolean;
     cleanroomOverride?: string;
   },
 ) {
@@ -586,13 +589,11 @@ function verifyPatchReproducibility(
   try {
     const cleanroomPath = options.cleanroomOverride ?? path.join(tempRoot, "cleanroom");
     if (!options.cleanroomOverride) {
-      run(["git", "clone", lock.upstream.remote, cleanroomPath], repoRoot);
-      run(["git", "fetch", "--tags", "origin"], cleanroomPath);
+      cloneUpstreamForValidation(lock, cleanroomPath);
     }
     run(["git", "checkout", "--detach", options.baseCommit], cleanroomPath);
     const compareWorktree = path.join(tempRoot, "vendor");
     run(["git", "worktree", "add", "--detach", compareWorktree, options.baseCommit], cleanroomPath);
-    run(["git", "checkout", "-B", lock.branch.name, options.baseCommit], compareWorktree);
     const patches = patchFiles(path.resolve(repoRoot, lock.paths.patches));
     if (patches.length > 0) {
       run(["git", "am", "--3way", ...patches], compareWorktree, { env: gitAmEnv() });
@@ -601,6 +602,22 @@ function verifyPatchReproducibility(
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
+}
+
+function cloneUpstreamForValidation(lock: LockFile, destination: string) {
+  run(
+    [
+      "git",
+      "clone",
+      "--branch",
+      lock.upstream.tag,
+      "--single-branch",
+      "--filter=blob:none",
+      lock.upstream.remote,
+      destination,
+    ],
+    repoRoot,
+  );
 }
 
 function compareDirectories(left: string, right: string) {
