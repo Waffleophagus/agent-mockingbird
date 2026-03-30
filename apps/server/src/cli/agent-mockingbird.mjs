@@ -767,16 +767,20 @@ function buildManagedOpenCodeInstallArgs(sourceDir) {
 }
 
 function cleanupManagedOpenCodeConfigInstallArtifacts(input) {
-  const sourceDir = path.resolve(String(input?.sourceDir ?? ""));
-  const targetDir = path.resolve(String(input?.targetDir ?? ""));
+  const rawSourceDir = input?.sourceDir;
+  const rawTargetDir = input?.targetDir;
+  const mode = input?.mode === "update" ? "update" : "install";
   const logger = typeof input?.logger === "function" ? input.logger : null;
 
-  if (!sourceDir) {
+  if (!rawSourceDir) {
     throw new Error("managed OpenCode config source directory is required");
   }
-  if (!targetDir) {
+  if (!rawTargetDir) {
     throw new Error("managed OpenCode config target directory is required");
   }
+
+  const sourceDir = path.resolve(String(rawSourceDir));
+  const targetDir = path.resolve(String(rawTargetDir));
 
   const sourceLockPath = path.join(sourceDir, "bun.lock");
   const targetLockPath = path.join(targetDir, "bun.lock");
@@ -795,13 +799,13 @@ function cleanupManagedOpenCodeConfigInstallArtifacts(input) {
     if (logger) logger("managed-open-code-config: removed stale bun.lock");
   }
 
-  if (fs.existsSync(targetNodeModulesPath)) {
+  if (mode === "install" && fs.existsSync(targetNodeModulesPath)) {
     fs.rmSync(targetNodeModulesPath, { recursive: true, force: true });
     summary.cleanedNodeModules = true;
     if (logger) logger("managed-open-code-config: removed stale node_modules");
   }
 
-  if (fs.existsSync(targetBunCachePath)) {
+  if (mode === "install" && fs.existsSync(targetBunCachePath)) {
     fs.rmSync(targetBunCachePath, { recursive: true, force: true });
     summary.cleanedBunCache = true;
     if (logger) logger("managed-open-code-config: removed stale .bun");
@@ -3225,6 +3229,7 @@ async function installOrUpdate(args, mode) {
     opencodeConfig: cleanupManagedOpenCodeConfigInstallArtifacts({
       sourceDir: runtimeAssetsSource.opencodeConfigSourceDir,
       targetDir: paths.opencodeConfigDir,
+      mode,
     }),
   };
   if (fs.existsSync(opencodePackagePath)) {

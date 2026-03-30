@@ -203,6 +203,20 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
 });
 
 describe("agent-mockingbird managed OpenCode config cleanup", () => {
+  test("rejects missing source or target directories before resolving paths", () => {
+    expect(() =>
+      testing.cleanupManagedOpenCodeConfigInstallArtifacts({
+        targetDir: "/tmp/managed-opencode-target",
+      }),
+    ).toThrow("managed OpenCode config source directory is required");
+
+    expect(() =>
+      testing.cleanupManagedOpenCodeConfigInstallArtifacts({
+        sourceDir: "/tmp/managed-opencode-source",
+      }),
+    ).toThrow("managed OpenCode config target directory is required");
+  });
+
   test("removes stale target bun.lock when source has no bun.lock", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-cleanup-"));
     const sourceDir = path.join(tempRoot, "source");
@@ -246,7 +260,7 @@ describe("agent-mockingbird managed OpenCode config cleanup", () => {
     }
   });
 
-  test("removes stale node_modules and .bun artifacts", () => {
+  test("removes stale node_modules and .bun artifacts on install", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-artifacts-"));
     const sourceDir = path.join(tempRoot, "source");
     const targetDir = path.join(tempRoot, "target");
@@ -266,12 +280,45 @@ describe("agent-mockingbird managed OpenCode config cleanup", () => {
       const result = testing.cleanupManagedOpenCodeConfigInstallArtifacts({
         sourceDir,
         targetDir,
+        mode: "install",
       });
 
       expect(result.cleanedNodeModules).toBe(true);
       expect(result.cleanedBunCache).toBe(true);
       expect(fs.existsSync(path.join(targetDir, "node_modules"))).toBe(false);
       expect(fs.existsSync(path.join(targetDir, ".bun"))).toBe(false);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps node_modules and .bun artifacts on update", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-update-artifacts-"));
+    const sourceDir = path.join(tempRoot, "source");
+    const targetDir = path.join(tempRoot, "target");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.mkdirSync(path.join(targetDir, "node_modules", "left-pad"), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(targetDir, ".bun"), { recursive: true });
+    fs.writeFileSync(
+      path.join(targetDir, "node_modules", "left-pad", "package.json"),
+      "{\"name\":\"left-pad\"}\n",
+      "utf8",
+    );
+    fs.writeFileSync(path.join(targetDir, ".bun", "install-cache"), "cache\n", "utf8");
+
+    try {
+      const result = testing.cleanupManagedOpenCodeConfigInstallArtifacts({
+        sourceDir,
+        targetDir,
+        mode: "update",
+      });
+
+      expect(result.cleanedNodeModules).toBe(false);
+      expect(result.cleanedBunCache).toBe(false);
+      expect(fs.existsSync(path.join(targetDir, "node_modules"))).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, ".bun"))).toBe(true);
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
