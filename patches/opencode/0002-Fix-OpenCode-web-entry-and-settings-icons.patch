@@ -1,7 +1,7 @@
-From a409fa60bb48c376544c7100c885fa4c1d022c08 Mon Sep 17 00:00:00 2001
+From 8b4688b9615630a19c4a05a92cf186245250d4d9 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 16 Mar 2026 14:17:21 -0500
-Subject: [PATCH 02/13] Fix OpenCode web entry and settings icons
+Subject: [PATCH 02/14] Fix OpenCode web entry and settings icons
 
 ---
  .../app/src/components/dialog-settings.tsx    | 10 +++---

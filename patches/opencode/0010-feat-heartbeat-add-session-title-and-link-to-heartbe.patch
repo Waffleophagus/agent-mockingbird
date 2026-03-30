@@ -1,7 +1,7 @@
-From 1a830bba4c51a3c061b37e67b11b5181ab82e432 Mon Sep 17 00:00:00 2001
+From 50785eef283f73e14762e6741663df88102e10cc Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sat, 21 Mar 2026 16:03:29 -0500
-Subject: [PATCH 10/13] feat(heartbeat): add session title and link to
+Subject: [PATCH 10/14] feat(heartbeat): add session title and link to
  heartbeat session
 
 ---

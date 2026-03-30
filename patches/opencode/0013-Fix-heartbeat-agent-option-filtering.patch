@@ -1,7 +1,7 @@
-From c62e5c7321dc6117efca80768febc15cb498bd7e Mon Sep 17 00:00:00 2001
+From 4e337874d9eddc9c417605f6a68633e23d321216 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Fri, 27 Mar 2026 17:42:39 -0500
-Subject: [PATCH 13/13] Fix heartbeat agent option filtering
+Subject: [PATCH 13/14] Fix heartbeat agent option filtering
 
 ---
  .../components/settings-heartbeat-options.ts  | 31 +++++++++++++++++++

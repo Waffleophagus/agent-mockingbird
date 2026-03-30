@@ -128,7 +128,6 @@ async function main() {
     verifyPatchReproducibility(lock, {
       baseCommit: targetCommit,
       compareDir: path.resolve(repoRoot, lock.paths.vendor),
-      useTemporaryClone: true,
     });
     writeLock(lock, {
       upstream: {
@@ -157,7 +156,6 @@ async function main() {
     verifyPatchReproducibility(lock, {
       baseCommit: targetCommit,
       compareDir: path.resolve(repoRoot, lock.paths.vendor),
-      useTemporaryClone: true,
     });
     writeLock(lock, {
       upstream: {
@@ -186,7 +184,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     exportPatches: false,
     check: false,
   };
-  
+
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--status") {
