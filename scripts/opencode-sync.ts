@@ -370,8 +370,11 @@ function runCheck(lock: LockFile) {
     run(["git", "checkout", "-B", lock.branch.name, lock.upstream.commit], vendorPath);
     console.log("Checking OpenCode workflow: applying tracked patch series...");
     applyPatchSeries(lock, vendorPath);
-    console.log("Checking OpenCode workflow: running OpenCode validation...");
-    runValidation(vendorPath, { includeRepoValidation: false });
+    console.log("Checking OpenCode workflow: running OpenCode validation in temporary vendor worktree...");
+    runValidation(vendorPath, {
+      includeRepoValidation: false,
+      installMode: "low-disk-check",
+    });
     console.log("Checking OpenCode workflow: verifying patch reproducibility...");
     verifyPatchReproducibility(lock, {
       baseCommit: lock.upstream.commit,
@@ -668,10 +671,29 @@ function bunInstallEnv() {
   };
 }
 
-function runValidation(vendorPath: string, options?: { includeRepoValidation?: boolean }) {
+function runValidation(
+  vendorPath: string,
+  options?: {
+    includeRepoValidation?: boolean;
+    installMode?: "default" | "low-disk-check";
+  },
+) {
   const includeRepoValidation =
     options?.includeRepoValidation ?? path.resolve(vendorPath) === path.resolve(repoRoot, readLock().paths.vendor);
-  run(["bun", "install", "--cwd", vendorPath], repoRoot, { env: bunInstallEnv() });
+  const installCommand =
+    options?.installMode === "low-disk-check"
+      ? [
+          "bun",
+          "install",
+          "--cwd",
+          vendorPath,
+          "--backend=symlink",
+          "--linker=isolated",
+          "--frozen-lockfile",
+          "--no-progress",
+        ]
+      : ["bun", "install", "--cwd", vendorPath];
+  run(installCommand, repoRoot, { env: bunInstallEnv() });
   run(["bun", "run", "typecheck"], path.join(vendorPath, "packages", "app"));
   run(["bun", "run", "build"], path.join(vendorPath, "packages", "app"));
   run(
