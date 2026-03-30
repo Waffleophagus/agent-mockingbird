@@ -29,3 +29,13 @@ agent-mockingbird start
 agent-mockingbird stop
 agent-mockingbird uninstall
 ```
+
+If a prior install was removed while keeping `~/.agent-mockingbird/data`, and a reinstall fails mid-flight, the immediate recovery path is:
+
+```bash
+rm -f ~/.agent-mockingbird/data/opencode-config/bun.lock
+rm -rf ~/.agent-mockingbird/data/opencode-config/node_modules
+rm -rf ~/.agent-mockingbird/data/opencode-config/.bun
+agent-mockingbird install
+agent-mockingbird status
+```

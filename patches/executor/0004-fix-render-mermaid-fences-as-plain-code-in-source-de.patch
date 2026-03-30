@@ -1,0 +1,56 @@
+From 579782d31b4f9e113b9b8572e4e46e645ce335ff Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Sun, 29 Mar 2026 23:37:37 -0500
+Subject: [PATCH 4/4] fix: render mermaid fences as plain code in source detail
+
+
+diff --git a/apps/web/src/components/markdown.tsx b/apps/web/src/components/markdown.tsx
+index 29ab16cc0cb399d03aca954731fb5ccfd7232bff..87d2b15dc03a9f1c1549bb80b1e3c85f78b59e1d 100644
+--- a/apps/web/src/components/markdown.tsx
++++ b/apps/web/src/components/markdown.tsx
+@@ -1,8 +1,29 @@
+ import { Streamdown } from "streamdown";
++import type { CustomRendererProps } from "streamdown";
+ import { createLimitedCodePlugin } from "../lib/shiki";
+ 
+ const codePlugin = createLimitedCodePlugin();
+ 
++function PlainMermaidBlock(props: CustomRendererProps) {
++  return (
++    <div className="my-2 overflow-hidden rounded-md border border-border bg-muted">
++      <div className="border-b border-border px-3 py-2 text-[11px] font-mono lowercase tracking-wide text-muted-foreground">
++        mermaid
++      </div>
++      <pre className="overflow-x-auto px-3 py-2 text-xs leading-relaxed text-foreground">
++        <code>{props.code}</code>
++      </pre>
++    </div>
++  );
++}
++
++const markdownRenderers = [
++  {
++    language: ["mermaid", "mmd"],
++    component: PlainMermaidBlock,
++  },
++];
++
+ const PROSE_CLASSES = [
+   "text-[13px] leading-relaxed text-muted-foreground",
+   // paragraphs
+@@ -43,7 +64,11 @@ const PROSE_CLASSES = [
+ export function Markdown(props: { children: string; className?: string }) {
+   return (
+     <div className={props.className ? `${PROSE_CLASSES} ${props.className}` : PROSE_CLASSES}>
+-      <Streamdown plugins={{ code: codePlugin }} controls={{ code: true }} linkSafety={{ enabled: false }}>
++      <Streamdown
++        plugins={{ code: codePlugin, renderers: markdownRenderers }}
++        controls={{ code: true }}
++        linkSafety={{ enabled: false }}
++      >
+         {props.children}
+       </Streamdown>
+     </div>
+-- 
+2.53.0
+

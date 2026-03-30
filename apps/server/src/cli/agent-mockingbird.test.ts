@@ -202,6 +202,112 @@ describe("agent-mockingbird CLI opencode version resolution", () => {
   });
 });
 
+describe("agent-mockingbird managed OpenCode config cleanup", () => {
+  test("removes stale target bun.lock when source has no bun.lock", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-cleanup-"));
+    const sourceDir = path.join(tempRoot, "source");
+    const targetDir = path.join(tempRoot, "target");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(path.join(targetDir, "bun.lock"), "stale lock\n", "utf8");
+
+    try {
+      const result = testing.cleanupManagedOpenCodeConfigInstallArtifacts({
+        sourceDir,
+        targetDir,
+      });
+
+      expect(result.cleanedLockfile).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, "bun.lock"))).toBe(false);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves bun.lock when source also ships one", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-lock-"));
+    const sourceDir = path.join(tempRoot, "source");
+    const targetDir = path.join(tempRoot, "target");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "bun.lock"), "source lock\n", "utf8");
+    fs.writeFileSync(path.join(targetDir, "bun.lock"), "target lock\n", "utf8");
+
+    try {
+      const result = testing.cleanupManagedOpenCodeConfigInstallArtifacts({
+        sourceDir,
+        targetDir,
+      });
+
+      expect(result.cleanedLockfile).toBe(false);
+      expect(fs.readFileSync(path.join(targetDir, "bun.lock"), "utf8")).toBe("target lock\n");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("removes stale node_modules and .bun artifacts", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-artifacts-"));
+    const sourceDir = path.join(tempRoot, "source");
+    const targetDir = path.join(tempRoot, "target");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.mkdirSync(path.join(targetDir, "node_modules", "left-pad"), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(targetDir, ".bun"), { recursive: true });
+    fs.writeFileSync(
+      path.join(targetDir, "node_modules", "left-pad", "package.json"),
+      "{\"name\":\"left-pad\"}\n",
+      "utf8",
+    );
+    fs.writeFileSync(path.join(targetDir, ".bun", "install-cache"), "cache\n", "utf8");
+
+    try {
+      const result = testing.cleanupManagedOpenCodeConfigInstallArtifacts({
+        sourceDir,
+        targetDir,
+      });
+
+      expect(result.cleanedNodeModules).toBe(true);
+      expect(result.cleanedBunCache).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, "node_modules"))).toBe(false);
+      expect(fs.existsSync(path.join(targetDir, ".bun"))).toBe(false);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("agent-mockingbird managed OpenCode install args", () => {
+  test("omits frozen lockfile when source has no bun.lock", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-install-args-"));
+    const sourceDir = path.join(tempRoot, "source");
+    fs.mkdirSync(sourceDir, { recursive: true });
+
+    try {
+      expect(testing.buildManagedOpenCodeInstallArgs(sourceDir)).toEqual(["install"]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("includes frozen lockfile when source has bun.lock", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-opencode-install-args-lock-"));
+    const sourceDir = path.join(tempRoot, "source");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "bun.lock"), "lock\n", "utf8");
+
+    try {
+      expect(testing.buildManagedOpenCodeInstallArgs(sourceDir)).toEqual([
+        "install",
+        "--frozen-lockfile",
+      ]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("agent-mockingbird CLI Bun version pinning", () => {
   test("prefers explicit Bun env version override", () => {
     const version = testing.readPinnedBunVersion({

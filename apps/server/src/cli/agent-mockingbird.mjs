@@ -758,6 +758,58 @@ function ensurePackagedExecutorRuntime(agentMockingbirdAppDir, bunBin) {
   return packagedExecutorWebAssetsDir;
 }
 
+function buildManagedOpenCodeInstallArgs(sourceDir) {
+  const installArgs = ["install"];
+  if (fs.existsSync(path.join(sourceDir, "bun.lock"))) {
+    installArgs.push("--frozen-lockfile");
+  }
+  return installArgs;
+}
+
+function cleanupManagedOpenCodeConfigInstallArtifacts(input) {
+  const sourceDir = path.resolve(String(input?.sourceDir ?? ""));
+  const targetDir = path.resolve(String(input?.targetDir ?? ""));
+  const logger = typeof input?.logger === "function" ? input.logger : null;
+
+  if (!sourceDir) {
+    throw new Error("managed OpenCode config source directory is required");
+  }
+  if (!targetDir) {
+    throw new Error("managed OpenCode config target directory is required");
+  }
+
+  const sourceLockPath = path.join(sourceDir, "bun.lock");
+  const targetLockPath = path.join(targetDir, "bun.lock");
+  const targetNodeModulesPath = path.join(targetDir, "node_modules");
+  const targetBunCachePath = path.join(targetDir, ".bun");
+
+  const summary = {
+    cleanedLockfile: false,
+    cleanedNodeModules: false,
+    cleanedBunCache: false,
+  };
+
+  if (!fs.existsSync(sourceLockPath) && fs.existsSync(targetLockPath)) {
+    fs.rmSync(targetLockPath, { force: true });
+    summary.cleanedLockfile = true;
+    if (logger) logger("managed-open-code-config: removed stale bun.lock");
+  }
+
+  if (fs.existsSync(targetNodeModulesPath)) {
+    fs.rmSync(targetNodeModulesPath, { recursive: true, force: true });
+    summary.cleanedNodeModules = true;
+    if (logger) logger("managed-open-code-config: removed stale node_modules");
+  }
+
+  if (fs.existsSync(targetBunCachePath)) {
+    fs.rmSync(targetBunCachePath, { recursive: true, force: true });
+    summary.cleanedBunCache = true;
+    if (logger) logger("managed-open-code-config: removed stale .bun");
+  }
+
+  return summary;
+}
+
 function candidateBunBinaryPaths(paths) {
   const candidates = [];
   const seen = new Set();
@@ -2710,6 +2762,8 @@ async function runInteractiveProviderOnboarding(input) {
 export const testing = {
   applyDefaultInstallTarget,
   buildEmptyModelDiscoveryDiagnostics,
+  buildManagedOpenCodeInstallArgs,
+  cleanupManagedOpenCodeConfigInstallArtifacts,
   readInstalledExecutorMode,
   readInstalledExecutorVersion,
   readInstalledOpenCodeVersion,
@@ -3167,12 +3221,16 @@ async function installOrUpdate(args, mode) {
     paths.opencodeConfigDir,
     "package.json",
   );
-  const opencodeLockPath = path.join(paths.opencodeConfigDir, "bun.lock");
+  const managedCleanup = {
+    opencodeConfig: cleanupManagedOpenCodeConfigInstallArtifacts({
+      sourceDir: runtimeAssetsSource.opencodeConfigSourceDir,
+      targetDir: paths.opencodeConfigDir,
+    }),
+  };
   if (fs.existsSync(opencodePackagePath)) {
-    const installArgs = ["install"];
-    if (fs.existsSync(opencodeLockPath)) {
-      installArgs.push("--frozen-lockfile");
-    }
+    const installArgs = buildManagedOpenCodeInstallArgs(
+      runtimeAssetsSource.opencodeConfigSourceDir,
+    );
     must(bunBin, installArgs, { cwd: paths.opencodeConfigDir });
   }
   ensurePackagedExecutorRuntime(agentMockingbirdAppDir, bunBin);
@@ -3285,6 +3343,7 @@ async function installOrUpdate(args, mode) {
       workspace: workspaceRuntimeAssets,
       opencodeConfig: opencodeRuntimeAssets,
     },
+    managedCleanup,
     defaultSkillSync,
     health,
     linger,
@@ -3498,6 +3557,15 @@ function printResult(result, asJson) {
           `runtime-assets:${name}: backups created=${assetResult.backupsCreated}`,
         );
       }
+    }
+    if (result.managedCleanup?.opencodeConfig?.cleanedLockfile) {
+      console.log("managed-cleanup: opencode-config removed stale bun.lock");
+    }
+    if (result.managedCleanup?.opencodeConfig?.cleanedNodeModules) {
+      console.log("managed-cleanup: opencode-config removed stale node_modules");
+    }
+    if (result.managedCleanup?.opencodeConfig?.cleanedBunCache) {
+      console.log("managed-cleanup: opencode-config removed stale .bun");
     }
     if (result.defaultSkillSync?.attempted) {
       if (result.defaultSkillSync.updated) {

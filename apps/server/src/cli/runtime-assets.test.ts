@@ -49,4 +49,26 @@ describe("syncRuntimeWorkspaceAssets", () => {
     expect(result.removed).toBe(1);
     expect(fs.existsSync(path.join(targetDir, "plugins", "memory_search.ts"))).toBe(false);
   });
+
+  test("install mode preserves unrelated preexisting files in the target directory", async () => {
+    const sourceDir = makeTempDir();
+    const targetDir = makeTempDir();
+    const stateFilePath = path.join(makeTempDir(), "runtime-assets-state.json");
+
+    fs.writeFileSync(path.join(sourceDir, "package.json"), "{\"name\":\"managed\"}\n");
+    fs.writeFileSync(path.join(targetDir, "bun.lock"), "stale lock\n");
+
+    const result = await syncRuntimeWorkspaceAssets({
+      sourceWorkspaceDir: sourceDir,
+      targetWorkspaceDir: targetDir,
+      stateFilePath,
+      mode: "install",
+    });
+
+    expect(result.overwritten).toBe(0);
+    expect(fs.readFileSync(path.join(targetDir, "package.json"), "utf8")).toBe(
+      "{\"name\":\"managed\"}\n",
+    );
+    expect(fs.existsSync(path.join(targetDir, "bun.lock"))).toBe(true);
+  });
 });
