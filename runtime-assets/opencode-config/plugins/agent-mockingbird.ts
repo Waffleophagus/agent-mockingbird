@@ -24,6 +24,24 @@ type AgentMockingbirdPluginOptions = {
 
 type ApiScope = "config" | "memory" | "cron"
 
+const scopeEnvKeys: Record<ApiScope, string[]> = {
+  config: [
+    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+  ],
+  memory: [
+    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+  ],
+  cron: [
+    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+  ],
+}
+
 function normalizeBaseUrl(value?: string) {
   const trimmed = value?.trim()
   if (!trimmed) return
@@ -75,9 +93,7 @@ async function requestJson(options: AgentMockingbirdPluginOptions, scope: ApiSco
   const response = await fetch(`${resolveApiBaseUrl(
     options,
     scope,
-    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
-    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
-    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+    ...scopeEnvKeys[scope],
   )}${pathname}`, init)
   const payload = (await response.json()) as JsonObject
   if (!response.ok) {
