@@ -1,7 +1,7 @@
-From e68aef843e90140e13ceb7a501b0f24ce4089013 Mon Sep 17 00:00:00 2001
+From c74b381b5406f4ea30927c473cf3168a17498f0a Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Sat, 28 Mar 2026 15:25:53 -0500
-Subject: [PATCH 3/3] feat: add openapi spec uploads
+Subject: [PATCH 3/4] feat: add openapi spec uploads
 
 
 diff --git a/apps/executor/src/server/server.test.ts b/apps/executor/src/server/server.test.ts
