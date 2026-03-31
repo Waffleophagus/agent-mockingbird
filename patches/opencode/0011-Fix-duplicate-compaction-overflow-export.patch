@@ -1,0 +1,30 @@
+From 0171022c4c06b153b275f994e2c04d038b05afbd Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Mon, 30 Mar 2026 20:23:01 -0500
+Subject: [PATCH 11/11] Fix duplicate compaction overflow export
+
+---
+ packages/opencode/src/session/compaction.ts | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/packages/opencode/src/session/compaction.ts b/packages/opencode/src/session/compaction.ts
+index b42b7dc7c..4f793d40d 100644
+--- a/packages/opencode/src/session/compaction.ts
++++ b/packages/opencode/src/session/compaction.ts
+@@ -69,13 +69,6 @@ export namespace SessionCompaction {
+     return effectiveTokenCount(input.tokens) >= usable * input.ratio
+   }
+ 
+-  export async function isOverflow(input: { tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
+-    const config = await Config.get()
+-    if (config.compaction?.auto === false) return false
+-    const usable = await usableInputBudget({ model: input.model })
+-    if (typeof usable !== "number" || usable <= 0) return false
+-    return effectiveTokenCount(input.tokens) >= usable
+-  }
+   export const PRUNE_MINIMUM = 20_000
+   export const PRUNE_PROTECT = 40_000
+   const PRUNE_PROTECTED_TOOLS = ["skill"]
+-- 
+2.53.0
+

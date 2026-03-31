@@ -1,7 +1,7 @@
-From ab40face9e2ecc7fb64c3457a14c70b68896c32e Mon Sep 17 00:00:00 2001
+From 57ad4a2163cb4f92f6f9842cb7f1f70b8d800f49 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 17:04:36 -0500
-Subject: [PATCH 02/10] Add heartbeat settings and usage navigation
+Subject: [PATCH 02/11] Add heartbeat settings and usage navigation
 
 ---
  .../app/src/components/dialog-settings.tsx    |   8 +

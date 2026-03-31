@@ -1,7 +1,7 @@
-From 6d8a241153551201f988054195a59ccab93320bc Mon Sep 17 00:00:00 2001
+From 6f347db56a976bd82d8be964ff8fdb7fd812d8f9 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 17:04:36 -0500
-Subject: [PATCH 03/10] Modernize cron settings
+Subject: [PATCH 03/11] Modernize cron settings
 
 ---
  .../src/components/settings-cron-data.test.ts |  96 +++++++++++++++

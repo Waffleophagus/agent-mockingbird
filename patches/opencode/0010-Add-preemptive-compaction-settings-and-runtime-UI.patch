@@ -1,7 +1,7 @@
-From 46854256787c3b63d018d329f23985c1d40b844a Mon Sep 17 00:00:00 2001
+From 94e36e2d07cb761637812232e5170d3c5f655352 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 01:01:10 -0500
-Subject: [PATCH 10/10] Add preemptive compaction settings and runtime UI
+Subject: [PATCH 10/11] Add preemptive compaction settings and runtime UI
 
 ---
  .../app/src/components/settings-runtime.tsx   | 171 +++++++++++++++++-

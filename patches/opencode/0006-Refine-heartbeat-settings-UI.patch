@@ -1,7 +1,7 @@
-From 3d7fe2cb9624e266aa4d86f685d776618d0922fd Mon Sep 17 00:00:00 2001
+From 743534827e299ad9a5028e9e56b4b9fab6e57022 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 17:04:36 -0500
-Subject: [PATCH 06/10] Refine heartbeat settings UI
+Subject: [PATCH 06/11] Refine heartbeat settings UI
 
 ---
  .../src/components/dialog-select-model.tsx    |   7 +-

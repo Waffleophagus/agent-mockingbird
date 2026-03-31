@@ -1,7 +1,7 @@
-From 950b558d09c1971cd39558bd90fc8c81c2bbbb54 Mon Sep 17 00:00:00 2001
+From e7c9dd94b36f3b0304fb49cd2ac9fb52203b89e3 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 17:04:36 -0500
-Subject: [PATCH 01/10] Integrate OpenCode baseline and settings shell
+Subject: [PATCH 01/11] Integrate OpenCode baseline and settings shell
 
 ---
  packages/app/src/app.tsx                      |   2 +
