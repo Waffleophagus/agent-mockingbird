@@ -475,7 +475,7 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
 
     fs.mkdirSync(path.dirname(packagedExecutorPkg), { recursive: true });
     fs.mkdirSync(path.dirname(installedExecutorPkg), { recursive: true });
-    fs.writeFileSync(packagedExecutorPkg, JSON.stringify({ name: "executor", version: "1.2.5" }), "utf8");
+    fs.writeFileSync(packagedExecutorPkg, JSON.stringify({ name: "executor", version: "1.3.0-beta.5" }), "utf8");
     fs.writeFileSync(installedExecutorPkg, JSON.stringify({ name: "executor", version: "1.2.4-beta.4" }), "utf8");
     fs.writeFileSync(
       executorUnitPath,
@@ -495,7 +495,7 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
           npmPrefix: path.join(tempRoot, "npm"),
           executorUnitPath,
         }),
-      ).toBe("1.2.5");
+      ).toBe("1.3.0-beta.5");
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

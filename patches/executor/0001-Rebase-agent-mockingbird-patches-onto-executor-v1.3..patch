@@ -1,0 +1,1764 @@
+From ef02734fb0a4ea728c78e91ab85000f95712fbef Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Wed, 1 Apr 2026 16:24:47 -0500
+Subject: [PATCH] Rebase agent-mockingbird patches onto executor v1.3.0-beta.5
+
+
+diff --git a/apps/executor/src/cli/main.ts b/apps/executor/src/cli/main.ts
+index ef6af93438cc5f3600a0176e19895df7f3e0945d..3962184055f0ad088b387b99a087779ba071c568 100644
+--- a/apps/executor/src/cli/main.ts
++++ b/apps/executor/src/cli/main.ts
+@@ -33,6 +33,7 @@ import {
+   mcpSdkPlugin,
+ } from "@executor/plugin-mcp-sdk";
+ import {
++  createInMemoryOpenApiSpecUploadStorage,
+   openApiSdkPlugin,
+ } from "@executor/plugin-openapi-sdk";
+ import {
+@@ -192,6 +193,7 @@ const decodeExecutionId = Schema.decodeUnknown(ExecutionIdSchema);
+ const require = createRequire(import.meta.url);
+ const CLI_NAME = "executor";
+ const CLI_LOCAL_DATA_DIR = resolveCliLocalDataDir();
++const EXECUTOR_SERVER_BASE_PATH_ENV = "EXECUTOR_SERVER_BASE_PATH";
+ const CLI_VERSION = (() => {
+   const candidatePaths = [
+     "../package.json",
+@@ -353,6 +355,7 @@ const loadRunWorkflowText = (): Effect.Effect<string, Error, never> =>
+           storage: createFileOpenApiSourceStorage({
+             rootDir: `${CLI_LOCAL_DATA_DIR}/plugins/openapi/sources`,
+           }),
++          uploads: createInMemoryOpenApiSpecUploadStorage(),
+         }),
+       ] as const,
+     }).pipe(Effect.mapError(toError)),
+@@ -499,13 +502,14 @@ const isServerReachable = (baseUrl: string) =>
+ 
+ const getDefaultServerOptions = (port: number = DEFAULT_SERVER_PORT) => {
+   const assetsDir = resolveRuntimeWebAssetsDir();
++  const basePath = process.env[EXECUTOR_SERVER_BASE_PATH_ENV]?.trim();
+ 
+   return {
+     host: DEFAULT_SERVER_HOST,
+     port,
+     localDataDir: CLI_LOCAL_DATA_DIR,
+     pidFile: DEFAULT_SERVER_PID_FILE,
+-    ui: assetsDir ? { assetsDir } : undefined,
++    ui: assetsDir ? { assetsDir, basePath } : { basePath },
+   };
+ };
+ 
+diff --git a/apps/web/src/components/local-mcp-install-card.tsx b/apps/web/src/components/local-mcp-install-card.tsx
+index e08f7825d59c5a45cba53698e4899d8a333ab25a..c28e02ed62475cffaaca8319176435ee2cff9d49 100644
+--- a/apps/web/src/components/local-mcp-install-card.tsx
++++ b/apps/web/src/components/local-mcp-install-card.tsx
+@@ -1,5 +1,6 @@
+ import { useEffect, useState } from "react";
+ import { Button } from "@executor/react/plugins";
++import { getExecutorUiBaseUrl } from "../lib/urls";
+ import { CodeBlock } from "./code-block";
+ 
+ type LocalMcpInstallMode = "stdio" | "http";
+@@ -15,7 +16,7 @@ export function LocalMcpInstallCard(props: {
+   const [mode, setMode] = useState<LocalMcpInstallMode>("stdio");
+ 
+   useEffect(() => {
+-    setOrigin(window.location.origin);
++    setOrigin(getExecutorUiBaseUrl(import.meta.env.BASE_URL ?? "/", window.location.origin));
+   }, []);
+ 
+   const command = mode === "stdio"
+diff --git a/apps/web/src/components/markdown.tsx b/apps/web/src/components/markdown.tsx
+index 29ab16cc0cb399d03aca954731fb5ccfd7232bff..87d2b15dc03a9f1c1549bb80b1e3c85f78b59e1d 100644
+--- a/apps/web/src/components/markdown.tsx
++++ b/apps/web/src/components/markdown.tsx
+@@ -1,8 +1,29 @@
+ import { Streamdown } from "streamdown";
++import type { CustomRendererProps } from "streamdown";
+ import { createLimitedCodePlugin } from "../lib/shiki";
+ 
+ const codePlugin = createLimitedCodePlugin();
+ 
++function PlainMermaidBlock(props: CustomRendererProps) {
++  return (
++    <div className="my-2 overflow-hidden rounded-md border border-border bg-muted">
++      <div className="border-b border-border px-3 py-2 text-[11px] font-mono lowercase tracking-wide text-muted-foreground">
++        mermaid
++      </div>
++      <pre className="overflow-x-auto px-3 py-2 text-xs leading-relaxed text-foreground">
++        <code>{props.code}</code>
++      </pre>
++    </div>
++  );
++}
++
++const markdownRenderers = [
++  {
++    language: ["mermaid", "mmd"],
++    component: PlainMermaidBlock,
++  },
++];
++
+ const PROSE_CLASSES = [
+   "text-[13px] leading-relaxed text-muted-foreground",
+   // paragraphs
+@@ -43,7 +64,11 @@ const PROSE_CLASSES = [
+ export function Markdown(props: { children: string; className?: string }) {
+   return (
+     <div className={props.className ? `${PROSE_CLASSES} ${props.className}` : PROSE_CLASSES}>
+-      <Streamdown plugins={{ code: codePlugin }} controls={{ code: true }} linkSafety={{ enabled: false }}>
++      <Streamdown
++        plugins={{ code: codePlugin, renderers: markdownRenderers }}
++        controls={{ code: true }}
++        linkSafety={{ enabled: false }}
++      >
+         {props.children}
+       </Streamdown>
+     </div>
+diff --git a/apps/web/src/components/shell.tsx b/apps/web/src/components/shell.tsx
+index bf10186dbc0a7b6a2aa48d02edc5a3d44bf17099..7b7faba32eb8b6f8bffb70ed3c9cfdfdd931f160 100644
+--- a/apps/web/src/components/shell.tsx
++++ b/apps/web/src/components/shell.tsx
+@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
+ import { useSources, type Source } from "@executor/react";
+ import { Button, sourcePluginsIndexPath } from "@executor/react/plugins";
+ import { cn } from "../lib/utils";
+-import { IconPlus, IconCopy, IconCheck, IconClose, IconMenu } from "./icons";
++import { IconPlus, IconCopy, IconCheck, IconClose, IconMenu, IconArrowLeft } from "./icons";
+ import { LoadableBlock } from "./loadable";
+ import { SourceFavicon } from "./source-favicon";
+ import {
+@@ -32,7 +32,8 @@ const { VITE_APP_VERSION, VITE_GITHUB_URL } = (import.meta as ImportMeta & {
+ 
+ type UpdateChannel = "latest" | "beta";
+ 
+-const EXECUTOR_DIST_TAGS_PATH = "/v1/app/npm/dist-tags";
++const executorBasePath = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") || "/";
++const EXECUTOR_DIST_TAGS_PATH = `${executorBasePath === "/" ? "" : executorBasePath}/v1/app/npm/dist-tags`;
+ 
+ type ParsedVersion = {
+   readonly major: number;
+@@ -375,6 +376,18 @@ function SidebarContent(props: {
+         </div>
+       )}
+ 
++      <div className="px-2 py-2.5">
++        <a
++          href="/"
++          className="group flex items-center gap-2.5 rounded-lg border border-sidebar-border/60 bg-gradient-to-r from-primary/[0.08] to-transparent px-3 py-2 text-[12px] font-medium text-foreground shadow-sm transition-all duration-200 hover:border-primary/30 hover:from-primary/[0.12] hover:shadow-md hover:-translate-y-px"
++        >
++          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 transition-all duration-200 group-hover:bg-primary/20 group-hover:scale-110">
++            <IconArrowLeft className="size-3 text-primary transition-transform duration-200 group-hover:-translate-x-0.5" />
++          </span>
++          <span className="flex-1">Back to Chat</span>
++        </a>
++      </div>
++
+       <nav className="flex flex-1 flex-col overflow-y-auto p-2">
+         <NavItem
+           to="/"
+diff --git a/apps/web/src/dev.ts b/apps/web/src/dev.ts
+index 5868a3a98611c5f8c2571c2c25ce8c388f96cb75..65b5864c8355520fc8a12197327d7319ae27b440 100644
+--- a/apps/web/src/dev.ts
++++ b/apps/web/src/dev.ts
+@@ -18,6 +18,7 @@ import {
+ 
+ const MAX_LOGGED_ERROR_BODY_LENGTH = 4_000;
+ const EXECUTOR_WEB_DEV_LOCAL_DATA_DIR_ENV = "EXECUTOR_WEB_DEV_LOCAL_DATA_DIR";
++const EXECUTOR_SERVER_BASE_PATH_ENV = "EXECUTOR_SERVER_BASE_PATH";
+ const DEFAULT_WEB_DEV_LOCAL_DATA_DIR = join(
+   DEFAULT_EXECUTOR_DATA_DIR,
+   "control-plane-web-dev",
+@@ -35,6 +36,11 @@ const resolveWebDevLocalDataDir = (): string => {
+     : DEFAULT_WEB_DEV_LOCAL_DATA_DIR;
+ };
+ 
++const resolveBasePath = (): string | undefined => {
++  const configured = process.env[EXECUTOR_SERVER_BASE_PATH_ENV]?.trim();
++  return configured && configured.length > 0 ? configured : undefined;
++};
++
+ /**
+  * Extract a detailed, human-readable description from an error.
+  *
+@@ -63,6 +69,9 @@ const handlerPromise = (async () => {
+       const scope = yield* Scope.make();
+       const handler = yield* createLocalExecutorRequestHandler({
+         localDataDir: resolveWebDevLocalDataDir(),
++        ui: {
++          basePath: resolveBasePath(),
++        },
+       }).pipe(
+         Effect.provideService(Scope.Scope, scope),
+       );
+@@ -91,9 +100,17 @@ export default {
+ 
+     try {
+       const handler = await handlerPromise;
+-      handler.setBaseUrl(url.origin);
++      handler.setBaseUrl(
++        new URL(resolveBasePath() ?? "/", url.origin).toString().replace(/\/+$/, ""),
++      );
+ 
+-      const response = await handler.handleApiRequest(request);
++      const init: RequestInit & { duplex?: "half" } = {
++        method: request.method,
++        headers: request.headers,
++        body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
++        duplex: request.method === "GET" || request.method === "HEAD" ? undefined : "half",
++      };
++      const response = await handler.handleApiRequest(new Request(request.url, init));
+ 
+       if (url.pathname.startsWith("/v1/") && response.status >= 500) {
+         let bodyText = "<unavailable>";
+diff --git a/apps/web/src/lib/urls.ts b/apps/web/src/lib/urls.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..cb422f83af3de3499e909ad28e451e97d46a66f5
+--- /dev/null
++++ b/apps/web/src/lib/urls.ts
+@@ -0,0 +1,7 @@
++const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
++
++const resolveBaseUrl = (baseUrl: string, origin: string): URL =>
++  new URL(baseUrl || "/", origin);
++
++export const getExecutorUiBaseUrl = (baseUrl: string, origin: string): string =>
++  trimTrailingSlash(resolveBaseUrl(baseUrl, origin).toString());
+diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
+index d49e3929065fc6c10f21334b8bc147e36e9a1bc2..5338b3a92f56ce5423860e89ce7ca4653a49df1b 100644
+--- a/apps/web/src/main.tsx
++++ b/apps/web/src/main.tsx
+@@ -5,7 +5,7 @@ import {
+   createRouter,
+   useNavigate,
+ } from "@tanstack/react-router";
+-import { ExecutorReactProvider } from "@executor/react";
++import { ExecutorReactProvider, setExecutorApiBaseUrl } from "@executor/react";
+ import {
+   createExecutorPluginPaths,
+   sourcePluginsIndexPath,
+@@ -23,10 +23,19 @@ import {
+   ExecutorPluginRoutePage,
+   SourcePluginsIndexPage,
+ } from "./plugins/pages";
++import { getExecutorUiBaseUrl } from "./lib/urls";
+ import { HomePage } from "./views/home";
+ import { PoliciesPage } from "./views/policies";
+ import { SecretsPage } from "./views/secrets";
+ 
++const executorBasePath = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") || "/";
++
++if (typeof window !== "undefined") {
++  setExecutorApiBaseUrl(
++    getExecutorUiBaseUrl(import.meta.env.BASE_URL ?? "/", window.location.origin),
++  );
++}
++
+ const rootRoute = createRootRoute({
+   component: AppShell,
+ });
+@@ -121,6 +130,7 @@ const routeTree = rootRoute.addChildren([
+ 
+ const router = createRouter({
+   routeTree,
++  basepath: executorBasePath,
+   defaultPreload: "intent",
+   defaultPreloadStaleTime: 0,
+ });
+diff --git a/apps/web/src/server.ts b/apps/web/src/server.ts
+index 13bcbfec24dcf45b306482c87c99a5a2408a99b5..8f60411572defc8af0dde5e00be26a638bdc25f9 100644
+--- a/apps/web/src/server.ts
++++ b/apps/web/src/server.ts
+@@ -9,5 +9,6 @@ import { runLocalExecutorServer } from "@executor/server";
+ await runLocalExecutorServer({
+   ui: {
+     assetsDir: new URL("../dist", import.meta.url).pathname,
++    basePath: process.env.EXECUTOR_WEB_BASE_PATH ?? process.env.EXECUTOR_SERVER_BASE_PATH,
+   },
+ });
+diff --git a/apps/web/vite.config.ts b/apps/web/vite.config.ts
+index 225a8668743f62122baa5b88eaf2c2947691b3f6..4770794fe6db26ce57ab34ce05ec7458d1529f6f 100644
+--- a/apps/web/vite.config.ts
++++ b/apps/web/vite.config.ts
+@@ -24,6 +24,25 @@ const githubUrl = (executorPackage.homepage ?? repositoryUrl ?? "https://github.
+   .replace(/^git\+/, "")
+   .replace(/\.git$/, "");
+ 
++const normalizeBasePath = (value?: string): string => {
++  const trimmed = value?.trim();
++  if (!trimmed || trimmed === "/") {
++    return "/";
++  }
++
++  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
++  return `${withLeadingSlash.replace(/\/+$/, "")}/`;
++};
++
++const basePath = normalizeBasePath(
++  process.env.EXECUTOR_WEB_BASE_PATH ?? process.env.EXECUTOR_SERVER_BASE_PATH,
++);
++const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
++const apiPrefix =
++  basePath === "/"
++    ? "(?:v1|mcp)"
++    : `${escapeRegex(basePath.replace(/^\//, "").replace(/\/$/, ""))}\\/(?:v1|mcp)`;
++
+ const webPackage = JSON.parse(
+   readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+ ) as {
+@@ -49,6 +68,7 @@ const reloadOnPluginChange = () => ({
+ });
+ 
+ export default defineConfig({
++  base: basePath,
+   root: "src",
+   resolve: {
+     alias: {
+@@ -63,7 +83,7 @@ export default defineConfig({
+       entry: "src/dev.ts",
+       exclude: [
+         // Only let /v1 and /mcp requests reach the API handler
+-        /^\/(?!(v1|mcp)(\/|$))/,
++        new RegExp(`^\\/(?!(?:${apiPrefix})(?:\\/|$))`),
+         /^\/(src|node_modules|@vite|@id|@react-refresh)/,
+         /\.(css|ts|tsx|js|jsx|svg|png|jpg|gif|ico|woff2?|json|map)(\?.*)?$/,
+       ],
+diff --git a/packages/clients/react/src/index.test.tsx b/packages/clients/react/src/index.test.tsx
+index cd07bb0861e5845cf37e2f0e03dfa0eca12eff33..e644d0796ed6ed8466a65b8fd42ba131996092fb 100644
+--- a/packages/clients/react/src/index.test.tsx
++++ b/packages/clients/react/src/index.test.tsx
+@@ -176,6 +176,16 @@ const getInstallation = (baseUrl: string) =>
+     path: "/v1/local/installation",
+   });
+ 
++const listSourcesRaw = (input: {
++  baseUrl: string;
++  installation: LocalInstallation;
++}) =>
++  requestJson<ReadonlyArray<Source>>({
++    baseUrl: input.baseUrl,
++    path: `/v1/workspaces/${input.installation.scopeId}/sources`,
++    accountId: input.installation.actorScopeId,
++  });
++
+ const seedStoredOpenApiSource = async (input: {
+   server: RunningServer;
+   installation: LocalInstallation;
+@@ -285,6 +295,57 @@ type OpenApiSpecServer = RunningServer & {
+ };
+ 
+ describe("executor-react source hooks", () => {
++  it("keeps two-item source lists intact when useSources resolves", async () => {
++    const apiServer = await startControlPlaneServer();
++    const specServer = await startOpenApiSpecServer();
++
++    setExecutorApiBaseUrl(apiServer.baseUrl);
++
++    try {
++      const installation = await getInstallation(apiServer.baseUrl);
++      await seedStoredOpenApiSource({
++        server: apiServer,
++        installation,
++        name: "First Source",
++        specUrl: specServer.specUrl,
++      });
++      await seedStoredOpenApiSource({
++        server: apiServer,
++        installation,
++        name: "Second Source",
++        specUrl: specServer.specUrl,
++      });
++      const raw = await listSourcesRaw({
++        baseUrl: apiServer.baseUrl,
++        installation,
++      });
++      const workspaceHarness = await renderWorkspaceHarness();
++
++      try {
++        const workspace = await waitForValue(
++          () => workspaceHarness.current,
++          (value) =>
++            isReady(value.installation)
++            && isReady(value.sources)
++            && value.sources.data.length === 2,
++        );
++
++        if (!isReady(workspace.sources)) {
++          throw new Error("Expected sources to be ready");
++        }
++
++        expect(workspace.sources.data.map((source) => source.id)).toEqual(
++          raw.map((source) => source.id),
++        );
++      } finally {
++        await workspaceHarness.unmount();
++      }
++    } finally {
++      await specServer.close();
++      await apiServer.close();
++    }
++  }, 60_000);
++
+   it("loads the local installation, sources, and inspection data", async () => {
+     const apiServer = await startControlPlaneServer();
+     const specServer = await startOpenApiSpecServer();
+diff --git a/packages/platform/sdk/src/runtime/sources/executor-tools.test.ts b/packages/platform/sdk/src/runtime/sources/executor-tools.test.ts
+index da6bcbbbb47a9d684752bc6f39577e00a7c8d4a0..85600d446080a86a3a2231ff2c281ba3094f0885 100644
+--- a/packages/platform/sdk/src/runtime/sources/executor-tools.test.ts
++++ b/packages/platform/sdk/src/runtime/sources/executor-tools.test.ts
+@@ -27,6 +27,7 @@ import {
+   RuntimeExecutionResolverService,
+ } from "../execution/scope/environment";
+ import {
++  createInMemoryOpenApiSpecUploadStorage,
+   openApiSdkPlugin,
+ } from "../../../../../../plugins/openapi/sdk";
+ import {
+@@ -167,6 +168,7 @@ describe("executor internal tools", () => {
+                     stored.delete(sourceId);
+                   }),
+               },
++              uploads: createInMemoryOpenApiSpecUploadStorage(),
+             }),
+           ] as const,
+         }),
+@@ -272,6 +274,7 @@ describe("executor internal tools", () => {
+                     stored.delete(sourceId);
+                   }),
+               },
++              uploads: createInMemoryOpenApiSpecUploadStorage(),
+             }),
+           ] as const,
+         }),
+diff --git a/packages/platform/server/src/index.test.ts b/packages/platform/server/src/index.test.ts
+index 11d842ac413989fd05ad7c88b6a20fe345dcfbed..90719d259c607fcfc974f03ec3eab4b4b62adb75 100644
+--- a/packages/platform/server/src/index.test.ts
++++ b/packages/platform/server/src/index.test.ts
+@@ -1051,6 +1051,101 @@ const extractOAuthPopupPayload = (html: string): {
+ };
+ 
+ describe("local-executor-server", () => {
++  it.scoped("uploads an OpenAPI spec, dedupes it, and creates a source from the stored upload", () =>
++    Effect.gen(function* () {
++      const { installation, client } = yield* createApiClientHarness();
++      const specText = JSON.stringify({
++        openapi: "3.1.0",
++        info: {
++          title: "Uploaded Widgets API",
++          version: "1.0.0",
++        },
++        servers: [
++          {
++            url: "https://api.example.com",
++          },
++        ],
++        paths: {
++          "/widgets": {
++            get: {
++              operationId: "listWidgets",
++              responses: {
++                "200": {
++                  description: "ok",
++                  content: {
++                    "application/json": {
++                      schema: {
++                        type: "object",
++                        properties: {
++                          items: {
++                            type: "array",
++                            items: {
++                              type: "string",
++                            },
++                          },
++                        },
++                      },
++                    },
++                  },
++                },
++              },
++            },
++          },
++        },
++      });
++
++      const firstUpload = yield* client.openapi.uploadSpec({
++        path: {
++          workspaceId: installation.scopeId,
++        },
++        payload: {
++          filename: "widgets-openapi.json",
++          contentType: "application/json",
++          text: specText,
++        },
++      });
++      const secondUpload = yield* client.openapi.uploadSpec({
++        path: {
++          workspaceId: installation.scopeId,
++        },
++        payload: {
++          filename: "widgets-openapi.json",
++          contentType: "application/json",
++          text: specText,
++        },
++      });
++
++      expect(firstUpload.specUrl).toBe(secondUpload.specUrl);
++      expect(firstUpload.sha256).toBe(secondUpload.sha256);
++
++      const created = yield* client.openapi.createSource({
++        path: {
++          workspaceId: installation.scopeId,
++        },
++        payload: {
++          name: "Uploaded Widgets",
++          specUrl: firstUpload.specUrl,
++          baseUrl: "https://api.example.com",
++          auth: {
++            kind: "none",
++          },
++        },
++      });
++
++      const inspection = yield* client.sources.inspection({
++        path: {
++          workspaceId: installation.scopeId,
++          sourceId: created.id,
++        },
++      });
++
++      expect(created.kind).toBe("openapi");
++      expect(inspection.toolCount).toBeGreaterThan(0);
++      expect(inspection.source.name).toBe("Uploaded Widgets");
++    }),
++    15_000,
++  );
++
+   it.scoped("serves the control-plane OpenAPI spec at /v1/openapi.json", () =>
+     Effect.gen(function* () {
+       const server = yield* makeServer;
+diff --git a/packages/platform/server/src/index.ts b/packages/platform/server/src/index.ts
+index ef26e9f590042c828725b0e1e6a743e00e501740..a2a6b1506ef3e517ef7389689c3a575820329777 100644
+--- a/packages/platform/server/src/index.ts
++++ b/packages/platform/server/src/index.ts
+@@ -62,6 +62,7 @@ import { createFileGraphqlSourceStorage } from "./graphql-source-storage";
+ import { createFileMcpOAuthSessionStorage } from "./mcp-oauth-session-storage";
+ import { createFileMcpSourceStorage } from "./mcp-source-storage";
+ import { createFileOpenApiSourceStorage } from "./openapi-source-storage";
++import { createFileOpenApiUploadStorage } from "./openapi-upload-storage";
+ 
+ export { createFileGoogleDiscoveryOAuthSessionStorage } from "./google-discovery-oauth-session-storage";
+ export { createFileGoogleDiscoverySourceStorage } from "./google-discovery-source-storage";
+@@ -69,6 +70,7 @@ export { createFileGraphqlSourceStorage } from "./graphql-source-storage";
+ export { createFileMcpOAuthSessionStorage } from "./mcp-oauth-session-storage";
+ export { createFileMcpSourceStorage } from "./mcp-source-storage";
+ export { createFileOpenApiSourceStorage } from "./openapi-source-storage";
++export { createFileOpenApiUploadStorage } from "./openapi-upload-storage";
+ 
+ export {
+   DEFAULT_EXECUTOR_DATA_DIR,
+@@ -97,6 +99,7 @@ export {
+ type StaticUiOptions = {
+   readonly assetsDir?: string;
+   readonly devServerUrl?: string;
++  readonly basePath?: string;
+ };
+ 
+ export type LocalExecutorServer = {
+@@ -139,6 +142,50 @@ const executorHttpPlugins = [
+   openApiHttpPlugin(),
+ ] as const;
+ 
++const normalizeBasePath = (value?: string): string => {
++  const trimmed = value?.trim();
++  if (!trimmed || trimmed === "/") {
++    return "";
++  }
++
++  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
++  return withLeadingSlash.replace(/\/+$/, "");
++};
++
++const stripBasePath = (pathname: string, basePath: string): string | null => {
++  if (!basePath) {
++    return pathname;
++  }
++  if (pathname === basePath) {
++    return "/";
++  }
++  if (pathname.startsWith(`${basePath}/`)) {
++    return pathname.slice(basePath.length) || "/";
++  }
++  return null;
++};
++
++const rebaseRequest = (
++  request: Request,
++  pathname: string,
++  basePath: string,
++): Request => {
++  const url = new URL(request.url);
++  url.pathname = pathname;
++  const headers = new Headers(request.headers);
++  if (basePath) {
++    headers.set("x-forwarded-prefix", basePath);
++  }
++  const init: RequestInit & { duplex?: "half" } = {
++    method: request.method,
++    headers,
++    body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
++    duplex: request.method === "GET" || request.method === "HEAD" ? undefined : "half",
++    redirect: request.redirect,
++  };
++  return new Request(url.toString(), init);
++};
++
+ const disposeExecutor = (executor: Executor) =>
+   Effect.tryPromise({
+     try: () => executor.close(),
+@@ -186,6 +233,12 @@ const createExecutorRuntime = (
+         storage: createFileOpenApiSourceStorage({
+           rootDir: resolve(localDataDir, "plugins", "openapi", "sources"),
+         }),
++        uploads: createFileOpenApiUploadStorage({
++          rootDir:
++            localDataDir === ":memory:"
++              ? ":memory:"
++              : resolve(localDataDir, "plugins", "openapi", "uploads"),
++        }),
+       }),
+     ] as const,
+     executionResolver: options.executionResolver,
+@@ -344,9 +397,15 @@ const serveUiAsset = async (
+   ui: StaticUiOptions,
+ ): Promise<Response | null> => {
+   const url = new URL(request.url);
++  const basePath = normalizeBasePath(ui.basePath);
++  const resolvedPathname = stripBasePath(url.pathname, basePath);
++
++  if (resolvedPathname === null) {
++    return null;
++  }
+ 
+   if (ui.devServerUrl) {
+-    const proxyUrl = new URL(`${url.pathname}${url.search}`, ui.devServerUrl);
++    const proxyUrl = new URL(`${resolvedPathname}${url.search}`, ui.devServerUrl);
+     return fetch(new Request(proxyUrl.toString(), request));
+   }
+ 
+@@ -354,14 +413,14 @@ const serveUiAsset = async (
+     return null;
+   }
+ 
+-  const candidatePath = safeFilePath(ui.assetsDir, url.pathname);
++  const candidatePath = safeFilePath(ui.assetsDir, resolvedPathname);
+   if (candidatePath && await isRegularFile(fileSystem, candidatePath)) {
+     return readResponseFile(fileSystem, candidatePath);
+   }
+ 
+   const shouldServeIndex =
+-    url.pathname === "/"
+-    || extname(url.pathname).length === 0
++    resolvedPathname === "/"
++    || extname(resolvedPathname).length === 0
+     || wantsHtml(request);
+ 
+   if (!shouldServeIndex) {
+@@ -376,8 +435,7 @@ const serveUiAsset = async (
+   return readResponseFile(fileSystem, indexPath, "text/html; charset=utf-8");
+ };
+ 
+-const isApiRequest = (request: Request): boolean => {
+-  const pathname = new URL(request.url).pathname;
++const isApiPath = (pathname: string): boolean => {
+   return pathname === "/mcp" || pathname === "/v1" || pathname.startsWith("/v1/");
+ };
+ 
+@@ -415,6 +473,7 @@ export const createLocalExecutorRequestHandler = (
+   Effect.gen(function* () {
+     const fileSystem = yield* FileSystem.FileSystem;
+     const requestedLocalDataDir = options.localDataDir ?? DEFAULT_LOCAL_DATA_DIR;
++    const basePath = normalizeBasePath(options.ui?.basePath);
+ 
+     if (requestedLocalDataDir !== ":memory:") {
+       yield* fileSystem.makeDirectory(dirname(requestedLocalDataDir), {
+@@ -466,12 +525,18 @@ export const createLocalExecutorRequestHandler = (
+       runtime: executor.runtime,
+       handleApiRequest: (request) => {
+         const pathname = new URL(request.url).pathname;
+-        if (pathname === EXECUTOR_NPM_DIST_TAGS_PATHNAME) {
++        const resolvedPathname = stripBasePath(pathname, basePath);
++        if (resolvedPathname === null) {
++          return Promise.resolve(new Response("Not Found", { status: 404 }));
++        }
++        if (resolvedPathname === EXECUTOR_NPM_DIST_TAGS_PATHNAME) {
+           return handleExecutorNpmDistTagsRequest();
+         }
+-        return pathname === "/mcp"
+-          ? mcpHandler.handleRequest(request)
+-          : apiHandler.handler(request);
++
++        const rebasedRequest = rebaseRequest(request, resolvedPathname, basePath);
++        return resolvedPathname === "/mcp"
++          ? mcpHandler.handleRequest(rebasedRequest)
++          : apiHandler.handler(rebasedRequest);
+       },
+       getBaseUrl: () => baseUrlRef,
+       setBaseUrl: (baseUrl) => {
+@@ -487,6 +552,7 @@ export const createLocalExecutorServer = (
+     const fileSystem = yield* FileSystem.FileSystem;
+     const host = options.host ?? DEFAULT_SERVER_HOST;
+     const port = options.port ?? DEFAULT_SERVER_PORT;
++    const basePath = normalizeBasePath(options.ui?.basePath);
+     const requestHandler = yield* createLocalExecutorRequestHandler(options);
+ 
+     const server = yield* Effect.acquireRelease(
+@@ -496,7 +562,8 @@ export const createLocalExecutorServer = (
+             const server = createNodeServer((nodeRequest, nodeResponse) => {
+               void (async () => {
+                 const request = toWebRequest(nodeRequest);
+-                const response = isApiRequest(request)
++                const resolvedPathname = stripBasePath(new URL(request.url).pathname, basePath);
++                const response = resolvedPathname && isApiPath(resolvedPathname)
+                   ? await requestHandler.handleApiRequest(request)
+                   : await serveUiAsset(fileSystem, request, options.ui ?? {}) ?? new Response("Not Found", { status: 404 });
+                 await writeNodeResponse(nodeResponse, response);
+@@ -536,7 +603,7 @@ export const createLocalExecutorServer = (
+     }
+ 
+     const resolvedAddress = address as AddressInfo;
+-    const baseUrl = `http://${host}:${resolvedAddress.port}`;
++    const baseUrl = `http://${host}:${resolvedAddress.port}${basePath}`;
+     requestHandler.setBaseUrl(baseUrl);
+ 
+     return {
+diff --git a/packages/platform/server/src/openapi-upload-storage.ts b/packages/platform/server/src/openapi-upload-storage.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..17acb33756e178d2ba40f7991d5343862f11358a
+--- /dev/null
++++ b/packages/platform/server/src/openapi-upload-storage.ts
+@@ -0,0 +1,197 @@
++import { createHash } from "node:crypto";
++import { extname, join } from "node:path";
++import { FileSystem } from "@effect/platform";
++import { NodeFileSystem } from "@effect/platform-node";
++import type { OpenApiSpecUploadStorage } from "@executor/plugin-openapi-sdk";
++import {
++  OpenApiSpecUploadResultSchema,
++  buildOpenApiUploadedSpecUrl,
++  parseOpenApiUploadedSpecUrl,
++  type OpenApiSpecUploadResult,
++} from "@executor/plugin-openapi-shared";
++import * as Effect from "effect/Effect";
++import * as Schema from "effect/Schema";
++
++const decodeUploadRecord = Schema.decodeUnknownSync(OpenApiSpecUploadResultSchema);
++const encodeUploadRecord = Schema.encodeSync(OpenApiSpecUploadResultSchema);
++
++const toError = (cause: unknown): Error =>
++  cause instanceof Error ? cause : new Error(String(cause));
++
++const bindNodeFileSystem = <A, E>(
++  effect: Effect.Effect<A, E, FileSystem.FileSystem>,
++): Effect.Effect<A, E, never> =>
++  effect.pipe(Effect.provide(NodeFileSystem.layer));
++
++const sha256ForText = (text: string): string =>
++  createHash("sha256").update(text, "utf8").digest("hex");
++
++const contentPath = (input: {
++  rootDir: string;
++  sha256: string;
++  filename: string;
++}): string =>
++  join(input.rootDir, `${input.sha256}.document${extname(input.filename).toLowerCase()}`);
++
++const metadataPath = (input: {
++  rootDir: string;
++  sha256: string;
++}): string => join(input.rootDir, `${input.sha256}.json`);
++
++const createUploadRecord = (input: {
++  filename: string;
++  contentType: string | null;
++  text: string;
++  sha256: string;
++}): OpenApiSpecUploadResult => ({
++  specUrl: buildOpenApiUploadedSpecUrl({
++    sha256: input.sha256,
++    filename: input.filename,
++  }),
++  filename: input.filename,
++  contentType: input.contentType,
++  sizeBytes: Buffer.byteLength(input.text, "utf8"),
++  sha256: input.sha256,
++});
++
++const readUploadRecord = (path: string): Effect.Effect<OpenApiSpecUploadResult | null, Error, never> =>
++  bindNodeFileSystem(
++    Effect.gen(function* () {
++      const fileSystem = yield* FileSystem.FileSystem;
++      const exists = yield* fileSystem.exists(path).pipe(Effect.mapError(toError));
++      if (!exists) {
++        return null;
++      }
++
++      const contents = yield* fileSystem.readFileString(path, "utf8").pipe(
++        Effect.mapError(toError),
++      );
++      return decodeUploadRecord(JSON.parse(contents));
++    }),
++  );
++
++const createInMemoryOpenApiUploadStorage = (): OpenApiSpecUploadStorage => {
++  const recordsByHash = new Map<string, OpenApiSpecUploadResult>();
++  const textBySpecUrl = new Map<string, string>();
++
++  return {
++    put: ({ filename, contentType, text }) =>
++      Effect.sync(() => {
++        const sha256 = sha256ForText(text);
++        const existing = recordsByHash.get(sha256);
++        if (existing) {
++          textBySpecUrl.set(existing.specUrl, text);
++          return existing;
++        }
++
++        const record = createUploadRecord({
++          filename,
++          contentType,
++          text,
++          sha256,
++        });
++        recordsByHash.set(sha256, record);
++        textBySpecUrl.set(record.specUrl, text);
++        return record;
++      }),
++    getBySpecUrl: (specUrl) =>
++      Effect.sync(() => textBySpecUrl.get(specUrl) ?? null),
++    getMetadataBySpecUrl: (specUrl) =>
++      Effect.sync(() => {
++        for (const record of recordsByHash.values()) {
++          if (record.specUrl === specUrl) {
++            return record;
++          }
++        }
++        return null;
++      }),
++  };
++};
++
++export const createFileOpenApiUploadStorage = (input: {
++  rootDir: string;
++}): OpenApiSpecUploadStorage =>
++  input.rootDir === ":memory:"
++    ? createInMemoryOpenApiUploadStorage()
++    : {
++        put: ({ filename, contentType, text }) =>
++          bindNodeFileSystem(
++            Effect.gen(function* () {
++              const fileSystem = yield* FileSystem.FileSystem;
++              const sha256 = sha256ForText(text);
++              const metadata = metadataPath({
++                rootDir: input.rootDir,
++                sha256,
++              });
++              const existing = yield* readUploadRecord(metadata);
++              if (existing) {
++                return existing;
++              }
++
++              const record = createUploadRecord({
++                filename,
++                contentType,
++                text,
++                sha256,
++              });
++              const content = contentPath({
++                rootDir: input.rootDir,
++                sha256,
++                filename: record.filename,
++              });
++
++              yield* fileSystem.makeDirectory(input.rootDir, {
++                recursive: true,
++              }).pipe(Effect.mapError(toError));
++              yield* fileSystem.writeFileString(content, text).pipe(
++                Effect.mapError(toError),
++              );
++              yield* fileSystem.writeFileString(
++                metadata,
++                `${JSON.stringify(encodeUploadRecord(record), null, 2)}\n`,
++              ).pipe(Effect.mapError(toError));
++
++              return record;
++            }),
++          ),
++        getBySpecUrl: (specUrl) =>
++          bindNodeFileSystem(
++            Effect.gen(function* () {
++              const fileSystem = yield* FileSystem.FileSystem;
++              const parsed = parseOpenApiUploadedSpecUrl(specUrl);
++              if (parsed === null) {
++                return null;
++              }
++
++              const path = contentPath({
++                rootDir: input.rootDir,
++                sha256: parsed.sha256,
++                filename: parsed.filename,
++              });
++              const exists = yield* fileSystem.exists(path).pipe(Effect.mapError(toError));
++              if (!exists) {
++                return null;
++              }
++
++              return yield* fileSystem.readFileString(path, "utf8").pipe(
++                Effect.mapError(toError),
++              );
++            }),
++          ),
++        getMetadataBySpecUrl: (specUrl) =>
++          bindNodeFileSystem(
++            Effect.gen(function* () {
++              const parsed = parseOpenApiUploadedSpecUrl(specUrl);
++              if (parsed === null) {
++                return null;
++              }
++
++              return yield* readUploadRecord(
++                metadataPath({
++                  rootDir: input.rootDir,
++                  sha256: parsed.sha256,
++                }),
++              );
++            }),
++          ),
++      };
+diff --git a/plugins/openapi/http/index.ts b/plugins/openapi/http/index.ts
+index e2f8a1843572f570062221490b8644d8f5cec36f..ed53bd85d1c83a221dec2df7e4a6bf6e15fc0e33 100644
+--- a/plugins/openapi/http/index.ts
++++ b/plugins/openapi/http/index.ts
+@@ -27,10 +27,14 @@ import {
+   OpenApiConnectInputSchema,
+   OpenApiPreviewRequestSchema,
+   OpenApiPreviewResponseSchema,
++  OpenApiSpecUploadPayloadSchema,
++  OpenApiSpecUploadResultSchema,
+   OpenApiSourceConfigPayloadSchema,
+   type OpenApiConnectInput,
+   type OpenApiPreviewRequest,
+   type OpenApiPreviewResponse,
++  type OpenApiSpecUploadPayload,
++  type OpenApiSpecUploadResult,
+   type OpenApiSourceConfigPayload,
+   type OpenApiUpdateSourceInput,
+ } from "@executor/plugin-openapi-shared";
+@@ -40,6 +44,9 @@ type OpenApiExecutorExtension = {
+     previewDocument: (
+       input: OpenApiPreviewRequest,
+     ) => Effect.Effect<OpenApiPreviewResponse, Error, never>;
++    uploadSpec: (
++      input: OpenApiSpecUploadPayload,
++    ) => Effect.Effect<OpenApiSpecUploadResult, Error, never>;
+     createSource: (
+       input: OpenApiConnectInput,
+     ) => Effect.Effect<Source, Error, never>;
+@@ -78,6 +85,14 @@ export const OpenApiHttpGroup = HttpApiGroup.make("openapi")
+       .addError(ControlPlaneForbiddenError)
+       .addError(ControlPlaneStorageError),
+   )
++  .add(
++    HttpApiEndpoint.post("uploadSpec")`/workspaces/${workspaceIdParam}/plugins/openapi/uploads`
++      .setPayload(OpenApiSpecUploadPayloadSchema)
++      .addSuccess(OpenApiSpecUploadResultSchema)
++      .addError(ControlPlaneBadRequestError)
++      .addError(ControlPlaneForbiddenError)
++      .addError(ControlPlaneStorageError),
++  )
+   .add(
+     HttpApiEndpoint.get("getSourceConfig")`/workspaces/${workspaceIdParam}/plugins/openapi/sources/${sourceIdParam}`
+       .addSuccess(OpenApiSourceConfigPayloadSchema)
+@@ -168,6 +183,15 @@ export const openApiHttpPlugin = (): ExecutorHttpPlugin<
+             Effect.mapError(toBadRequestError("openapi.previewDocument")),
+           )
+         )
++        .handle("uploadSpec", ({ path, payload }) =>
++          resolveRequestedLocalWorkspace(
++            "openapi.uploadSpec",
++            path.workspaceId,
++          ).pipe(
++            Effect.flatMap(() => executor.openapi.uploadSpec(payload)),
++            Effect.mapError(toBadRequestError("openapi.uploadSpec")),
++          )
++        )
+         .handle("createSource", ({ path, payload }) =>
+           resolveRequestedLocalWorkspace(
+             "openapi.createSource",
+diff --git a/plugins/openapi/react/components.tsx b/plugins/openapi/react/components.tsx
+index 1d6e877242c1b0ea75833ba08b2f3677b6cc9299..49dc106ea4f8abc66c831cbad52de0c8e376be5a 100644
+--- a/plugins/openapi/react/components.tsx
++++ b/plugins/openapi/react/components.tsx
+@@ -30,11 +30,17 @@ import {
+ import {
+   openApiHttpApiExtension,
+ } from "@executor/plugin-openapi-http";
++import {
++  getOpenApiUploadedSpecFilename,
++  isOpenApiUploadedSpecUrl,
++} from "@executor/plugin-openapi-shared";
+ import type {
+   OpenApiConnectInput,
+   OpenApiPreviewRequest,
+   OpenApiPreviewSecurityScheme,
+   OpenApiPreviewResponse,
++  OpenApiSpecUploadPayload,
++  OpenApiSpecUploadResult,
+   OpenApiSourceConfigPayload,
+ } from "@executor/plugin-openapi-shared";
+ import { startTransition, useEffect, useState, type ReactNode } from "react";
+@@ -154,6 +160,10 @@ const Section = (props: {
+ 
+ const isPreviewableSpecUrl = (value: string): boolean => {
+   const trimmed = value.trim();
++  if (isOpenApiUploadedSpecUrl(trimmed)) {
++    return true;
++  }
++
+   if (!/^https?:\/\//i.test(trimmed)) {
+     return false;
+   }
+@@ -215,6 +225,19 @@ const trimToNull = (value: string): string | null => {
+   return trimmed.length > 0 ? trimmed : null;
+ };
+ 
++const formatFileSize = (sizeBytes: number | null): string | null => {
++  if (sizeBytes === null) {
++    return null;
++  }
++  if (sizeBytes < 1024) {
++    return `${sizeBytes} B`;
++  }
++  if (sizeBytes < 1024 * 1024) {
++    return `${(sizeBytes / 1024).toFixed(1)} KiB`;
++  }
++  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MiB`;
++};
++
+ const authFromSecretValue = (
+   authKind: OpenApiConnectInput["auth"]["kind"],
+   value: string,
+@@ -252,8 +275,19 @@ function OpenApiSourceForm(props: {
+     openApiHttpClient.mutation("openapi", "previewDocument"),
+     { mode: "promise" },
+   );
++  const uploadSpec = useAtomSet(
++    openApiHttpClient.mutation("openapi", "uploadSpec"),
++    { mode: "promise" },
++  );
+   const [name, setName] = useState(props.initialValue.name);
+   const [specUrl, setSpecUrl] = useState(props.initialValue.specUrl);
++  const [specSourceMode, setSpecSourceMode] = useState<"url" | "upload">(
++    isOpenApiUploadedSpecUrl(props.initialValue.specUrl) ? "upload" : "url",
++  );
++  const [uploadedSpecFilename, setUploadedSpecFilename] = useState(
++    getOpenApiUploadedSpecFilename(props.initialValue.specUrl) ?? "",
++  );
++  const [uploadedSpecSizeBytes, setUploadedSpecSizeBytes] = useState<number | null>(null);
+   const [baseUrl, setBaseUrl] = useState(props.initialValue.baseUrl ?? "");
+   const [authKind, setAuthKind] = useState<OpenApiConnectInput["auth"]["kind"]>(
+     props.initialValue.auth.kind,
+@@ -281,6 +315,15 @@ function OpenApiSourceForm(props: {
+       payload,
+     })
+   );
++  const uploadMutation = useExecutorMutation<
++    OpenApiSpecUploadPayload,
++    OpenApiSpecUploadResult
++  >(async (payload) =>
++    uploadSpec({
++      path: { workspaceId: props.workspaceId },
++      payload,
++    })
++  );
+   const submitMutation = useExecutorMutation<OpenApiConnectInput, void>(props.onSubmit);
+ 
+   const runPreview = async (input: {
+@@ -358,7 +401,7 @@ function OpenApiSourceForm(props: {
+       return;
+     }
+     if (!trimmedSpecUrl) {
+-      setError("Spec URL is required.");
++      setError(specSourceMode === "upload" ? "Upload an OpenAPI document." : "Spec URL is required.");
+       return;
+     }
+     if (authKind === "bearer" && tokenSecretRef.trim().length === 0) {
+@@ -384,6 +427,29 @@ function OpenApiSourceForm(props: {
+     }
+   };
+ 
++  const handleOpenApiFileSelected = async (file: File | null) => {
++    if (file === null) {
++      return;
++    }
++
++    setError(null);
++
++    try {
++      const uploaded = await uploadMutation.mutateAsync({
++        filename: file.name,
++        contentType: file.type || null,
++        text: await file.text(),
++      });
++      setSpecSourceMode("upload");
++      setSpecUrl(uploaded.specUrl);
++      setUploadedSpecFilename(uploaded.filename);
++      setUploadedSpecSizeBytes(uploaded.sizeBytes);
++      setLastPreviewedSpecUrl(null);
++    } catch (cause) {
++      setError(cause instanceof Error ? cause.message : "Failed uploading OpenAPI document.");
++    }
++  };
++
+   return (
+     <div className="space-y-6 rounded-lg border border-border bg-card p-6 text-sm ring-1 ring-foreground/[0.04]">
+       <Section title="Connection">
+@@ -401,18 +467,77 @@ function OpenApiSourceForm(props: {
+           </div>
+ 
+           <div className="grid gap-2">
+-            <Label>Spec URL</Label>
+-            <Input
+-              value={specUrl}
+-              onChange={(event) => setSpecUrl(event.target.value)}
+-              onBlur={() => {
+-                void runPreview({ mode: "manual" });
+-              }}
+-              placeholder="https://example.com/openapi.json"
+-              className="font-mono text-xs"
+-            />
++            <Label>Spec source</Label>
++            <div className="inline-flex rounded-lg border border-border bg-background/70 p-1">
++              {(["url", "upload"] as const).map((mode) => (
++                <Button
++                  key={mode}
++                  type="button"
++                  variant={specSourceMode === mode ? "default" : "ghost"}
++                  size="sm"
++                  onClick={() => {
++                    setSpecSourceMode(mode);
++                    if (mode === "url" && isOpenApiUploadedSpecUrl(specUrl)) {
++                      setSpecUrl("");
++                      setUploadedSpecFilename("");
++                      setUploadedSpecSizeBytes(null);
++                      setPreview(null);
++                      setLastPreviewedSpecUrl(null);
++                    }
++                  }}
++                  className="rounded-md px-3 py-1.5"
++                >
++                  {mode === "url" ? "URL" : "Upload file"}
++                </Button>
++              ))}
++            </div>
+           </div>
+ 
++          {specSourceMode === "url" ? (
++            <div className="grid gap-2">
++              <Label>Spec URL</Label>
++              <Input
++                value={specUrl}
++                onChange={(event) => setSpecUrl(event.target.value)}
++                onBlur={() => {
++                  void runPreview({ mode: "manual" });
++                }}
++                placeholder="https://example.com/openapi.json"
++                className="font-mono text-xs"
++              />
++            </div>
++          ) : (
++            <div className="grid gap-2">
++              <Label>Uploaded file</Label>
++              <div className="space-y-3 rounded-xl border border-border bg-background/60 p-3">
++                <input
++                  type="file"
++                  accept=".json,.yaml,.yml,application/json,application/yaml,text/yaml"
++                  onChange={(event) => {
++                    void handleOpenApiFileSelected(event.target.files?.[0] ?? null);
++                    event.currentTarget.value = "";
++                  }}
++                  className="block w-full text-[12px] text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-[12px] file:font-medium file:text-primary-foreground"
++                />
++                {isOpenApiUploadedSpecUrl(specUrl) && (
++                  <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card/80 px-3 py-2 text-[12px]">
++                    <div className="min-w-0">
++                      <div className="truncate font-medium text-foreground">
++                        {uploadedSpecFilename || getOpenApiUploadedSpecFilename(specUrl) || "Uploaded OpenAPI file"}
++                      </div>
++                      <div className="text-muted-foreground">
++                        {formatFileSize(uploadedSpecSizeBytes) ?? "Stored locally in executor"}
++                      </div>
++                    </div>
++                    <span className="shrink-0 text-muted-foreground">
++                      Replace
++                    </span>
++                  </div>
++                )}
++              </div>
++            </div>
++          )}
++
+           <div className="grid gap-2">
+             <Label>Base URL</Label>
+             <Input
+@@ -529,9 +654,13 @@ function OpenApiSourceForm(props: {
+           onClick={() => {
+             void handleSubmit();
+           }}
+-          disabled={submitMutation.status === "pending"}
++          disabled={submitMutation.status === "pending" || uploadMutation.status === "pending"}
+         >
+-          {submitMutation.status === "pending" ? props.busyLabel : props.submitLabel}
++          {uploadMutation.status === "pending"
++            ? "Uploading..."
++            : submitMutation.status === "pending"
++              ? props.busyLabel
++              : props.submitLabel}
+         </Button>
+       </div>
+     </div>
+diff --git a/plugins/openapi/sdk/index.ts b/plugins/openapi/sdk/index.ts
+index 894968dcdea7e5c0e0ca612efcdc53b1d6f9622f..10ee2cf230378830f853ecd55d50d91abf702e16 100644
+--- a/plugins/openapi/sdk/index.ts
++++ b/plugins/openapi/sdk/index.ts
+@@ -1,4 +1,5 @@
+ import { createHash } from "node:crypto";
++import { extname } from "node:path";
+ import * as Effect from "effect/Effect";
+ import * as Option from "effect/Option";
+ import * as Schema from "effect/Schema";
+@@ -29,13 +30,20 @@ import {
+   OpenApiConnectInputSchema,
+   OpenApiPreviewRequestSchema,
+   OpenApiPreviewResponseSchema,
++  OpenApiSpecUploadPayloadSchema,
++  OpenApiSpecUploadResultSchema,
+   OpenApiSourceConfigPayloadSchema,
+   OpenApiUpdateSourceInputSchema,
++  buildOpenApiUploadedSpecUrl,
+   deriveOpenApiNamespace,
++  isOpenApiUploadedSpecUrl,
+   previewOpenApiDocument,
++  previewOpenApiDocumentText,
+   type OpenApiConnectInput,
+   type OpenApiPreviewRequest,
+   type OpenApiPreviewResponse,
++  type OpenApiSpecUploadPayload,
++  type OpenApiSpecUploadResult,
+   type OpenApiSourceConfigPayload,
+   type OpenApiStoredSourceData,
+   type OpenApiUpdateSourceInput,
+@@ -68,6 +76,63 @@ const OpenApiSourceIdInputSchema = Schema.Struct({
+ const stableSourceHash = (value: OpenApiStoredSourceData): string =>
+   createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 24);
+ 
++const OPENAPI_SPEC_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
++const ALLOWED_OPENAPI_UPLOAD_EXTENSIONS = new Set([".json", ".yaml", ".yml"]);
++
++const sanitizeUploadFilename = (filename: string): string =>
++  filename
++    .trim()
++    .replaceAll("\\", "/")
++    .split("/")
++    .filter((segment) => segment.length > 0)
++    .at(-1)
++    ?? "";
++
++const validateOpenApiUploadInput = (input: OpenApiSpecUploadPayload): {
++  filename: string;
++  contentType: string | null;
++  text: string;
++  sizeBytes: number;
++  sha256: string;
++  specUrl: string;
++} => {
++  const filename = sanitizeUploadFilename(input.filename);
++  if (filename.length === 0) {
++    throw new Error("Filename is required.");
++  }
++  if (filename.length > 255) {
++    throw new Error("Filename must be 255 characters or fewer.");
++  }
++
++  const extension = extname(filename).toLowerCase();
++  if (!ALLOWED_OPENAPI_UPLOAD_EXTENSIONS.has(extension)) {
++    throw new Error("OpenAPI uploads must use .json, .yaml, or .yml files.");
++  }
++
++  const text = input.text;
++  if (text.length === 0) {
++    throw new Error("OpenAPI upload text is required.");
++  }
++
++  const sizeBytes = Buffer.byteLength(text, "utf8");
++  if (sizeBytes > OPENAPI_SPEC_UPLOAD_MAX_BYTES) {
++    throw new Error("OpenAPI upload exceeds the 10 MiB size limit.");
++  }
++
++  const sha256 = createHash("sha256").update(text, "utf8").digest("hex");
++  return {
++    filename,
++    contentType: input.contentType,
++    text,
++    sizeBytes,
++    sha256,
++    specUrl: buildOpenApiUploadedSpecUrl({
++      sha256,
++      filename,
++    }),
++  };
++};
++
+ export type OpenApiSourceStorage = {
+   get: (input: {
+     scopeId: string;
+@@ -84,10 +149,23 @@ export type OpenApiSourceStorage = {
+   }) => Effect.Effect<void, Error, never>;
+ };
+ 
++export type OpenApiSpecUploadStorage = {
++  put: (
++    input: OpenApiSpecUploadPayload,
++  ) => Effect.Effect<OpenApiSpecUploadResult, Error, never>;
++  getBySpecUrl: (specUrl: string) => Effect.Effect<string | null, Error, never>;
++  getMetadataBySpecUrl?: (
++    specUrl: string,
++  ) => Effect.Effect<OpenApiSpecUploadResult | null, Error, never>;
++};
++
+ export type OpenApiSdk = {
+   previewDocument: (
+     input: OpenApiPreviewRequest,
+   ) => Effect.Effect<OpenApiPreviewResponse, Error, never>;
++  uploadSpec: (
++    input: OpenApiSpecUploadPayload,
++  ) => Effect.Effect<OpenApiSpecUploadResult, Error, never>;
+   getSourceConfig: (
+     sourceId: Source["id"],
+   ) => Effect.Effect<OpenApiSourceConfigPayload, Error, never>;
+@@ -107,6 +185,46 @@ export type OpenApiSdk = {
+ 
+ export type OpenApiSdkPluginOptions = {
+   storage: OpenApiSourceStorage;
++  uploads: OpenApiSpecUploadStorage;
++};
++
++export const createInMemoryOpenApiSpecUploadStorage = (): OpenApiSpecUploadStorage => {
++  const recordsByHash = new Map<string, OpenApiSpecUploadResult>();
++  const textBySpecUrl = new Map<string, string>();
++
++  return {
++    put: (input) =>
++      Effect.sync(() => {
++        const validated = validateOpenApiUploadInput(input);
++        const existing = recordsByHash.get(validated.sha256);
++        if (existing) {
++          textBySpecUrl.set(existing.specUrl, validated.text);
++          return existing;
++        }
++
++        const record: OpenApiSpecUploadResult = {
++          specUrl: validated.specUrl,
++          filename: validated.filename,
++          contentType: validated.contentType,
++          sizeBytes: validated.sizeBytes,
++          sha256: validated.sha256,
++        };
++        recordsByHash.set(record.sha256, record);
++        textBySpecUrl.set(record.specUrl, validated.text);
++        return record;
++      }),
++    getBySpecUrl: (specUrl) =>
++      Effect.sync(() => textBySpecUrl.get(specUrl) ?? null),
++    getMetadataBySpecUrl: (specUrl) =>
++      Effect.sync(() => {
++        for (const record of recordsByHash.values()) {
++          if (record.specUrl === specUrl) {
++            return record;
++          }
++        }
++        return null;
++      }),
++  };
+ };
+ 
+ const OpenApiExecutorAddInputSchema = Schema.Struct({
+@@ -444,16 +562,62 @@ const requestOpenApiDocument = (input: {
+       cause instanceof Error ? cause : new Error(String(cause)),
+   });
+ 
++const readUploadedOpenApiDocument = (input: {
++  specUrl: string;
++  uploads: OpenApiSpecUploadStorage;
++}): Effect.Effect<string, Error, never> =>
++  Effect.gen(function* () {
++    const text = yield* input.uploads.getBySpecUrl(input.specUrl);
++    if (text === null) {
++      return yield* runtimeEffectError(
++        "plugins/openapi/sdk",
++        `Uploaded OpenAPI spec is unavailable for ${input.specUrl}`,
++      );
++    }
++
++    return text;
++  });
++
++const previewResolvedOpenApiDocument = (input: {
++  specUrl: string;
++  uploads: OpenApiSpecUploadStorage;
++}): Effect.Effect<OpenApiPreviewResponse, Error, never> =>
++  isOpenApiUploadedSpecUrl(input.specUrl)
++    ? Effect.gen(function* () {
++        const text = yield* readUploadedOpenApiDocument(input);
++        return previewOpenApiDocumentText({
++          specUrl: input.specUrl,
++          text,
++        });
++      })
++    : Effect.tryPromise({
++        try: () => previewOpenApiDocument({ specUrl: input.specUrl }),
++        catch: (cause) =>
++          cause instanceof Error ? cause : new Error(String(cause)),
++      });
++
+ const fetchOpenApiDocument = (
+   input: {
+     stored: OpenApiStoredSourceData;
+     bearerToken: string | null;
++    uploads: OpenApiSpecUploadStorage;
+   },
+ ): Effect.Effect<{
+   text: string;
+   etag: string | null;
+ }, Error, never> =>
+   Effect.gen(function* () {
++    if (isOpenApiUploadedSpecUrl(input.stored.specUrl)) {
++      const text = yield* readUploadedOpenApiDocument({
++        specUrl: input.stored.specUrl,
++        uploads: input.uploads,
++      });
++      return {
++        text,
++        etag: null,
++      };
++    }
++
+     const conditionalResponse = yield* requestOpenApiDocument({
+       url: input.stored.specUrl,
+       stored: input.stored,
+@@ -489,6 +653,19 @@ const fetchOpenApiDocument = (
+     };
+   });
+ 
++const uploadOpenApiSpec = (input: {
++  payload: OpenApiSpecUploadPayload;
++  uploads: OpenApiSpecUploadStorage;
++}): Effect.Effect<OpenApiSpecUploadResult, Error, never> =>
++  Effect.gen(function* () {
++    const validated = validateOpenApiUploadInput(input.payload);
++    return yield* input.uploads.put({
++      filename: validated.filename,
++      contentType: validated.contentType,
++      text: validated.text,
++    });
++  });
++
+ export const openApiSdkPlugin = (
+   options: OpenApiSdkPluginOptions,
+ ) => defineExecutorSourcePlugin<
+@@ -579,23 +756,36 @@ export const openApiSdkPlugin = (
+           const fetched = yield* fetchOpenApiDocument({
+             stored: normalizedStored,
+             bearerToken,
++            uploads: options.uploads,
+           });
+           const manifest = yield* extractOpenApiManifest(source.name, fetched.text, {
+             documentUrl: normalizedStored.specUrl,
+-            loadDocument: async (url) => {
+-              const response = await fetch(url, {
+-                headers: openApiDocumentHeaders({
+-                  stored: normalizedStored,
+-                  bearerToken,
+-                }),
+-              });
+-              if (!response.ok) {
+-                throw new Error(
+-                  `Failed fetching OpenAPI document ${url} (${response.status} ${response.statusText})`,
+-                );
+-              }
+-              return response.text();
+-            },
++            loadDocument: async (url) =>
++              await Effect.runPromise(
++                isOpenApiUploadedSpecUrl(url)
++                  ? readUploadedOpenApiDocument({
++                      specUrl: url,
++                      uploads: options.uploads,
++                    })
++                  : Effect.tryPromise({
++                      try: async () => {
++                        const response = await fetch(url, {
++                          headers: openApiDocumentHeaders({
++                            stored: normalizedStored,
++                            bearerToken,
++                          }),
++                        });
++                        if (!response.ok) {
++                          throw new Error(
++                            `Failed fetching OpenAPI document ${url} (${response.status} ${response.statusText})`,
++                          );
++                        }
++                        return response.text();
++                      },
++                      catch: (cause) =>
++                        cause instanceof Error ? cause : new Error(String(cause)),
++                    }),
++              ),
+           });
+           const definitions = compileOpenApiToolDefinitions(manifest);
+           const now = Date.now();
+@@ -778,10 +968,20 @@ export const openApiSdkPlugin = (
+       inputSchema: OpenApiPreviewRequestSchema,
+       outputSchema: OpenApiPreviewResponseSchema,
+       execute: ({ args }) =>
+-        Effect.tryPromise({
+-          try: () => previewOpenApiDocument(args),
+-          catch: (cause) =>
+-            cause instanceof Error ? cause : new Error(String(cause)),
++        previewResolvedOpenApiDocument({
++          specUrl: args.specUrl,
++          uploads: options.uploads,
++        }),
++    },
++    {
++      name: "uploadSpec",
++      description: "Upload an OpenAPI document into local executor storage.",
++      inputSchema: OpenApiSpecUploadPayloadSchema,
++      outputSchema: OpenApiSpecUploadResultSchema,
++      execute: ({ args }) =>
++        uploadOpenApiSpec({
++          payload: args,
++          uploads: options.uploads,
+         }),
+     },
+     {
+@@ -828,10 +1028,14 @@ export const openApiSdkPlugin = (
+ 
+     return {
+       previewDocument: (input) =>
+-        Effect.tryPromise({
+-          try: () => previewOpenApiDocument(input),
+-          catch: (cause) =>
+-            cause instanceof Error ? cause : new Error(String(cause)),
++        previewResolvedOpenApiDocument({
++          specUrl: input.specUrl,
++          uploads: options.uploads,
++        }),
++      uploadSpec: (input) =>
++        uploadOpenApiSpec({
++          payload: input,
++          uploads: options.uploads,
+         }),
+       getSourceConfig: (sourceId) =>
+         provideRuntime(source.getSourceConfig(sourceId)),
+diff --git a/plugins/openapi/sdk/refresh.test.ts b/plugins/openapi/sdk/refresh.test.ts
+index 5d2ebb206957dfac500dec1c1576e138f666fed8..0825ef6f31a6fc854f6bec2f513c7972ad774196 100644
+--- a/plugins/openapi/sdk/refresh.test.ts
++++ b/plugins/openapi/sdk/refresh.test.ts
+@@ -37,6 +37,7 @@ import {
+   SourceIdSchema,
+ } from "../../../packages/platform/sdk/src/schema/ids";
+ import {
++  createInMemoryOpenApiSpecUploadStorage,
+   openApiSdkPlugin,
+ } from "./index";
+ 
+@@ -189,6 +190,7 @@ describe("openapi refresh", () => {
+                 stored = value;
+               }),
+           },
++          uploads: createInMemoryOpenApiSpecUploadStorage(),
+         });
+         const runtime = registerExecutorSdkPlugins([plugin]).getSourceContribution(
+           "openapi",
+diff --git a/plugins/openapi/shared/index.ts b/plugins/openapi/shared/index.ts
+index 03a0deb32c2aba6792499b17fb35347a4c609650..47f3e0083d363e1045e335a2ae9a6c7201b96c8c 100644
+--- a/plugins/openapi/shared/index.ts
++++ b/plugins/openapi/shared/index.ts
+@@ -53,6 +53,20 @@ export const OpenApiPreviewRequestSchema = Schema.Struct({
+   specUrl: Schema.String,
+ });
+ 
++export const OpenApiSpecUploadPayloadSchema = Schema.Struct({
++  filename: Schema.String,
++  contentType: Schema.NullOr(Schema.String),
++  text: Schema.String,
++});
++
++export const OpenApiSpecUploadResultSchema = Schema.Struct({
++  specUrl: Schema.String,
++  filename: Schema.String,
++  contentType: Schema.NullOr(Schema.String),
++  sizeBytes: Schema.Number,
++  sha256: Schema.String,
++});
++
+ export const OpenApiPreviewSecuritySchemeSchema = Schema.Struct({
+   name: Schema.String,
+   kind: Schema.Literal("apiKey", "http", "oauth2", "openIdConnect", "unknown"),
+@@ -80,9 +94,89 @@ export type OpenApiPreviewRequest = typeof OpenApiPreviewRequestSchema.Type;
+ export type OpenApiPreviewSecurityScheme =
+   typeof OpenApiPreviewSecuritySchemeSchema.Type;
+ export type OpenApiPreviewResponse = typeof OpenApiPreviewResponseSchema.Type;
++export type OpenApiSpecUploadPayload = typeof OpenApiSpecUploadPayloadSchema.Type;
++export type OpenApiSpecUploadResult = typeof OpenApiSpecUploadResultSchema.Type;
+ export type OpenApiUpdateSourceInput =
+   typeof OpenApiUpdateSourceInputSchema.Type;
+ 
++const OPENAPI_UPLOAD_URL_PROTOCOL = "executor-upload:";
++const OPENAPI_UPLOAD_URL_PREFIX = "executor-upload://openapi/";
++const OPENAPI_UPLOAD_FILENAME_FALLBACK = "openapi";
++const OPENAPI_UPLOAD_SHA256_PATTERN = /^[a-f0-9]{64}$/;
++
++export type OpenApiUploadedSpecUrlParts = {
++  sha256: string;
++  filename: string;
++};
++
++const sanitizeFilenameSegment = (value: string): string => {
++  const trimmed = value.trim();
++  const normalized = trimmed
++    .replaceAll("\\", "/")
++    .split("/")
++    .filter((segment) => segment.length > 0)
++    .at(-1)
++    ?? OPENAPI_UPLOAD_FILENAME_FALLBACK;
++  const sanitized = normalized
++    .replace(/[^A-Za-z0-9._-]+/g, "-")
++    .replace(/^-+|-+$/g, "");
++
++  return sanitized.length > 0 ? sanitized : OPENAPI_UPLOAD_FILENAME_FALLBACK;
++};
++
++export const buildOpenApiUploadedSpecUrl = (input: {
++  sha256: string;
++  filename: string;
++}): string =>
++  `${OPENAPI_UPLOAD_URL_PREFIX}${input.sha256}/${sanitizeFilenameSegment(input.filename)}`;
++
++export const parseOpenApiUploadedSpecUrl = (
++  specUrl: string,
++): OpenApiUploadedSpecUrlParts | null => {
++  if (!specUrl.startsWith(OPENAPI_UPLOAD_URL_PREFIX)) {
++    return null;
++  }
++
++  let parsed: URL;
++  try {
++    parsed = new URL(specUrl);
++  } catch {
++    return null;
++  }
++
++  if (parsed.protocol !== OPENAPI_UPLOAD_URL_PROTOCOL || parsed.hostname !== "openapi") {
++    return null;
++  }
++
++  const segments = parsed.pathname
++    .split("/")
++    .filter((segment) => segment.length > 0);
++  if (segments.length !== 2) {
++    return null;
++  }
++
++  const [sha256, filename] = segments;
++  if (!OPENAPI_UPLOAD_SHA256_PATTERN.test(sha256)) {
++    return null;
++  }
++
++  const sanitizedFilename = sanitizeFilenameSegment(filename);
++  if (sanitizedFilename !== filename) {
++    return null;
++  }
++
++  return {
++    sha256,
++    filename,
++  };
++};
++
++export const isOpenApiUploadedSpecUrl = (specUrl: string): boolean =>
++  parseOpenApiUploadedSpecUrl(specUrl) !== null;
++
++export const getOpenApiUploadedSpecFilename = (specUrl: string): string | null =>
++  parseOpenApiUploadedSpecUrl(specUrl)?.filename ?? null;
++
+ type JsonRecord = Record<string, unknown>;
+ 
+ const asRecord = (value: unknown): JsonRecord | null =>
+@@ -153,6 +247,10 @@ const deriveBaseUrl = (document: JsonRecord, specUrl: string): string | null =>
+     return null;
+   }
+ 
++  if (isOpenApiUploadedSpecUrl(specUrl) && !/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(rawUrl)) {
++    return rawUrl;
++  }
++
+   try {
+     return new URL(rawUrl, specUrl).toString();
+   } catch {
+@@ -223,16 +321,11 @@ const countOperations = (document: JsonRecord): number => {
+   return count;
+ };
+ 
+-export const previewOpenApiDocument = async (
+-  input: OpenApiPreviewRequest,
+-): Promise<OpenApiPreviewResponse> => {
+-  const response = await fetch(input.specUrl);
+-  if (!response.ok) {
+-    throw new Error(`Failed fetching spec: ${response.status} ${response.statusText}`);
+-  }
+-
+-  const text = await response.text();
+-  const parsed = parseDocument(text);
++export const previewOpenApiDocumentText = (input: {
++  specUrl: string;
++  text: string;
++}): OpenApiPreviewResponse => {
++  const parsed = parseDocument(input.text);
+   const document = asRecord(parsed);
+   if (document === null) {
+     throw new Error("The fetched document is not a valid OpenAPI object.");
+@@ -266,6 +359,20 @@ export const previewOpenApiDocument = async (
+   };
+ };
+ 
++export const previewOpenApiDocument = async (
++  input: OpenApiPreviewRequest,
++): Promise<OpenApiPreviewResponse> => {
++  const response = await fetch(input.specUrl);
++  if (!response.ok) {
++    throw new Error(`Failed fetching spec: ${response.status} ${response.statusText}`);
++  }
++
++  return previewOpenApiDocumentText({
++    specUrl: input.specUrl,
++    text: await response.text(),
++  });
++};
++
+ export const decodeOpenApiStoredSourceData = (
+   value: unknown,
+ ): Effect.Effect<OpenApiStoredSourceData, Error, never> =>
+-- 
+2.53.0
+

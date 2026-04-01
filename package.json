@@ -40,7 +40,7 @@
   },
   "agentMockingbirdInstall": {
     "opencodeVersion": "1.3.5",
-    "executorVersion": "1.2.5"
+    "executorVersion": "1.3.0-beta.5"
   },
   "workspaces": [
     "apps/*",
