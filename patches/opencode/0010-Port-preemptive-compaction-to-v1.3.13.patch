@@ -1,0 +1,817 @@
+From f1b145c1b8d6814f1e65402157a4e01ea7be46b8 Mon Sep 17 00:00:00 2001
+From: Matt Campbell <matt@battleshopper.com>
+Date: Wed, 1 Apr 2026 00:12:47 -0500
+Subject: [PATCH 10/10] Port preemptive compaction to v1.3.13
+
+---
+ .../app/src/components/settings-runtime.tsx   | 202 ++++++++++++++++--
+ packages/opencode/src/config/config.ts        |  14 ++
+ packages/opencode/src/session/compaction.ts   |  30 ++-
+ packages/opencode/src/session/overflow.ts     |  49 ++++-
+ packages/opencode/src/session/prompt.ts       |  49 +++++
+ packages/opencode/test/config/config.test.ts  |  22 ++
+ .../opencode/test/session/compaction.test.ts  |  92 ++++++++
+ packages/opencode/test/session/prompt.test.ts | 125 +++++++++++
+ 8 files changed, 559 insertions(+), 24 deletions(-)
+
+diff --git a/packages/app/src/components/settings-runtime.tsx b/packages/app/src/components/settings-runtime.tsx
+index 808430278..aba98a4cd 100644
+--- a/packages/app/src/components/settings-runtime.tsx
++++ b/packages/app/src/components/settings-runtime.tsx
+@@ -1,18 +1,76 @@
+ import { Button } from "@opencode-ai/ui/button"
++import { Switch } from "@opencode-ai/ui/switch"
+ import { showToast } from "@opencode-ai/ui/toast"
+ import { onMount, Show, type Component } from "solid-js"
+ import { createStore } from "solid-js/store"
+ import { prettyJson, mockingbirdJson } from "@/utils/mockingbird"
+-import { MockingbirdCard, MockingbirdMetaRow, MockingbirdNotice, MockingbirdSettingsPage, MockingbirdSettingsSection, MockingbirdTextArea, MockingbirdToolbar } from "./settings-mockingbird-shared"
++import {
++  MockingbirdCard,
++  MockingbirdInput,
++  MockingbirdMetaRow,
++  MockingbirdNotice,
++  MockingbirdSettingsPage,
++  MockingbirdSettingsSection,
++  MockingbirdTextArea,
++  MockingbirdToolbar,
++} from "./settings-mockingbird-shared"
++
++type RuntimeConfig = {
++  workspace: {
++    pinnedDirectory: string
++  }
++  runtime: {
++    opencode?: {
++      compaction?: {
++        preemptiveIdleMinutes?: number
++        preemptiveThresholdRatio?: number
++        memoryAutoPersist?: boolean
++      }
++    }
++    [key: string]: unknown
++  }
++}
+ 
+ type RuntimePayload = {
+   hash: string
+   path: string
+-  config: {
+-    workspace: {
+-      pinnedDirectory: string
+-    }
+-    runtime: Record<string, unknown>
++  config: RuntimeConfig
++}
++
++type CompactionFormState = {
++  preemptiveIdleMinutes: string
++  preemptiveThresholdPercent: string
++  memoryAutoPersist: boolean
++}
++
++function toCompactionForm(config: RuntimeConfig): CompactionFormState {
++  const compaction = config.runtime.opencode?.compaction
++  return {
++    preemptiveIdleMinutes: String(compaction?.preemptiveIdleMinutes ?? 15),
++    preemptiveThresholdPercent: String(Math.round((compaction?.preemptiveThresholdRatio ?? 0.6) * 100)),
++    memoryAutoPersist: compaction?.memoryAutoPersist ?? true,
++  }
++}
++
++function buildCompactionPatch(form: CompactionFormState) {
++  const preemptiveIdleMinutes = Number(form.preemptiveIdleMinutes)
++  const preemptiveThresholdPercent = Number(form.preemptiveThresholdPercent)
++
++  if (!Number.isFinite(preemptiveIdleMinutes) || preemptiveIdleMinutes < 0) {
++    throw new Error("Preemptive idle threshold must be 0 or greater")
++  }
++  if (
++    !Number.isFinite(preemptiveThresholdPercent) ||
++    preemptiveThresholdPercent < 0 ||
++    preemptiveThresholdPercent > 100
++  ) {
++    throw new Error("Preemptive compaction threshold must be between 0 and 100")
++  }
++
++  return {
++    preemptiveIdleMinutes,
++    preemptiveThresholdRatio: preemptiveThresholdPercent / 100,
++    memoryAutoPersist: form.memoryAutoPersist,
+   }
+ }
+ 
+@@ -20,18 +78,29 @@ export const SettingsRuntime: Component = () => {
+   const [state, setState] = createStore({
+     loading: true,
+     saving: false,
++    savingCompaction: false,
+     error: "",
+     payload: null as RuntimePayload | null,
+-    text: "{\n  \"workspace\": {\n    \"pinnedDirectory\": \"\"\n  },\n  \"runtime\": {}\n}",
++    text: '{\n  "workspace": {\n    "pinnedDirectory": ""\n  },\n  "runtime": {}\n}',
++    compaction: {
++      preemptiveIdleMinutes: "15",
++      preemptiveThresholdPercent: "60",
++      memoryAutoPersist: true,
++    } as CompactionFormState,
+   })
+ 
++  function applyPayload(payload: RuntimePayload) {
++    setState("payload", payload)
++    setState("text", prettyJson(payload.config))
++    setState("compaction", toCompactionForm(payload.config))
++  }
++
+   async function load() {
+     setState("loading", true)
+     setState("error", "")
+     try {
+       const payload = await mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config")
+-      setState("payload", payload)
+-      setState("text", prettyJson(payload.config))
++      applyPayload(payload)
+     } catch (error) {
+       setState("error", error instanceof Error ? error.message : "Failed to load runtime config")
+     } finally {
+@@ -58,8 +127,7 @@ export const SettingsRuntime: Component = () => {
+           expectedHash: state.payload?.hash,
+         }),
+       })
+-      setState("payload", payload)
+-      setState("text", prettyJson(payload.config))
++      applyPayload(payload)
+       showToast({
+         variant: "success",
+         icon: "circle-check",
+@@ -72,6 +140,44 @@ export const SettingsRuntime: Component = () => {
+     }
+   }
+ 
++  async function saveCompaction() {
++    let compaction: ReturnType<typeof buildCompactionPatch>
++    try {
++      compaction = buildCompactionPatch(state.compaction)
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Invalid compaction settings")
++      return
++    }
++
++    setState("savingCompaction", true)
++    setState("error", "")
++    try {
++      const payload = await mockingbirdJson<RuntimePayload>("/api/mockingbird/runtime/config", {
++        method: "PATCH",
++        body: JSON.stringify({
++          patch: {
++            runtime: {
++              opencode: {
++                compaction,
++              },
++            },
++          },
++          expectedHash: state.payload?.hash,
++        }),
++      })
++      applyPayload(payload)
++      showToast({
++        variant: "success",
++        icon: "circle-check",
++        title: "Compaction settings saved",
++      })
++    } catch (error) {
++      setState("error", error instanceof Error ? error.message : "Failed to save compaction settings")
++    } finally {
++      setState("savingCompaction", false)
++    }
++  }
++
+   onMount(() => {
+     void load()
+   })
+@@ -82,10 +188,19 @@ export const SettingsRuntime: Component = () => {
+       description="Edit Agent Mockingbird runtime settings owned outside OpenCode's workspace config."
+       actions={
+         <MockingbirdToolbar>
+-          <Button variant="ghost" size="large" onClick={() => void load()} disabled={state.loading || state.saving}>
++          <Button
++            variant="ghost"
++            size="large"
++            onClick={() => void load()}
++            disabled={state.loading || state.saving || state.savingCompaction}
++          >
+             Refresh
+           </Button>
+-          <Button size="large" onClick={() => void save()} disabled={state.loading || state.saving}>
++          <Button
++            size="large"
++            onClick={() => void save()}
++            disabled={state.loading || state.saving || state.savingCompaction}
++          >
+             Save
+           </Button>
+         </MockingbirdToolbar>
+@@ -105,7 +220,66 @@ export const SettingsRuntime: Component = () => {
+         )}
+       </Show>
+ 
+-      <MockingbirdSettingsSection title="Config editor" description="Replace the current Agent Mockingbird config payload with JSON.">
++      <MockingbirdSettingsSection
++        title="Compaction"
++        description="Tune idle-aware preemptive compaction thresholds and whether durable memory candidates are auto-persisted after compaction."
++        actions={
++          <Button
++            size="large"
++            onClick={() => void saveCompaction()}
++            disabled={state.loading || state.savingCompaction || state.saving}
++          >
++            Save compaction
++          </Button>
++        }
++      >
++        <MockingbirdCard>
++          <div class="flex flex-col gap-2">
++            <div class="text-12-medium text-text-weak">Preemptive idle threshold (minutes)</div>
++            <MockingbirdInput
++              type="number"
++              min="0"
++              step="1"
++              value={state.compaction.preemptiveIdleMinutes}
++              onInput={(event) => setState("compaction", "preemptiveIdleMinutes", event.currentTarget.value)}
++            />
++          </div>
++
++          <div class="flex flex-col gap-2">
++            <div class="text-12-medium text-text-weak">Preemptive compaction threshold (%)</div>
++            <MockingbirdInput
++              type="number"
++              min="0"
++              max="100"
++              step="1"
++              value={state.compaction.preemptiveThresholdPercent}
++              onInput={(event) => setState("compaction", "preemptiveThresholdPercent", event.currentTarget.value)}
++            />
++          </div>
++
++          <div class="flex items-center justify-between gap-3">
++            <div class="flex flex-col gap-1">
++              <div class="text-12-medium text-text-weak">Auto-persist compaction memory candidates</div>
++              <div class="text-12-regular text-text-weak">
++                Persist accepted durable memory candidates without using memory tools inside the hidden compaction
++                agent.
++              </div>
++            </div>
++            <Switch
++              checked={state.compaction.memoryAutoPersist}
++              onChange={(value) => setState("compaction", "memoryAutoPersist", value)}
++              disabled={state.loading || state.savingCompaction}
++            >
++              Enabled
++            </Switch>
++          </div>
++        </MockingbirdCard>
++      </MockingbirdSettingsSection>
++
++      <MockingbirdSettingsSection
++        title="Config editor"
++        description="Replace the current Agent Mockingbird config payload with JSON."
++      >
+         <MockingbirdCard>
+           <MockingbirdTextArea
+             rows={22}
+diff --git a/packages/opencode/src/config/config.ts b/packages/opencode/src/config/config.ts
+index f86d8d32a..9f38b0424 100644
+--- a/packages/opencode/src/config/config.ts
++++ b/packages/opencode/src/config/config.ts
+@@ -1053,6 +1053,20 @@ export namespace Config {
+             .min(0)
+             .optional()
+             .describe("Token buffer for compaction. Leaves enough window to avoid overflow during compaction."),
++          preemptiveIdleMs: z
++            .number()
++            .int()
++            .min(0)
++            .optional()
++            .describe("Trigger automatic compaction before the next real user turn after this much idle time."),
++          preemptiveThresholdRatio: z
++            .number()
++            .min(0)
++            .max(1)
++            .optional()
++            .describe(
++              "Trigger preemptive compaction when the last completed assistant turn used at least this ratio of usable input budget.",
++            ),
+         })
+         .optional(),
+       experimental: z
+diff --git a/packages/opencode/src/session/compaction.ts b/packages/opencode/src/session/compaction.ts
+index 02a8d9484..f7d971a89 100644
+--- a/packages/opencode/src/session/compaction.ts
++++ b/packages/opencode/src/session/compaction.ts
+@@ -2,7 +2,6 @@ import { BusEvent } from "@/bus/bus-event"
+ import { Bus } from "@/bus"
+ import { Session } from "."
+ import { SessionID, MessageID, PartID } from "./schema"
+-import { Instance } from "../project/instance"
+ import { Provider } from "../provider/provider"
+ import { MessageV2 } from "./message-v2"
+ import z from "zod"
+@@ -18,7 +17,7 @@ import { ModelID, ProviderID } from "@/provider/schema"
+ import { Effect, Layer, ServiceMap } from "effect"
+ import { makeRuntime } from "@/effect/run-service"
+ import { InstanceState } from "@/effect/instance-state"
+-import { isOverflow as overflow } from "./overflow"
++import { isOverflow as overflow, shouldPreemptivelyCompact as shouldPreemptivelyCompactCheck } from "./overflow"
+ 
+ export namespace SessionCompaction {
+   const log = Log.create({ service: "session.compaction" })
+@@ -41,6 +40,11 @@ export namespace SessionCompaction {
+       tokens: MessageV2.Assistant["tokens"]
+       model: Provider.Model
+     }) => Effect.Effect<boolean>
++    readonly shouldPreemptivelyCompact: (input: {
++      tokens: MessageV2.Assistant["tokens"]
++      model: Provider.Model
++      idleMs: number
++    }) => Effect.Effect<boolean>
+     readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
+     readonly process: (input: {
+       parentID: MessageID
+@@ -81,6 +85,19 @@ export namespace SessionCompaction {
+         return overflow({ cfg: yield* config.get(), tokens: input.tokens, model: input.model })
+       })
+ 
++      const shouldPreemptivelyCompact = Effect.fn("SessionCompaction.shouldPreemptivelyCompact")(function* (input: {
++        tokens: MessageV2.Assistant["tokens"]
++        model: Provider.Model
++        idleMs: number
++      }) {
++        return shouldPreemptivelyCompactCheck({
++          cfg: yield* config.get(),
++          tokens: input.tokens,
++          model: input.model,
++          idleMs: input.idleMs,
++        })
++      })
++
+       // goes backwards through parts until there are PRUNE_PROTECT tokens worth of tool
+       // calls, then erases output of older tool calls to free context space
+       const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID }) {
+@@ -367,6 +384,7 @@ When constructing the summary, try to stick to this template:
+ 
+       return Service.of({
+         isOverflow,
++        shouldPreemptivelyCompact,
+         prune,
+         process: processCompaction,
+         create,
+@@ -393,6 +411,14 @@ When constructing the summary, try to stick to this template:
+     return runPromise((svc) => svc.isOverflow(input))
+   }
+ 
++  export async function shouldPreemptivelyCompact(input: {
++    tokens: MessageV2.Assistant["tokens"]
++    model: Provider.Model
++    idleMs: number
++  }) {
++    return runPromise((svc) => svc.shouldPreemptivelyCompact(input))
++  }
++
+   export async function prune(input: { sessionID: SessionID }) {
+     return runPromise((svc) => svc.prune(input))
+   }
+diff --git a/packages/opencode/src/session/overflow.ts b/packages/opencode/src/session/overflow.ts
+index f0e52565d..54f0e3ce9 100644
+--- a/packages/opencode/src/session/overflow.ts
++++ b/packages/opencode/src/session/overflow.ts
+@@ -4,19 +4,52 @@ import { ProviderTransform } from "@/provider/transform"
+ import type { MessageV2 } from "./message-v2"
+ 
+ const COMPACTION_BUFFER = 20_000
++const DEFAULT_PREEMPTIVE_THRESHOLD_RATIO = 0.6
+ 
+-export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
+-  if (input.cfg.compaction?.auto === false) return false
+-  const context = input.model.limit.context
+-  if (context === 0) return false
++function inputHasNumber(value: unknown): value is number {
++  return typeof value === "number" && Number.isFinite(value)
++}
+ 
+-  const count =
+-    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
++export function effectiveTokenCount(tokens: MessageV2.Assistant["tokens"]) {
++  return tokens.total || tokens.input + tokens.output + tokens.cache.read + tokens.cache.write
++}
++
++export function usableInputBudget(input: { cfg: Config.Info; model: Provider.Model }) {
++  const context = input.model.limit.context
++  if (context === 0) return 0
+ 
+   const reserved =
+     input.cfg.compaction?.reserved ?? Math.min(COMPACTION_BUFFER, ProviderTransform.maxOutputTokens(input.model))
+-  const usable = input.model.limit.input
++
++  return typeof input.model.limit.input === "number"
+     ? input.model.limit.input - reserved
+     : context - ProviderTransform.maxOutputTokens(input.model)
+-  return count >= usable
++}
++
++export function shouldPreemptivelyCompact(input: {
++  cfg: Config.Info
++  tokens: MessageV2.Assistant["tokens"]
++  model: Provider.Model
++  idleMs: number
++  ratio?: number
++}) {
++  if (input.cfg.compaction?.auto === false) return false
++  const idleThreshold = input.cfg.compaction?.preemptiveIdleMs ?? 0
++  if (input.idleMs < idleThreshold) return false
++
++  const usable = usableInputBudget({ cfg: input.cfg, model: input.model })
++  if (usable <= 0) return false
++
++  const ratio = inputHasNumber(input.ratio)
++    ? input.ratio
++    : (input.cfg.compaction?.preemptiveThresholdRatio ?? DEFAULT_PREEMPTIVE_THRESHOLD_RATIO)
++
++  return effectiveTokenCount(input.tokens) >= usable * ratio
++}
++
++export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
++  if (input.cfg.compaction?.auto === false) return false
++  const usable = usableInputBudget({ cfg: input.cfg, model: input.model })
++  if (usable <= 0) return false
++  return effectiveTokenCount(input.tokens) >= usable
+ }
+diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
+index 083c23cc6..0511dd0b0 100644
+--- a/packages/opencode/src/session/prompt.ts
++++ b/packages/opencode/src/session/prompt.ts
+@@ -65,6 +65,14 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
+ export namespace SessionPrompt {
+   const log = Log.create({ service: "session.prompt" })
+ 
++  function isSyntheticUserMessage(message: MessageV2.WithParts) {
++    return (
++      message.info.role === "user" &&
++      message.parts.length > 0 &&
++      message.parts.every((part) => part.type === "text" && part.synthetic === true)
++    )
++  }
++
+   export interface Interface {
+     readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
+     readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+@@ -147,6 +155,30 @@ export namespace SessionPrompt {
+         yield* runner.cancel
+       })
+ 
++      const shouldPreemptivelyCompactTurn = Effect.fn("SessionPrompt.shouldPreemptivelyCompactTurn")(function* (input: {
++        lastFinished?: MessageV2.Assistant
++        lastUserMessage: MessageV2.WithParts
++        model: Provider.Model
++        hasPendingCompaction: boolean
++      }) {
++        if (!input.lastFinished) return false
++        if (input.lastFinished.summary === true) return false
++        if (input.hasPendingCompaction) return false
++        if (isSyntheticUserMessage(input.lastUserMessage)) return false
++
++        const idleMs = Math.max(
++          0,
++          input.lastUserMessage.info.time.created -
++            (input.lastFinished.time.completed ?? input.lastFinished.time.created),
++        )
++
++        return yield* compaction.shouldPreemptivelyCompact({
++          tokens: input.lastFinished.tokens,
++          model: input.model,
++          idleMs,
++        })
++      })
++
+       const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
+         const ctx = yield* InstanceState.context
+         const parts: PromptInput["parts"] = [{ type: "text", text: template }]
+@@ -1359,6 +1391,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
+             }
+ 
+             if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
++            const lastUserMessage = msgs.findLast((msg) => msg.info.id === lastUser.id)
++            if (!lastUserMessage || lastUserMessage.info.role !== "user") {
++              throw new Error("No user message found in stream. This should never happen.")
++            }
+             if (
+               lastAssistant?.finish &&
+               !["tool-calls"].includes(lastAssistant.finish) &&
+@@ -1379,6 +1415,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
+ 
+             const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+             const task = tasks.pop()
++            const hasPendingCompaction = task?.type === "compaction" || tasks.some((item) => item.type === "compaction")
+ 
+             if (task?.type === "subtask") {
+               yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
+@@ -1397,6 +1434,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
+               continue
+             }
+ 
++            if (
++              yield* shouldPreemptivelyCompactTurn({
++                lastFinished,
++                lastUserMessage,
++                model,
++                hasPendingCompaction,
++              })
++            ) {
++              yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
++              continue
++            }
++
+             if (
+               lastFinished &&
+               lastFinished.summary !== true &&
+diff --git a/packages/opencode/test/config/config.test.ts b/packages/opencode/test/config/config.test.ts
+index ef71ca8cf..f19560ebb 100644
+--- a/packages/opencode/test/config/config.test.ts
++++ b/packages/opencode/test/config/config.test.ts
+@@ -106,6 +106,28 @@ test("loads JSON config file", async () => {
+   })
+ })
+ 
++test("loads compaction preemptive settings from config", async () => {
++  await using tmp = await tmpdir({
++    init: async (dir) => {
++      await writeConfig(dir, {
++        $schema: "https://opencode.ai/config.json",
++        compaction: {
++          preemptiveIdleMs: 900_000,
++          preemptiveThresholdRatio: 0.6,
++        },
++      })
++    },
++  })
++  await Instance.provide({
++    directory: tmp.path,
++    fn: async () => {
++      const config = await Config.get()
++      expect(config.compaction?.preemptiveIdleMs).toBe(900_000)
++      expect(config.compaction?.preemptiveThresholdRatio).toBe(0.6)
++    },
++  })
++})
++
+ test("loads project config from Git Bash and MSYS2 paths on Windows", async () => {
+   // Git Bash and MSYS2 both use /<drive>/... paths on Windows.
+   await check((dir) => {
+diff --git a/packages/opencode/test/session/compaction.test.ts b/packages/opencode/test/session/compaction.test.ts
+index e6d715728..5117211c4 100644
+--- a/packages/opencode/test/session/compaction.test.ts
++++ b/packages/opencode/test/session/compaction.test.ts
+@@ -427,6 +427,98 @@ describe("session.compaction.isOverflow", () => {
+   })
+ })
+ 
++describe("session.compaction.shouldPreemptivelyCompact", () => {
++  test("returns true when idle gap exceeds threshold and usage exceeds ratio", async () => {
++    await using tmp = await tmpdir({
++      init: async (dir) => {
++        await Bun.write(
++          path.join(dir, "opencode.json"),
++          JSON.stringify({
++            compaction: {
++              preemptiveIdleMs: 60_000,
++              preemptiveThresholdRatio: 0.6,
++            },
++          }),
++        )
++      },
++    })
++    await Instance.provide({
++      directory: tmp.path,
++      fn: async () => {
++        const model = createModel({ context: 200_000, output: 32_000 })
++        const tokens = { input: 110_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
++        expect(
++          await SessionCompaction.shouldPreemptivelyCompact({
++            tokens,
++            model,
++            idleMs: 61_000,
++          }),
++        ).toBe(true)
++      },
++    })
++  })
++
++  test("returns false when idle gap is below threshold", async () => {
++    await using tmp = await tmpdir({
++      init: async (dir) => {
++        await Bun.write(
++          path.join(dir, "opencode.json"),
++          JSON.stringify({
++            compaction: {
++              preemptiveIdleMs: 60_000,
++              preemptiveThresholdRatio: 0.6,
++            },
++          }),
++        )
++      },
++    })
++    await Instance.provide({
++      directory: tmp.path,
++      fn: async () => {
++        const model = createModel({ context: 200_000, output: 32_000 })
++        const tokens = { input: 110_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
++        expect(
++          await SessionCompaction.shouldPreemptivelyCompact({
++            tokens,
++            model,
++            idleMs: 59_000,
++          }),
++        ).toBe(false)
++      },
++    })
++  })
++
++  test("returns false when usage is below threshold ratio", async () => {
++    await using tmp = await tmpdir({
++      init: async (dir) => {
++        await Bun.write(
++          path.join(dir, "opencode.json"),
++          JSON.stringify({
++            compaction: {
++              preemptiveIdleMs: 60_000,
++              preemptiveThresholdRatio: 0.6,
++            },
++          }),
++        )
++      },
++    })
++    await Instance.provide({
++      directory: tmp.path,
++      fn: async () => {
++        const model = createModel({ context: 200_000, output: 32_000 })
++        const tokens = { input: 80_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
++        expect(
++          await SessionCompaction.shouldPreemptivelyCompact({
++            tokens,
++            model,
++            idleMs: 61_000,
++          }),
++        ).toBe(false)
++      },
++    })
++  })
++})
++
+ describe("session.compaction.create", () => {
+   test("creates a compaction user message and part", async () => {
+     await using tmp = await tmpdir()
+diff --git a/packages/opencode/test/session/prompt.test.ts b/packages/opencode/test/session/prompt.test.ts
+index 51d2e1194..d04413e4a 100644
+--- a/packages/opencode/test/session/prompt.test.ts
++++ b/packages/opencode/test/session/prompt.test.ts
+@@ -7,6 +7,7 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
+ import { Session } from "../../src/session"
+ import { MessageV2 } from "../../src/session/message-v2"
+ import { SessionPrompt } from "../../src/session/prompt"
++import { MessageID, PartID } from "../../src/session/schema"
+ import { Log } from "../../src/util/log"
+ import { tmpdir } from "../fixture/fixture"
+ 
+@@ -377,6 +378,130 @@ describe("session.prompt regression", () => {
+       server.stop(true)
+     }
+   })
++
++  test("does not preemptively compact synthetic continuation messages", async () => {
++    let calls = 0
++    const server = Bun.serve({
++      port: 0,
++      fetch(req) {
++        const url = new URL(req.url)
++        if (!url.pathname.endsWith("/chat/completions")) {
++          return new Response("not found", { status: 404 })
++        }
++        calls++
++        return new Response(chat("continuing"), {
++          status: 200,
++          headers: { "Content-Type": "text/event-stream" },
++        })
++      },
++    })
++
++    try {
++      await using tmp = await tmpdir({
++        git: true,
++        init: async (dir) => {
++          await Bun.write(
++            path.join(dir, "opencode.json"),
++            JSON.stringify({
++              $schema: "https://opencode.ai/config.json",
++              enabled_providers: ["alibaba"],
++              provider: {
++                alibaba: {
++                  options: {
++                    apiKey: "test-key",
++                    baseURL: `${server.url.origin}/v1`,
++                  },
++                },
++              },
++              compaction: {
++                preemptiveIdleMs: 60_000,
++                preemptiveThresholdRatio: 0.6,
++              },
++              agent: {
++                build: {
++                  model: "alibaba/qwen-plus",
++                },
++              },
++            }),
++          )
++        },
++      })
++
++      await Instance.provide({
++        directory: tmp.path,
++        fn: async () => {
++          const session = await Session.create({ title: "Synthetic continuation regression" })
++          const providerID = ProviderID.make("alibaba")
++          const modelID = ModelID.make("qwen-plus")
++
++          const firstUser = await Session.updateMessage({
++            id: MessageID.ascending(),
++            sessionID: session.id,
++            role: "user",
++            time: { created: 0 },
++            agent: "build",
++            model: { providerID, modelID },
++          })
++          await Session.updatePart({
++            id: PartID.ascending(),
++            messageID: firstUser.id,
++            sessionID: session.id,
++            type: "text",
++            text: "start",
++          })
++
++          await Session.updateMessage({
++            id: MessageID.ascending(),
++            sessionID: session.id,
++            parentID: firstUser.id,
++            role: "assistant",
++            mode: "build",
++            agent: "build",
++            cost: 0,
++            path: { cwd: tmp.path, root: tmp.path },
++            time: { created: 0, completed: 0 },
++            tokens: {
++              input: 110_000,
++              output: 5_000,
++              reasoning: 0,
++              cache: { read: 0, write: 0 },
++            },
++            modelID,
++            providerID,
++            finish: "stop",
++            summary: false,
++          })
++
++          const syntheticUser = await Session.updateMessage({
++            id: MessageID.ascending(),
++            sessionID: session.id,
++            role: "user",
++            time: { created: 120_000 },
++            agent: "build",
++            model: { providerID, modelID },
++          })
++          await Session.updatePart({
++            id: PartID.ascending(),
++            messageID: syntheticUser.id,
++            sessionID: session.id,
++            type: "text",
++            text: "Continue if you have next steps.",
++            synthetic: true,
++            time: { start: 120_000, end: 120_000 },
++          })
++
++          const result = await SessionPrompt.loop({ sessionID: session.id })
++          expect(result.info.role).toBe("assistant")
++
++          const msgs = await Session.messages({ sessionID: session.id })
++          expect(msgs.some((msg) => msg.parts.some((part) => part.type === "compaction"))).toBe(false)
++          expect(calls).toBe(1)
++        },
++      })
++    } finally {
++      server.stop(true)
++    }
++  })
+ })
+ 
+ describe("session.prompt agent variant", () => {
+-- 
+2.53.0
+

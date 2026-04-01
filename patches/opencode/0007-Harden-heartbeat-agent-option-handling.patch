@@ -1,7 +1,7 @@
-From eec5aa9f924a28fbc0f13eb1fedbab893e564308 Mon Sep 17 00:00:00 2001
+From 480739a2019be1a1a8e22c6c9f00d7723d808451 Mon Sep 17 00:00:00 2001
 From: Matt Campbell <matt@battleshopper.com>
 Date: Mon, 30 Mar 2026 17:04:36 -0500
-Subject: [PATCH 07/11] Harden heartbeat agent option handling
+Subject: [PATCH 07/10] Harden heartbeat agent option handling
 
 ---
  .../components/settings-heartbeat-options.ts  | 31 +++++++++++++++++++
