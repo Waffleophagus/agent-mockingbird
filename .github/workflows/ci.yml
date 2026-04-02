@@ -192,6 +192,11 @@ jobs:
       - name: Pack agent-mockingbird artifact
         run: |
           set -euo pipefail
+          case "$(uname -s)" in
+            Darwin) sqlite_vec_asset="package/dist/sqlite-vec/vec0.dylib" ;;
+            MINGW*|MSYS*|CYGWIN*) sqlite_vec_asset="package/dist/sqlite-vec/vec0.dll" ;;
+            *) sqlite_vec_asset="package/dist/sqlite-vec/vec0.so" ;;
+          esac
           tarball="agent-mockingbird-${{ steps.meta.outputs.package_version }}.tgz"
           bun pm pack --filename "${tarball}" --quiet >/dev/null
           test -f "${tarball}"
@@ -205,6 +210,7 @@ jobs:
           grep -Fqx -- "package/opencode.lock.json" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/app/index.html" <<<"${tar_contents}"
+          grep -Fqx -- "${sqlite_vec_asset}" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/drizzle/meta/_journal.json" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/packages/opencode/src/server/embedded-opencode.js" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/packages/opencode/migration/20260127222353_familiar_lady_ursula/migration.sql" <<<"${tar_contents}"
@@ -235,6 +241,8 @@ jobs:
             const path = require("path");
             const fs = require("fs");
             const pkgRoot = process.env.PACKAGE_ROOT;
+            const sqliteVecFilename =
+              process.platform === "win32" ? "vec0.dll" : process.platform === "darwin" ? "vec0.dylib" : "vec0.so";
             const indexPath = path.join(pkgRoot, "dist", "app", "index.html");
             const indexHtml = fs.readFileSync(indexPath, "utf8");
             if (!indexHtml.includes("/assets/")) {
@@ -244,6 +252,10 @@ jobs:
             const assetEntries = fs.readdirSync(assetDir);
             if (assetEntries.length === 0) {
               throw new Error("Packaged app assets directory is empty.");
+            }
+            const sqliteVecPath = path.join(pkgRoot, "dist", "sqlite-vec", sqliteVecFilename);
+            if (!fs.existsSync(sqliteVecPath)) {
+              throw new Error("Packaged sqlite-vec extension is missing.");
             }
             console.log("Packaged compiled app bundle validated.");
           '

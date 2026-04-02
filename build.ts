@@ -12,6 +12,7 @@ const drizzleOutdir = path.join(outdir, "drizzle");
 const vendorRoot = path.join(repoRoot, "vendor", "opencode");
 const appSourceDir = path.join(vendorRoot, "packages", "app", "dist");
 const appOutdir = path.join(outdir, "app");
+const sqliteVecOutdir = path.join(outdir, "sqlite-vec");
 const opencodeBundleRoot = path.join(outdir, "packages", "opencode");
 const opencodeServerOutdir = path.join(opencodeBundleRoot, "src", "server");
 const opencodeMigrationOutdir = path.join(opencodeBundleRoot, "migration");
@@ -62,10 +63,22 @@ if (!openCodeServerBuild.success) {
   process.exit(1);
 }
 
+console.log("Resolving sqlite-vec loadable extension...");
+const sqliteVec = await import("sqlite-vec");
+const sqliteVecLoadablePath =
+  typeof sqliteVec.getLoadablePath === "function" ? sqliteVec.getLoadablePath() : "";
+
+if (!sqliteVecLoadablePath || !existsSync(sqliteVecLoadablePath)) {
+  console.error("Missing sqlite-vec loadable extension in installed dependencies.");
+  process.exit(1);
+}
+
 console.log("Copying packaged assets...");
 cpSync(appSourceDir, appOutdir, { recursive: true });
 cpSync(opencodeMigrationSourceDir, opencodeMigrationOutdir, { recursive: true });
 cpSync(path.join(repoRoot, "drizzle"), drizzleOutdir, { recursive: true });
+mkdirSync(sqliteVecOutdir, { recursive: true });
+cpSync(sqliteVecLoadablePath, path.join(sqliteVecOutdir, path.basename(sqliteVecLoadablePath)));
 
 if (!existsSync(path.join(appOutdir, "index.html"))) {
   console.error(`Missing built OpenCode app assets in ${appOutdir}`);
@@ -73,6 +86,10 @@ if (!existsSync(path.join(appOutdir, "index.html"))) {
 }
 if (!existsSync(outfile)) {
   console.error(`Missing standalone binary at ${outfile}`);
+  process.exit(1);
+}
+if (!existsSync(path.join(sqliteVecOutdir, path.basename(sqliteVecLoadablePath)))) {
+  console.error(`Missing sqlite-vec extension at ${sqliteVecOutdir}`);
   process.exit(1);
 }
 

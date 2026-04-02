@@ -12,6 +12,7 @@ type CommandResult = {
 };
 
 const repoRoot = path.resolve(import.meta.dir, "..");
+const sqliteVecFilename = process.platform === "win32" ? "vec0.dll" : process.platform === "darwin" ? "vec0.dylib" : "vec0.so";
 const trackedArtifactPaths = [
   "bin/agent-mockingbird",
   "bin/agent-mockingbird-managed",
@@ -46,6 +47,7 @@ function assertDistBuilt() {
   const assetsPath = path.join(repoRoot, "dist", "app", "assets");
   const binaryPath = path.join(repoRoot, "dist", "agent-mockingbird");
   const drizzleJournalPath = path.join(repoRoot, "dist", "drizzle", "meta", "_journal.json");
+  const sqliteVecPath = path.join(repoRoot, "dist", "sqlite-vec", sqliteVecFilename);
   const opencodeServerPath = path.join(
     repoRoot,
     "dist",
@@ -76,6 +78,9 @@ function assertDistBuilt() {
   }
   if (!existsSync(drizzleJournalPath)) {
     fail("Missing dist/drizzle/meta/_journal.json after build.");
+  }
+  if (!existsSync(sqliteVecPath)) {
+    fail(`Missing dist/sqlite-vec/${sqliteVecFilename} after build.`);
   }
   if (!existsSync(opencodeServerPath)) {
     fail("Missing dist/packages/opencode/src/server/embedded-opencode.js after build.");

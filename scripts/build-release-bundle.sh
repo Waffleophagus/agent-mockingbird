@@ -25,6 +25,18 @@ fi
 mkdir -p "${DIST_DIR}"
 rm -rf "${STAGE_DIR}"
 
+case "$(uname -s)" in
+  Darwin)
+    SQLITE_VEC_FILENAME="vec0.dylib"
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    SQLITE_VEC_FILENAME="vec0.dll"
+    ;;
+  *)
+    SQLITE_VEC_FILENAME="vec0.so"
+    ;;
+esac
+
 ARCHIVE_PATH="${DIST_DIR}/agent-mockingbird-${VERSION}.tar.gz"
 CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
 PREFIX="agent-mockingbird-${VERSION}"
@@ -56,6 +68,7 @@ find "${STAGE_DIR}/${PREFIX}/vendor/executor" \
 test -f "${STAGE_DIR}/${PREFIX}/dist/agent-mockingbird"
 test -f "${STAGE_DIR}/${PREFIX}/dist/drizzle/meta/_journal.json"
 test -f "${STAGE_DIR}/${PREFIX}/dist/app/index.html"
+test -f "${STAGE_DIR}/${PREFIX}/dist/sqlite-vec/${SQLITE_VEC_FILENAME}"
 test -f "${STAGE_DIR}/${PREFIX}/dist/packages/opencode/src/server/embedded-opencode.js"
 test -f "${STAGE_DIR}/${PREFIX}/dist/packages/opencode/migration/20260127222353_familiar_lady_ursula/migration.sql"
 test -f "${STAGE_DIR}/${PREFIX}/drizzle/meta/_journal.json"
