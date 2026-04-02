@@ -266,12 +266,36 @@ function normalizeRoot(value: string, workspaceRoot: string) {
 function assertDistAppBuilt() {
   const indexPath = path.join(repoRoot, "dist", "app", "index.html");
   const assetsPath = path.join(repoRoot, "dist", "app", "assets");
+  const opencodeServerPath = path.join(
+    repoRoot,
+    "dist",
+    "packages",
+    "opencode",
+    "src",
+    "server",
+    "embedded-opencode.js",
+  );
+  const opencodeMigrationPath = path.join(
+    repoRoot,
+    "dist",
+    "packages",
+    "opencode",
+    "migration",
+    "20260127222353_familiar_lady_ursula",
+    "migration.sql",
+  );
 
   if (!existsSync(indexPath)) {
     fail("Missing dist/app/index.html after build.");
   }
   if (!existsSync(assetsPath) || !directoryHasFiles(assetsPath)) {
     fail("Missing built OpenCode app assets in dist/app/assets after build.");
+  }
+  if (!existsSync(opencodeServerPath)) {
+    fail("Missing dist/packages/opencode/src/server/embedded-opencode.js after build.");
+  }
+  if (!existsSync(opencodeMigrationPath)) {
+    fail("Missing packaged OpenCode migration SQL after build.");
   }
 }
 

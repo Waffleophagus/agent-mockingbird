@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
 const OPENCODE_SERVER_PREFIXES = [
   "/agent",
   "/auth",
@@ -29,19 +33,40 @@ type EmbeddedOpenCodeApp = {
   fetch(req: Request, server: Bun.Server<unknown>): Response | Promise<Response>;
 };
 
-const embeddedOpenCodeServerModuleUrl = new URL(
-  "../../../../../vendor/opencode/packages/opencode/src/server/server.ts",
-  import.meta.url,
-).href;
-
 let embeddedOpenCodeAppPromise: Promise<EmbeddedOpenCodeApp> | null = null;
+
+function resolveEmbeddedOpenCodeBundlePath() {
+  const executableDir = path.dirname(process.execPath);
+  const candidates = [
+    path.resolve(process.cwd(), "dist", "packages", "opencode", "src", "server", "embedded-opencode.js"),
+    path.resolve(
+      import.meta.dir,
+      "../../../../../dist/packages/opencode/src/server/embedded-opencode.js",
+    ),
+    path.resolve(executableDir, "packages", "opencode", "src", "server", "embedded-opencode.js"),
+  ];
+  return candidates.find(candidate => existsSync(candidate)) ?? null;
+}
 
 async function getEmbeddedOpenCodeApp() {
   if (!embeddedOpenCodeAppPromise) {
-    embeddedOpenCodeAppPromise = import(embeddedOpenCodeServerModuleUrl).then(
-      (module: { Server: { createApp: (opts: { cors?: string[] }) => EmbeddedOpenCodeApp } }) =>
-        module.Server.createApp({}),
-    );
+    const bundledModulePath = resolveEmbeddedOpenCodeBundlePath();
+    if (bundledModulePath) {
+      embeddedOpenCodeAppPromise = import(pathToFileURL(bundledModulePath).href).then(
+        (module: { createEmbeddedOpenCodeApp: () => EmbeddedOpenCodeApp }) =>
+          module.createEmbeddedOpenCodeApp(),
+      );
+    } else {
+      embeddedOpenCodeAppPromise = import(
+        new URL(
+          "../../../../../vendor/opencode/packages/opencode/src/server/server.ts",
+          import.meta.url,
+        ).href
+      ).then(
+        (module: { Server: { createApp: (opts: { cors?: string[] }) => EmbeddedOpenCodeApp } }) =>
+          module.Server.createApp({}),
+      );
+    }
   }
   return embeddedOpenCodeAppPromise;
 }

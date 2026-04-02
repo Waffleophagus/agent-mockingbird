@@ -1129,6 +1129,20 @@ function hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) {
   );
 }
 
+function hasCompiledEmbeddedOpenCodeRuntime(agentMockingbirdAppDir) {
+  return fs.existsSync(
+    path.join(
+      agentMockingbirdAppDir,
+      "dist",
+      "packages",
+      "opencode",
+      "src",
+      "server",
+      "embedded-opencode.js",
+    ),
+  );
+}
+
 function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   const compiledBinary = path.join(
     agentMockingbirdAppDir,
@@ -1137,7 +1151,8 @@ function resolveAgentMockingbirdRuntimeCommand(agentMockingbirdAppDir, bunBin) {
   );
   if (
     hasCompiledAgentMockingbirdRuntime(agentMockingbirdAppDir) &&
-    hasCompiledDashboardAssets(agentMockingbirdAppDir)
+    hasCompiledDashboardAssets(agentMockingbirdAppDir) &&
+    hasCompiledEmbeddedOpenCodeRuntime(agentMockingbirdAppDir)
   ) {
     return {
       execStart: compiledBinary,

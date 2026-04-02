@@ -57,6 +57,8 @@ find "${STAGE_DIR}/${PREFIX}/vendor/executor" \
 test -f "${STAGE_DIR}/${PREFIX}/dist/agent-mockingbird"
 test -f "${STAGE_DIR}/${PREFIX}/dist/drizzle/meta/_journal.json"
 test -f "${STAGE_DIR}/${PREFIX}/dist/app/index.html"
+test -f "${STAGE_DIR}/${PREFIX}/dist/packages/opencode/src/server/embedded-opencode.js"
+test -f "${STAGE_DIR}/${PREFIX}/dist/packages/opencode/migration/20260127222353_familiar_lady_ursula/migration.sql"
 test -f "${STAGE_DIR}/${PREFIX}/drizzle/meta/_journal.json"
 test -f "${STAGE_DIR}/${PREFIX}/vendor/executor/apps/executor/src/cli/main.ts"
 
