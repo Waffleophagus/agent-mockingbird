@@ -3,23 +3,20 @@ import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
+import { createStandaloneBuildOptions } from "./apps/server/src/cli/standaloneBuild";
+
 const repoRoot = import.meta.dir;
 const outdir = path.join(repoRoot, "dist");
+const outfile = path.join(outdir, "agent-mockingbird");
+const drizzleOutdir = path.join(outdir, "drizzle");
 const vendorRoot = path.join(repoRoot, "vendor", "opencode");
-const appSourceDir = path.join(repoRoot, "vendor", "opencode", "packages", "app", "dist");
+const appSourceDir = path.join(vendorRoot, "packages", "app", "dist");
 const appOutdir = path.join(outdir, "app");
 const opencodeBundleRoot = path.join(outdir, "packages", "opencode");
 const opencodeServerOutdir = path.join(opencodeBundleRoot, "src", "server");
 const opencodeMigrationOutdir = path.join(opencodeBundleRoot, "migration");
 const embeddedOpenCodeEntrypoint = path.join(repoRoot, "embedded-opencode.ts");
-const opencodeMigrationSourceDir = path.join(
-  repoRoot,
-  "vendor",
-  "opencode",
-  "packages",
-  "opencode",
-  "migration",
-);
+const opencodeMigrationSourceDir = path.join(vendorRoot, "packages", "opencode", "migration");
 
 console.log("Refreshing vendored OpenCode worktree...");
 await Bun.$`bun run opencode:sync --rebuild-only`.cwd(repoRoot);
@@ -38,8 +35,20 @@ if (existsSync(outdir)) {
 }
 mkdirSync(outdir, { recursive: true });
 
+console.log("Building standalone binary...");
+const standaloneBuild = await Bun.build(createStandaloneBuildOptions(repoRoot, outfile));
+
+if (!standaloneBuild.success) {
+  for (const message of standaloneBuild.logs) {
+    console.error(message);
+  }
+  process.exit(1);
+}
+
+console.log("Building vendored OpenCode app...");
 await Bun.$`bun run build`.cwd(path.join(vendorRoot, "packages", "app")).quiet();
 
+console.log("Building embedded OpenCode server bundle...");
 const openCodeServerBuild = await Bun.build({
   entrypoints: [embeddedOpenCodeEntrypoint],
   outdir: opencodeServerOutdir,
@@ -53,12 +62,18 @@ if (!openCodeServerBuild.success) {
   process.exit(1);
 }
 
+console.log("Copying packaged assets...");
 cpSync(appSourceDir, appOutdir, { recursive: true });
 cpSync(opencodeMigrationSourceDir, opencodeMigrationOutdir, { recursive: true });
+cpSync(path.join(repoRoot, "drizzle"), drizzleOutdir, { recursive: true });
 
 if (!existsSync(path.join(appOutdir, "index.html"))) {
   console.error(`Missing built OpenCode app assets in ${appOutdir}`);
   process.exit(1);
 }
+if (!existsSync(outfile)) {
+  console.error(`Missing standalone binary at ${outfile}`);
+  process.exit(1);
+}
 
-console.log(`Copied built OpenCode app assets into ${appOutdir}`);
+console.log(`Build complete: ${outdir}`);

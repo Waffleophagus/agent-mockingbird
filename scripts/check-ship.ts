@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -36,10 +35,6 @@ type Diagnostic = {
 const repoRoot = path.resolve(import.meta.dir, "..");
 const opencodeCleanroomRoot = path.join(repoRoot, "cleanroom", "opencode");
 const opencodeVendorRoot = path.join(repoRoot, "vendor", "opencode");
-const trackedArtifactPaths = [
-  "bin/agent-mockingbird",
-  "bin/agent-mockingbird-managed",
-];
 
 main();
 
@@ -59,22 +54,10 @@ function main() {
   }
   assertShipState("executor", executorStatus);
 
-  runStep("Build CLI", ["bun", "run", "build:cli"]);
-  assertTrackedArtifactsSynced(trackedArtifactPaths);
-
-  runStep("Lint", ["bun", "run", "lint"]);
-  runStep("Typecheck", ["bun", "run", "typecheck"]);
-
   runStep("OpenCode Patch Check", ["bun", "run", "opencode:sync", "--check"]);
   runStep("Executor Patch Check", ["bun", "run", "executor:sync", "--check"]);
   runFilteredOpencodeTypecheck();
-
-  runStep("Build", ["bun", "run", "build"]);
-  assertDistAppBuilt();
-  assertTrackedArtifactsSynced(trackedArtifactPaths);
-
-  runStep("Build Standalone Runtime", ["bun", "run", "build:bin"]);
-  assertTrackedArtifactsSynced(trackedArtifactPaths);
+  runStep("CI Check", ["bun", "run", "check:ci"]);
 
   console.log("\nShip check passed.");
 }
@@ -261,70 +244,6 @@ function normalizePath(filePath: string, workspaceRoot: string) {
 function normalizeRoot(value: string, workspaceRoot: string) {
   const normalizedRoot = workspaceRoot.replaceAll("\\", "/");
   return value.replaceAll(normalizedRoot, "<workspace>").replaceAll(repoRoot.replaceAll("\\", "/"), "<repo>");
-}
-
-function assertDistAppBuilt() {
-  const indexPath = path.join(repoRoot, "dist", "app", "index.html");
-  const assetsPath = path.join(repoRoot, "dist", "app", "assets");
-  const opencodeServerPath = path.join(
-    repoRoot,
-    "dist",
-    "packages",
-    "opencode",
-    "src",
-    "server",
-    "embedded-opencode.js",
-  );
-  const opencodeMigrationPath = path.join(
-    repoRoot,
-    "dist",
-    "packages",
-    "opencode",
-    "migration",
-    "20260127222353_familiar_lady_ursula",
-    "migration.sql",
-  );
-
-  if (!existsSync(indexPath)) {
-    fail("Missing dist/app/index.html after build.");
-  }
-  if (!existsSync(assetsPath) || !directoryHasFiles(assetsPath)) {
-    fail("Missing built OpenCode app assets in dist/app/assets after build.");
-  }
-  if (!existsSync(opencodeServerPath)) {
-    fail("Missing dist/packages/opencode/src/server/embedded-opencode.js after build.");
-  }
-  if (!existsSync(opencodeMigrationPath)) {
-    fail("Missing packaged OpenCode migration SQL after build.");
-  }
-}
-
-function directoryHasFiles(targetPath: string): boolean {
-  for (const entry of readdirSync(targetPath)) {
-    const entryPath = path.join(targetPath, entry);
-    const stats = statSync(entryPath);
-    if (stats.isFile()) {
-      return true;
-    }
-    if (stats.isDirectory() && directoryHasFiles(entryPath)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function assertTrackedArtifactsSynced(pathsToCheck: string[]) {
-  const result = runCommand(["git", "diff", "--name-only", "--", ...pathsToCheck], { allowFailure: true, printCommand: false });
-  const changed = result.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (changed.length === 0) {
-    return;
-  }
-
-  const detail = changed.map((item) => `- ${item}`).join("\n");
-  fail(`Generated artifacts are out of sync:\n${detail}\n\nRebuild and commit the generated outputs before shipping.`);
 }
 
 function readSyncStatus(target: "opencode" | "executor", options?: { allowFailure?: boolean }): SyncStatus | null {

@@ -154,6 +154,7 @@ bun run test
 bun run lint
 bun run typecheck
 bun run build
+bun run check:ci
 bun run check:ship
 ```
 

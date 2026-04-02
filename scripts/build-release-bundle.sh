@@ -33,7 +33,6 @@ echo "Building vendored OpenCode app + standalone runtime..."
 (
   cd "${ROOT_DIR}"
   bun run build
-  bun run build:bin
 )
 
 mkdir -p "${STAGE_DIR}/${PREFIX}"
