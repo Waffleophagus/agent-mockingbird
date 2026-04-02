@@ -1,6 +1,4 @@
-import { tool, type ToolContext } from "@opencode-ai/plugin"
-
-const z = tool.schema
+import { z } from "zod"
 
 type JsonObject = Record<string, unknown>
 
@@ -55,7 +53,7 @@ function toolOptions(source: MemoryToolOptions | (() => MemoryToolOptions)) {
 
 export function createMemorySearchTool(source: MemoryToolOptions | (() => MemoryToolOptions) = {}) {
   const getOptions = toolOptions(source)
-  return tool({
+  return {
     description: "Search memory for relevant prior context.",
     args: {
       query: z.string().min(1).describe("Natural language memory query"),
@@ -99,12 +97,12 @@ export function createMemorySearchTool(source: MemoryToolOptions | (() => Memory
         debug: args.debug ? response.payload.debug : undefined,
       })
     },
-  })
+  }
 }
 
 export function createMemoryGetTool(source: MemoryToolOptions | (() => MemoryToolOptions) = {}) {
   const getOptions = toolOptions(source)
-  return tool({
+  return {
     description: "Read a safe slice of canonical markdown memory files by path and line window.",
     args: {
       path: z.string().min(1).describe("Memory path such as MEMORY.md or memory/2026-02-17.md"),
@@ -128,12 +126,12 @@ export function createMemoryGetTool(source: MemoryToolOptions | (() => MemoryToo
         text: response.payload.text,
       })
     },
-  })
+  }
 }
 
 export function createMemoryRememberTool(source: MemoryToolOptions | (() => MemoryToolOptions) = {}) {
   const getOptions = toolOptions(source)
-  return tool({
+  return {
     description: "Persist a memory note so it can be retrieved later.",
     args: {
       content: z.string().min(1),
@@ -152,7 +150,7 @@ export function createMemoryRememberTool(source: MemoryToolOptions | (() => Memo
         supersedes?: string[]
         topic?: string
       },
-      context: ToolContext,
+      context: { sessionID?: string | null },
     ) {
       const response = await postMemoryJson(getOptions(), "/api/mockingbird/memory/remember", {
         ...args,
@@ -171,5 +169,5 @@ export function createMemoryRememberTool(source: MemoryToolOptions | (() => Memo
         result: response.payload,
       })
     },
-  })
+  }
 }

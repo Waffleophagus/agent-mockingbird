@@ -1,6 +1,4 @@
-import { tool, type ToolContext } from "@opencode-ai/plugin"
-
-const z = tool.schema
+import { z } from "zod"
 
 type JsonObject = Record<string, unknown>
 
@@ -443,7 +441,7 @@ const configArgsSchema = z.discriminatedUnion("action", [
   }),
 ])
 
-const cronManagerTool = tool({
+const cronManagerTool = {
   description: "Manage Agent Mockingbird cron jobs (list/create/update/run/delete/inspect).",
   args: {
     action: z.enum([
@@ -483,15 +481,18 @@ const cronManagerTool = tool({
       ...response.payload,
     })
   },
-})
+}
 
-const notifyMainThreadTool = tool({
+const notifyMainThreadTool = {
   description: "Escalate a concise prompt from a cron worker thread into the main/root conversation.",
   args: {
     prompt: z.string().min(1),
     severity: z.enum(["info", "warn", "critical"]).optional(),
   },
-  async execute(args: { prompt: string; severity?: "info" | "warn" | "critical" }, context: ToolContext) {
+  async execute(
+    args: { prompt: string; severity?: "info" | "warn" | "critical" },
+    context: { sessionID?: string | null },
+  ) {
     const response = await postJson(
       activePluginOptions,
       "cron",
@@ -511,9 +512,9 @@ const notifyMainThreadTool = tool({
       ...response.payload,
     })
   },
-})
+}
 
-const agentTypeManagerTool = tool({
+const agentTypeManagerTool = {
   description:
     "Manage OpenCode agent definitions through Agent Mockingbird's OpenCode-backed APIs with validation and hash conflict detection.",
   args: {
@@ -558,9 +559,9 @@ const agentTypeManagerTool = tool({
     })
     return JSON.stringify({ ok: true, ...payload })
   },
-})
+}
 
-const configManagerTool = tool({
+const configManagerTool = {
   description:
     "Read or update Agent Mockingbird managed config through validated APIs with hash conflict detection and optional smoke tests. MCP state is exposed in get_config under effective.mcp and is sourced from managed OpenCode config.",
   args: {
@@ -608,7 +609,7 @@ const configManagerTool = tool({
     })
     return JSON.stringify({ ok: true, ...payload })
   },
-})
+}
 
 const AgentMockingbirdPlugin = async (_input: unknown, options?: unknown) => {
   activePluginOptions = parsePluginOptions(options)
