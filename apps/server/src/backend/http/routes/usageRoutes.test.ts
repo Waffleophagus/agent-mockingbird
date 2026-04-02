@@ -153,15 +153,14 @@ describe("usage routes", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
 
     const html = await response.text();
-    expect(html).toContain("<title>Usage</title>");
+    expect(html).toContain("<title>Usage Report</title>");
     expect(html).toContain("/api/usage/dashboard");
-    expect(html).toContain("Back to app");
-    expect(html).toContain("window.history.back()");
+    expect(html).toContain("← Back");
     expect(html).toContain("window.location.origin");
-    expect(html).toContain("All time");
-    expect(html).toContain("Apply range");
-    expect(html).toContain("Month to date");
-    expect(html).toContain("usage-start-date");
-    expect(html).toContain("usage-end-date");
+    expect(html).toContain("All");
+    expect(html).toContain("Month");
+    expect(html).toContain("Overview");
+    expect(html).toContain("Models");
+    expect(html).toContain("Providers");
   });
 });
