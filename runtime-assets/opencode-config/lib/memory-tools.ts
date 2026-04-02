@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 type JsonObject = Record<string, unknown>
+type ToolExecuteContext = { sessionID?: string | null }
 
 export type MemoryToolOptions = {
   apiBaseUrl?: string
@@ -61,7 +62,10 @@ export function createMemorySearchTool(source: MemoryToolOptions | (() => Memory
       minScore: z.number().min(0).max(1).optional(),
       debug: z.boolean().optional().describe("Include retrieval debug details."),
     },
-    async execute(args: { query: string; maxResults?: number; minScore?: number; debug?: boolean }) {
+    async execute(
+      args: { query: string; maxResults?: number; minScore?: number; debug?: boolean },
+      _context?: ToolExecuteContext,
+    ) {
       const response = await postMemoryJson(getOptions(), "/api/mockingbird/memory/retrieve", {
         query: args.query,
         maxResults: args.maxResults,
@@ -109,7 +113,7 @@ export function createMemoryGetTool(source: MemoryToolOptions | (() => MemoryToo
       from: z.number().int().min(1).optional().describe("Start line number (1-based)"),
       lines: z.number().int().min(1).max(400).optional().describe("Number of lines to return"),
     },
-    async execute(args: { path: string; from?: number; lines?: number }) {
+    async execute(args: { path: string; from?: number; lines?: number }, _context?: ToolExecuteContext) {
       const response = await postMemoryJson(getOptions(), "/api/mockingbird/memory/read", {
         path: args.path,
         from: args.from,
@@ -150,7 +154,7 @@ export function createMemoryRememberTool(source: MemoryToolOptions | (() => Memo
         supersedes?: string[]
         topic?: string
       },
-      context: { sessionID?: string | null },
+      context: ToolExecuteContext = {},
     ) {
       const response = await postMemoryJson(getOptions(), "/api/mockingbird/memory/remember", {
         ...args,

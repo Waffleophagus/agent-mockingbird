@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 type JsonObject = Record<string, unknown>
+type ToolExecuteContext = { sessionID?: string | null }
 
 type JsonSchema = {
   type?: string
@@ -466,7 +467,7 @@ const cronManagerTool = {
     job: z.unknown().optional(),
     patch: z.unknown().optional(),
   },
-  async execute(rawArgs) {
+  async execute(rawArgs: unknown, _context?: ToolExecuteContext) {
     const args = cronArgsSchema.parse(rawArgs)
     const response = await postJson(activePluginOptions, "cron", "/api/mockingbird/cron/manage", args, [
       "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
@@ -491,7 +492,7 @@ const notifyMainThreadTool = {
   },
   async execute(
     args: { prompt: string; severity?: "info" | "warn" | "critical" },
-    context: { sessionID?: string | null },
+    context: ToolExecuteContext = {},
   ) {
     const response = await postJson(
       activePluginOptions,
@@ -528,7 +529,7 @@ const agentTypeManagerTool = {
     upserts?: unknown[]
     deletes?: string[]
     expectedHash?: string
-  }) {
+  }, _context?: ToolExecuteContext) {
     const args = agentArgsSchema.parse(rawArgs)
 
     if (args.action === "list") {
@@ -577,7 +578,7 @@ const configManagerTool = {
     config?: unknown
     expectedHash?: string
     runSmokeTest?: boolean
-  }) {
+  }, _context?: ToolExecuteContext) {
     const args = configArgsSchema.parse(rawArgs)
 
     if (args.action === "get_config") {
