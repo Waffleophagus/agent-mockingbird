@@ -1163,7 +1163,6 @@ function unitContents(
   executorExecStart,
   executorMode,
   executorWebAssetsDir,
-  opencodeBin,
   agentMockingbirdExecStart,
   runtimeMode,
 ) {
@@ -1171,11 +1170,9 @@ function unitContents(
     ? `Environment=EXECUTOR_WEB_ASSETS_DIR=${executorWebAssetsDir}\n`
     : "";
   const executor = `[Unit]\nDescription=Executor Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.executorWorkspaceDir}\nEnvironment=EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=EXECUTOR_LOCAL_DATA_DIR=${paths.executorLocalDataDir}\nEnvironment=EXECUTOR_SERVER_PID_FILE=${path.join(paths.executorRunDir, "server.pid")}\nEnvironment=EXECUTOR_SERVER_LOG_FILE=${path.join(paths.executorRunDir, "server.log")}\nEnvironment=EXECUTOR_SERVER_BASE_PATH=/executor\n${executorWebAssetsEnvLine}ExecStart=${executorExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
-  const opencode = `[Unit]\nDescription=OpenCode Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.workspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nExecStart=${opencodeBin} serve --hostname 127.0.0.1 --port 4096 --print-logs --log-level INFO\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_EXECUTOR}\nWants=network.target ${UNIT_EXECUTOR}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:3001\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=${paths.executorWorkspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_MODE=${executorMode}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH=/executor\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
-  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\nWants=network.target ${UNIT_EXECUTOR} ${UNIT_OPENCODE}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=${paths.executorWorkspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_MODE=${executorMode}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH=/executor\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
-
-  return { executor, opencode, agentMockingbird };
+  return { executor, agentMockingbird };
 }
 
 function ensureSystemdUserAvailable() {
@@ -1398,12 +1395,6 @@ async function runPostInstallVerification() {
     UNIT_EXECUTOR,
     "--no-pager",
   ]);
-  const opencodeStatus = shell("systemctl", [
-    "--user",
-    "status",
-    UNIT_OPENCODE,
-    "--no-pager",
-  ]);
   const linger = shell("loginctl", ["show-user", userName(), "-p", "Linger"]);
   const embeddedExecutor = await verifyEmbeddedExecutorGatewayWithRetry(
     "http://127.0.0.1:3001/executor",
@@ -1418,7 +1409,6 @@ async function runPostInstallVerification() {
   return {
     agentMockingbirdServiceOk: agentMockingbirdStatus.code === 0,
     executorServiceOk: executorStatus.code === 0,
-    opencodeServiceOk: opencodeStatus.code === 0,
     lingerOk:
       linger.code === 0 && linger.stdout.toLowerCase().includes("linger=yes"),
     embeddedExecutorOk: embeddedExecutor.ok,
@@ -1430,7 +1420,6 @@ async function runPostInstallVerification() {
         agentMockingbirdStatus.stdout || agentMockingbirdStatus.stderr
       ).trim(),
       executorStatus: (executorStatus.stdout || executorStatus.stderr).trim(),
-      opencodeStatus: (opencodeStatus.stdout || opencodeStatus.stderr).trim(),
       linger: (linger.stdout || linger.stderr).trim(),
     },
   };
@@ -1586,9 +1575,10 @@ function buildUpdateDryRun({ args, paths }) {
     "Build packaged Executor embedded web bundle for /executor",
     "Rewrite agent-mockingbird CLI shim",
     "Rewrite opencode CLI shim",
-    "Rewrite systemd user unit files for executor + opencode + agent-mockingbird",
-    "systemctl --user daemon-reload + enable --now executor.service opencode.service agent-mockingbird.service",
-    "systemctl --user restart executor.service opencode.service agent-mockingbird.service",
+    "Rewrite systemd user unit files for executor + agent-mockingbird",
+    "Disable and remove any stale opencode.service user unit",
+    "systemctl --user daemon-reload + enable --now executor.service agent-mockingbird.service",
+    "systemctl --user restart executor.service agent-mockingbird.service",
     args.skipLinger
       ? "Skip loginctl linger step (--skip-linger)"
       : "Check/enable loginctl linger when needed",
@@ -1936,7 +1926,7 @@ async function restartOpencodeServiceForAuthRefresh() {
       attempted: false,
       ok: false,
       message:
-        "systemctl --user unavailable; skipping automatic OpenCode restart.",
+        "systemctl --user unavailable; skipping automatic Agent Mockingbird restart.",
     };
   }
   const loadState = shell("systemctl", [
@@ -1944,30 +1934,30 @@ async function restartOpencodeServiceForAuthRefresh() {
     "show",
     "--property=LoadState",
     "--value",
-    UNIT_OPENCODE,
+    UNIT_AGENT_MOCKINGBIRD,
   ]);
   if (loadState.code === 0 && loadState.stdout.trim() === "not-found") {
     return {
       attempted: false,
       ok: false,
-      message: `${UNIT_OPENCODE} is not installed as a user service; provider credentials were saved without a restart.`,
+      message: `${UNIT_AGENT_MOCKINGBIRD} is not installed as a user service; provider credentials were saved without a restart.`,
     };
   }
-  const restarted = shell("systemctl", ["--user", "restart", UNIT_OPENCODE]);
+  const restarted = shell("systemctl", ["--user", "restart", UNIT_AGENT_MOCKINGBIRD]);
   if (restarted.code !== 0) {
     const detail =
       (restarted.stderr || restarted.stdout).trim() || "unknown error";
     return {
       attempted: true,
       ok: false,
-      message: `Failed to restart ${UNIT_OPENCODE}: ${detail}`,
+      message: `Failed to restart ${UNIT_AGENT_MOCKINGBIRD}: ${detail}`,
     };
   }
   await sleep(1_500);
   return {
     attempted: true,
     ok: true,
-    message: `${UNIT_OPENCODE} restarted to refresh provider credentials.`,
+    message: `${UNIT_AGENT_MOCKINGBIRD} restarted to refresh provider credentials.`,
   };
 }
 
@@ -3271,13 +3261,15 @@ async function installOrUpdate(args, mode) {
     executorRuntime.execStart,
     executorRuntime.mode,
     executorRuntime.webAssetsDir,
-    opencodeBin,
     agentMockingbirdRuntime.execStart,
     agentMockingbirdRuntime.mode,
   );
   writeFile(paths.executorUnitPath, units.executor);
-  writeFile(paths.opencodeUnitPath, units.opencode);
   writeFile(paths.agentMockingbirdUnitPath, units.agentMockingbird);
+  if (fs.existsSync(paths.opencodeUnitPath)) {
+    fs.rmSync(paths.opencodeUnitPath, { force: true });
+  }
+  shell("systemctl", ["--user", "disable", "--now", UNIT_OPENCODE]);
 
   must("systemctl", ["--user", "daemon-reload"]);
   must("systemctl", [
@@ -3285,7 +3277,6 @@ async function installOrUpdate(args, mode) {
     "enable",
     "--now",
     UNIT_EXECUTOR,
-    UNIT_OPENCODE,
     UNIT_AGENT_MOCKINGBIRD,
   ]);
   if (mode === "update") {
@@ -3293,7 +3284,6 @@ async function installOrUpdate(args, mode) {
       "--user",
       "restart",
       UNIT_EXECUTOR,
-      UNIT_OPENCODE,
       UNIT_AGENT_MOCKINGBIRD,
     ]);
   }
@@ -3343,7 +3333,7 @@ async function installOrUpdate(args, mode) {
     shimPath,
     opencodeShimPath,
     pathSetup,
-    units: [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
+    units: [UNIT_EXECUTOR, UNIT_AGENT_MOCKINGBIRD],
     runtimeAssets: {
       workspace: workspaceRuntimeAssets,
       opencodeConfig: opencodeRuntimeAssets,
@@ -3364,7 +3354,7 @@ async function status(args) {
     userUnitDir: USER_UNIT_DIR,
   });
   const unitStates = {};
-  for (const unit of [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD]) {
+  for (const unit of [UNIT_EXECUTOR, UNIT_AGENT_MOCKINGBIRD]) {
     const result = shell("systemctl", ["--user", "is-active", unit]);
     unitStates[unit] = result.code === 0 ? result.stdout.trim() : "inactive";
   }
@@ -3388,7 +3378,6 @@ function serviceCommand(action) {
     "--user",
     action,
     UNIT_EXECUTOR,
-    UNIT_OPENCODE,
     UNIT_AGENT_MOCKINGBIRD,
   ]);
 }
@@ -3493,7 +3482,7 @@ async function uninstall(args) {
   return {
     mode: "uninstall",
     rootDir: paths.rootDir,
-    unitsRemoved: [UNIT_EXECUTOR, UNIT_OPENCODE, UNIT_AGENT_MOCKINGBIRD],
+    unitsRemoved: [UNIT_EXECUTOR, UNIT_AGENT_MOCKINGBIRD],
     removedShim,
     removedOpencodeShim,
     removed: true,
@@ -3596,9 +3585,6 @@ function printResult(result, asJson) {
       console.log(
         `verify: executor.service=${result.verify.executorServiceOk ? "ok" : "failed"}`,
       );
-      console.log(
-        `verify: opencode.service=${result.verify.opencodeServiceOk ? "ok" : "failed"}`,
-      );
       console.log(`verify: linger=${result.verify.lingerOk ? "yes" : "no"}`);
       console.log(
         `verify: executor-gateway=${result.verify.embeddedExecutorOk ? "ok" : "failed"}`,
@@ -3614,7 +3600,6 @@ function printResult(result, asJson) {
       if (
         !result.verify.agentMockingbirdServiceOk ||
         !result.verify.executorServiceOk ||
-        !result.verify.opencodeServiceOk ||
         !result.verify.lingerOk ||
         !result.verify.embeddedExecutorOk ||
         !result.verify.externalProxyOk
@@ -3625,9 +3610,6 @@ function printResult(result, asJson) {
         );
         console.log(
           result.verify.commandOutput.executorStatus || "(no output)",
-        );
-        console.log(
-          result.verify.commandOutput.opencodeStatus || "(no output)",
         );
         console.log(result.verify.commandOutput.linger || "(no output)");
         if (result.verify.embeddedExecutor?.error) {
@@ -3718,7 +3700,7 @@ function printResult(result, asJson) {
     console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
     console.log(
-      `units: ${UNIT_EXECUTOR}=${result.unitStates[UNIT_EXECUTOR]}, ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`,
+      `units: ${UNIT_EXECUTOR}=${result.unitStates[UNIT_EXECUTOR]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`,
     );
     console.log(
       `health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`,
@@ -3747,7 +3729,7 @@ function printResult(result, asJson) {
     console.log(`runtime: ${result.runtimeMode ?? "unknown"}`);
     console.log(`opencode: ${result.opencodeVersion ?? "not installed"}`);
     console.log(
-      `units: ${UNIT_EXECUTOR}=${result.unitStates[UNIT_EXECUTOR]}, ${UNIT_OPENCODE}=${result.unitStates[UNIT_OPENCODE]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`,
+      `units: ${UNIT_EXECUTOR}=${result.unitStates[UNIT_EXECUTOR]}, ${UNIT_AGENT_MOCKINGBIRD}=${result.unitStates[UNIT_AGENT_MOCKINGBIRD]}`,
     );
     console.log(
       `health: ${result.health.ok ? "ok" : `failed (${result.health.status})`}`,
@@ -3857,14 +3839,12 @@ function printResult(result, asJson) {
 function evaluateResult(result) {
   const isActive =
     result?.unitStates?.[UNIT_EXECUTOR] === "active" &&
-    result?.unitStates?.[UNIT_OPENCODE] === "active" &&
     result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] === "active";
   if (result.mode === "install" || result.mode === "update") {
     if (
       !result.health?.ok ||
       !result.verify?.agentMockingbirdServiceOk ||
       !result.verify?.executorServiceOk ||
-      !result.verify?.opencodeServiceOk ||
       !result.verify?.frontendAssetsOk
     ) {
       return 2;
@@ -3884,7 +3864,6 @@ function evaluateResult(result) {
   if (result.mode === "stop") {
     const stopped =
       result?.unitStates?.[UNIT_EXECUTOR] !== "active" &&
-      result?.unitStates?.[UNIT_OPENCODE] !== "active" &&
       result?.unitStates?.[UNIT_AGENT_MOCKINGBIRD] !== "active";
     return stopped ? 0 : 2;
   }

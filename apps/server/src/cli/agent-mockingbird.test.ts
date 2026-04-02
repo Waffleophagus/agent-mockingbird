@@ -15,14 +15,14 @@ describe("agent-mockingbird CLI onboarding diagnostics", () => {
       authSuccess: true,
       authRefresh: {
         ok: true,
-        message: "opencode.service restarted to refresh provider credentials.",
+        message: "agent-mockingbird.service restarted to refresh provider credentials.",
       },
     });
 
     expect(diagnostics[0]).toBe("No runtime models were discovered after provider setup.");
     expect(diagnostics).toContain("Current runtime default: opencode/big-pickle");
     expect(diagnostics).toContain("Provider auth attempts: 1 (at least one succeeded)");
-    expect(diagnostics).toContain("OpenCode auth refresh: opencode.service restarted to refresh provider credentials.");
+    expect(diagnostics).toContain("OpenCode auth refresh: agent-mockingbird.service restarted to refresh provider credentials.");
     expect(diagnostics).toContain(
       "- curl -sS http://127.0.0.1:3001/api/opencode/models",
     );
@@ -621,7 +621,6 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
         runtime!.execStart,
         runtime!.mode,
         runtime!.webAssetsDir,
-        "/tmp/opencode",
         "/tmp/agent-mockingbird",
         "source",
       );

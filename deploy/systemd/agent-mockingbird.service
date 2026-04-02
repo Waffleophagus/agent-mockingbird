@@ -1,7 +1,7 @@
 [Unit]
 Description=Agent Mockingbird API and Dashboard
-After=network.target executor.service opencode.service
-Wants=network.target executor.service opencode.service
+After=network.target executor.service
+Wants=network.target executor.service
 
 [Service]
 Type=simple
@@ -12,7 +12,7 @@ Environment=NODE_ENV=production
 Environment=PORT=3001
 Environment=AGENT_MOCKINGBIRD_CONFIG_PATH=/var/lib/agent-mockingbird/agent-mockingbird.config.json
 Environment=AGENT_MOCKINGBIRD_DB_PATH=/var/lib/agent-mockingbird/agent-mockingbird.db
-Environment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:4096
+Environment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:3001
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=/var/lib/agent-mockingbird/executor-workspace
@@ -20,9 +20,11 @@ Environment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=/var/lib/agent-mockingbird/execu
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH=/executor
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH=/executor
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_MODE=embedded-patched
+Environment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001
 Environment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=/srv/agent-mockingbird/app
 Environment=OPENCODE_CONFIG_DIR=__AGENT_MOCKINGBIRD_OPENCODE_CONFIG_DIR__
 Environment=OPENCODE_DISABLE_PROJECT_CONFIG=1
+Environment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1
 ExecStart=/usr/bin/env bun apps/server/src/index.ts
 Restart=always
 RestartSec=2

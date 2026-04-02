@@ -7,11 +7,12 @@ import {
   type OpencodeClient as OpencodeV2Client,
 } from "@opencode-ai/sdk/v2/client";
 
+import { resolveDefaultAppBaseUrl } from "../appBaseUrl";
 import { env } from "../env";
 
 const DEFAULT_OPENCODE_BASE_URL =
   env.AGENT_MOCKINGBIRD_OPENCODE_BASE_URL?.trim() ||
-  `http://127.0.0.1:${process.env.OPENCODE_PORT?.trim() || "4096"}`;
+  resolveDefaultAppBaseUrl();
 const DEFAULT_OPENCODE_TIMEOUT_MS = 120_000;
 
 interface OpencodeConnectionConfig {

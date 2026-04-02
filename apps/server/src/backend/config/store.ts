@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import path from "node:path";
 import { z } from "zod";
 
+import { resolveDefaultAppBaseUrl } from "../appBaseUrl";
 import { sqlite } from "../db/client";
 import { DEFAULT_AGENTS, DEFAULT_AGENT_TYPES, DEFAULT_MCPS, DEFAULT_SKILLS } from "../defaults";
 import { env } from "../env";
@@ -31,7 +32,7 @@ const DEFAULT_SMOKE_TEST_PROMPT = 'Just respond "OK" to this to confirm the gate
 const DEFAULT_SMOKE_TEST_PATTERN = "\\bok\\b";
 const DEFAULT_OPENCODE_BASE_URL =
   process.env.AGENT_MOCKINGBIRD_OPENCODE_BASE_URL?.trim() ||
-  `http://127.0.0.1:${process.env.OPENCODE_PORT?.trim() || "4096"}`;
+  resolveDefaultAppBaseUrl();
 const DEFAULT_EXECUTOR_BASE_URL =
   process.env.AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL?.trim() ||
   `http://127.0.0.1:${process.env.EXECUTOR_PORT?.trim() || "8788"}`;
@@ -258,6 +259,21 @@ function mergeAgentTypesWithLegacyAgents(
 function normalizeOpencodeBaseUrl(baseUrl: string) {
   const trimmed = baseUrl.trim();
   if (!trimmed) return DEFAULT_OPENCODE_BASE_URL;
+  if (hasExplicitEnvValue("AGENT_MOCKINGBIRD_OPENCODE_BASE_URL")) {
+    return trimmed;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    const isLegacyLoopback =
+      (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") &&
+      parsed.port === "4096" &&
+      (!parsed.pathname || parsed.pathname === "/");
+    if (isLegacyLoopback) {
+      return DEFAULT_OPENCODE_BASE_URL;
+    }
+  } catch {
+    return trimmed;
+  }
   return trimmed;
 }
 

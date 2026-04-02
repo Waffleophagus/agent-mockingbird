@@ -3,6 +3,7 @@ import fs, { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { resolveDefaultAppBaseUrl } from "../appBaseUrl";
 import { ensureConfigSnapshot, parseConfig } from "./store";
 import { resolveExampleConfigPath } from "./testFixtures";
 import { ConfigApplyError } from "./types";
@@ -207,6 +208,23 @@ test("parseConfig backfills embedded executor config from legacy runtime.executo
   expect(parsed.runtime.embeddedServices.executor.baseUrl).toBe(
     "http://127.0.0.1:9999",
   );
+});
+
+test("parseConfig rewrites the legacy dedicated OpenCode loopback URL to the app server", () => {
+  const filePath = resolveExampleConfigPath();
+  const raw = JSON.parse(readFileSync(filePath, "utf8")) as {
+    runtime?: {
+      opencode?: Record<string, unknown>;
+    };
+  };
+  if (!raw.runtime?.opencode) {
+    throw new Error("Test fixture missing opencode settings");
+  }
+
+  raw.runtime.opencode.baseUrl = "http://127.0.0.1:4096";
+
+  const parsed = parseConfig(raw);
+  expect(parsed.runtime.opencode.baseUrl).toBe(resolveDefaultAppBaseUrl());
 });
 
 test("parseConfig preserves explicit embedded executor overrides", () => {

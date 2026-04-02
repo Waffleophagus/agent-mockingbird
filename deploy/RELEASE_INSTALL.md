@@ -32,7 +32,7 @@ This installs:
 - `agent-mockingbird` from npmjs
 - `opencode-ai` from npmjs
 - `executor` from npmjs
-- user services (`executor.service`, `opencode.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
+- user services (`executor.service`, `agent-mockingbird.service`) in `~/.config/systemd/user`
 - automatic service start and health verification
 - interactive onboarding on TTY installs (`provider auth`, default model, memory/Ollama, optional OpenClaw import)
 
@@ -104,7 +104,6 @@ After install, verify:
 
 ```bash
 systemctl status executor.service --no-pager
-systemctl status opencode.service --no-pager
 systemctl status agent-mockingbird.service --no-pager
 curl -sS http://127.0.0.1:3001/api/health
 ```
