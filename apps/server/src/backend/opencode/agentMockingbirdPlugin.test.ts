@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
+import { createMemorySearchTool } from "../../../../../runtime-assets/opencode-config/lib/memory-tools";
 import { AgentMockingbirdPlugin } from "../../../../../runtime-assets/opencode-config/plugins/agent-mockingbird";
+import memoryGetTool from "../../../../../runtime-assets/opencode-config/tools/memory_get";
+import memoryRememberTool from "../../../../../runtime-assets/opencode-config/tools/memory_remember";
+import memorySearchTool from "../../../../../runtime-assets/opencode-config/tools/memory_search";
 
 const originalFetch = globalThis.fetch;
 
@@ -19,14 +23,11 @@ describe("AgentMockingbirdPlugin", () => {
       "agent_type_manager",
       "config_manager",
       "cron_manager",
-      "memory_get",
-      "memory_remember",
-      "memory_search",
       "notify_main_thread",
     ]);
   });
 
-  test("memory_search calls the memory API and compacts snippets", async () => {
+  test("direct memory_search tool calls the memory API and compacts snippets", async () => {
     process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input) => {
@@ -53,8 +54,7 @@ describe("AgentMockingbirdPlugin", () => {
       );
     }) as typeof fetch;
 
-    const hooks = await AgentMockingbirdPlugin({} as never);
-    const raw = await hooks.tool?.memory_search?.execute(
+    const raw = await memorySearchTool.execute(
       {
         query: "stored detail",
       },
@@ -73,7 +73,7 @@ describe("AgentMockingbirdPlugin", () => {
     expect(payload.results[0]?.snippet).toBe("Stored detail");
   });
 
-  test("plugin options override env defaults for API base URLs", async () => {
+  test("plugin memory tool factories still honor plugin option overrides", async () => {
     process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input) => {
@@ -85,11 +85,10 @@ describe("AgentMockingbirdPlugin", () => {
       });
     }) as typeof fetch;
 
-    const hooks = await AgentMockingbirdPlugin({} as never, {
+    const memorySearchWithOptions = createMemorySearchTool({
       memoryApiBaseUrl: "http://127.0.0.1:4010/",
     });
-
-    const raw = await hooks.tool?.memory_search?.execute(
+    const raw = await memorySearchWithOptions.execute(
       {
         query: "stored detail",
       },
@@ -97,6 +96,40 @@ describe("AgentMockingbirdPlugin", () => {
     );
 
     expect(JSON.parse(raw ?? "{}")).toMatchObject({ ok: true, count: 0 });
+  });
+
+  test("direct memory_get tool reads the configured memory slice", async () => {
+    process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async (input, init) => {
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/memory/read");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+      expect(init?.body).toBe(JSON.stringify({
+        path: "memory/2026-03-14.md",
+        from: 5,
+        lines: 10,
+      }));
+      return new Response(JSON.stringify({
+        path: "memory/2026-03-14.md",
+        text: "Stored detail",
+      }), {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    }) as typeof fetch;
+
+    const raw = await memoryGetTool.execute({
+      path: "memory/2026-03-14.md",
+      from: 5,
+      lines: 10,
+    }, {} as never);
+    expect(JSON.parse(raw ?? "{}")).toEqual({
+      ok: true,
+      path: "memory/2026-03-14.md",
+      text: "Stored detail",
+    });
   });
 
   test("config_manager get_config passes through effective MCP state", async () => {
@@ -459,7 +492,7 @@ describe("AgentMockingbirdPlugin", () => {
     });
   });
 
-  test("memory_remember forwards the calling session id", async () => {
+  test("direct memory_remember tool forwards the calling session id", async () => {
     process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
 
     globalThis.fetch = (async (input, init) => {
@@ -480,8 +513,7 @@ describe("AgentMockingbirdPlugin", () => {
       });
     }) as typeof fetch;
 
-    const hooks = await AgentMockingbirdPlugin({} as never);
-    const raw = await hooks.tool?.memory_remember?.execute(
+    const raw = await memoryRememberTool.execute(
       {
         content: "Remember this.",
       },
