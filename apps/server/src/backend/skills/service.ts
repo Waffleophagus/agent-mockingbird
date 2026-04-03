@@ -15,7 +15,10 @@ import os from "node:os";
 import path from "node:path";
 
 import type { AgentMockingbirdConfig } from "../config/schema";
-import { createOpencodeClientFromConnection } from "../opencode/client";
+import {
+  createOpencodeClientFromConnection,
+  resolveOpencodeConnection,
+} from "../opencode/client";
 
 const SKILL_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 const MANAGED_SKILLS_RELATIVE = path.join(".agents", "skills");
@@ -426,10 +429,7 @@ export function listManagedSkillCatalog(workspaceDir?: string | null): RuntimeSk
 }
 
 export async function disposeOpencodeSkillInstance(config: AgentMockingbirdConfig) {
-  await createOpencodeClientFromConnection({
-    baseUrl: config.runtime.opencode.baseUrl,
-    directory: config.runtime.opencode.directory,
-  }).instance.dispose({
+  await createOpencodeClientFromConnection(resolveOpencodeConnection(config)).instance.dispose({
     responseStyle: "data",
     throwOnError: true,
     signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),

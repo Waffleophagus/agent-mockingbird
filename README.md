@@ -45,7 +45,7 @@ agent-mockingbird install
 
 The npm/Bun global `agent-mockingbird` command is a bootstrap wrapper. On first install it creates the managed runtime under `~/.agent-mockingbird`, then future `agent-mockingbird` commands delegate into that managed install regardless of npm global prefix or PATH ordering.
 
-`agent-mockingbird install` provisions and starts the `executor`, `opencode`, and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
+`agent-mockingbird install` provisions and starts the `executor` and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
 
 If you are working from source:
 
@@ -54,7 +54,7 @@ bun install
 bun run dev:stack
 ```
 
-`bun run dev:stack` builds the bundled app, starts the local OpenCode sidecar on `127.0.0.1:4096`, and starts the Agent Mockingbird server in one command.
+`bun run dev:stack` builds the bundled app, starts the local Executor sidecar on `127.0.0.1:8788`, and starts the Agent Mockingbird server with embedded OpenCode on `127.0.0.1:3001` in one command.
 
 ## How It Works
 
@@ -81,8 +81,7 @@ A series of patches applied to the OpenCode UI that add management interfaces:
 A Bun-native server that bridges the plugin and UI layers:
 
 - Provides HTTP APIs for plugin tool execution
-- Proxies OpenCode runtime requests to the sidecar
-- Serves the patched OpenCode web interface
+- Serves the embedded OpenCode runtime and patched web interface
 - Manages local state, memory indexing, cron scheduling, and run tracking
 
 ## Core Concepts

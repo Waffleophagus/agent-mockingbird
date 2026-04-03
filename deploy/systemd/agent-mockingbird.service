@@ -12,7 +12,6 @@ Environment=NODE_ENV=production
 Environment=PORT=3001
 Environment=AGENT_MOCKINGBIRD_CONFIG_PATH=/var/lib/agent-mockingbird/agent-mockingbird.config.json
 Environment=AGENT_MOCKINGBIRD_DB_PATH=/var/lib/agent-mockingbird/agent-mockingbird.db
-Environment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:3001
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=/var/lib/agent-mockingbird/executor-workspace

@@ -8,6 +8,7 @@ import {
 } from "@opencode-ai/sdk/v2/client";
 
 import { resolveDefaultAppBaseUrl } from "../appBaseUrl";
+import type { AgentMockingbirdConfig } from "../config/schema";
 import { env } from "../env";
 
 const DEFAULT_OPENCODE_BASE_URL =
@@ -36,6 +37,28 @@ function resolveAuthHeader() {
   const password = env.AGENT_MOCKINGBIRD_OPENCODE_PASSWORD ?? "";
   if (!username) return undefined;
   return `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}`;
+}
+
+export function resolveOpencodeConnection(
+  config: AgentMockingbirdConfig,
+  overrides?: Partial<OpencodeConnectionConfig>,
+): OpencodeConnectionConfig {
+  return {
+    baseUrl:
+      typeof overrides?.baseUrl === "string" && overrides.baseUrl.trim()
+        ? overrides.baseUrl.trim()
+        : config.runtime.opencode.baseUrl,
+    directory:
+      typeof overrides?.directory === "undefined"
+        ? config.runtime.opencode.directory
+        : overrides.directory,
+    timeoutMs:
+      typeof overrides?.timeoutMs === "number" &&
+      Number.isFinite(overrides.timeoutMs) &&
+      overrides.timeoutMs > 0
+        ? overrides.timeoutMs
+        : config.runtime.opencode.timeoutMs,
+  };
 }
 
 export function getOpencodeConnectionInfo(

@@ -2,7 +2,11 @@ import type { ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 
 import type { AgentMockingbirdConfig } from "./schema";
 import { ConfigApplyError, type ConfigSemanticSummary } from "./types";
-import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
+import {
+  createOpencodeClientFromConnection,
+  resolveOpencodeConnection,
+  unwrapSdkData,
+} from "../opencode/client";
 
 export function resolveModelRefForValidation(
   rawRef: string,
@@ -46,15 +50,13 @@ export function resolveModelRefForValidation(
 
 async function loadProviderModelMap(config: AgentMockingbirdConfig) {
   try {
-    const client = createOpencodeClientFromConnection({
-      baseUrl: config.runtime.opencode.baseUrl,
-      directory: config.runtime.opencode.directory,
-    });
+    const connection = resolveOpencodeConnection(config);
+    const client = createOpencodeClientFromConnection(connection);
     const payload = unwrapSdkData<ConfigProvidersResponse>(
       await client.config.providers({
         responseStyle: "data",
         throwOnError: true,
-        signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),
+        signal: AbortSignal.timeout(connection.timeoutMs),
       }),
     );
     const modelsByProvider = new Map<string, Set<string>>();

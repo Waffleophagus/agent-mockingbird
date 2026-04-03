@@ -40,7 +40,8 @@ journalctl -u agent-mockingbird.service -f
 ## Notes
 
 - OpenCode runtime settings (`baseUrl`, `directory`, model/provider/timeouts) now come from agent-mockingbird config JSON (`runtime.opencode.*`), not runtime env vars.
-- `agent-mockingbird.service` now hosts the embedded OpenCode server directly, so `AGENT_MOCKINGBIRD_OPENCODE_BASE_URL` should point at the app service itself (`http://127.0.0.1:3001`).
+- `agent-mockingbird.service` now hosts the embedded OpenCode server directly. By default the runtime targets the same app service URL derived from `PORT` (`http://127.0.0.1:3001` unless overridden).
+- Only set `AGENT_MOCKINGBIRD_OPENCODE_BASE_URL` when you intentionally want the backend to call a different OpenCode endpoint.
 - Set `AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR` in `agent-mockingbird.service` to the same project workspace path used by the embedded OpenCode runtime.
 - If migrating older env-based settings, run `bun run config:migrate-opencode-env` once before service start.
 - Agent edits from Agent Mockingbird persist to the managed OpenCode config dir pointed to by `OPENCODE_CONFIG_DIR`, not to project-local `.opencode`.

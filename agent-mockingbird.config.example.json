@@ -5,7 +5,7 @@
   },
   "runtime": {
     "opencode": {
-      "baseUrl": "http://127.0.0.1:4096",
+      "baseUrl": "http://127.0.0.1:3001",
       "providerId": "opencode",
       "modelId": "big-pickle",
       "fallbackModels": [],

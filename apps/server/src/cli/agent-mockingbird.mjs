@@ -1185,7 +1185,7 @@ function unitContents(
     ? `Environment=EXECUTOR_WEB_ASSETS_DIR=${executorWebAssetsDir}\n`
     : "";
   const executor = `[Unit]\nDescription=Executor Sidecar for Agent Mockingbird (user service)\nAfter=network.target\nWants=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${paths.executorWorkspaceDir}\nEnvironment=EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=EXECUTOR_LOCAL_DATA_DIR=${paths.executorLocalDataDir}\nEnvironment=EXECUTOR_SERVER_PID_FILE=${path.join(paths.executorRunDir, "server.pid")}\nEnvironment=EXECUTOR_SERVER_LOG_FILE=${path.join(paths.executorRunDir, "server.log")}\nEnvironment=EXECUTOR_SERVER_BASE_PATH=/executor\n${executorWebAssetsEnvLine}ExecStart=${executorExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
-  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_EXECUTOR}\nWants=network.target ${UNIT_EXECUTOR}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_OPENCODE_BASE_URL=http://127.0.0.1:3001\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=${paths.executorWorkspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_MODE=${executorMode}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH=/executor\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const agentMockingbird = `[Unit]\nDescription=Agent Mockingbird API and Dashboard (user service)\nAfter=network.target ${UNIT_EXECUTOR}\nWants=network.target ${UNIT_EXECUTOR}\n\n[Service]\nType=simple\nWorkingDirectory=${paths.rootDir}\nEnvironment=NODE_ENV=production\nEnvironment=PORT=3001\nEnvironment=AGENT_MOCKINGBIRD_CONFIG_PATH=${path.join(paths.dataDir, "agent-mockingbird.config.json")}\nEnvironment=AGENT_MOCKINGBIRD_DB_PATH=${path.join(paths.dataDir, "agent-mockingbird.db")}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_BASE_URL=http://127.0.0.1:8788\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_WORKSPACE_DIR=${paths.executorWorkspaceDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_DATA_DIR=${paths.executorDataDir}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_MODE=${executorMode}\nEnvironment=AGENT_MOCKINGBIRD_EXECUTOR_HEALTHCHECK_PATH=/executor\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL=http://127.0.0.1:3001\nEnvironment=AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR=${paths.workspaceDir}\nEnvironment=OPENCODE_CONFIG_DIR=${paths.opencodeConfigDir}\nEnvironment=OPENCODE_DISABLE_PROJECT_CONFIG=1\nEnvironment=OPENCODE_DISABLE_EXTERNAL_SKILLS=1\nEnvironment=AGENT_MOCKINGBIRD_RUNTIME_MODE=${runtimeMode}\nExecStart=${agentMockingbirdExecStart}\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
 
   return { executor, agentMockingbird };
 }
@@ -1518,8 +1518,8 @@ function buildInstallSummary({ args, paths }) {
     `7. Install CLI shims at ${paths.agentMockingbirdShimPath} and ${paths.opencodeShimPath}, and ensure ${paths.localBinDir} is on PATH.`,
     `8. Seed workspace skills from bundled package into ${path.join(paths.workspaceDir, ".agents", "skills")}.`,
     "9. Build the packaged Executor embedded web bundle for /executor.",
-    `10. Write user services: ${paths.executorUnitPath}, ${paths.opencodeUnitPath}, and ${paths.agentMockingbirdUnitPath}.`,
-    "11. Reload systemd user daemon and enable/start all three services.",
+    `10. Write user services: ${paths.executorUnitPath} and ${paths.agentMockingbirdUnitPath}, and remove any stale ${paths.opencodeUnitPath}.`,
+    "11. Reload systemd user daemon and enable/start both services.",
     args.skipLinger
       ? "12. Skip linger configuration (--skip-linger set)."
       : `12. Attempt loginctl linger so services survive logout/reboot${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,
@@ -1548,13 +1548,13 @@ function buildUpdateSummary({ args, paths }) {
     `- Install root: ${paths.rootDir}`,
     "",
     "What this update does:",
-    "1. Refresh Agent Mockingbird package + executor + OpenCode sidecar dependencies.",
+    "1. Refresh Agent Mockingbird package + executor + OpenCode CLI dependencies.",
     `2. Ensure pinned Bun runtime is available (${bunStatus}).`,
     "3. Re-seed workspace skills from bundled package.",
     "4. Rebuild the packaged Executor embedded web bundle for /executor.",
     "5. Re-write CLI shim + systemd user units to current paths/entrypoint.",
     "   - Includes agent-mockingbird + opencode shims in ~/.local/bin",
-    "6. Reload daemon, enable/start services, then force restart all sidecars.",
+    "6. Reload daemon, enable/start services, then force restart executor + agent-mockingbird.",
     args.skipLinger
       ? "7. Skip linger configuration (--skip-linger set)."
       : `7. Re-check linger and enable when missing${hasLoginctl ? "" : " (loginctl missing; may require manual setup)"}.`,

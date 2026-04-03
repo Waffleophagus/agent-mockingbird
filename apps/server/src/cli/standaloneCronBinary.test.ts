@@ -45,12 +45,12 @@ function buildCandidatePorts(count: number) {
   const seen = new Set<number>();
 
   for (let attempt = 0; ports.length < count && attempt < count * 8; attempt += 1) {
-    const sidecarPort = start + ((seed + attempt * 7919) % span);
-    const apiPort = sidecarPort + 1;
-    if (seen.has(sidecarPort) || seen.has(apiPort)) continue;
-    seen.add(sidecarPort);
+    const opencodePort = start + ((seed + attempt * 7919) % span);
+    const apiPort = opencodePort + 1;
+    if (seen.has(opencodePort) || seen.has(apiPort)) continue;
+    seen.add(opencodePort);
     seen.add(apiPort);
-    ports.push(sidecarPort);
+    ports.push(opencodePort);
   }
 
   return ports;
@@ -70,10 +70,10 @@ test(
     expect(build.exitCode).toBe(0);
 
     const candidatePorts = buildCandidatePorts(24);
-    let boundSidecar = false;
+    let boundOpencodeStub = false;
 
-    for (const sidecarPort of candidatePorts) {
-      const apiPort = sidecarPort + 1;
+    for (const opencodePort of candidatePorts) {
+      const apiPort = opencodePort + 1;
       const tempRoot = mkdtempSync(path.join(os.tmpdir(), "agent-mockingbird-bin-cron-"));
       const workspaceDir = path.join(tempRoot, "workspace");
       const configPath = path.join(tempRoot, "config.json");
@@ -88,7 +88,7 @@ test(
         };
       };
       config.workspace.pinnedDirectory = workspaceDir;
-      config.runtime.opencode.baseUrl = `http://127.0.0.1:${sidecarPort}`;
+      config.runtime.opencode.baseUrl = `http://127.0.0.1:${opencodePort}`;
       config.runtime.opencode.directory = workspaceDir;
       config.runtime.memory.enabled = false;
       config.runtime.memory.workspaceDir = workspaceDir;
@@ -104,12 +104,12 @@ test(
       );
 
       let sessionCount = 0;
-      let sidecar: Bun.Server<unknown> | null = null;
+      let opencodeStub: Bun.Server<unknown> | null = null;
       let binary: ReturnType<typeof Bun.spawn> | null = null;
       try {
-        sidecar = Bun.serve({
+        opencodeStub = Bun.serve({
           hostname: "127.0.0.1",
-          port: sidecarPort,
+          port: opencodePort,
           fetch(req) {
             const url = new URL(req.url);
             if (url.pathname === "/config" && req.method === "GET") {
@@ -130,7 +130,7 @@ test(
             return new Response("Not found", { status: 404 });
           },
         });
-        boundSidecar = true;
+        boundOpencodeStub = true;
 
         binary = Bun.spawn({
           cmd: [path.join(repoRoot, "dist", "agent-mockingbird")],
@@ -186,12 +186,12 @@ test(
       } finally {
         binary?.kill();
         await binary?.exited;
-        sidecar?.stop(true);
+        opencodeStub?.stop(true);
         rmSync(tempRoot, { recursive: true, force: true });
       }
     }
 
-    if (!boundSidecar) {
+    if (!boundOpencodeStub) {
       console.warn("Skipping compiled binary cron smoke test because the environment could not bind a local Bun.serve port.");
       return;
     }

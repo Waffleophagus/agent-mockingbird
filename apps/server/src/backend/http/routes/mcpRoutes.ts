@@ -10,6 +10,7 @@ import {
 import {
   createOpencodeClientFromConnection,
   createOpencodeV2ClientFromConnection,
+  resolveOpencodeConnection,
   unwrapSdkData,
 } from "../../opencode/client";
 import { patchManagedOpencodeConfig } from "../../opencode/managedConfig";
@@ -31,11 +32,7 @@ function getConnectionConfig() {
     directory =
       snapshot.config.runtime.opencode.directory || snapshot.config.workspace.pinnedDirectory;
   }
-  return {
-    baseUrl: snapshot.config.runtime.opencode.baseUrl,
-    directory,
-    timeoutMs: snapshot.config.runtime.opencode.timeoutMs,
-  };
+  return resolveOpencodeConnection(snapshot.config, { directory });
 }
 
 async function loadOpencodeConfig() {

@@ -3,7 +3,10 @@ import { applyEdits, format, modify, parse as parseJsonc } from "jsonc-parser";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { createOpencodeClientFromConnection } from "./client";
+import {
+  createOpencodeClientFromConnection,
+  resolveOpencodeConnection,
+} from "./client";
 import type { AgentMockingbirdConfig } from "../config/schema";
 import {
   resolveOpencodeConfigDir,
@@ -207,10 +210,11 @@ export async function disposeManagedOpencodeInstance(
   config: AgentMockingbirdConfig,
 ) {
   try {
-    await createOpencodeClientFromConnection({
-      baseUrl: config.runtime.opencode.baseUrl,
-      directory: resolveOpencodeWorkspaceDir(config),
-    }).instance.dispose({
+    await createOpencodeClientFromConnection(
+      resolveOpencodeConnection(config, {
+        directory: resolveOpencodeWorkspaceDir(config),
+      }),
+    ).instance.dispose({
       responseStyle: "data",
       throwOnError: true,
       signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),
