@@ -47,6 +47,8 @@ The npm/Bun global `agent-mockingbird` command is a bootstrap wrapper. On first 
 
 `agent-mockingbird install` provisions and starts the `executor` and `agent-mockingbird` user services, then launches the interactive onboarding wizard on TTY installs.
 
+Installed services listen on `0.0.0.0:3001` by default, so opening or forwarding TCP port `3001` exposes the dashboard/API immediately. Local source-mode development still uses `127.0.0.1:3001`.
+
 If you are working from source:
 
 ```bash

@@ -630,6 +630,9 @@ describe("agent-mockingbird CLI packaged executor runtime", () => {
       expect(units.executor).toContain(
         `Environment=EXECUTOR_WEB_ASSETS_DIR=${path.dirname(webIndex)}`,
       );
+      expect(units.agentMockingbird).toContain(
+        "Environment=AGENT_MOCKINGBIRD_HOST=0.0.0.0",
+      );
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

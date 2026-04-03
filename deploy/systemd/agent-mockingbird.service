@@ -10,6 +10,7 @@ Group=agent-mockingbird
 WorkingDirectory=/srv/agent-mockingbird/app
 Environment=NODE_ENV=production
 Environment=PORT=3001
+Environment=AGENT_MOCKINGBIRD_HOST=0.0.0.0
 Environment=AGENT_MOCKINGBIRD_CONFIG_PATH=/var/lib/agent-mockingbird/agent-mockingbird.config.json
 Environment=AGENT_MOCKINGBIRD_DB_PATH=/var/lib/agent-mockingbird/agent-mockingbird.db
 Environment=AGENT_MOCKINGBIRD_EXECUTOR_ENABLED=true
