@@ -1,4 +1,10 @@
+const DEFAULT_APP_HOST = "127.0.0.1";
 const DEFAULT_APP_PORT = "3001";
+
+function resolveConfiguredAppHost() {
+  const host = process.env.AGENT_MOCKINGBIRD_HOST?.trim() || DEFAULT_APP_HOST;
+  return host || DEFAULT_APP_HOST;
+}
 
 function resolveConfiguredAppPort() {
   const rawPort =
@@ -12,6 +18,22 @@ function resolveConfiguredAppPort() {
   return String(parsedPort);
 }
 
+function resolveConnectHost() {
+  const host = resolveConfiguredAppHost();
+  if (host === "0.0.0.0" || host === "::") {
+    return DEFAULT_APP_HOST;
+  }
+  return host;
+}
+
+function formatHostForUrl(host: string) {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+export function resolveDefaultAppBindHost() {
+  return resolveConfiguredAppHost();
+}
+
 export function resolveDefaultAppBaseUrl() {
-  return `http://127.0.0.1:${resolveConfiguredAppPort()}`;
+  return `http://${formatHostForUrl(resolveConnectHost())}:${resolveConfiguredAppPort()}`;
 }

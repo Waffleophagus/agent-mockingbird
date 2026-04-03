@@ -90,8 +90,10 @@ const serverPort = Number(
   process.env.AGENT_MOCKINGBIRD_PORT?.trim() ||
   "3001",
 );
+const serverHost = env.AGENT_MOCKINGBIRD_HOST;
 
 const server = serve({
+  hostname: serverHost,
   port: Number.isFinite(serverPort) && serverPort > 0 ? serverPort : 3001,
   idleTimeout: 120,
   fetch: async (req, server) => {
@@ -137,6 +139,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 console.log("[startup] agent-mockingbird runtime", {
   nodeEnv: env.NODE_ENV,
+  host: serverHost,
   appDistDir,
   runtimeMode: process.env.AGENT_MOCKINGBIRD_RUNTIME_MODE || "unknown",
   config: {
