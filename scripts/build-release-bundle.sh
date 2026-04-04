@@ -83,7 +83,11 @@ tar -C "${STAGE_DIR}" -czf "${ARCHIVE_PATH}" "${PREFIX}"
 
 (
   cd "${DIST_DIR}"
-  sha256sum "agent-mockingbird-${VERSION}.tar.gz" > "agent-mockingbird-${VERSION}.tar.gz.sha256"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "agent-mockingbird-${VERSION}.tar.gz" > "agent-mockingbird-${VERSION}.tar.gz.sha256"
+  else
+    shasum -a 256 "agent-mockingbird-${VERSION}.tar.gz" > "agent-mockingbird-${VERSION}.tar.gz.sha256"
+  fi
 )
 
 rm -rf "${STAGE_DIR}"

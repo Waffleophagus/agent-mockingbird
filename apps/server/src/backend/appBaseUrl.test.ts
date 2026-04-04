@@ -50,3 +50,16 @@ test("default app base URL keeps loopback for wildcard bind hosts", () => {
     restoreEnv("AGENT_MOCKINGBIRD_PORT", previousPort);
   }
 });
+
+test("default app base URL maps IPv6 wildcard bind hosts to IPv6 loopback", () => {
+  const previousHost = process.env.AGENT_MOCKINGBIRD_HOST;
+  delete process.env.AGENT_MOCKINGBIRD_PORT;
+  process.env.AGENT_MOCKINGBIRD_HOST = "::";
+
+  try {
+    expect(resolveDefaultAppBindHost()).toBe("::");
+    expect(resolveDefaultAppBaseUrl()).toBe("http://[::1]:3001");
+  } finally {
+    restoreEnv("AGENT_MOCKINGBIRD_HOST", previousHost);
+  }
+});

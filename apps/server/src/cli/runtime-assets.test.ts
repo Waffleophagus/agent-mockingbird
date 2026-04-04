@@ -71,4 +71,52 @@ describe("syncRuntimeWorkspaceAssets", () => {
     );
     expect(fs.existsSync(path.join(targetDir, "bun.lock"))).toBe(true);
   });
+
+  test("update mode treats untracked target files as conflicts instead of silently overwriting", async () => {
+    const sourceDir = makeTempDir();
+    const targetDir = makeTempDir();
+    const stateFilePath = path.join(makeTempDir(), "runtime-assets-state.json");
+
+    fs.mkdirSync(path.join(sourceDir, "plugins"), { recursive: true });
+    fs.mkdirSync(path.join(targetDir, "plugins"), { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "plugins", "memory_search.ts"), "export default 'packaged'\n");
+    fs.writeFileSync(path.join(targetDir, "plugins", "memory_search.ts"), "export default 'local'\n");
+
+    const result = await syncRuntimeWorkspaceAssets({
+      sourceWorkspaceDir: sourceDir,
+      targetWorkspaceDir: targetDir,
+      stateFilePath,
+      mode: "update",
+    });
+
+    expect(result.conflicts).toBe(1);
+    expect(result.backupsCreated).toBe(1);
+    expect(fs.readFileSync(path.join(targetDir, "plugins", "memory_search.ts"), "utf8")).toBe(
+      "export default 'packaged'\n",
+    );
+    expect(fs.readdirSync(path.join(targetDir, "plugins")).some(name => name.startsWith("memory_search.ts.backup-"))).toBe(true);
+  });
+
+  test("validates required paths before resolving them", async () => {
+    const sourceDir = makeTempDir();
+    fs.writeFileSync(path.join(sourceDir, "package.json"), "{\"name\":\"managed\"}\n");
+
+    await expect(
+      syncRuntimeWorkspaceAssets({
+        sourceWorkspaceDir: sourceDir,
+        targetWorkspaceDir: "",
+        stateFilePath: path.join(makeTempDir(), "runtime-assets-state.json"),
+        mode: "install",
+      }),
+    ).rejects.toThrow("runtime asset target directory is required");
+
+    await expect(
+      syncRuntimeWorkspaceAssets({
+        sourceWorkspaceDir: sourceDir,
+        targetWorkspaceDir: makeTempDir(),
+        stateFilePath: "",
+        mode: "install",
+      }),
+    ).rejects.toThrow("runtime asset state file path is required");
+  });
 });

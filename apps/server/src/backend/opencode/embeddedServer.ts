@@ -35,6 +35,14 @@ type EmbeddedOpenCodeApp = {
 
 let embeddedOpenCodeAppPromise: Promise<EmbeddedOpenCodeApp> | null = null;
 
+function cacheEmbeddedOpenCodeApp(promise: Promise<EmbeddedOpenCodeApp>) {
+  embeddedOpenCodeAppPromise = promise.catch((error) => {
+    embeddedOpenCodeAppPromise = null;
+    throw error;
+  });
+  return embeddedOpenCodeAppPromise;
+}
+
 function resolveEmbeddedOpenCodeBundlePath() {
   const executableDir = path.dirname(process.execPath);
   const candidates = [
@@ -52,19 +60,23 @@ async function getEmbeddedOpenCodeApp() {
   if (!embeddedOpenCodeAppPromise) {
     const bundledModulePath = resolveEmbeddedOpenCodeBundlePath();
     if (bundledModulePath) {
-      embeddedOpenCodeAppPromise = import(pathToFileURL(bundledModulePath).href).then(
-        (module: { createEmbeddedOpenCodeApp: () => EmbeddedOpenCodeApp }) =>
-          module.createEmbeddedOpenCodeApp(),
+      embeddedOpenCodeAppPromise = cacheEmbeddedOpenCodeApp(
+        import(pathToFileURL(bundledModulePath).href).then(
+          (module: { createEmbeddedOpenCodeApp: () => EmbeddedOpenCodeApp }) =>
+            module.createEmbeddedOpenCodeApp(),
+        ),
       );
     } else {
-      embeddedOpenCodeAppPromise = import(
-        new URL(
-          "../../../../../vendor/opencode/packages/opencode/src/server/server.ts",
-          import.meta.url,
-        ).href
-      ).then(
-        (module: { Server: { createApp: (opts: { cors?: string[] }) => EmbeddedOpenCodeApp } }) =>
-          module.Server.createApp({}),
+      embeddedOpenCodeAppPromise = cacheEmbeddedOpenCodeApp(
+        import(
+          new URL(
+            "../../../../../vendor/opencode/packages/opencode/src/server/server.ts",
+            import.meta.url,
+          ).href
+        ).then(
+          (module: { Server: { createApp: (opts: { cors?: string[] }) => EmbeddedOpenCodeApp } }) =>
+            module.Server.createApp({}),
+        ),
       );
     }
   }

@@ -676,8 +676,8 @@ const AgentMockingbirdPlugin = async (_input: unknown, options?: unknown) => {
           output.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL ??= cronBaseUrl
           if (process.env.AGENT_MOCKINGBIRD_PORT?.trim()) {
             output.env.AGENT_MOCKINGBIRD_PORT ??= process.env.AGENT_MOCKINGBIRD_PORT.trim()
-        }
-      },
+          }
+        },
     tool: {
       cron_manager: cronManagerTool,
       notify_main_thread: notifyMainThreadTool,

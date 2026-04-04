@@ -25,17 +25,55 @@ function resolveMemoryApiBaseUrl(options: MemoryToolOptions) {
   return `http://127.0.0.1:${port}`
 }
 
+function toJsonObject(value: unknown) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as JsonObject
+  }
+  return { data: value }
+}
+
+function getResponseErrorMessage(response: { status: number; payload: JsonObject; rawText: string }) {
+  if (typeof response.payload.error === "string" && response.payload.error.trim()) {
+    return response.payload.error
+  }
+  if (typeof response.payload.body === "string" && response.payload.body.trim()) {
+    return response.payload.body
+  }
+  if (response.rawText.trim()) {
+    return response.rawText
+  }
+  return `Request failed (${response.status})`
+}
+
 async function postMemoryJson(options: MemoryToolOptions, pathname: string, body: unknown) {
   const response = await fetch(`${resolveMemoryApiBaseUrl(options)}${pathname}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  const payload = (await response.json()) as JsonObject
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
+  const rawText = await response.text()
+  const trimmed = rawText.trim()
+  let payload: JsonObject = {}
+
+  if (trimmed) {
+    const looksLikeJson = trimmed.startsWith("{") || trimmed.startsWith("[")
+    if (contentType.includes("application/json") || looksLikeJson) {
+      try {
+        payload = toJsonObject(JSON.parse(rawText))
+      } catch {
+        payload = { body: rawText }
+      }
+    } else {
+      payload = { body: rawText }
+    }
+  }
+
   return {
     ok: response.ok,
     status: response.status,
     payload,
+    rawText,
   }
 }
 
@@ -73,14 +111,14 @@ export function createMemorySearchTool(source: MemoryToolOptions | (() => Memory
         debug: args.debug,
       })
       if (!response.ok) {
-        const error = typeof response.payload.error === "string" ? response.payload.error : `Request failed (${response.status})`
-        throw new Error(error)
+        throw new Error(getResponseErrorMessage(response))
       }
 
       const results = Array.isArray(response.payload.results) ? response.payload.results : []
       const compactResults = results.map((result) => {
         const value = result as JsonObject
         const snippet = typeof value.snippet === "string" ? value.snippet : ""
+        const preview = toPreview(snippet)
         return {
           id: value.id,
           score: value.score,
@@ -88,8 +126,8 @@ export function createMemorySearchTool(source: MemoryToolOptions | (() => Memory
           path: value.path,
           startLine: value.startLine,
           endLine: value.endLine,
-          preview: toPreview(snippet),
-          snippet: toPreview(snippet),
+          preview,
+          snippet: preview,
         }
       })
 
@@ -120,8 +158,7 @@ export function createMemoryGetTool(source: MemoryToolOptions | (() => MemoryToo
         lines: args.lines,
       })
       if (!response.ok) {
-        const error = typeof response.payload.error === "string" ? response.payload.error : `Request failed (${response.status})`
-        throw new Error(error)
+        throw new Error(getResponseErrorMessage(response))
       }
 
       return JSON.stringify({
@@ -163,8 +200,7 @@ export function createMemoryRememberTool(source: MemoryToolOptions | (() => Memo
       })
 
       if (!response.ok && response.status !== 422) {
-        const error = typeof response.payload.error === "string" ? response.payload.error : `Request failed (${response.status})`
-        throw new Error(error)
+        throw new Error(getResponseErrorMessage(response))
       }
 
       return JSON.stringify({

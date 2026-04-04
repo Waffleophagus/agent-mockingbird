@@ -20,8 +20,11 @@ function resolveConfiguredAppPort() {
 
 function resolveConnectHost() {
   const host = resolveConfiguredAppHost();
-  if (host === "0.0.0.0" || host === "::") {
-    return DEFAULT_APP_HOST;
+  if (host === "0.0.0.0") {
+    return "127.0.0.1";
+  }
+  if (host === "::") {
+    return "::1";
   }
   return host;
 }

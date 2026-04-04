@@ -163,4 +163,21 @@ describe("usage routes", () => {
     expect(html).toContain("Models");
     expect(html).toContain("Providers");
   });
+
+  test("GET /usage initializes local date ranges and renders rows without innerHTML interpolation", async () => {
+    const routes = createUsageRoutes();
+    const handler = routes["/usage"]?.GET;
+    expect(handler).toBeDefined();
+
+    const response = await handler!();
+    const html = await response.text();
+
+    expect(html).toContain("currentStart = toDateInputValue(startOfMonth);");
+    expect(html).toContain("currentEnd = toDateInputValue(today);");
+    expect(html).toContain("parseDateInputValue");
+    expect(html).toContain("document.createElement(\"tr\")");
+    expect(html).not.toContain(".innerHTML = data.models");
+    expect(html).not.toContain(".innerHTML = data.providers");
+    expect(html).not.toContain("new Date(e.target.value)");
+  });
 });

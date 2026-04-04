@@ -65,7 +65,10 @@ async function resolveSqliteVecLoadablePath() {
     if (!loadablePath) {
       throw new Error("sqlite-vec loadable path is unavailable");
     }
-    return loadablePath;
+    if (existsSync(loadablePath)) {
+      return loadablePath;
+    }
+    errors.push(formatError(new Error(`sqlite-vec loadable path does not exist: ${loadablePath}`)));
   } catch (error) {
     errors.push(formatError(error));
   }

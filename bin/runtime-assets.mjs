@@ -86,18 +86,29 @@ function readDecision(value) {
 
 export async function syncRuntimeWorkspaceAssets(input) {
   const mode = input?.mode === "update" ? "update" : "install";
-  const sourceWorkspaceDir = path.resolve(String(input?.sourceWorkspaceDir ?? ""));
-  const targetWorkspaceDir = path.resolve(String(input?.targetWorkspaceDir ?? ""));
-  const stateFilePath = path.resolve(String(input?.stateFilePath ?? ""));
+  const rawSourceWorkspaceDir =
+    typeof input?.sourceWorkspaceDir === "string" ? input.sourceWorkspaceDir.trim() : "";
+  const rawTargetWorkspaceDir =
+    typeof input?.targetWorkspaceDir === "string" ? input.targetWorkspaceDir.trim() : "";
+  const rawStateFilePath =
+    typeof input?.stateFilePath === "string" ? input.stateFilePath.trim() : "";
+
+  if (!rawSourceWorkspaceDir) {
+    throw new Error("runtime asset source directory missing: ");
+  }
+  if (!rawTargetWorkspaceDir) {
+    throw new Error("runtime asset target directory is required");
+  }
+  if (!rawStateFilePath) {
+    throw new Error("runtime asset state file path is required");
+  }
+
+  const sourceWorkspaceDir = path.resolve(rawSourceWorkspaceDir);
+  const targetWorkspaceDir = path.resolve(rawTargetWorkspaceDir);
+  const stateFilePath = path.resolve(rawStateFilePath);
 
   if (!sourceWorkspaceDir || !fs.existsSync(sourceWorkspaceDir)) {
     throw new Error(`runtime asset source directory missing: ${sourceWorkspaceDir}`);
-  }
-  if (!targetWorkspaceDir) {
-    throw new Error("runtime asset target directory is required");
-  }
-  if (!stateFilePath) {
-    throw new Error("runtime asset state file path is required");
   }
 
   const interactive = Boolean(input?.interactive);
@@ -144,7 +155,7 @@ export async function syncRuntimeWorkspaceAssets(input) {
     const previousAppliedHash = typeof previous?.appliedHash === "string" ? previous.appliedHash : null;
 
     const packageChanged = previousSourceHash === null || previousSourceHash !== sourceHash;
-    const localChanged = previousAppliedHash === null ? false : targetHash !== previousAppliedHash;
+    const localChanged = previousAppliedHash === null ? mode === "update" : targetHash !== previousAppliedHash;
 
     let appliedHash = targetHash;
 

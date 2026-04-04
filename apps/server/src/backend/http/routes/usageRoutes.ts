@@ -519,19 +519,79 @@ function usagePageHtml() {
       const fmtUsd = (n) => new Intl.NumberFormat("en-US", {
         style: "currency", currency: "USD", minimumFractionDigits: 2
       }).format(n);
+      const safeText = (value) =>
+        typeof value === "string" ? value : value == null ? "" : String(value);
+      const toDateInputValue = (date) => {
+        const year = String(date.getFullYear());
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return \`\${year}-\${month}-\${day}\`;
+      };
+      const parseDateInputValue = (value) => {
+        if (!value) return null;
+        const [yearText, monthText, dayText] = value.split("-");
+        const year = Number(yearText);
+        const monthIndex = Number(monthText) - 1;
+        const day = Number(dayText);
+        if (!Number.isInteger(year) || !Number.isInteger(monthIndex) || !Number.isInteger(day)) {
+          return null;
+        }
+        const start = new Date(year, monthIndex, day);
+        if (
+          start.getFullYear() !== year ||
+          start.getMonth() !== monthIndex ||
+          start.getDate() !== day
+        ) {
+          return null;
+        }
+        return {
+          start,
+          endExclusive: new Date(year, monthIndex, day + 1),
+        };
+      };
+      const shiftLocalDate = (date, days) =>
+        new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+
+      function createTextElement(tagName, className, text) {
+        const element = document.createElement(tagName);
+        if (className) {
+          element.className = className;
+        }
+        element.textContent = text;
+        return element;
+      }
+
+      function createCell(text, rightAlign = false) {
+        const cell = document.createElement("td");
+        cell.textContent = text;
+        if (rightAlign) {
+          cell.style.textAlign = "right";
+        }
+        return cell;
+      }
+
+      function replaceChildren(targetId, children) {
+        const target = document.getElementById(targetId);
+        target.replaceChildren(...children);
+      }
 
       let currentStart = null;
       let currentEnd = null;
 
-      const today = new Date();
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-      document.getElementById("start-date").value = startOfMonth.toISOString().split("T")[0];
-      document.getElementById("end-date").value = today.toISOString().split("T")[0];
+      currentStart = toDateInputValue(startOfMonth);
+      currentEnd = toDateInputValue(today);
+      document.getElementById("start-date").value = currentStart;
+      document.getElementById("end-date").value = currentEnd;
 
       async function loadData() {
         const url = new URL("/api/usage/dashboard", window.location.origin);
-        if (currentStart) url.searchParams.set("startAt", currentStart);
-        if (currentEnd) url.searchParams.set("endAtExclusive", currentEnd);
+        const startRange = parseDateInputValue(currentStart);
+        const endRange = parseDateInputValue(currentEnd);
+        if (startRange) url.searchParams.set("startAt", String(startRange.start.getTime()));
+        if (endRange) url.searchParams.set("endAtExclusive", String(endRange.endExclusive.getTime()));
 
         try {
           const res = await fetch(url);
@@ -549,42 +609,64 @@ function usagePageHtml() {
         document.getElementById("stat-output").textContent = fmt(data.totals.outputTokens);
         document.getElementById("stat-cost").textContent = fmtUsd(data.totals.estimatedCostUsd);
 
-        document.getElementById("models-list").innerHTML = data.models.slice(0, 5).map(m => \`
-          <div class="usage-detail-item">
-            <span class="usage-detail-name">\${m.modelId}</span>
-            <span class="usage-detail-value">\${fmtUsd(m.estimatedCostUsd)}</span>
-          </div>
-        \`).join("");
+        replaceChildren(
+          "models-list",
+          data.models.slice(0, 5).map((model) => {
+            const item = document.createElement("div");
+            item.className = "usage-detail-item";
+            item.append(
+              createTextElement("span", "usage-detail-name", safeText(model.modelId)),
+              createTextElement("span", "usage-detail-value", fmtUsd(model.estimatedCostUsd)),
+            );
+            return item;
+          }),
+        );
 
-        document.getElementById("providers-list").innerHTML = data.providers.slice(0, 5).map(p => \`
-          <div class="usage-detail-item">
-            <span class="usage-detail-name">\${p.providerId}</span>
-            <span class="usage-detail-value">\${fmtUsd(p.estimatedCostUsd)}</span>
-          </div>
-        \`).join("");
+        replaceChildren(
+          "providers-list",
+          data.providers.slice(0, 5).map((provider) => {
+            const item = document.createElement("div");
+            item.className = "usage-detail-item";
+            item.append(
+              createTextElement("span", "usage-detail-name", safeText(provider.providerId)),
+              createTextElement("span", "usage-detail-value", fmtUsd(provider.estimatedCostUsd)),
+            );
+            return item;
+          }),
+        );
 
-        document.getElementById("models-tbody").innerHTML = data.models.map(m => \`
-          <tr>
-            <td>\${m.modelId}</td>
-            <td>\${m.providerId}</td>
-            <td style="text-align: right">\${fmt(m.requestCount)}</td>
-            <td style="text-align: right">\${fmt(m.inputTokens)}</td>
-            <td style="text-align: right">\${fmt(m.outputTokens)}</td>
-            <td style="text-align: right">\${fmt(m.totalTokens)}</td>
-            <td style="text-align: right">\${fmtUsd(m.estimatedCostUsd)}</td>
-          </tr>
-        \`).join("");
+        replaceChildren(
+          "models-tbody",
+          data.models.map((model) => {
+            const row = document.createElement("tr");
+            row.append(
+              createCell(safeText(model.modelId)),
+              createCell(safeText(model.providerId)),
+              createCell(fmt(model.requestCount), true),
+              createCell(fmt(model.inputTokens), true),
+              createCell(fmt(model.outputTokens), true),
+              createCell(fmt(model.totalTokens), true),
+              createCell(fmtUsd(model.estimatedCostUsd), true),
+            );
+            return row;
+          }),
+        );
 
-        document.getElementById("providers-tbody").innerHTML = data.providers.map(p => \`
-          <tr>
-            <td>\${p.providerId}</td>
-            <td style="text-align: right">\${fmt(p.requestCount)}</td>
-            <td style="text-align: right">\${fmt(p.inputTokens)}</td>
-            <td style="text-align: right">\${fmt(p.outputTokens)}</td>
-            <td style="text-align: right">\${fmt(p.totalTokens)}</td>
-            <td style="text-align: right">\${fmtUsd(p.estimatedCostUsd)}</td>
-          </tr>
-        \`).join("");
+        replaceChildren(
+          "providers-tbody",
+          data.providers.map((provider) => {
+            const row = document.createElement("tr");
+            row.append(
+              createCell(safeText(provider.providerId)),
+              createCell(fmt(provider.requestCount), true),
+              createCell(fmt(provider.inputTokens), true),
+              createCell(fmt(provider.outputTokens), true),
+              createCell(fmt(provider.totalTokens), true),
+              createCell(fmtUsd(provider.estimatedCostUsd), true),
+            );
+            return row;
+          }),
+        );
       }
 
       document.querySelectorAll(".usage-tab").forEach(tab => {
@@ -602,26 +684,26 @@ function usagePageHtml() {
           btn.classList.add("active");
           const range = btn.dataset.range;
           const end = new Date();
-          let start = new Date();
-          if (range === "month") start = new Date(end.getFullYear(), end.getMonth(), 1);
-          else if (range === "week") start.setDate(end.getDate() - 7);
-          else if (range === "day") start = end;
-          else if (range === "all") start = new Date(0);
-          document.getElementById("start-date").value = start.toISOString().split("T")[0];
-          document.getElementById("end-date").value = end.toISOString().split("T")[0];
-          currentStart = range === "all" ? null : start.getTime();
-          currentEnd = range === "all" ? null : end.getTime() + 86400000;
+          const endLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+          let startLocal = endLocal;
+          if (range === "month") startLocal = new Date(endLocal.getFullYear(), endLocal.getMonth(), 1);
+          else if (range === "week") startLocal = shiftLocalDate(endLocal, -7);
+          else if (range === "day") startLocal = endLocal;
+          currentStart = range === "all" ? null : toDateInputValue(startLocal);
+          currentEnd = range === "all" ? null : toDateInputValue(endLocal);
+          document.getElementById("start-date").value = currentStart ?? "";
+          document.getElementById("end-date").value = currentEnd ?? "";
           loadData();
         });
       });
 
       document.getElementById("start-date").addEventListener("change", (e) => {
-        currentStart = e.target.value ? new Date(e.target.value).getTime() : null;
+        currentStart = e.target.value || null;
         loadData();
       });
 
       document.getElementById("end-date").addEventListener("change", (e) => {
-        currentEnd = e.target.value ? new Date(e.target.value).getTime() + 86400000 : null;
+        currentEnd = e.target.value || null;
         loadData();
       });
 
