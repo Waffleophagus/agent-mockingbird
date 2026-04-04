@@ -360,16 +360,19 @@ function usagePageHtml() {
       }
 
       .usage-table-container {
+        width: 100%;
+        max-width: 100%;
         background: var(--surface-raised-base);
         border: 1px solid var(--border-weak-base);
         border-radius: var(--radius-lg);
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
+        touch-action: pan-x;
       }
 
       .usage-table {
-        width: 100%;
-        min-width: 600px;
+        width: max-content;
+        min-width: 100%;
         border-collapse: collapse;
         font-size: var(--font-size-small);
       }
