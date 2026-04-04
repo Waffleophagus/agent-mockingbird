@@ -104,17 +104,18 @@ function usagePageHtml() {
       }
 
       .usage-header {
-        padding: 20px 24px 0;
+        padding: 16px 16px 0;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
+        gap: 12px;
       }
 
       .usage-header-left {
         display: flex;
         align-items: center;
-        gap: 16px;
+        gap: 12px;
+        flex-wrap: wrap;
       }
 
       .usage-back {
@@ -145,13 +146,21 @@ function usagePageHtml() {
       .usage-tabs {
         display: flex;
         gap: 4px;
-        padding: 0 24px;
+        padding: 0 16px;
         border-bottom: 1px solid var(--border-weak-base);
-        margin-top: 20px;
+        margin-top: 16px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+
+      .usage-tabs::-webkit-scrollbar {
+        display: none;
       }
 
       .usage-tab {
-        padding: 12px 20px;
+        padding: 12px 16px;
         font-family: var(--font-family-sans);
         font-size: var(--font-size-small);
         font-weight: var(--font-weight-medium);
@@ -162,6 +171,8 @@ function usagePageHtml() {
         cursor: pointer;
         transition: all 0.15s ease;
         margin-bottom: -1px;
+        white-space: nowrap;
+        flex-shrink: 0;
       }
 
       .usage-tab:hover {
@@ -175,7 +186,7 @@ function usagePageHtml() {
 
       .usage-content {
         flex: 1;
-        padding: 24px;
+        padding: 16px;
         overflow-y: auto;
       }
 
@@ -189,9 +200,9 @@ function usagePageHtml() {
 
       .usage-controls {
         display: flex;
-        gap: 16px;
-        margin-bottom: 24px;
-        padding: 16px;
+        gap: 12px;
+        margin-bottom: 20px;
+        padding: 12px;
         background: var(--surface-raised-base);
         border: 1px solid var(--border-weak-base);
         border-radius: var(--radius-lg);
@@ -201,9 +212,9 @@ function usagePageHtml() {
 
       .usage-date-group {
         display: flex;
-        gap: 12px;
+        gap: 8px;
         flex: 1;
-        min-width: 280px;
+        min-width: 0;
       }
 
       .usage-date-field {
@@ -238,11 +249,12 @@ function usagePageHtml() {
 
       .usage-quick-btns {
         display: flex;
-        gap: 8px;
+        gap: 6px;
+        flex-wrap: wrap;
       }
 
       .usage-quick-btn {
-        padding: 8px 16px;
+        padding: 8px 12px;
         font-family: var(--font-family-sans);
         font-size: var(--font-size-small);
         font-weight: var(--font-weight-medium);
@@ -252,6 +264,8 @@ function usagePageHtml() {
         color: var(--text-base);
         cursor: pointer;
         transition: all 0.15s ease;
+        white-space: nowrap;
+        min-height: 36px;
       }
 
       .usage-quick-btn:hover {
@@ -267,13 +281,13 @@ function usagePageHtml() {
 
       .usage-stats-row {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 16px;
-        margin-bottom: 32px;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+        margin-bottom: 24px;
       }
 
       .usage-stat-card {
-        padding: 20px;
+        padding: 16px;
         background: var(--surface-raised-base);
         border: 1px solid var(--border-weak-base);
         border-radius: var(--radius-lg);
@@ -283,14 +297,14 @@ function usagePageHtml() {
       .usage-stat-label {
         font-size: var(--font-size-small);
         color: var(--text-weak);
-        margin-bottom: 8px;
+        margin-bottom: 6px;
         display: flex;
         align-items: center;
         gap: 6px;
       }
 
       .usage-stat-value {
-        font-size: 28px;
+        font-size: 24px;
         font-weight: var(--font-weight-medium);
         color: var(--text-strong);
         font-variant-numeric: tabular-nums;
@@ -298,8 +312,8 @@ function usagePageHtml() {
 
       .usage-detail-grid {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 16px;
+        grid-template-columns: 1fr;
+        gap: 12px;
       }
 
       .usage-detail-card {
@@ -349,11 +363,13 @@ function usagePageHtml() {
         background: var(--surface-raised-base);
         border: 1px solid var(--border-weak-base);
         border-radius: var(--radius-lg);
-        overflow: hidden;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
       }
 
       .usage-table {
         width: 100%;
+        min-width: 600px;
         border-collapse: collapse;
         font-size: var(--font-size-small);
       }
@@ -385,25 +401,70 @@ function usagePageHtml() {
         background: var(--surface-raised-base-hover);
       }
 
-      @media (max-width: 900px) {
+      @media (min-width: 768px) {
+        .usage-header {
+          padding: 20px 24px 0;
+        }
+        .usage-tabs {
+          padding: 0 24px;
+        }
+        .usage-content {
+          padding: 24px;
+        }
         .usage-stats-row {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(4, 1fr);
+          gap: 16px;
         }
         .usage-detail-grid {
-          grid-template-columns: 1fr;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
+        }
+        .usage-stat-card {
+          padding: 20px;
+        }
+        .usage-stat-value {
+          font-size: 28px;
+        }
+        .usage-controls {
+          gap: 16px;
+          padding: 16px;
+        }
+        .usage-date-group {
+          min-width: 280px;
+        }
+        .usage-quick-btn {
+          padding: 8px 16px;
         }
       }
 
-      @media (max-width: 600px) {
-        .usage-stats-row {
-          grid-template-columns: 1fr;
+      @media (max-width: 480px) {
+        .usage-header-left {
+          width: 100%;
+          justify-content: space-between;
         }
-        .usage-controls {
-          flex-direction: column;
-          align-items: stretch;
+        .usage-title {
+          font-size: var(--font-size-large);
         }
-        .usage-date-group {
-          min-width: auto;
+        .usage-back {
+          padding: 6px 10px;
+          font-size: var(--font-size-xs);
+        }
+        .usage-stat-value {
+          font-size: 20px;
+        }
+        .usage-stat-label {
+          font-size: var(--font-size-xs);
+        }
+        .usage-detail-item {
+          padding: 8px 12px;
+        }
+        .usage-detail-name,
+        .usage-detail-value {
+          font-size: var(--font-size-xs);
+        }
+        .usage-table th,
+        .usage-table td {
+          padding: 8px 12px;
         }
       }
     </style>
