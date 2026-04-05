@@ -17,6 +17,7 @@ const absoluteUrlPathFromEnv = z
 
 const envSchema = {
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  AGENT_MOCKINGBIRD_HOST: z.string().trim().min(1).default("127.0.0.1"),
   AGENT_MOCKINGBIRD_DB_PATH: z.string().optional(),
   AGENT_MOCKINGBIRD_CONFIG_PATH: z.string().optional(),
   AGENT_MOCKINGBIRD_OPENCODE_BASE_URL: z.string().url().optional(),

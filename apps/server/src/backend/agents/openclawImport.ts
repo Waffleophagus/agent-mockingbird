@@ -17,10 +17,13 @@ import type { Stats } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-
 import type { AgentMockingbirdConfig } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
-import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
+import {
+  createOpencodeClientFromConnection,
+  resolveOpencodeConnection,
+  unwrapSdkData,
+} from "../opencode/client";
 import { resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
 const EXCLUDED_DIR_NAMES = new Set([".git", "node_modules", ".next", "dist", "build", "coverage"]);
@@ -570,10 +573,7 @@ async function createLlmMerger(config: AgentMockingbirdConfig, warnings: string[
   }
 
   const timeoutMs = Math.max(2_000, Math.min(config.runtime.opencode.timeoutMs, 20_000));
-  const client = createOpencodeClientFromConnection({
-    baseUrl: config.runtime.opencode.baseUrl,
-    directory: config.runtime.opencode.directory,
-  });
+  const client = createOpencodeClientFromConnection(resolveOpencodeConnection(config));
 
   try {
     const session = unwrapSdkData<Session>(

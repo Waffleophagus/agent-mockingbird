@@ -4,19 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { AgentMockingbirdConfig } from "../config/schema";
+import { restoreEnv } from "../testEnv";
 
 const tempDirs: string[] = [];
 const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
 const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
-
-function restoreEnv(key: "AGENT_MOCKINGBIRD_CONFIG_PATH" | "AGENT_MOCKINGBIRD_DB_PATH", value: string | undefined) {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-
-  process.env[key] = value;
-}
 
 afterEach(() => {
   restoreEnv("AGENT_MOCKINGBIRD_CONFIG_PATH", originalConfigPath);

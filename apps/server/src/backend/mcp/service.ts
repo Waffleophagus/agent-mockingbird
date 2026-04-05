@@ -12,6 +12,7 @@ import { configuredMcpServerSchema } from "../config/schema";
 import {
   createOpencodeClientFromConnection,
   createOpencodeV2ClientFromConnection,
+  resolveOpencodeConnection,
   unwrapSdkData,
 } from "../opencode/client";
 import { resolveOpencodeConfigDir } from "../workspace/resolve";
@@ -76,17 +77,19 @@ function resolveMcpConnectionDirectory(config: AgentMockingbirdConfig) {
 }
 
 function createMcpClient(config: AgentMockingbirdConfig) {
-  return createOpencodeV2ClientFromConnection({
-    baseUrl: config.runtime.opencode.baseUrl,
-    directory: resolveMcpConnectionDirectory(config),
-  });
+  return createOpencodeV2ClientFromConnection(
+    resolveOpencodeConnection(config, {
+      directory: resolveMcpConnectionDirectory(config),
+    }),
+  );
 }
 
 function createConfigClient(config: AgentMockingbirdConfig) {
-  return createOpencodeClientFromConnection({
-    baseUrl: config.runtime.opencode.baseUrl,
-    directory: resolveMcpConnectionDirectory(config),
-  });
+  return createOpencodeClientFromConnection(
+    resolveOpencodeConnection(config, {
+      directory: resolveMcpConnectionDirectory(config),
+    }),
+  );
 }
 
 function normalizeRecordStringMap(value: unknown): Record<string, string> {

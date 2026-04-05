@@ -7,6 +7,7 @@ import type { createConfigRoutes as CreateConfigRoutesType } from "./configRoute
 import type * as ConfigStoreModuleType from "../../config/store";
 import type * as ClientModuleType from "../../db/client";
 import type * as ManagedConfigModuleType from "../../opencode/managedConfig";
+import { restoreEnv } from "../../testEnv";
 import { resolveOpencodeConfigDir } from "../../workspace/resolve";
 
 const originalNodeEnv = process.env.NODE_ENV;
@@ -14,14 +15,6 @@ const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
 const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
 const originalWorkspacePath = process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
 const originalEmbedProvider = process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER;
-
-function restoreEnv(key: string, value: string | undefined) {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-  process.env[key] = value;
-}
 
 const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-config-routes-test-"));
 const testConfigPath = path.join(testRoot, "agent-mockingbird.config-routes.config.json");

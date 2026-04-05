@@ -25,6 +25,18 @@ fi
 mkdir -p "${DIST_DIR}"
 rm -rf "${STAGE_DIR}"
 
+case "$(uname -s)" in
+  Darwin)
+    SQLITE_VEC_FILENAME="vec0.dylib"
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    SQLITE_VEC_FILENAME="vec0.dll"
+    ;;
+  *)
+    SQLITE_VEC_FILENAME="vec0.so"
+    ;;
+esac
+
 ARCHIVE_PATH="${DIST_DIR}/agent-mockingbird-${VERSION}.tar.gz"
 CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
 PREFIX="agent-mockingbird-${VERSION}"
@@ -33,7 +45,6 @@ echo "Building vendored OpenCode app + standalone runtime..."
 (
   cd "${ROOT_DIR}"
   bun run build
-  bun run build:bin
 )
 
 mkdir -p "${STAGE_DIR}/${PREFIX}"
@@ -57,7 +68,14 @@ find "${STAGE_DIR}/${PREFIX}/vendor/executor" \
 test -f "${STAGE_DIR}/${PREFIX}/dist/agent-mockingbird"
 test -f "${STAGE_DIR}/${PREFIX}/dist/drizzle/meta/_journal.json"
 test -f "${STAGE_DIR}/${PREFIX}/dist/app/index.html"
+test -f "${STAGE_DIR}/${PREFIX}/dist/sqlite-vec/${SQLITE_VEC_FILENAME}"
+test -f "${STAGE_DIR}/${PREFIX}/dist/packages/opencode/src/server/embedded-opencode.js"
+test -f "${STAGE_DIR}/${PREFIX}/dist/packages/opencode/migration/20260127222353_familiar_lady_ursula/migration.sql"
 test -f "${STAGE_DIR}/${PREFIX}/drizzle/meta/_journal.json"
+test -f "${STAGE_DIR}/${PREFIX}/runtime-assets/opencode-config/lib/memory-tools.ts"
+test -f "${STAGE_DIR}/${PREFIX}/runtime-assets/opencode-config/tools/memory_search.ts"
+test -f "${STAGE_DIR}/${PREFIX}/runtime-assets/opencode-config/tools/memory_get.ts"
+test -f "${STAGE_DIR}/${PREFIX}/runtime-assets/opencode-config/tools/memory_remember.ts"
 test -f "${STAGE_DIR}/${PREFIX}/vendor/executor/apps/executor/src/cli/main.ts"
 
 echo "Packing release bundle..."
@@ -65,7 +83,11 @@ tar -C "${STAGE_DIR}" -czf "${ARCHIVE_PATH}" "${PREFIX}"
 
 (
   cd "${DIST_DIR}"
-  sha256sum "agent-mockingbird-${VERSION}.tar.gz" > "agent-mockingbird-${VERSION}.tar.gz.sha256"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "agent-mockingbird-${VERSION}.tar.gz" > "agent-mockingbird-${VERSION}.tar.gz.sha256"
+  else
+    shasum -a 256 "agent-mockingbird-${VERSION}.tar.gz" > "agent-mockingbird-${VERSION}.tar.gz.sha256"
+  fi
 )
 
 rm -rf "${STAGE_DIR}"

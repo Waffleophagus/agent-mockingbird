@@ -12,7 +12,11 @@ import path from "node:path";
 import type { AgentTypeDefinition, AgentMockingbirdConfig } from "../config/schema";
 import { agentTypeDefinitionSchema } from "../config/schema";
 import { getConfigSnapshot } from "../config/service";
-import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
+import {
+  createOpencodeClientFromConnection,
+  resolveOpencodeConnection,
+  unwrapSdkData,
+} from "../opencode/client";
 import { BUILTIN_PRIMARY_AGENT_IDS, BUILTIN_SUBAGENT_IDS } from "../runtime/opencodeRuntime/shared";
 import { resolveOpencodeConfigDir, resolveOpencodeWorkspaceDir } from "../workspace/resolve";
 
@@ -293,10 +297,7 @@ function hashAgentTypes(agentTypes: AgentTypeDefinition[]): string {
 }
 
 function createOpencodeConfigClient(config: AgentMockingbirdConfig, directory = resolveOpencodeConfigDir(config)) {
-  return createOpencodeClientFromConnection({
-    baseUrl: config.runtime.opencode.baseUrl,
-    directory,
-  });
+  return createOpencodeClientFromConnection(resolveOpencodeConnection(config, { directory }));
 }
 
 async function disposeOpencodeInstance(config: AgentMockingbirdConfig) {

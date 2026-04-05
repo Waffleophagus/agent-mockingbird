@@ -1,4 +1,5 @@
 import { serve } from "bun";
+import { websocket as honoWebsocket } from "hono/bun";
 
 import { ensureConfigFile, getConfigSnapshot } from "./backend/config/service";
 import { CronService } from "./backend/cron/service";
@@ -7,47 +8,18 @@ import { ensureSeedData, getHeartbeatSnapshot, getUsageSnapshot } from "./backen
 import { proxyEmbeddedExternalRequest, proxyEmbeddedServiceRequest } from "./backend/embed/gateway";
 import { env } from "./backend/env";
 import { HeartbeatRuntimeService } from "./backend/heartbeat/runtimeService";
-import { proxyOpenCodeSidecar } from "./backend/http/opencodeProxy";
 import { dispatchRoute } from "./backend/http/router";
 import { createApiRoutes } from "./backend/http/routes";
 import { createRuntimeEventStream } from "./backend/http/sse";
 import { initializeMemory } from "./backend/memory/service";
+import {
+  handleEmbeddedOpenCodeRequest,
+  isOpenCodeServerPath,
+} from "./backend/opencode/embeddedServer";
 import { ensureExecutorMcpServerConfigured } from "./backend/opencode/managedConfig";
 import { resolveAppDistDir } from "./backend/paths";
 import { RunService } from "./backend/run/service";
 import { createRuntime, getRuntimeStartupInfo } from "./backend/runtime";
-
-const OPENCODE_SERVER_PREFIXES = [
-  "/agent",
-  "/auth",
-  "/command",
-  "/config",
-  "/doc",
-  "/event",
-  "/experimental",
-  "/file",
-  "/find",
-  "/formatter",
-  "/global",
-  "/instance",
-  "/log",
-  "/lsp",
-  "/mcp",
-  "/path",
-  "/permission",
-  "/project",
-  "/provider",
-  "/pty",
-  "/question",
-  "/session",
-  "/skill",
-  "/tui",
-  "/vcs",
-];
-
-function isOpenCodeServerPath(pathname: string) {
-  return OPENCODE_SERVER_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
-}
 
 ensureSeedData();
 ensureConfigFile();
@@ -73,7 +45,7 @@ const apiRoutes = createApiRoutes({
 
 const unsubscribeRuntimeEvents = runtime.subscribe(eventStream.publish);
 
-async function serveOpenCodeApp(req: Request) {
+async function serveOpenCodeApp(req: Request, server: Bun.Server<unknown>) {
   const url = new URL(req.url);
   const pathname = decodeURIComponent(url.pathname);
   const config = getConfigSnapshot().config;
@@ -86,7 +58,7 @@ async function serveOpenCodeApp(req: Request) {
     return embeddedExternalResponse;
   }
   if (isOpenCodeServerPath(pathname)) {
-    return proxyOpenCodeSidecar(req, config.runtime.opencode.baseUrl);
+    return handleEmbeddedOpenCodeRequest(req, server);
   }
   if (!appDistDir) {
     return new Response("Missing built OpenCode app assets (dist/app).", { status: 500 });
@@ -118,17 +90,20 @@ const serverPort = Number(
   process.env.AGENT_MOCKINGBIRD_PORT?.trim() ||
   "3001",
 );
+const serverHost = env.AGENT_MOCKINGBIRD_HOST;
 
 const server = serve({
+  hostname: serverHost,
   port: Number.isFinite(serverPort) && serverPort > 0 ? serverPort : 3001,
   idleTimeout: 120,
-  fetch: async (req) => {
+  fetch: async (req, server) => {
     const apiResponse = await dispatchRoute(apiRoutes, req);
     if (apiResponse) {
       return apiResponse;
     }
-    return serveOpenCodeApp(req);
+    return serveOpenCodeApp(req, server);
   },
+  websocket: honoWebsocket,
   development: env.NODE_ENV !== "production" && {
     hmr: true,
     console: true,
@@ -164,6 +139,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 console.log("[startup] agent-mockingbird runtime", {
   nodeEnv: env.NODE_ENV,
+  host: serverHost,
   appDistDir,
   runtimeMode: process.env.AGENT_MOCKINGBIRD_RUNTIME_MODE || "unknown",
   config: {

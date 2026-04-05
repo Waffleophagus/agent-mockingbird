@@ -28,6 +28,9 @@ bun run build:cli
 bun run lint
 bun run typecheck
 bun run build
-bun run build:bin
 
-git add bin/agent-mockingbird bin/runtime-layout.mjs
+git add -f \
+  bin/agent-mockingbird \
+  bin/agent-mockingbird-managed \
+  bin/runtime-assets.mjs \
+  bin/runtime-layout.mjs

@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { AgentMockingbirdPlugin } from "../../../../../runtime-assets/opencode-config/plugins/agent-mockingbird";
+import { createMemorySearchTool } from "../../../../../runtime-assets/opencode-config/lib/memory-tools";
+import {
+  AgentMockingbirdPlugin,
+  clearSystemPromptCache,
+} from "../../../../../runtime-assets/opencode-config/plugins/agent-mockingbird";
+import memoryGetTool from "../../../../../runtime-assets/opencode-config/tools/memory_get";
+import memoryRememberTool from "../../../../../runtime-assets/opencode-config/tools/memory_remember";
+import memorySearchTool from "../../../../../runtime-assets/opencode-config/tools/memory_search";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  clearSystemPromptCache();
   delete process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL;
   delete process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL;
   delete process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL;
@@ -19,17 +27,14 @@ describe("AgentMockingbirdPlugin", () => {
       "agent_type_manager",
       "config_manager",
       "cron_manager",
-      "memory_get",
-      "memory_remember",
-      "memory_search",
       "notify_main_thread",
     ]);
   });
 
-  test("memory_search calls the memory API and compacts snippets", async () => {
+  test("direct memory_search tool calls the memory API and compacts snippets", async () => {
     process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/memory/retrieve");
       return new Response(
         JSON.stringify({
@@ -51,10 +56,9 @@ describe("AgentMockingbirdPlugin", () => {
           },
         },
       );
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
-    const hooks = await AgentMockingbirdPlugin({} as never);
-    const raw = await hooks.tool?.memory_search?.execute(
+    const raw = await memorySearchTool.execute(
       {
         query: "stored detail",
       },
@@ -73,23 +77,22 @@ describe("AgentMockingbirdPlugin", () => {
     expect(payload.results[0]?.snippet).toBe("Stored detail");
   });
 
-  test("plugin options override env defaults for API base URLs", async () => {
+  test("plugin memory tool factories still honor plugin option overrides", async () => {
     process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("http://127.0.0.1:4010/api/mockingbird/memory/retrieve");
       return new Response(JSON.stringify({ results: [] }), {
         headers: {
           "Content-Type": "application/json",
         },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
-    const hooks = await AgentMockingbirdPlugin({} as never, {
+    const memorySearchWithOptions = createMemorySearchTool({
       memoryApiBaseUrl: "http://127.0.0.1:4010/",
     });
-
-    const raw = await hooks.tool?.memory_search?.execute(
+    const raw = await memorySearchWithOptions.execute(
       {
         query: "stored detail",
       },
@@ -99,10 +102,67 @@ describe("AgentMockingbirdPlugin", () => {
     expect(JSON.parse(raw ?? "{}")).toMatchObject({ ok: true, count: 0 });
   });
 
+  test("memory tools surface non-JSON upstream errors", async () => {
+    process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async () => {
+      return new Response("<html>Bad gateway</html>", {
+        status: 502,
+        headers: {
+          "Content-Type": "text/html",
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    const memorySearchWithOptions = createMemorySearchTool();
+    await expect(
+      memorySearchWithOptions.execute(
+        {
+          query: "stored detail",
+        },
+        {} as never,
+      ),
+    ).rejects.toThrow("<html>Bad gateway</html>");
+  });
+
+  test("direct memory_get tool reads the configured memory slice", async () => {
+    process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/memory/read");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+      expect(init?.body).toBe(JSON.stringify({
+        path: "memory/2026-03-14.md",
+        from: 5,
+        lines: 10,
+      }));
+      return new Response(JSON.stringify({
+        path: "memory/2026-03-14.md",
+        text: "Stored detail",
+      }), {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    }) as typeof fetch;
+
+    const raw = await memoryGetTool.execute({
+      path: "memory/2026-03-14.md",
+      from: 5,
+      lines: 10,
+    }, {} as never);
+    expect(JSON.parse(raw ?? "{}")).toEqual({
+      ok: true,
+      path: "memory/2026-03-14.md",
+      text: "Stored detail",
+    });
+  });
+
   test("config_manager get_config passes through effective MCP state", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("http://127.0.0.1:3001/api/config");
       return new Response(
         JSON.stringify({
@@ -161,7 +221,7 @@ describe("AgentMockingbirdPlugin", () => {
   test("system transform appends Agent Mockingbird prompt from the runtime API", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/system-prompt") {
         return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
@@ -189,7 +249,7 @@ describe("AgentMockingbirdPlugin", () => {
   test("system transform appends main-thread guidance for the rooted conversation", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/system-prompt") {
         return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
@@ -221,7 +281,7 @@ describe("AgentMockingbirdPlugin", () => {
   test("system transform appends cron-thread guidance for cron worker sessions", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/system-prompt") {
         return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
@@ -263,7 +323,7 @@ describe("AgentMockingbirdPlugin", () => {
   test("system transform appends heartbeat-thread guidance for heartbeat worker sessions", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "http://127.0.0.1:3001/api/mockingbird/runtime/system-prompt") {
         return new Response(JSON.stringify({ system: "Config policy:\n- Use config_manager." }), {
@@ -305,7 +365,7 @@ describe("AgentMockingbirdPlugin", () => {
   test("compaction hook prefers a replacement prompt from the runtime API", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/runtime/compaction-context?sessionId=sess-1");
       return new Response(
         JSON.stringify({
@@ -330,7 +390,7 @@ describe("AgentMockingbirdPlugin", () => {
   test("compaction hook falls back to appended context when no replacement prompt is returned", async () => {
     process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/runtime/compaction-context?sessionId=sess-1");
       return new Response(JSON.stringify({ context: ["Agent Mockingbird continuation notes:\n- Mention config changes."] }), {
         headers: {
@@ -422,7 +482,7 @@ describe("AgentMockingbirdPlugin", () => {
   test("notify_main_thread sends an escalation request using the calling session", async () => {
     process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input, init) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/runtime/notify-main-thread");
       expect(init?.method).toBe("POST");
       expect(init?.headers).toEqual({ "Content-Type": "application/json" });
@@ -459,10 +519,10 @@ describe("AgentMockingbirdPlugin", () => {
     });
   });
 
-  test("memory_remember forwards the calling session id", async () => {
+  test("direct memory_remember tool forwards the calling session id", async () => {
     process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL = "http://127.0.0.1:3001";
 
-    globalThis.fetch = (async (input, init) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe("http://127.0.0.1:3001/api/mockingbird/memory/remember");
       const body = JSON.parse(String(init?.body ?? "{}")) as {
         content?: string;
@@ -480,8 +540,7 @@ describe("AgentMockingbirdPlugin", () => {
       });
     }) as typeof fetch;
 
-    const hooks = await AgentMockingbirdPlugin({} as never);
-    const raw = await hooks.tool?.memory_remember?.execute(
+    const raw = await memoryRememberTool.execute(
       {
         content: "Remember this.",
       },

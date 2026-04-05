@@ -111,19 +111,18 @@ render_unit() {
 }
 
 render_unit "${APP_DIR}/deploy/systemd/executor.service" "${TMP_DIR}/executor.service"
-render_unit "${APP_DIR}/deploy/systemd/opencode.service" "${TMP_DIR}/opencode.service"
 render_unit "${APP_DIR}/deploy/systemd/agent-mockingbird.service" "${TMP_DIR}/agent-mockingbird.service"
 
 install -m 0644 "${TMP_DIR}/executor.service" "${UNIT_DIR}/executor.service"
-install -m 0644 "${TMP_DIR}/opencode.service" "${UNIT_DIR}/opencode.service"
 install -m 0644 "${TMP_DIR}/agent-mockingbird.service" "${UNIT_DIR}/agent-mockingbird.service"
+systemctl disable --now opencode.service >/dev/null 2>&1 || true
+rm -f "${UNIT_DIR}/opencode.service"
 
 systemctl daemon-reload
-systemctl enable --now executor.service opencode.service agent-mockingbird.service
+systemctl enable --now executor.service agent-mockingbird.service
 
 echo "Installed agent-mockingbird with systemd services:"
 echo "  executor.service"
-echo "  opencode.service"
 echo "  agent-mockingbird.service"
 echo
 echo "Health checks:"

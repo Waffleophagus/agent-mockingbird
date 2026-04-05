@@ -7,15 +7,20 @@ on:
       - "**"
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   id-token: write
 
+env:
+  NPM_REGISTRY_URL: https://registry.npmjs.org/
+
 jobs:
-  pipeline:
+  verify:
     runs-on: ubuntu-latest
-    env:
-      NPM_REGISTRY_URL: https://registry.npmjs.org/
 
     steps:
       - name: Checkout
@@ -24,7 +29,27 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.10
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: CI Check
+        run: bun run check:ci
+
+  publish:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/'))
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -35,12 +60,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Print Publish Tooling
-        run: |
-          node -v
-          npm -v
-          npm config get registry
-
       - name: Ship Check
         run: bun run check:ship
 
@@ -48,40 +67,37 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          event="${GITHUB_EVENT_NAME:-}"
           ref="${GITHUB_REF:-}"
           ref_name="${GITHUB_REF_NAME:-}"
-          actor="${GITHUB_ACTOR:-}"
 
-          should_publish="false"
           npm_tag="latest"
           bootstrap_ref="main"
           bootstrap_tag="latest"
           package_version=""
           latest_version=""
           next_version=""
+          main_package_version=""
+          next_package_version=""
 
-          if [[ "${event}" == "pull_request" ]]; then
-            should_publish="false"
-          elif [[ "${event}" == "push" && "${ref}" == "refs/heads/main" ]]; then
-            should_publish="true"
-          elif [[ "${event}" == "push" && "${ref}" == refs/heads/* && "${ref}" != "refs/heads/main" ]]; then
-            should_publish="true"
+          if [[ "${ref}" == "refs/heads/main" ]]; then
+            npm_tag="latest"
+            bootstrap_ref="main"
+            bootstrap_tag="latest"
+          else
             npm_tag="next"
             bootstrap_ref="${ref_name}"
             bootstrap_tag="next"
           fi
 
-          if [[ "${should_publish}" == "true" ]]; then
-            version_info="$({
-              curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true
-            } | node -e '
-              let raw = "";
-              process.stdin.setEncoding("utf8");
-              process.stdin.on("data", (chunk) => {
-                raw += chunk;
-              });
-              process.stdin.on("end", () => {
+          version_info="$({
+            curl -fsSL "${NPM_REGISTRY_URL%/}/agent-mockingbird" || true
+          } | node -e '
+            let raw = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", (chunk) => {
+              raw += chunk;
+            });
+            process.stdin.on("end", () => {
               let latest = "";
               let next = "";
 
@@ -118,26 +134,37 @@ jobs:
                   ? currentNext.prerelease + 1
                   : 1;
 
-                console.log(`LATEST_VERSION=${latest}`);
-                console.log(`NEXT_VERSION=${next}`);
-                console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
-                console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
-              });
-            ')"
-            eval "${version_info}"
-            latest_version="${LATEST_VERSION}"
-            next_version="${NEXT_VERSION}"
+              console.log(`LATEST_VERSION=${latest}`);
+              console.log(`NEXT_VERSION=${next}`);
+              console.log(`MAIN_PACKAGE_VERSION=${nextBase}`);
+              console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
+            });
+          ')"
+          while IFS='=' read -r key value; do
+            case "${key}" in
+              LATEST_VERSION)
+                latest_version="${value}"
+                ;;
+              NEXT_VERSION)
+                next_version="${value}"
+                ;;
+              MAIN_PACKAGE_VERSION)
+                main_package_version="${value}"
+                ;;
+              NEXT_PACKAGE_VERSION)
+                next_package_version="${value}"
+                ;;
+            esac
+          done <<< "${version_info}"
 
-            if [[ "${npm_tag}" == "latest" ]]; then
-              package_version="${MAIN_PACKAGE_VERSION}"
-            else
-              package_version="${NEXT_PACKAGE_VERSION}"
-            fi
+          if [[ "${npm_tag}" == "latest" ]]; then
+            package_version="${main_package_version}"
+          else
+            package_version="${next_package_version}"
           fi
 
-          echo "Publish decision: event=${event} ref=${ref} ref_name=${ref_name} actor=${actor} should_publish=${should_publish} npm_tag=${npm_tag}"
+          echo "Publish decision: ref=${ref} ref_name=${ref_name} npm_tag=${npm_tag} package_version=${package_version}"
 
-          echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
           echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
           echo "npm_tag=${npm_tag}" >> "${GITHUB_OUTPUT}"
           echo "bootstrap_ref=${bootstrap_ref}" >> "${GITHUB_OUTPUT}"
@@ -146,7 +173,6 @@ jobs:
           echo "next_version=${next_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build package metadata for publish
-        if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
           PKG_VERSION="${{ steps.meta.outputs.package_version }}" bun -e '
@@ -178,16 +204,14 @@ jobs:
             fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
           '
 
-      - name: Rebuild published CLI artifacts
-        if: steps.meta.outputs.should_publish == 'true'
-        run: |
-          set -euo pipefail
-          bun run build:cli
-
       - name: Pack agent-mockingbird artifact
-        if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
+          case "$(uname -s)" in
+            Darwin) sqlite_vec_asset="package/dist/sqlite-vec/vec0.dylib" ;;
+            MINGW*|MSYS*|CYGWIN*) sqlite_vec_asset="package/dist/sqlite-vec/vec0.dll" ;;
+            *) sqlite_vec_asset="package/dist/sqlite-vec/vec0.so" ;;
+          esac
           tarball="agent-mockingbird-${{ steps.meta.outputs.package_version }}.tgz"
           bun pm pack --filename "${tarball}" --quiet >/dev/null
           test -f "${tarball}"
@@ -201,12 +225,19 @@ jobs:
           grep -Fqx -- "package/opencode.lock.json" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/agent-mockingbird" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/app/index.html" <<<"${tar_contents}"
+          grep -Fqx -- "${sqlite_vec_asset}" <<<"${tar_contents}"
           grep -Fqx -- "package/dist/drizzle/meta/_journal.json" <<<"${tar_contents}"
+          grep -Fqx -- "package/dist/packages/opencode/src/server/embedded-opencode.js" <<<"${tar_contents}"
+          grep -Fqx -- "package/dist/packages/opencode/migration/20260127222353_familiar_lady_ursula/migration.sql" <<<"${tar_contents}"
           grep -Fqx -- "package/vendor/executor/apps/executor/src/cli/main.ts" <<<"${tar_contents}"
           grep -Fqx -- "package/vendor/executor/package.json" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/workspace/AGENTS.md" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/opencode-config/opencode.jsonc" <<<"${tar_contents}"
+          grep -Fqx -- "package/runtime-assets/opencode-config/lib/memory-tools.ts" <<<"${tar_contents}"
           grep -Fqx -- "package/runtime-assets/opencode-config/plugins/agent-mockingbird.ts" <<<"${tar_contents}"
+          grep -Fqx -- "package/runtime-assets/opencode-config/tools/memory_search.ts" <<<"${tar_contents}"
+          grep -Fqx -- "package/runtime-assets/opencode-config/tools/memory_get.ts" <<<"${tar_contents}"
+          grep -Fqx -- "package/runtime-assets/opencode-config/tools/memory_remember.ts" <<<"${tar_contents}"
           ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/plugins/agent-mockingbird.ts" <<<"${tar_contents}"
           ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/tools/memory_search.ts" <<<"${tar_contents}"
           ! grep -Fqx -- "package/runtime-assets/workspace/.opencode/tools/memory_get.ts" <<<"${tar_contents}"
@@ -220,7 +251,6 @@ jobs:
           ls -lh -- "${tarball}"
 
       - name: Verify packaged compiled app bundle
-        if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
           tmpdir="$(mktemp -d)"
@@ -230,6 +260,8 @@ jobs:
             const path = require("path");
             const fs = require("fs");
             const pkgRoot = process.env.PACKAGE_ROOT;
+            const sqliteVecFilename =
+              process.platform === "win32" ? "vec0.dll" : process.platform === "darwin" ? "vec0.dylib" : "vec0.so";
             const indexPath = path.join(pkgRoot, "dist", "app", "index.html");
             const indexHtml = fs.readFileSync(indexPath, "utf8");
             if (!indexHtml.includes("/assets/")) {
@@ -240,11 +272,14 @@ jobs:
             if (assetEntries.length === 0) {
               throw new Error("Packaged app assets directory is empty.");
             }
+            const sqliteVecPath = path.join(pkgRoot, "dist", "sqlite-vec", sqliteVecFilename);
+            if (!fs.existsSync(sqliteVecPath)) {
+              throw new Error("Packaged sqlite-vec extension is missing.");
+            }
             console.log("Packaged compiled app bundle validated.");
           '
 
       - name: Verify packaged runtime prefers compiled bundle
-        if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
           tmpdir="$(mktemp -d)"
@@ -276,7 +311,6 @@ jobs:
           '
 
       - name: Publish package tarball
-        if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
           package_name="agent-mockingbird"
@@ -288,10 +322,8 @@ jobs:
           npm publish "${AGENT_MOCKINGBIRD_TARBALL}" --registry "${NPM_REGISTRY_URL}" --access public --tag "${{ steps.meta.outputs.npm_tag }}"
 
       - name: Publish install command summary
-        if: steps.meta.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          bootstrap_ref="${{ steps.meta.outputs.bootstrap_ref }}"
           bootstrap_tag="${{ steps.meta.outputs.bootstrap_tag }}"
           {
             echo "## Install command"

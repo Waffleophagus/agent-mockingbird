@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { getUsageDashboardSnapshot } from "../../db/repository";
@@ -50,24 +49,25 @@ function parseRangeQuery(url: URL): UsageDashboardRangeQuery | Response {
   return { startAt, endAtExclusive };
 }
 
-function getOpenCodeStylesheetLinks() {
+async function getOpenCodeStylesheetLinks() {
   const appDistDir = resolveAppDistDir();
   if (!appDistDir) return "";
   const indexPath = path.join(appDistDir, "index.html");
-  if (!existsSync(indexPath)) return "";
-  const html = readFileSync(indexPath, "utf8");
+  const indexFile = Bun.file(indexPath);
+  if (!(await indexFile.exists())) return "";
+  const html = await indexFile.text();
   const hrefs = [...html.matchAll(/<link\s+rel="stylesheet"[^>]*href="([^"]+)"/g)].map(match => match[1]);
   return hrefs.map(href => `<link rel="stylesheet" crossorigin href="${href}">`).join("\n    ");
 }
 
-function usagePageHtml() {
-  const stylesheetLinks = getOpenCodeStylesheetLinks();
+async function usagePageHtml() {
+  const stylesheetLinks = await getOpenCodeStylesheetLinks();
   return `<!doctype html>
 <html lang="en" style="background-color: var(--background-base)">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Usage</title>
+    <title>Usage Report</title>
     <link rel="icon" type="image/png" href="/favicon-96x96-v3.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="/favicon-v3.svg" />
     <link rel="shortcut icon" href="/favicon-v3.ico" />
@@ -81,192 +81,309 @@ function usagePageHtml() {
         color-scheme: light dark;
       }
 
-      body {
+      * {
         margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: var(--font-family-sans);
         background: var(--background-base);
         color: var(--text-base);
+        line-height: var(--line-height-large);
+        min-height: 100dvh;
       }
 
       .usage-shell {
         min-height: 100dvh;
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--background-base) 82%, transparent), var(--background-base)),
-          radial-gradient(circle at top left, color-mix(in srgb, var(--surface-interactive-base) 70%, transparent), transparent 32rem);
-      }
-
-      .usage-main {
-        min-width: 0;
-        padding: 1rem;
-      }
-
-      .usage-content {
-        max-width: min(1680px, calc(100vw - 2rem));
-        margin: 0 auto;
         display: flex;
         flex-direction: column;
-        gap: 1rem;
-      }
-
-      .usage-card {
-        border: 1px solid var(--border-weak-base);
-        border-radius: 0.875rem;
-        background: var(--surface-raised-base);
-        box-shadow: var(--shadow-xs);
+        max-width: 1200px;
+        margin: 0 auto;
       }
 
       .usage-header {
+        padding: 16px 16px 0;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 1rem;
-        padding: 1rem 1.1rem;
+        gap: 12px;
       }
 
-      .usage-header-copy {
+      .usage-header-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .usage-back {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        border-radius: var(--radius-md);
+        color: var(--text-base);
+        text-decoration: none;
+        font-size: var(--font-size-small);
+        font-weight: var(--font-weight-medium);
+        border: 1px solid var(--border-weak-base);
+        background: var(--surface-raised-base);
+        transition: all 0.15s ease;
+      }
+
+      .usage-back:hover {
+        background: var(--surface-raised-base-hover);
+      }
+
+      .usage-title {
+        font-size: var(--font-size-x-large);
+        font-weight: var(--font-weight-medium);
+        color: var(--text-strong);
+      }
+
+      .usage-tabs {
+        display: flex;
+        gap: 4px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--border-weak-base);
+        margin-top: 16px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+
+      .usage-tabs::-webkit-scrollbar {
+        display: none;
+      }
+
+      .usage-tab {
+        padding: 12px 16px;
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-small);
+        font-weight: var(--font-weight-medium);
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--text-weak);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        margin-bottom: -1px;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .usage-tab:hover {
+        color: var(--text-base);
+      }
+
+      .usage-tab.active {
+        color: var(--text-interactive-base);
+        border-bottom-color: var(--text-interactive-base);
+      }
+
+      .usage-content {
+        flex: 1;
+        padding: 16px;
+        overflow-y: auto;
+      }
+
+      .usage-tab-panel {
+        display: none;
+      }
+
+      .usage-tab-panel.active {
+        display: block;
+      }
+
+      .usage-controls {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 20px;
+        padding: 12px;
+        background: var(--surface-raised-base);
+        border: 1px solid var(--border-weak-base);
+        border-radius: var(--radius-lg);
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+
+      .usage-date-group {
+        display: flex;
+        gap: 8px;
+        flex: 1;
         min-width: 0;
       }
 
-      .usage-back-link {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-        text-decoration: none;
+      .usage-date-field {
+        flex: 1;
+      }
+
+      .usage-date-field label {
+        display: block;
+        font-size: var(--font-size-small);
         color: var(--text-weak);
-        border: 1px solid transparent;
-        border-radius: 999px;
-        padding: 0.45rem 0.7rem;
-        transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
-      }
-
-      .usage-back-link:hover {
-        color: var(--text-strong);
-        background: var(--surface-raised-base-hover);
-        border-color: var(--border-weak-base);
-      }
-
-      .usage-toolbar-card {
-        padding: 1rem 1.1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.9rem;
-      }
-
-      .usage-filter-form {
-        display: flex;
-        align-items: end;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-      }
-
-      .usage-filter-fields {
-        display: flex;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-      }
-
-      .usage-filter-field {
-        display: flex;
-        flex-direction: column;
-        gap: 0.4rem;
-        min-width: min(100%, 13rem);
+        margin-bottom: 6px;
+        font-weight: var(--font-weight-medium);
       }
 
       .usage-date-input {
-        appearance: none;
-        min-height: 2.75rem;
+        width: 100%;
+        height: 36px;
+        padding: 0 12px;
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-small);
         border: 1px solid var(--border-weak-base);
-        border-radius: 0.75rem;
-        background: var(--surface-base);
+        border-radius: var(--radius-md);
+        background: var(--input-base);
         color: var(--text-strong);
-        padding: 0.7rem 0.8rem;
       }
 
       .usage-date-input:focus {
-        outline: 2px solid color-mix(in srgb, var(--border-weak-selected) 45%, transparent);
-        outline-offset: 1px;
-        border-color: var(--border-weak-selected);
+        outline: none;
+        border-color: var(--border-selected);
+        box-shadow: var(--shadow-xs-border-select);
       }
 
-      .usage-filter-actions {
+      .usage-quick-btns {
         display: flex;
-        gap: 0.55rem;
+        gap: 6px;
         flex-wrap: wrap;
-        align-items: center;
       }
 
-      .usage-filter-button {
+      .usage-quick-btn {
+        padding: 8px 12px;
+        font-family: var(--font-family-sans);
+        font-size: var(--font-size-small);
+        font-weight: var(--font-weight-medium);
         border: 1px solid var(--border-weak-base);
-        border-radius: 999px;
+        border-radius: var(--radius-md);
         background: var(--surface-base);
         color: var(--text-base);
-        padding: 0.7rem 0.95rem;
         cursor: pointer;
-        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+        min-height: 36px;
       }
 
-      .usage-filter-button:hover {
-        background: var(--surface-raised-base-hover);
+      .usage-quick-btn:hover {
+        background: var(--surface-base-hover);
         border-color: var(--border-weak-selected);
-        color: var(--text-strong);
       }
 
-      .usage-filter-button--primary {
-        background: var(--surface-base-active);
-        border-color: var(--border-weak-selected);
-        color: var(--text-strong);
+      .usage-quick-btn.active {
+        background: var(--surface-interactive-base);
+        border-color: var(--border-interactive-base);
+        color: var(--text-interactive-base);
       }
 
-      .usage-filter-summary {
+      .usage-stats-row {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+
+      .usage-stat-card {
+        padding: 16px;
+        background: var(--surface-raised-base);
+        border: 1px solid var(--border-weak-base);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-xs);
+      }
+
+      .usage-stat-label {
+        font-size: var(--font-size-small);
+        color: var(--text-weak);
+        margin-bottom: 6px;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 0.75rem;
-        flex-wrap: wrap;
+        gap: 6px;
       }
 
-      .usage-filter-status {
-        min-height: 1rem;
-      }
-
-      .usage-metrics {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 0.8rem;
-      }
-
-      .usage-metric {
-        padding: 1rem 1.1rem;
-      }
-
-      .usage-metric-value {
-        margin-top: 0.35rem;
+      .usage-stat-value {
+        font-size: 24px;
+        font-weight: var(--font-weight-medium);
         color: var(--text-strong);
-        font-size: 1.4rem;
-        letter-spacing: -0.03em;
+        font-variant-numeric: tabular-nums;
       }
 
-      .usage-panel {
-        padding: 1rem 1.1rem;
+      .usage-detail-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
       }
 
-      .usage-table-wrap {
+      .usage-detail-card {
+        background: var(--surface-raised-base);
+        border: 1px solid var(--border-weak-base);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+
+      .usage-detail-header {
+        padding: 12px 16px;
+        background: var(--background-weak);
+        border-bottom: 1px solid var(--border-weak-base);
+        font-weight: var(--font-weight-medium);
+        color: var(--text-strong);
+      }
+
+      .usage-detail-list {
+        padding: 8px 0;
+      }
+
+      .usage-detail-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-weaker-base);
+      }
+
+      .usage-detail-item:last-child {
+        border-bottom: none;
+      }
+
+      .usage-detail-name {
+        font-size: var(--font-size-small);
+        color: var(--text-base);
+      }
+
+      .usage-detail-value {
+        font-size: var(--font-size-small);
+        font-weight: var(--font-weight-medium);
+        color: var(--text-strong);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .usage-table-container {
+        width: 100%;
+        max-width: 100%;
+        background: var(--surface-raised-base);
+        border: 1px solid var(--border-weak-base);
+        border-radius: var(--radius-lg);
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x;
       }
 
       .usage-table {
-        width: 100%;
-        min-width: 42rem;
+        width: max-content;
+        min-width: 100%;
         border-collapse: collapse;
-        table-layout: auto;
+        font-size: var(--font-size-small);
       }
 
-      .usage-table th,
-      .usage-table td {
-        padding: 0.7rem 0.75rem;
-        border-bottom: 1px solid var(--border-weak-base);
+      .usage-table th {
         text-align: left;
-        vertical-align: top;
+        padding: 12px 16px;
+        font-weight: var(--font-weight-medium);
+        color: var(--text-weak);
+        background: var(--background-weak);
+        border-bottom: 1px solid var(--border-weak-base);
       }
 
       .usage-table th:last-child,
@@ -274,500 +391,388 @@ function usagePageHtml() {
         text-align: right;
       }
 
-      .usage-table th {
-        white-space: nowrap;
-      }
-
       .usage-table td {
-        overflow-wrap: anywhere;
-        word-break: break-word;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border-weaker-base);
       }
 
-      .usage-table__cell--numeric,
-      .usage-table__cell--compact {
-        white-space: nowrap;
+      .usage-table tr:last-child td {
+        border-bottom: none;
       }
 
-      .usage-table__cell--numeric {
-        text-align: right;
-      }
-
-      .usage-table__cell--session {
-        min-width: 20rem;
-      }
-
-      .usage-table__cell--model {
-        min-width: 24rem;
-      }
-
-      .usage-table__cell--when {
-        min-width: 12rem;
-      }
-
-      .usage-table--provider th:first-child,
-      .usage-table--provider td:first-child {
-        width: 100%;
-      }
-
-      .usage-table--model th:first-child,
-      .usage-table--model td:first-child {
-        width: 100%;
-      }
-
-      .usage-table--recent {
-        min-width: 78rem;
-      }
-
-      .usage-table--recent th:first-child,
-      .usage-table--recent td:first-child {
-        width: 30%;
-      }
-
-      .usage-table--recent th:nth-child(2),
-      .usage-table--recent td:nth-child(2) {
-        width: 32%;
-      }
-
-      .usage-table--recent th:nth-child(3),
-      .usage-table--recent td:nth-child(3) {
-        width: 18%;
-      }
-
-      .usage-table tbody tr:hover {
+      .usage-table tr:hover td {
         background: var(--surface-raised-base-hover);
       }
 
-      .usage-empty {
-        padding: 0.75rem 0 0.25rem;
-        color: var(--text-weak);
-      }
-
-      @media (max-width: 1080px) {
-        .usage-metrics {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      @media (max-width: 720px) {
-        .usage-main {
-          padding: 0.75rem;
-        }
-
-        .usage-content {
-          max-width: none;
-        }
-
+      @media (min-width: 768px) {
         .usage-header {
-          flex-direction: column;
-          align-items: flex-start;
+          padding: 20px 24px 0;
         }
-
-        .usage-filter-form {
-          align-items: stretch;
+        .usage-tabs {
+          padding: 0 24px;
         }
+        .usage-content {
+          padding: 24px;
+        }
+        .usage-stats-row {
+          grid-template-columns: repeat(4, 1fr);
+          gap: 16px;
+        }
+        .usage-detail-grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
+        }
+        .usage-stat-card {
+          padding: 20px;
+        }
+        .usage-stat-value {
+          font-size: 28px;
+        }
+        .usage-controls {
+          gap: 16px;
+          padding: 16px;
+        }
+        .usage-date-group {
+          min-width: 280px;
+        }
+        .usage-quick-btn {
+          padding: 8px 16px;
+        }
+      }
 
-        .usage-filter-fields,
-        .usage-filter-field,
-        .usage-filter-actions {
+      @media (max-width: 480px) {
+        .usage-header-left {
           width: 100%;
+          justify-content: space-between;
         }
-
-        .usage-filter-button {
-          flex: 1 1 10rem;
-          justify-content: center;
+        .usage-title {
+          font-size: var(--font-size-large);
         }
-
-        .usage-metrics {
-          grid-template-columns: 1fr;
+        .usage-back {
+          padding: 6px 10px;
+          font-size: var(--font-size-xs);
+        }
+        .usage-stat-value {
+          font-size: 20px;
+        }
+        .usage-stat-label {
+          font-size: var(--font-size-xs);
+        }
+        .usage-detail-item {
+          padding: 8px 12px;
+        }
+        .usage-detail-name,
+        .usage-detail-value {
+          font-size: var(--font-size-xs);
+        }
+        .usage-table th,
+        .usage-table td {
+          padding: 8px 12px;
         }
       }
     </style>
   </head>
-  <body class="antialiased overscroll-none text-12-regular bg-background-base text-text-base">
+  <body>
     <div class="usage-shell">
-      <main class="usage-main">
-        <div class="usage-content">
-          <section class="usage-card usage-header">
-            <div class="usage-header-copy flex flex-col gap-1.5">
-              <div class="text-16-medium text-text-strong">Runtime Usage Dashboard</div>
-              <div class="text-12-regular text-text-weak">Calendar-based usage slices, grouped totals, and the latest deltas in the selected range.</div>
-            </div>
-            <a class="usage-back-link text-12-medium" href="/" data-action="usage-back-link" aria-label="Back to app">
-              <span aria-hidden="true">←</span>
-              <span>Back to app</span>
-            </a>
-          </section>
+      <header class="usage-header">
+        <div class="usage-header-left">
+          <a href="/" class="usage-back">← Back</a>
+          <h1 class="usage-title">Usage Report</h1>
+        </div>
+      </header>
 
-          <section class="usage-card usage-toolbar-card">
-            <form class="usage-filter-form" id="usage-filter-form">
-              <div class="usage-filter-fields">
-                <label class="usage-filter-field">
-                  <span class="text-12-medium text-text-weak">Start date</span>
-                  <input class="usage-date-input text-13-regular" id="usage-start-date" type="date" />
-                </label>
-                <label class="usage-filter-field">
-                  <span class="text-12-medium text-text-weak">End date</span>
-                  <input class="usage-date-input text-13-regular" id="usage-end-date" type="date" />
-                </label>
+      <nav class="usage-tabs">
+        <button class="usage-tab active" data-tab="overview">Overview</button>
+        <button class="usage-tab" data-tab="models">Models</button>
+        <button class="usage-tab" data-tab="providers">Providers</button>
+      </nav>
+
+      <main class="usage-content">
+        <div class="usage-tab-panel active" id="tab-overview">
+          <div class="usage-controls">
+            <div class="usage-date-group">
+              <div class="usage-date-field">
+                <label>From</label>
+                <input type="date" class="usage-date-input" id="start-date" />
               </div>
-
-              <div class="usage-filter-actions">
-                <button class="usage-filter-button usage-filter-button--primary text-13-medium" type="submit">Apply range</button>
-                <button class="usage-filter-button text-13-medium" type="button" id="usage-month-to-date">Month to date</button>
-                <button class="usage-filter-button text-13-medium" type="button" id="usage-all-time">All time</button>
-              </div>
-            </form>
-
-            <div class="usage-filter-summary">
-              <div>
-                <div class="text-12-medium text-text-weak">Selection</div>
-                <div class="text-13-regular text-text-strong" id="usage-range-summary"></div>
-              </div>
-              <div class="usage-filter-status text-12-regular text-text-danger" id="usage-filter-status" role="status" aria-live="polite"></div>
-            </div>
-          </section>
-
-          <section class="usage-metrics" id="metrics"></section>
-
-          <section class="usage-card usage-panel">
-            <div class="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <div class="text-14-medium text-text-strong">By Provider</div>
-                <div class="text-12-regular text-text-weak">Requests, input, output, total tokens, and estimated cost.</div>
+              <div class="usage-date-field">
+                <label>To</label>
+                <input type="date" class="usage-date-input" id="end-date" />
               </div>
             </div>
-            <div id="providers"></div>
-          </section>
-
-          <section class="usage-card usage-panel">
-            <div class="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <div class="text-14-medium text-text-strong">By Model</div>
-                <div class="text-12-regular text-text-weak">Qualified model references tracked per event when available.</div>
-              </div>
+            <div class="usage-quick-btns">
+              <button class="usage-quick-btn active" data-range="month">Month</button>
+              <button class="usage-quick-btn" data-range="week">Week</button>
+              <button class="usage-quick-btn" data-range="day">Day</button>
+              <button class="usage-quick-btn" data-range="all">All</button>
             </div>
-            <div id="models"></div>
-          </section>
+          </div>
 
-          <section class="usage-card usage-panel">
-            <div class="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <div class="text-14-medium text-text-strong">Recent Activity</div>
-                <div class="text-12-regular text-text-weak">The 50 latest usage deltas for the selected date range.</div>
-              </div>
+          <div class="usage-stats-row">
+            <div class="usage-stat-card">
+              <div class="usage-stat-label">Total Requests</div>
+              <div class="usage-stat-value" id="stat-requests">0</div>
             </div>
-            <div id="recent"></div>
-          </section>
+            <div class="usage-stat-card">
+              <div class="usage-stat-label">Input Tokens</div>
+              <div class="usage-stat-value" id="stat-input">0</div>
+            </div>
+            <div class="usage-stat-card">
+              <div class="usage-stat-label">Output Tokens</div>
+              <div class="usage-stat-value" id="stat-output">0</div>
+            </div>
+            <div class="usage-stat-card">
+              <div class="usage-stat-label">Total Cost</div>
+              <div class="usage-stat-value" id="stat-cost">$0.00</div>
+            </div>
+          </div>
+
+          <div class="usage-detail-grid">
+            <div class="usage-detail-card">
+              <div class="usage-detail-header">By Model</div>
+              <div class="usage-detail-list" id="models-list"></div>
+            </div>
+            <div class="usage-detail-card">
+              <div class="usage-detail-header">By Provider</div>
+              <div class="usage-detail-list" id="providers-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="usage-tab-panel" id="tab-models">
+          <div class="usage-table-container">
+            <table class="usage-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Provider</th>
+                  <th style="text-align: right">Requests</th>
+                  <th style="text-align: right">Tokens In</th>
+                  <th style="text-align: right">Tokens Out</th>
+                  <th style="text-align: right">Total</th>
+                  <th style="text-align: right">Cost</th>
+                </tr>
+              </thead>
+              <tbody id="models-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="usage-tab-panel" id="tab-providers">
+          <div class="usage-table-container">
+            <table class="usage-table">
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th style="text-align: right">Requests</th>
+                  <th style="text-align: right">Tokens In</th>
+                  <th style="text-align: right">Tokens Out</th>
+                  <th style="text-align: right">Total</th>
+                  <th style="text-align: right">Cost</th>
+                </tr>
+              </thead>
+              <tbody id="providers-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </main>
     </div>
 
     <script type="module">
-      const metricsEl = document.getElementById("metrics");
-      const providersEl = document.getElementById("providers");
-      const modelsEl = document.getElementById("models");
-      const recentEl = document.getElementById("recent");
-      const backLink = document.querySelector("[data-action='usage-back-link']");
-      const filterForm = document.getElementById("usage-filter-form");
-      const startDateInput = document.getElementById("usage-start-date");
-      const endDateInput = document.getElementById("usage-end-date");
-      const monthToDateButton = document.getElementById("usage-month-to-date");
-      const allTimeButton = document.getElementById("usage-all-time");
-      const rangeSummaryEl = document.getElementById("usage-range-summary");
-      const filterStatusEl = document.getElementById("usage-filter-status");
-
-      function formatNumber(value) {
-        return new Intl.NumberFormat("en-US").format(Number(value || 0));
-      }
-
-      function formatUsd(value) {
-        return new Intl.NumberFormat("en-US", {
-          style: "currency",
-          currency: "USD",
-          minimumFractionDigits: 4,
-          maximumFractionDigits: 4,
-        }).format(Number(value || 0));
-      }
-
-      function escapeHtml(value) {
-        return String(value ?? "")
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#39;");
-      }
-
-      function formatDateInput(date) {
-        const year = date.getFullYear();
+      const fmt = (n) => new Intl.NumberFormat("en-US").format(n);
+      const fmtUsd = (n) => new Intl.NumberFormat("en-US", {
+        style: "currency", currency: "USD", minimumFractionDigits: 2
+      }).format(n);
+      const safeText = (value) =>
+        typeof value === "string" ? value : value == null ? "" : String(value);
+      const toDateInputValue = (date) => {
+        const year = String(date.getFullYear());
         const month = String(date.getMonth() + 1).padStart(2, "0");
         const day = String(date.getDate()).padStart(2, "0");
-        return year + "-" + month + "-" + day;
-      }
-
-      function parseDateValue(value) {
-        if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value || "")) return null;
-        const [year, month, day] = value.split("-").map(Number);
-        const start = new Date(year, month - 1, day);
+        return \`\${year}-\${month}-\${day}\`;
+      };
+      const parseDateInputValue = (value) => {
+        if (!value) return null;
+        const [yearText, monthText, dayText] = value.split("-");
+        const year = Number(yearText);
+        const monthIndex = Number(monthText) - 1;
+        const day = Number(dayText);
+        if (!Number.isInteger(year) || !Number.isInteger(monthIndex) || !Number.isInteger(day)) {
+          return null;
+        }
+        const start = new Date(year, monthIndex, day);
         if (
           start.getFullYear() !== year ||
-          start.getMonth() !== month - 1 ||
+          start.getMonth() !== monthIndex ||
           start.getDate() !== day
         ) {
           return null;
         }
-
         return {
-          startAt: start.getTime(),
-          endAtExclusive: new Date(year, month - 1, day + 1).getTime(),
+          start,
+          endExclusive: new Date(year, monthIndex, day + 1),
         };
-      }
+      };
+      const shiftLocalDate = (date, days) =>
+        new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 
-      function getMonthToDateSelection() {
-        const now = new Date();
-        return {
-          startDate: formatDateInput(new Date(now.getFullYear(), now.getMonth(), 1)),
-          endDate: formatDateInput(now),
-        };
-      }
-
-      function getAllTimeSelection() {
-        return {
-          startDate: null,
-          endDate: null,
-        };
-      }
-
-      function readSelectionFromUrl() {
-        const url = new URL(window.location.href);
-        const startDate = url.searchParams.get("start");
-        const endDate = url.searchParams.get("end");
-
-        if (!startDate && !endDate) return getAllTimeSelection();
-        if (!startDate || !endDate) return getMonthToDateSelection();
-        const parsedStartDate = parseDateValue(startDate);
-        const parsedEndDate = parseDateValue(endDate);
-        if (!parsedStartDate || !parsedEndDate || startDate > endDate) {
-          return getMonthToDateSelection();
+      function createTextElement(tagName, className, text) {
+        const element = document.createElement(tagName);
+        if (className) {
+          element.className = className;
         }
-
-        return { startDate, endDate };
+        element.textContent = text;
+        return element;
       }
 
-      let currentSelection = readSelectionFromUrl();
-
-      function syncInputsFromSelection() {
-        startDateInput.value = currentSelection.startDate || "";
-        endDateInput.value = currentSelection.endDate || "";
-      }
-
-      function syncUrlFromSelection() {
-        const url = new URL(window.location.href);
-        if (currentSelection.startDate && currentSelection.endDate) {
-          url.searchParams.set("start", currentSelection.startDate);
-          url.searchParams.set("end", currentSelection.endDate);
-        } else {
-          url.searchParams.delete("start");
-          url.searchParams.delete("end");
+      function createCell(text, rightAlign = false) {
+        const cell = document.createElement("td");
+        cell.textContent = text;
+        if (rightAlign) {
+          cell.style.textAlign = "right";
         }
-        window.history.replaceState({}, "", url);
+        return cell;
       }
 
-      function formatHumanDate(value) {
-        const parsed = parseDateValue(value);
-        if (!parsed) return value;
-        return new Date(parsed.startAt).toLocaleDateString(undefined, {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        });
+      function replaceChildren(targetId, children) {
+        const target = document.getElementById(targetId);
+        target.replaceChildren(...children);
       }
 
-      function renderSelectionSummary() {
-        if (!currentSelection.startDate || !currentSelection.endDate) {
-          rangeSummaryEl.textContent = "All recorded usage";
-          return;
-        }
+      let currentStart = null;
+      let currentEnd = null;
 
-        if (currentSelection.startDate === currentSelection.endDate) {
-          rangeSummaryEl.textContent = formatHumanDate(currentSelection.startDate);
-          return;
-        }
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      currentStart = toDateInputValue(startOfMonth);
+      currentEnd = toDateInputValue(today);
+      document.getElementById("start-date").value = currentStart;
+      document.getElementById("end-date").value = currentEnd;
 
-        rangeSummaryEl.textContent = formatHumanDate(currentSelection.startDate) + " to " + formatHumanDate(currentSelection.endDate);
-      }
-
-      function setFilterStatus(message) {
-        filterStatusEl.textContent = message || "";
-      }
-
-      function buildRequestUrl() {
+      async function loadData() {
         const url = new URL("/api/usage/dashboard", window.location.origin);
-        if (currentSelection.startDate && currentSelection.endDate) {
-          const start = parseDateValue(currentSelection.startDate);
-          const end = parseDateValue(currentSelection.endDate);
-          if (start && end) {
-            url.searchParams.set("startAt", String(start.startAt));
-            url.searchParams.set("endAtExclusive", String(end.endAtExclusive));
-          }
+        const startRange = parseDateInputValue(currentStart);
+        const endRange = parseDateInputValue(currentEnd);
+        if (startRange) url.searchParams.set("startAt", String(startRange.start.getTime()));
+        if (endRange) url.searchParams.set("endAtExclusive", String(endRange.endExclusive.getTime()));
+
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error("Failed");
+          const data = await res.json();
+          render(data);
+        } catch (err) {
+          console.error(err);
         }
-        return url.toString();
       }
 
-      function renderMetrics(payload) {
-        const metrics = [
-          ["Requests", formatNumber(payload.totals.requestCount)],
-          ["Input Tokens", formatNumber(payload.totals.inputTokens)],
-          ["Output Tokens", formatNumber(payload.totals.outputTokens)],
-          ["Total Tokens", formatNumber(payload.totals.totalTokens)],
-          ["Estimated Cost", formatUsd(payload.totals.estimatedCostUsd)],
-        ];
-        metricsEl.innerHTML = metrics.map(([label, value]) => \`
-          <article class="usage-card usage-metric">
-            <div class="text-12-medium text-text-weak">\${escapeHtml(label)}</div>
-            <div class="usage-metric-value text-20-medium">\${escapeHtml(value)}</div>
-          </article>
-        \`).join("");
-      }
+      function render(data) {
+        document.getElementById("stat-requests").textContent = fmt(data.totals.requestCount);
+        document.getElementById("stat-input").textContent = fmt(data.totals.inputTokens);
+        document.getElementById("stat-output").textContent = fmt(data.totals.outputTokens);
+        document.getElementById("stat-cost").textContent = fmtUsd(data.totals.estimatedCostUsd);
 
-      function renderTable(target, rows, columns, className = "") {
-        if (!rows.length) {
-          target.innerHTML = '<div class="usage-empty text-13-regular">No usage recorded for this range.</div>';
-          return;
-        }
+        replaceChildren(
+          "models-list",
+          data.models.slice(0, 5).map((model) => {
+            const item = document.createElement("div");
+            item.className = "usage-detail-item";
+            item.append(
+              createTextElement("span", "usage-detail-name", safeText(model.modelId)),
+              createTextElement("span", "usage-detail-value", fmtUsd(model.estimatedCostUsd)),
+            );
+            return item;
+          }),
+        );
 
-        const head = columns
-          .map(column => \`<th class="text-12-medium text-text-weak \${escapeHtml(column.headerClassName || "")}">\${escapeHtml(column.label)}</th>\`)
-          .join("");
-        const body = rows
-          .map(row => \`<tr>\${columns.map(column => \`<td class="text-13-regular \${escapeHtml(column.className || "")}">\${escapeHtml(column.render(row))}</td>\`).join("")}</tr>\`)
-          .join("");
+        replaceChildren(
+          "providers-list",
+          data.providers.slice(0, 5).map((provider) => {
+            const item = document.createElement("div");
+            item.className = "usage-detail-item";
+            item.append(
+              createTextElement("span", "usage-detail-name", safeText(provider.providerId)),
+              createTextElement("span", "usage-detail-value", fmtUsd(provider.estimatedCostUsd)),
+            );
+            return item;
+          }),
+        );
 
-        target.innerHTML = \`<div class="usage-table-wrap"><table class="usage-table \${escapeHtml(className)}"><thead><tr>\${head}</tr></thead><tbody>\${body}</tbody></table></div>\`;
-      }
+        replaceChildren(
+          "models-tbody",
+          data.models.map((model) => {
+            const row = document.createElement("tr");
+            row.append(
+              createCell(safeText(model.modelId)),
+              createCell(safeText(model.providerId)),
+              createCell(fmt(model.requestCount), true),
+              createCell(fmt(model.inputTokens), true),
+              createCell(fmt(model.outputTokens), true),
+              createCell(fmt(model.totalTokens), true),
+              createCell(fmtUsd(model.estimatedCostUsd), true),
+            );
+            return row;
+          }),
+        );
 
-      function renderRecent(rows) {
-        renderTable(
-          recentEl,
-          rows,
-          [
-            {
-              label: "Session",
-              render: row => row.sessionTitle || row.sessionId || "Unbound usage event",
-              className: "text-text-strong usage-table__cell--session",
-            },
-            {
-              label: "Model",
-              render: row => (row.providerId || "unknown") + "/" + (row.modelId || "unknown"),
-              className: "font-mono text-text-weak usage-table__cell--model",
-            },
-            {
-              label: "When",
-              render: row => new Date(row.createdAt).toLocaleString(),
-              className: "text-text-weak usage-table__cell--when",
-            },
-            { label: "Req", render: row => formatNumber(row.requestCount), className: "usage-table__cell--numeric" },
-            { label: "In", render: row => formatNumber(row.inputTokens), className: "usage-table__cell--numeric" },
-            { label: "Out", render: row => formatNumber(row.outputTokens), className: "usage-table__cell--numeric" },
-            { label: "Total", render: row => formatNumber(row.totalTokens), className: "usage-table__cell--numeric" },
-            {
-              label: "Cost",
-              render: row => formatUsd(row.estimatedCostUsd),
-              className: "text-text-strong usage-table__cell--numeric",
-            },
-          ],
-          "usage-table--recent",
+        replaceChildren(
+          "providers-tbody",
+          data.providers.map((provider) => {
+            const row = document.createElement("tr");
+            row.append(
+              createCell(safeText(provider.providerId)),
+              createCell(fmt(provider.requestCount), true),
+              createCell(fmt(provider.inputTokens), true),
+              createCell(fmt(provider.outputTokens), true),
+              createCell(fmt(provider.totalTokens), true),
+              createCell(fmtUsd(provider.estimatedCostUsd), true),
+            );
+            return row;
+          }),
         );
       }
 
-      async function loadUsage() {
-        const response = await fetch(buildRequestUrl());
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null);
-          throw new Error(payload?.error || "Failed to load usage.");
-        }
-
-        const payload = await response.json();
-        renderMetrics(payload);
-        renderTable(providersEl, payload.providers, [
-          { label: "Provider", render: row => row.providerId, className: "font-mono text-text-strong" },
-          { label: "Req", render: row => formatNumber(row.requestCount), className: "usage-table__cell--numeric" },
-          { label: "In", render: row => formatNumber(row.inputTokens), className: "usage-table__cell--numeric" },
-          { label: "Out", render: row => formatNumber(row.outputTokens), className: "usage-table__cell--numeric" },
-          { label: "Total", render: row => formatNumber(row.totalTokens), className: "usage-table__cell--numeric" },
-          { label: "Cost", render: row => formatUsd(row.estimatedCostUsd), className: "text-text-strong usage-table__cell--numeric" },
-        ], "usage-table--provider");
-        renderTable(modelsEl, payload.models, [
-          { label: "Model", render: row => row.providerId + "/" + row.modelId, className: "font-mono text-text-strong usage-table__cell--model" },
-          { label: "Req", render: row => formatNumber(row.requestCount), className: "usage-table__cell--numeric" },
-          { label: "In", render: row => formatNumber(row.inputTokens), className: "usage-table__cell--numeric" },
-          { label: "Out", render: row => formatNumber(row.outputTokens), className: "usage-table__cell--numeric" },
-          { label: "Total", render: row => formatNumber(row.totalTokens), className: "usage-table__cell--numeric" },
-          { label: "Cost", render: row => formatUsd(row.estimatedCostUsd), className: "text-text-strong usage-table__cell--numeric" },
-        ], "usage-table--model");
-        renderRecent(payload.recent);
-      }
-
-      async function refreshUsage() {
-        setFilterStatus("");
-        renderSelectionSummary();
-        syncUrlFromSelection();
-
-        try {
-          await loadUsage();
-        } catch (error) {
-          setFilterStatus(error instanceof Error ? error.message : "Failed to load usage.");
-        }
-      }
-
-      filterForm?.addEventListener("submit", event => {
-        event.preventDefault();
-        const startDate = startDateInput.value;
-        const endDate = endDateInput.value;
-
-        if (!startDate || !endDate) {
-          setFilterStatus("Choose both a start date and an end date.");
-          return;
-        }
-
-        if (!parseDateValue(startDate) || !parseDateValue(endDate)) {
-          setFilterStatus("Enter valid calendar dates.");
-          return;
-        }
-
-        if (startDate > endDate) {
-          setFilterStatus("Start date must be on or before the end date.");
-          return;
-        }
-
-        currentSelection = { startDate, endDate };
-        void refreshUsage();
+      document.querySelectorAll(".usage-tab").forEach(tab => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll(".usage-tab").forEach(t => t.classList.remove("active"));
+          document.querySelectorAll(".usage-tab-panel").forEach(p => p.classList.remove("active"));
+          tab.classList.add("active");
+          document.getElementById(\`tab-\${tab.dataset.tab}\`).classList.add("active");
+        });
       });
 
-      monthToDateButton?.addEventListener("click", () => {
-        currentSelection = getMonthToDateSelection();
-        syncInputsFromSelection();
-        void refreshUsage();
+      document.querySelectorAll(".usage-quick-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".usage-quick-btn").forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          const range = btn.dataset.range;
+          const end = new Date();
+          const endLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+          let startLocal = endLocal;
+          if (range === "month") startLocal = new Date(endLocal.getFullYear(), endLocal.getMonth(), 1);
+          else if (range === "week") startLocal = shiftLocalDate(endLocal, -7);
+          else if (range === "day") startLocal = endLocal;
+          currentStart = range === "all" ? null : toDateInputValue(startLocal);
+          currentEnd = range === "all" ? null : toDateInputValue(endLocal);
+          document.getElementById("start-date").value = currentStart ?? "";
+          document.getElementById("end-date").value = currentEnd ?? "";
+          loadData();
+        });
       });
 
-      allTimeButton?.addEventListener("click", () => {
-        currentSelection = getAllTimeSelection();
-        syncInputsFromSelection();
-        void refreshUsage();
+      document.getElementById("start-date").addEventListener("change", (e) => {
+        currentStart = e.target.value || null;
+        loadData();
       });
 
-      backLink?.addEventListener("click", event => {
-        const referrer = document.referrer ? new URL(document.referrer) : null;
-        const sameOriginReferrer = referrer && referrer.origin === window.location.origin;
-        if (sameOriginReferrer && window.history.length > 1) {
-          event.preventDefault();
-          window.history.back();
-        }
+      document.getElementById("end-date").addEventListener("change", (e) => {
+        currentEnd = e.target.value || null;
+        loadData();
       });
 
-      syncInputsFromSelection();
-      void refreshUsage();
-      window.setInterval(() => { void loadUsage().catch(error => setFilterStatus(error instanceof Error ? error.message : "Failed to load usage.")); }, 15000);
+      loadData();
+      setInterval(loadData, 15000);
     </script>
   </body>
 </html>`;
@@ -785,8 +790,8 @@ export function createUsageRoutes() {
     },
 
     "/usage": {
-      GET: () =>
-        new Response(usagePageHtml(), {
+      GET: async () =>
+        new Response(await usagePageHtml(), {
           headers: {
             "content-type": "text/html; charset=utf-8",
           },

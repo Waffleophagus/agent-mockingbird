@@ -2,7 +2,11 @@ import type { Part, Session } from "@opencode-ai/sdk/client";
 
 import type { AgentMockingbirdConfig } from "./schema";
 import { ConfigApplyError, type ConfigSmokeTestSummary } from "./types";
-import { createOpencodeClientFromConnection, unwrapSdkData } from "../opencode/client";
+import {
+  createOpencodeClientFromConnection,
+  resolveOpencodeConnection,
+  unwrapSdkData,
+} from "../opencode/client";
 
 function extractAssistantText(parts: Array<Part>) {
   return parts
@@ -13,10 +17,8 @@ function extractAssistantText(parts: Array<Part>) {
 }
 
 export async function runSmokeTest(config: AgentMockingbirdConfig): Promise<ConfigSmokeTestSummary> {
-  const client = createOpencodeClientFromConnection({
-    baseUrl: config.runtime.opencode.baseUrl,
-    directory: config.runtime.opencode.directory,
-  });
+  const connection = resolveOpencodeConnection(config);
+  const client = createOpencodeClientFromConnection(connection);
 
   let expectedPattern: RegExp;
   try {
@@ -31,7 +33,7 @@ export async function runSmokeTest(config: AgentMockingbirdConfig): Promise<Conf
         body: { title: "agent-mockingbird-config-smoke" },
         responseStyle: "data",
         throwOnError: true,
-        signal: AbortSignal.timeout(config.runtime.opencode.timeoutMs),
+        signal: AbortSignal.timeout(connection.timeoutMs),
       }),
     );
 

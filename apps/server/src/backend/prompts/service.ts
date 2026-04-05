@@ -6,7 +6,11 @@ import {
 
 import { getConfigSnapshot } from "../config/service";
 import { getLocalSessionIdByRuntimeBinding } from "../db/repository";
-import { createOpencodeV2ClientFromConnection, unwrapSdkData } from "../opencode/client";
+import {
+  createOpencodeV2ClientFromConnection,
+  resolveOpencodeConnection,
+  unwrapSdkData,
+} from "../opencode/client";
 
 const OPENCODE_RUNTIME_ID = "opencode";
 
@@ -31,13 +35,11 @@ interface PendingPromptsSnapshot {
 }
 
 function createPromptClient() {
-  const config = getConfigSnapshot().config.runtime.opencode;
+  const config = getConfigSnapshot().config;
+  const connection = resolveOpencodeConnection(config);
   return {
-    client: createOpencodeV2ClientFromConnection({
-      baseUrl: config.baseUrl,
-      directory: config.directory,
-    }),
-    timeoutMs: config.timeoutMs,
+    client: createOpencodeV2ClientFromConnection(connection),
+    timeoutMs: connection.timeoutMs,
   };
 }
 

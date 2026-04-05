@@ -2,7 +2,10 @@ import { OpencodeRuntime } from "./opencodeRuntime";
 import { getConfigSnapshot } from "../config/service";
 import type { RuntimeEngine } from "../contracts/runtime";
 import { readConfiguredMcpServersFromWorkspaceConfig } from "../mcp/service";
-import { getOpencodeConnectionInfo } from "../opencode/client";
+import {
+  getOpencodeConnectionInfo,
+  resolveOpencodeConnection,
+} from "../opencode/client";
 import { listManagedSkillCatalog } from "../skills/service";
 
 let runtimeInstance: RuntimeEngine | null = null;
@@ -54,11 +57,7 @@ export function getRuntime(): RuntimeEngine | null {
 
 export function getRuntimeStartupInfo(): RuntimeStartupInfo {
   const config = getConfigSnapshot().config;
-  const connection = getOpencodeConnectionInfo({
-    baseUrl: config.runtime.opencode.baseUrl,
-    timeoutMs: config.runtime.opencode.timeoutMs,
-    directory: config.runtime.opencode.directory,
-  });
+  const connection = getOpencodeConnectionInfo(resolveOpencodeConnection(config));
   return {
     executor: {
       enabled: config.runtime.executor.enabled,

@@ -882,8 +882,8 @@ describe("config routes", () => {
 
   test("POST /api/config/patch-safe rejects denylisted paths", async () => {
     const { routes } = createRouteHarness(async () => ({ sessionId: "main", messages: [] }));
-    const configRoute = routes["/api/config"] as { GET: (req: Request) => Response };
-    const configResponse = configRoute.GET(new Request("http://localhost/api/config"));
+    const configRoute = routes["/api/config"] as { GET: (req: Request) => Promise<Response> };
+    const configResponse = await configRoute.GET(new Request("http://localhost/api/config"));
     const snapshot = (await configResponse.json()) as { hash: string };
 
     const route = routes["/api/config/patch-safe"] as {

@@ -6,21 +6,13 @@ import path from "node:path";
 import type { createUsageRoutes as CreateUsageRoutesType } from "./usageRoutes";
 import type * as ClientModuleType from "../../db/client";
 import type * as RepositoryModuleType from "../../db/repository";
+import { restoreEnv } from "../../testEnv";
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
 const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
 const originalWorkspaceDir = process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
 const originalEmbedProvider = process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER;
-
-function restoreEnv(key: string, value: string | undefined) {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-
-  process.env[key] = value;
-}
 
 const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-usage-routes-test-"));
 const testDbPath = path.join(testRoot, "agent-mockingbird.usage-routes.test.db");
@@ -153,15 +145,31 @@ describe("usage routes", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
 
     const html = await response.text();
-    expect(html).toContain("<title>Usage</title>");
+    expect(html).toContain("<title>Usage Report</title>");
     expect(html).toContain("/api/usage/dashboard");
-    expect(html).toContain("Back to app");
-    expect(html).toContain("window.history.back()");
+    expect(html).toContain("← Back");
     expect(html).toContain("window.location.origin");
-    expect(html).toContain("All time");
-    expect(html).toContain("Apply range");
-    expect(html).toContain("Month to date");
-    expect(html).toContain("usage-start-date");
-    expect(html).toContain("usage-end-date");
+    expect(html).toContain("All");
+    expect(html).toContain("Month");
+    expect(html).toContain("Overview");
+    expect(html).toContain("Models");
+    expect(html).toContain("Providers");
+  });
+
+  test("GET /usage initializes local date ranges and renders rows without innerHTML interpolation", async () => {
+    const routes = createUsageRoutes();
+    const handler = routes["/usage"]?.GET;
+    expect(handler).toBeDefined();
+
+    const response = await handler!();
+    const html = await response.text();
+
+    expect(html).toContain("currentStart = toDateInputValue(startOfMonth);");
+    expect(html).toContain("currentEnd = toDateInputValue(today);");
+    expect(html).toContain("parseDateInputValue");
+    expect(html).toContain("document.createElement(\"tr\")");
+    expect(html).not.toContain(".innerHTML = data.models");
+    expect(html).not.toContain(".innerHTML = data.providers");
+    expect(html).not.toContain("new Date(e.target.value)");
   });
 });

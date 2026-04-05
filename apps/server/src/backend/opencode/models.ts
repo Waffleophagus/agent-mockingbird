@@ -1,6 +1,10 @@
 import type { ConfigProvidersResponse } from "@opencode-ai/sdk/client";
 
-import { createOpencodeClientFromConnection, unwrapSdkData } from "./client";
+import {
+  createOpencodeClientFromConnection,
+  resolveOpencodeConnection,
+  unwrapSdkData,
+} from "./client";
 import { getConfig } from "../config/service";
 
 interface OpencodeModelOption {
@@ -13,10 +17,7 @@ interface OpencodeModelOption {
 
 export async function listOpencodeModelOptions(): Promise<OpencodeModelOption[]> {
   const config = getConfig();
-  const client = createOpencodeClientFromConnection({
-    baseUrl: config.runtime.opencode.baseUrl,
-    directory: config.runtime.opencode.directory,
-  });
+  const client = createOpencodeClientFromConnection(resolveOpencodeConnection(config));
   const payload = unwrapSdkData<ConfigProvidersResponse>(await client.config.providers({
     responseStyle: "data",
     throwOnError: true,

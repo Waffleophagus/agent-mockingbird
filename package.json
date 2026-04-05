@@ -49,6 +49,7 @@
   "scripts": {
     "prepare": "bun run ./scripts/setup-git-hooks.ts",
     "setup:hooks": "bun run ./scripts/setup-git-hooks.ts",
+    "check:ci": "bun run ./scripts/check-ci.ts",
     "check:ship": "bun run ./scripts/check-ship.ts",
     "opencode:sync": "bun run ./scripts/opencode-sync.ts",
     "executor:sync": "bun run ./scripts/executor-sync.ts",
