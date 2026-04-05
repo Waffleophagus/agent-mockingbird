@@ -5,6 +5,7 @@ import path from "node:path";
 
 import type * as ManagedConfigModuleType from "./managedConfig";
 import type * as ConfigStoreModuleType from "../config/store";
+import { restoreEnv } from "../testEnv";
 import { resolveOpencodeConfigDir } from "../workspace/resolve";
 
 const originalNodeEnv = process.env.NODE_ENV;
@@ -12,14 +13,6 @@ const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
 const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
 const originalWorkspacePath = process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
 const originalEmbedProvider = process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER;
-
-function restoreEnv(key: string, value: string | undefined) {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-  process.env[key] = value;
-}
 
 const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-managed-config-test-"));
 const testConfigPath = path.join(testRoot, "agent-mockingbird.managed-config.json");

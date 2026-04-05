@@ -6,21 +6,13 @@ import path from "node:path";
 import type { createUsageRoutes as CreateUsageRoutesType } from "./usageRoutes";
 import type * as ClientModuleType from "../../db/client";
 import type * as RepositoryModuleType from "../../db/repository";
+import { restoreEnv } from "../../testEnv";
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalDbPath = process.env.AGENT_MOCKINGBIRD_DB_PATH;
 const originalConfigPath = process.env.AGENT_MOCKINGBIRD_CONFIG_PATH;
 const originalWorkspaceDir = process.env.AGENT_MOCKINGBIRD_MEMORY_WORKSPACE_DIR;
 const originalEmbedProvider = process.env.AGENT_MOCKINGBIRD_MEMORY_EMBED_PROVIDER;
-
-function restoreEnv(key: string, value: string | undefined) {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-
-  process.env[key] = value;
-}
 
 const testRoot = mkdtempSync(path.join(tmpdir(), "agent-mockingbird-usage-routes-test-"));
 const testDbPath = path.join(testRoot, "agent-mockingbird.usage-routes.test.db");

@@ -1,15 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { env } from "./env";
-
-function restoreEnv(key: string, value: string | undefined) {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-
-  process.env[key] = value;
-}
+import { restoreEnv } from "./testEnv";
 
 test("executor mount path env var must start with a slash", () => {
   const previousValue = process.env.AGENT_MOCKINGBIRD_EXECUTOR_UI_MOUNT_PATH;

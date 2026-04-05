@@ -2,8 +2,7 @@ const DEFAULT_APP_HOST = "127.0.0.1";
 const DEFAULT_APP_PORT = "3001";
 
 function resolveConfiguredAppHost() {
-  const host = process.env.AGENT_MOCKINGBIRD_HOST?.trim() || DEFAULT_APP_HOST;
-  return host || DEFAULT_APP_HOST;
+  return process.env.AGENT_MOCKINGBIRD_HOST?.trim() || DEFAULT_APP_HOST;
 }
 
 function resolveConfiguredAppPort() {

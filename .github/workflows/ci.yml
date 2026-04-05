@@ -76,6 +76,8 @@ jobs:
           package_version=""
           latest_version=""
           next_version=""
+          main_package_version=""
+          next_package_version=""
 
           if [[ "${ref}" == "refs/heads/main" ]]; then
             npm_tag="latest"
@@ -138,14 +140,27 @@ jobs:
               console.log(`NEXT_PACKAGE_VERSION=${nextBase}-next.${nextCounter}`);
             });
           ')"
-          eval "${version_info}"
-          latest_version="${LATEST_VERSION}"
-          next_version="${NEXT_VERSION}"
+          while IFS='=' read -r key value; do
+            case "${key}" in
+              LATEST_VERSION)
+                latest_version="${value}"
+                ;;
+              NEXT_VERSION)
+                next_version="${value}"
+                ;;
+              MAIN_PACKAGE_VERSION)
+                main_package_version="${value}"
+                ;;
+              NEXT_PACKAGE_VERSION)
+                next_package_version="${value}"
+                ;;
+            esac
+          done <<< "${version_info}"
 
           if [[ "${npm_tag}" == "latest" ]]; then
-            package_version="${MAIN_PACKAGE_VERSION}"
+            package_version="${main_package_version}"
           else
-            package_version="${NEXT_PACKAGE_VERSION}"
+            package_version="${next_package_version}"
           fi
 
           echo "Publish decision: ref=${ref} ref_name=${ref_name} npm_tag=${npm_tag} package_version=${package_version}"

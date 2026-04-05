@@ -1,14 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { resolveDefaultAppBaseUrl, resolveDefaultAppBindHost } from "./appBaseUrl";
-
-function restoreEnv(key: string, value: string | undefined) {
-  if (typeof value === "undefined") {
-    delete process.env[key];
-    return;
-  }
-  process.env[key] = value;
-}
+import { restoreEnv } from "./testEnv";
 
 afterEach(() => {
   delete process.env.AGENT_MOCKINGBIRD_HOST;

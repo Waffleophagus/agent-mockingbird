@@ -103,6 +103,24 @@ describe("syncRuntimeWorkspaceAssets", () => {
 
     await expect(
       syncRuntimeWorkspaceAssets({
+        sourceWorkspaceDir: "",
+        targetWorkspaceDir: makeTempDir(),
+        stateFilePath: path.join(makeTempDir(), "runtime-assets-state.json"),
+        mode: "install",
+      }),
+    ).rejects.toThrow("runtime asset source directory");
+
+    await expect(
+      syncRuntimeWorkspaceAssets({
+        sourceWorkspaceDir: "   ",
+        targetWorkspaceDir: makeTempDir(),
+        stateFilePath: path.join(makeTempDir(), "runtime-assets-state.json"),
+        mode: "install",
+      }),
+    ).rejects.toThrow("runtime asset source directory");
+
+    await expect(
+      syncRuntimeWorkspaceAssets({
         sourceWorkspaceDir: sourceDir,
         targetWorkspaceDir: "",
         stateFilePath: path.join(makeTempDir(), "runtime-assets-state.json"),

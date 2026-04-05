@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemorySearchTool } from "../../../../../runtime-assets/opencode-config/lib/memory-tools";
-import { AgentMockingbirdPlugin } from "../../../../../runtime-assets/opencode-config/plugins/agent-mockingbird";
+import {
+  AgentMockingbirdPlugin,
+  clearSystemPromptCache,
+} from "../../../../../runtime-assets/opencode-config/plugins/agent-mockingbird";
 import memoryGetTool from "../../../../../runtime-assets/opencode-config/tools/memory_get";
 import memoryRememberTool from "../../../../../runtime-assets/opencode-config/tools/memory_remember";
 import memorySearchTool from "../../../../../runtime-assets/opencode-config/tools/memory_search";
@@ -10,6 +13,7 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  clearSystemPromptCache();
   delete process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL;
   delete process.env.AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL;
   delete process.env.AGENT_MOCKINGBIRD_CRON_API_BASE_URL;

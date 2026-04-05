@@ -230,6 +230,11 @@ async function fetchSystemPrompt(options: AgentMockingbirdPluginOptions) {
   return system
 }
 
+export function clearSystemPromptCache() {
+  systemPromptCache.value = ""
+  systemPromptCache.expiresAtMs = 0
+}
+
 async function fetchCompactionContext(options: AgentMockingbirdPluginOptions, sessionID?: string): Promise<CompactionPayload> {
   const now = Date.now()
   const cacheKey = sessionID?.trim() || "__default__"
@@ -464,8 +469,8 @@ const cronManagerTool = {
     jobId: z.string().optional(),
     instanceId: z.string().optional(),
     limit: z.number().int().positive().optional(),
-    job: z.unknown().optional(),
-    patch: z.unknown().optional(),
+    job: jobCreateSchema.optional(),
+    patch: jobPatchSchema.optional(),
   },
   async execute(rawArgs: unknown, _context?: ToolExecuteContext) {
     const args = cronArgsSchema.parse(rawArgs)
@@ -520,7 +525,7 @@ const agentTypeManagerTool = {
     "Manage OpenCode agent definitions through Agent Mockingbird's OpenCode-backed APIs with validation and hash conflict detection.",
   args: {
     action: z.enum(["list", "validate_patch", "apply_patch"]),
-    upserts: z.array(z.unknown()).optional(),
+    upserts: z.array(agentTypeSchema).optional(),
     deletes: z.array(z.string().min(1)).optional(),
     expectedHash: z.string().min(1).optional(),
   },

@@ -18,8 +18,14 @@ function resolveMemoryApiBaseUrl(options: MemoryToolOptions) {
   const configured = normalizeBaseUrl(options.memoryApiBaseUrl) ?? normalizeBaseUrl(options.apiBaseUrl)
   if (configured) return configured
 
-  const envValue = process.env.AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL?.trim()
-  if (envValue) return envValue.replace(/\/+$/, "")
+  for (const key of [
+    "AGENT_MOCKINGBIRD_MEMORY_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CONFIG_API_BASE_URL",
+    "AGENT_MOCKINGBIRD_CRON_API_BASE_URL",
+  ] as const) {
+    const envValue = normalizeBaseUrl(process.env[key])
+    if (envValue) return envValue
+  }
 
   const port = process.env.AGENT_MOCKINGBIRD_PORT?.trim() || process.env.PORT?.trim() || "3001"
   return `http://127.0.0.1:${port}`

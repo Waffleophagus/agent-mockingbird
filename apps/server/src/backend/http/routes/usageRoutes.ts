@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { getUsageDashboardSnapshot } from "../../db/repository";
@@ -50,18 +49,19 @@ function parseRangeQuery(url: URL): UsageDashboardRangeQuery | Response {
   return { startAt, endAtExclusive };
 }
 
-function getOpenCodeStylesheetLinks() {
+async function getOpenCodeStylesheetLinks() {
   const appDistDir = resolveAppDistDir();
   if (!appDistDir) return "";
   const indexPath = path.join(appDistDir, "index.html");
-  if (!existsSync(indexPath)) return "";
-  const html = readFileSync(indexPath, "utf8");
+  const indexFile = Bun.file(indexPath);
+  if (!(await indexFile.exists())) return "";
+  const html = await indexFile.text();
   const hrefs = [...html.matchAll(/<link\s+rel="stylesheet"[^>]*href="([^"]+)"/g)].map(match => match[1]);
   return hrefs.map(href => `<link rel="stylesheet" crossorigin href="${href}">`).join("\n    ");
 }
 
-function usagePageHtml() {
-  const stylesheetLinks = getOpenCodeStylesheetLinks();
+async function usagePageHtml() {
+  const stylesheetLinks = await getOpenCodeStylesheetLinks();
   return `<!doctype html>
 <html lang="en" style="background-color: var(--background-base)">
   <head>
@@ -790,8 +790,8 @@ export function createUsageRoutes() {
     },
 
     "/usage": {
-      GET: () =>
-        new Response(usagePageHtml(), {
+      GET: async () =>
+        new Response(await usagePageHtml(), {
           headers: {
             "content-type": "text/html; charset=utf-8",
           },

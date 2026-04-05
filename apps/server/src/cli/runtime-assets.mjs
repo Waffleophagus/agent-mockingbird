@@ -94,7 +94,7 @@ export async function syncRuntimeWorkspaceAssets(input) {
     typeof input?.stateFilePath === "string" ? input.stateFilePath.trim() : "";
 
   if (!rawSourceWorkspaceDir) {
-    throw new Error("runtime asset source directory missing: ");
+    throw new Error("runtime asset source directory is required");
   }
   if (!rawTargetWorkspaceDir) {
     throw new Error("runtime asset target directory is required");
@@ -118,6 +118,7 @@ export async function syncRuntimeWorkspaceAssets(input) {
   ensureDir(targetWorkspaceDir);
   const previousState = safeReadState(stateFilePath);
   const relativeFiles = listRelativeFiles(sourceWorkspaceDir);
+  const relativeFilesSet = new Set(relativeFiles);
   const nowIso = new Date().toISOString();
 
   const summary = {
@@ -217,7 +218,7 @@ export async function syncRuntimeWorkspaceAssets(input) {
   }
 
   const removedPaths = Object.keys(previousState.files ?? {})
-    .filter(relativePath => !relativeFiles.includes(relativePath))
+    .filter(relativePath => !relativeFilesSet.has(relativePath))
     .sort((left, right) => left.localeCompare(right));
 
   for (const relativePath of removedPaths) {
