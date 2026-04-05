@@ -252,16 +252,27 @@ export const opencodeRuntimeEventMethods: OpencodeRuntimeEventMethods = {
 
   handleMessageUpdatedEvent(this: OpencodeRuntime, event) {
     this.rememberMessageRole(event.properties.info.sessionID, event.properties.info.id, event.properties.info.role);
-    if (event.properties.info.role !== "assistant") return;
     const opencodeSessionId = event.properties.info.sessionID.trim();
     if (!opencodeSessionId) return;
     const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
-    if (!localSessionId || this["busySessions"].has(localSessionId)) return;
+    if (!localSessionId) return;
+    if (event.properties.info.role === "user") {
+      this.cancelIdleCompaction(localSessionId);
+      return;
+    }
+    if (event.properties.info.role !== "assistant" || this["busySessions"].has(localSessionId)) return;
     void this.syncMessageById({
       localSessionId,
       externalSessionId: opencodeSessionId,
       messageId: event.properties.info.id,
     });
+    if (event.properties.info.finish) {
+      const localSession = getSessionById(localSessionId);
+      if (localSession) {
+        const model = this.resolveModel(localSession.model);
+        void this.scheduleIdleCompaction(localSessionId, model, event.properties.info);
+      }
+    }
   },
 
   handleSessionCreatedEvent(this: OpencodeRuntime, event) {
@@ -323,6 +334,7 @@ export const opencodeRuntimeEventMethods: OpencodeRuntimeEventMethods = {
     this.markMemoryInjectionStateForReinject(opencodeSessionId);
     const localSessionId = getLocalSessionIdByRuntimeBinding(OPENCODE_RUNTIME_ID, opencodeSessionId);
     if (!localSessionId) return;
+    this.cancelIdleCompaction(localSessionId);
     this.emit(createSessionCompactedEvent({ sessionId: localSessionId }, "runtime"));
   },
 

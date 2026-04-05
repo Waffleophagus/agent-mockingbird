@@ -1164,7 +1164,9 @@ export const opencodeRuntimePromptMethods: OpencodeRuntimePromptMethods = {
             0,
             Math.round(localCompaction.preemptiveIdleMinutes * 60_000),
           ),
-          preemptiveThresholdRatio: localCompaction.preemptiveThresholdRatio,
+          // Mockingbird handles threshold-based idle compaction locally and leaves
+          // OpenCode's inline preemptive compaction effectively disabled until overflow.
+          preemptiveThresholdRatio: 1,
         };
         const currentIdleMs =
           typeof currentCompaction.preemptiveIdleMs === "number" &&

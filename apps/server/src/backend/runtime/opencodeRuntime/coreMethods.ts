@@ -41,6 +41,7 @@ import {
 import type { OpencodeRuntime } from "../opencodeRuntime";
 import {
   isQueueDrainRequest,
+  logger,
   OPENCODE_RUNTIME_ID,
   shouldQueueWhenBusy,
   type BackgroundRunHandle,
@@ -80,6 +81,10 @@ export interface OpencodeRuntimeCoreMethods {
   abortBackground(runId: string): Promise<boolean>;
   abortSession(sessionId: string): Promise<boolean>;
   compactSession(sessionId: string): Promise<boolean>;
+  cancelIdleCompaction(sessionId: string): void;
+  scheduleIdleCompaction(sessionId: string, model: ResolvedModel, info: AssistantInfo): Promise<void>;
+  shouldArmIdleCompaction(model: ResolvedModel, info: AssistantInfo): Promise<boolean>;
+  refreshModelMetadataCache(force?: boolean): Promise<void>;
   modelSupportsImageInput(model: ResolvedModel): Promise<boolean>;
   currentImageModel(): string;
   emit(event: RuntimeEvent): void;
@@ -187,6 +192,7 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
   async sendUserMessage(this: OpencodeRuntime, input) {
     const session = getSessionById(input.sessionId);
     if (!session) throw new RuntimeSessionNotFoundError(input.sessionId);
+    this.cancelIdleCompaction(session.id);
     const childRunsInFlight = this.inFlightBackgroundChildRunCount(session.id);
     const sessionBusy =
       this["busySessions"].has(session.id) ||
@@ -381,6 +387,7 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
       this.emit(createSessionStateUpdatedEvent(result.session, "runtime"));
       this.emit(createUsageUpdatedEvent(result.usage, "runtime"));
       this.emit(createHeartbeatUpdatedEvent(result.heartbeat, "runtime"));
+      await this.scheduleIdleCompaction(session.id, selectedModel, assistantMessage.info);
       return { sessionId: result.session.id, messages: result.messages };
     } finally {
       try {
@@ -597,6 +604,7 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
   },
 
   async compactSession(this: OpencodeRuntime, sessionId) {
+    this.cancelIdleCompaction(sessionId);
     const session = getSessionById(sessionId);
     if (!session) throw new RuntimeSessionNotFoundError(sessionId);
     let opencodeSessionId = await this.resolveOrCreateOpencodeSession(session.id, session.title);
@@ -646,61 +654,147 @@ export const opencodeRuntimeCoreMethods: OpencodeRuntimeCoreMethods = {
     }
   },
 
-  async modelSupportsImageInput(this: OpencodeRuntime, model) {
-    const now = Date.now();
-    if (now - this["imageCapabilityFetchedAtMs"] > 60_000) {
-      this["imageCapabilityByModelRef"].clear();
+  cancelIdleCompaction(this: OpencodeRuntime, sessionId) {
+    const currentGeneration = this["idleCompactionGenerationBySessionId"].get(sessionId) ?? 0;
+    this["idleCompactionGenerationBySessionId"].set(sessionId, currentGeneration + 1);
+    const timer = this["idleCompactionTimerBySessionId"].get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this["idleCompactionTimerBySessionId"].delete(sessionId);
     }
-    const modelRef = this.formatModelRef(model);
-    if (
-      this["imageCapabilityByModelRef"].size > 0 &&
-      this["imageCapabilityByModelRef"].has(modelRef)
-    ) {
-      return this["imageCapabilityByModelRef"].get(modelRef) === true;
-    }
+  },
+
+  async scheduleIdleCompaction(this: OpencodeRuntime, sessionId, model, info) {
+    this.cancelIdleCompaction(sessionId);
+    let shouldArm = false;
     try {
-      const payload = unwrapSdkData<Record<string, unknown>>(
-        await this.getClient().config.providers({
-          responseStyle: "data",
-          throwOnError: true,
-          signal: this.defaultRequestSignal(),
-        }),
-      );
-      const map = new Map<string, boolean>();
-      const providers = Array.isArray(payload.providers) ? payload.providers : [];
-      for (const provider of providers) {
-        if (!provider || typeof provider !== "object" || Array.isArray(provider)) continue;
-        const providerRecord = provider as Record<string, unknown>;
-        const providerId =
-          typeof providerRecord.id === "string" ? providerRecord.id.trim() : "";
-        if (!providerId) continue;
-        const models =
-          providerRecord.models &&
-          typeof providerRecord.models === "object" &&
-          !Array.isArray(providerRecord.models)
-            ? (providerRecord.models as Record<string, Record<string, unknown>>)
-            : {};
-        for (const [modelKey, modelInfo] of Object.entries(models)) {
-          const modelIdRaw = typeof modelInfo.id === "string" ? modelInfo.id : modelKey;
-          const modelId = modelIdRaw.trim();
-          if (!modelId) continue;
-          const capabilities =
-            modelInfo.capabilities &&
-            typeof modelInfo.capabilities === "object" &&
-            !Array.isArray(modelInfo.capabilities)
-              ? (modelInfo.capabilities as Record<string, unknown>)
-              : {};
-          const input =
-            capabilities.input &&
-            typeof capabilities.input === "object" &&
-            !Array.isArray(capabilities.input)
-              ? (capabilities.input as Record<string, unknown>)
-              : {};
-          map.set(`${providerId}/${modelId}`, input.image === true);
+      shouldArm = await this.shouldArmIdleCompaction(model, info);
+    } catch (error) {
+      logger.warnWithCause("Failed to evaluate idle compaction threshold", error, {
+        sessionId,
+      });
+      return;
+    }
+    if (!shouldArm) return;
+    const runtimeConfig = this.currentRuntimeConfig();
+    const delayMs = Math.max(
+      0,
+      Math.round((runtimeConfig?.compaction.preemptiveIdleMinutes ?? 0) * 60_000),
+    );
+    const generation = this["idleCompactionGenerationBySessionId"].get(sessionId) ?? 0;
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (this["disposed"]) return;
+        if ((this["idleCompactionGenerationBySessionId"].get(sessionId) ?? 0) !== generation) return;
+        this["idleCompactionTimerBySessionId"].delete(sessionId);
+        if (
+          this["busySessions"].has(sessionId) ||
+          this["drainingSessions"].has(sessionId) ||
+          this.inFlightBackgroundChildRunCount(sessionId) > 0
+        ) {
+          return;
         }
+        try {
+          await this.compactSession(sessionId);
+        } catch (error) {
+          logger.warnWithCause("Idle compaction timer failed", error, {
+            sessionId,
+          });
+        }
+      })();
+    }, delayMs);
+    this["idleCompactionTimerBySessionId"].set(sessionId, timer);
+  },
+
+  async shouldArmIdleCompaction(this: OpencodeRuntime, model, info) {
+    const runtimeConfig = this.currentRuntimeConfig();
+    const thresholdRatio = runtimeConfig?.compaction.preemptiveThresholdRatio ?? 0;
+    if (!Number.isFinite(thresholdRatio) || thresholdRatio <= 0) return false;
+    const delayMinutes = runtimeConfig?.compaction.preemptiveIdleMinutes ?? 0;
+    if (!Number.isFinite(delayMinutes) || delayMinutes < 0) return false;
+    const tokens = info.tokens;
+    if (!tokens) return false;
+
+    await this.refreshModelMetadataCache();
+    const modelLimits = this["modelContextLimitByModelRef"].get(this.formatModelRef(model));
+    if (!modelLimits || modelLimits.context <= 0 || modelLimits.output < 0) return false;
+
+    const reserved = Math.min(20_000, modelLimits.output);
+    const usableBudget = modelLimits.context - reserved;
+    if (usableBudget <= 0) return false;
+
+    const cacheRead = tokens.cache?.read ?? 0;
+    const cacheWrite = tokens.cache?.write ?? 0;
+    const effectiveTokens = tokens.input + tokens.output + cacheRead + cacheWrite;
+    return effectiveTokens >= usableBudget * thresholdRatio;
+  },
+
+  async refreshModelMetadataCache(this: OpencodeRuntime, force = false) {
+    const now = Date.now();
+    if (!force && now - this["imageCapabilityFetchedAtMs"] <= 60_000 && this["imageCapabilityByModelRef"].size > 0) {
+      return;
+    }
+    const payload = unwrapSdkData<Record<string, unknown>>(
+      await this.getClient().config.providers({
+        responseStyle: "data",
+        throwOnError: true,
+        signal: this.defaultRequestSignal(),
+      }),
+    );
+    const imageMap = new Map<string, boolean>();
+    const contextLimitMap = new Map<string, { context: number; output: number }>();
+    const providers = Array.isArray(payload.providers) ? payload.providers : [];
+    for (const provider of providers) {
+      if (!provider || typeof provider !== "object" || Array.isArray(provider)) continue;
+      const providerRecord = provider as Record<string, unknown>;
+      const providerId =
+        typeof providerRecord.id === "string" ? providerRecord.id.trim() : "";
+      if (!providerId) continue;
+      const models =
+        providerRecord.models &&
+        typeof providerRecord.models === "object" &&
+        !Array.isArray(providerRecord.models)
+          ? (providerRecord.models as Record<string, Record<string, unknown>>)
+          : {};
+      for (const [modelKey, modelInfo] of Object.entries(models)) {
+        const modelIdRaw = typeof modelInfo.id === "string" ? modelInfo.id : modelKey;
+        const modelId = modelIdRaw.trim();
+        if (!modelId) continue;
+        const modelRef = `${providerId}/${modelId}`;
+        const capabilities =
+          modelInfo.capabilities &&
+          typeof modelInfo.capabilities === "object" &&
+          !Array.isArray(modelInfo.capabilities)
+            ? (modelInfo.capabilities as Record<string, unknown>)
+            : {};
+        const input =
+          capabilities.input &&
+          typeof capabilities.input === "object" &&
+          !Array.isArray(capabilities.input)
+            ? (capabilities.input as Record<string, unknown>)
+            : {};
+        imageMap.set(modelRef, input.image === true);
+
+        const limit =
+          modelInfo.limit &&
+          typeof modelInfo.limit === "object" &&
+          !Array.isArray(modelInfo.limit)
+            ? (modelInfo.limit as Record<string, unknown>)
+            : {};
+        const context = typeof limit.context === "number" && Number.isFinite(limit.context) ? limit.context : 0;
+        const output = typeof limit.output === "number" && Number.isFinite(limit.output) ? limit.output : 0;
+        contextLimitMap.set(modelRef, { context, output });
       }
-      this["imageCapabilityByModelRef"] = map;
-      this["imageCapabilityFetchedAtMs"] = now;
+    }
+    this["imageCapabilityByModelRef"] = imageMap;
+    this["modelContextLimitByModelRef"] = contextLimitMap;
+    this["imageCapabilityFetchedAtMs"] = now;
+  },
+
+  async modelSupportsImageInput(this: OpencodeRuntime, model) {
+    const modelRef = this.formatModelRef(model);
+    try {
+      await this.refreshModelMetadataCache();
     } catch {
       return false;
     }

@@ -43,6 +43,9 @@ class OpencodeRuntimeImpl {
   private drainingSessions = new Set<string>();
   private imageCapabilityByModelRef = new Map<string, boolean>();
   private imageCapabilityFetchedAtMs = 0;
+  private modelContextLimitByModelRef = new Map<string, { context: number; output: number }>();
+  private idleCompactionTimerBySessionId = new Map<string, ReturnType<typeof setTimeout>>();
+  private idleCompactionGenerationBySessionId = new Map<string, number>();
   private messageRoleByScopedMessageId = new Map<string, Message["role"]>();
   private partTypeByScopedPartId = new Map<string, Part["type"]>();
   private processedCompactionMessageIds = new Map<string, true>();
@@ -106,6 +109,9 @@ class OpencodeRuntimeImpl {
     this.backgroundMessageSyncAtByChildSessionId.clear();
     this.busySessions.clear();
     this.drainingSessions.clear();
+    this.clearAllTimers(this["idleCompactionTimerBySessionId"]);
+    this["idleCompactionGenerationBySessionId"].clear();
+    this["modelContextLimitByModelRef"].clear();
     this.messageRoleByScopedMessageId.clear();
     this.partTypeByScopedPartId.clear();
     this.processedCompactionMessageIds.clear();

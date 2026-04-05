@@ -115,6 +115,7 @@ interface MockClient {
   config: {
     get: (input: unknown) => Promise<unknown>;
     update: (input: unknown) => Promise<unknown>;
+    providers: (input: unknown) => Promise<unknown>;
   };
   app: {
     agents: (input?: unknown) => Promise<unknown>;
@@ -436,6 +437,7 @@ function createMockClient(input: {
   message?: (request: unknown) => Promise<unknown>;
   children?: (request: unknown) => Promise<unknown>;
   appAgents?: (request?: unknown) => Promise<unknown>;
+  providers?: (request?: unknown) => Promise<unknown>;
 }): MockClient {
   let createCount = 0;
   return {
@@ -500,6 +502,44 @@ function createMockClient(input: {
         data: { small_model: "test-provider/test-small" },
       }),
       update: async () => ({ data: {} }),
+      providers: async (request) => {
+        if (input.providers) return input.providers(request);
+        return {
+          data: {
+            providers: [
+              {
+                id: "test-provider",
+                models: {
+                  "test-model": {
+                    id: "test-model",
+                    capabilities: {
+                      input: {
+                        image: false,
+                      },
+                    },
+                    limit: {
+                      context: 200_000,
+                      output: 32_000,
+                    },
+                  },
+                  "test-small": {
+                    id: "test-small",
+                    capabilities: {
+                      input: {
+                        image: false,
+                      },
+                    },
+                    limit: {
+                      context: 128_000,
+                      output: 16_000,
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        };
+      },
     },
     app: {
       agents: async (request) => {
@@ -1466,7 +1506,7 @@ describe("opencode runtime failover contract", () => {
       prune: true,
       reserved: 1234,
       preemptiveIdleMs: 900_000,
-      preemptiveThresholdRatio: 0.6,
+      preemptiveThresholdRatio: 1,
     });
     expect(managedConfig.permission).toBeUndefined();
     expect(managedConfig.agent).toBeUndefined();
@@ -1534,7 +1574,6 @@ describe("opencode runtime failover contract", () => {
 
     runtimeConfig.compaction.preemptiveIdleMinutes = 5;
     runtimeConfig.compaction.preemptiveThresholdRatio = 0.8;
-
     await runtime.sendUserMessage({ sessionId: "main", content: "hello again" });
     expect(configGetCount).toBeGreaterThan(firstConfigGetCount);
 
@@ -1560,8 +1599,123 @@ describe("opencode runtime failover contract", () => {
       prune: true,
       reserved: 2048,
       preemptiveIdleMs: 300_000,
-      preemptiveThresholdRatio: 0.8,
+      preemptiveThresholdRatio: 1,
     });
+  });
+
+  test("arms idle compaction after a high-usage turn and compacts only after the idle timer elapses", async () => {
+    let summarizeCount = 0;
+    const client = createMockClient({
+      prompt: async (request) => {
+        const response = assistantResponse(request.path.id, "High usage reply") as {
+          data: { info: { tokens: Record<string, unknown> } };
+        };
+        response.data.info.tokens = {
+          input: 110_000,
+          output: 5_000,
+          reasoning: 0,
+          cache: { read: 0, write: 0 },
+        };
+        return response;
+      },
+    });
+    client.session.summarize = async () => {
+      summarizeCount += 1;
+      return { data: true };
+    };
+
+    const runtime = createRuntimeWithClient(client, {
+      runtimeDirectory: testWorkspacePath,
+      runtimeConfig: {
+        baseUrl: "http://127.0.0.1:4096",
+        providerId: "test-provider",
+        modelId: "test-model",
+        fallbackModels: [],
+        imageModel: null,
+        smallModel: "test-provider/test-small",
+        timeoutMs: 120_000,
+        promptTimeoutMs: 20,
+        runWaitTimeoutMs: 180_000,
+        childSessionHideAfterDays: 3,
+        directory: testWorkspacePath,
+        compaction: {
+          preemptiveIdleMinutes: 0.001,
+          preemptiveThresholdRatio: 0.6,
+          memoryAutoPersist: true,
+        },
+        bootstrap: {
+          enabled: true,
+          maxCharsPerFile: 20_000,
+          maxCharsTotal: 150_000,
+          subagentMinimal: true,
+          includeAgentPrompt: true,
+        },
+      },
+    });
+
+    await runtime.sendUserMessage({ sessionId: "main", content: "hello" });
+    expect(summarizeCount).toBe(0);
+    await sleep(90);
+    expect(summarizeCount).toBe(1);
+  });
+
+  test("sending another message resets the pending idle compaction timer", async () => {
+    let summarizeCount = 0;
+    const client = createMockClient({
+      prompt: async (request) => {
+        const response = assistantResponse(request.path.id, "High usage reply") as {
+          data: { info: { tokens: Record<string, unknown> } };
+        };
+        response.data.info.tokens = {
+          input: 110_000,
+          output: 5_000,
+          reasoning: 0,
+          cache: { read: 0, write: 0 },
+        };
+        return response;
+      },
+    });
+    client.session.summarize = async () => {
+      summarizeCount += 1;
+      return { data: true };
+    };
+
+    const runtime = createRuntimeWithClient(client, {
+      runtimeDirectory: testWorkspacePath,
+      runtimeConfig: {
+        baseUrl: "http://127.0.0.1:4096",
+        providerId: "test-provider",
+        modelId: "test-model",
+        fallbackModels: [],
+        imageModel: null,
+        smallModel: "test-provider/test-small",
+        timeoutMs: 120_000,
+        promptTimeoutMs: 20,
+        runWaitTimeoutMs: 180_000,
+        childSessionHideAfterDays: 3,
+        directory: testWorkspacePath,
+        compaction: {
+          preemptiveIdleMinutes: 0.001,
+          preemptiveThresholdRatio: 0.6,
+          memoryAutoPersist: true,
+        },
+        bootstrap: {
+          enabled: true,
+          maxCharsPerFile: 20_000,
+          maxCharsTotal: 150_000,
+          subagentMinimal: true,
+          includeAgentPrompt: true,
+        },
+      },
+    });
+
+    await runtime.sendUserMessage({ sessionId: "main", content: "hello" });
+    await sleep(30);
+    await runtime.sendUserMessage({ sessionId: "main", content: "follow up" });
+    await sleep(40);
+    expect(summarizeCount).toBe(0);
+    await sleep(50);
+    expect(summarizeCount).toBe(1);
   });
 
   test("maps authentication errors to RuntimeProviderAuthError", async () => {
